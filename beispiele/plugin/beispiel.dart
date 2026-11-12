@@ -15,7 +15,7 @@
 //    abweisen. Der Schlüssel kommt nicht über die Kommandozeile, weil er dort
 //    in jeder Prozessliste stünde; das Plugin schreibt ihn nirgends hin.
 // 3. Spätestens 20 Sekunden nach dem Start auf `initialize` antworten, sonst
-//    gilt das Plugin als nicht gestartet und moocp beendet das Programm.
+//    beendet moocp das Programm und versucht es noch einmal (Punkt 7).
 // 4. Jedes Werkzeug mit dem Kurznamen aus plugin.json und einem Unterstrich
 //    beginnen lassen (`beispiel_…`), höchstens 40 Zeichen lang, nur Buchstaben,
 //    Ziffern, „_“ und „-“. Die Werkzeugliste liest moocp einmal beim
@@ -25,6 +25,12 @@
 // 6. Sich beenden, wenn die Standardeingabe endet: Dann ist moocp fort, auch
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
+// 7. Damit rechnen, nach einem Absturz neu gestartet zu werden: Endet das
+//    Programm, ohne dass moocp es beendet hat, startet moocp es einmal neu,
+//    mit neuem Port und neuem Schlüssel. Was das Plugin für sich behält,
+//    muss es deshalb beim Start neu aufbauen; ein Aufruf, der beim Absturz
+//    lief, wird nicht wiederholt. Endet es danach noch einmal, gilt es bis
+//    zum nächsten Start von moocp als ausgefallen.
 //
 // Was moocp mitgibt:
 // - beim `initialize` unter `capabilities.experimental.moocp` die Version der
@@ -125,6 +131,24 @@ McpServer _server() {
         ),
       ]);
     },
+  );
+  // Nur für das Beispiel und die Tests der App: ein Absturz auf Bestellung.
+  // Das Programm endet mitten im Aufruf mit Exit-Code 3, ohne zu antworten;
+  // so lässt sich sehen, was moocp dann tut (Punkt 7 oben). Ein echtes Plugin
+  // hat so ein Werkzeug nicht.
+  server.registerTool(
+    'beispiel_absturz',
+    description:
+        'Beendet das Beispiel-Plugin sofort, ohne zu antworten. Zeigt, wie '
+        'moocp einen Absturz behandelt: ein Neustart, danach ausgefallen.',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: const ToolAnnotations(
+      title: 'Absturz (Beispiel)',
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    ),
+    callback: (args, extra) async => exit(3),
   );
   return server;
 }

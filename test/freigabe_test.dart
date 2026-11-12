@@ -1,7 +1,8 @@
 // Freigaben: die Frist, die Entscheidung und die Stufe der Bestätigungen --
 // wer fragt, wer durchläuft, und was im Protokoll steht. Geprüft wird die eine
 // Stelle, an der das entschieden wird (Freigaben.anfragen), damit kein
-// Werkzeug die Einstellung übersehen kann, und das Feld in der Titelzeile;
+// Werkzeug die Einstellung übersehen kann, und das Feld in der Titelzeile
+// (mit der Anzeige ausgefallener Plugins daneben);
 // dazu, dass eine Anfrage verfällt, wenn der Client nicht mehr wartet, und
 // dass weitere Anfragen sich sichtbar einreihen (Protokoll, Zähler im Dialog),
 // ihre Frist ab der Anfrage läuft und immer nur ein Dialog offen ist.
@@ -602,6 +603,49 @@ void main() {
     await tester.tap(find.text('alle').last);
     await tester.pumpAndSettle();
     expect(gewaehlt, Bestaetigungen.alle);
+  });
+
+  // Die Anzeige ausgefallener Plugins steht in derselben Titelzeile und folgt
+  // dem Muster der Stufe „keine“: rot, alle Namen, bei Platzmangel gekürzt.
+  test('Der Text der Ausfallanzeige nennt jedes ausgefallene Plugin', () {
+    expect(pluginAusfallText(['Beispiel']), 'Plugin „Beispiel“ ausgefallen');
+    expect(pluginAusfallText(['Beispiel', 'Noten']), 'Plugins „Beispiel“, „Noten“ ausgefallen');
+  });
+
+  testWidgets('Die Ausfallanzeige ist rot, nennt alle Namen und wird bei Platzmangel gekürzt', (tester) async {
+    Future<void> zeigen(List<String> namen) => tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                Flexible(child: PluginAusfallAnzeige(namen: namen)),
+                BestaetigungenFeld(stufe: Bestaetigungen.mittel, aendern: (_) async {}),
+              ],
+            ),
+          ),
+        ));
+    final anzeige = find.byType(PluginAusfallAnzeige);
+
+    await zeigen(const []);
+    expect(find.textContaining('ausgefallen'), findsNothing);
+
+    await zeigen(const ['Beispiel', 'Noten']);
+    expect(find.text('Plugins „Beispiel“, „Noten“ ausgefallen'), findsOneWidget);
+    expect(
+      tester.widget<Material>(find.descendant(of: anzeige, matching: find.byType(Material)).first).color,
+      ThemeData().colorScheme.error,
+    );
+    expect(
+      tester.widget<Tooltip>(find.descendant(of: anzeige, matching: find.byType(Tooltip))).message,
+      allOf(contains('„Beispiel“, „Noten“'), contains('moocp neu')),
+    );
+
+    tester.view.physicalSize = const Size(520, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await zeigen(const ['Ein Plugin mit langem Namen', 'Noch eins mit langem Namen', 'Und ein drittes']);
+    expect(tester.takeException(), isNull, reason: 'kein Überlauf der Titelzeile');
+    expect(tester.widget<Text>(find.textContaining('ausgefallen')).overflow, TextOverflow.ellipsis);
+    expect(find.byType(BestaetigungenFeld), findsOneWidget);
   });
 
   test('Die Stufe steht in den Einstellungen und kommt unverändert zurück', () {

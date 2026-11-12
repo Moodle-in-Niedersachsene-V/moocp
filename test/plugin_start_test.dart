@@ -226,7 +226,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (1 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (2 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -426,30 +426,196 @@ void main() {
       expect(l.werkzeuge(profil), isEmpty);
     });
 
-    test('antwortet es nicht binnen der Frist, gilt es als nicht gestartet, und sein Prozess endet', () async {
+    test('antwortet es zweimal nicht binnen der Frist, ist es ausgefallen, und beide Prozesse enden', () async {
       final profil = _profil('standard', 'moodle', await _freierPort());
       final plugins = await beispielAngenommen([profil]);
-      late Process prozess;
-      // Ein Programm, das läuft, aber nie lauscht: die Standardeingabe von
-      // `dart` ohne Skript-Server -- hier ein Dart-Programm, das nur wartet.
+      final prozesse = <Process>[];
+      // Ein Programm, das läuft, aber nie lauscht: ein Dart-Programm, das nur
+      // wartet.
       final warten = File(p.join(wurzel.path, 'warten.dart'))
         ..writeAsStringSync('Future<void> main() => Future<void>.delayed(const Duration(minutes: 5));\n');
       final l = LaufendePlugins(
         protokoll,
         startfrist: const Duration(seconds: 2),
-        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async =>
-            prozess = await Process.start(_dart(), [warten.path]),
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          final prozess = await Process.start(_dart(), [warten.path]);
+          prozesse.add(prozess);
+          return prozess;
+        },
       );
 
       await starten(plugins, mit: l);
 
-      expect(l.laeuft(plugins.eintraege.single), isFalse);
-      expect(l.startfehler(plugins.eintraege.single), contains('nicht binnen 2 Sekunden'));
-      expect(await _laeuft(prozess.pid), isFalse);
+      final e = plugins.eintraege.single;
+      expect(prozesse, hasLength(2), reason: 'genau ein zweiter Versuch');
+      expect(l.laeuft(e), isFalse);
+      expect(l.ausgefallen(e), isTrue);
+      expect(l.ausgefalleneNamen, ['Beispiel']);
+      expect(l.startfehler(e), contains('nicht binnen 2 Sekunden'));
+      expect(l.werkzeuge(profil), isEmpty, reason: 'es hat nie Werkzeuge genannt');
+      for (final prozess in prozesse) {
+        expect(await _laeuft(prozess.pid), isFalse);
+      }
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(
-        [for (final e in protokoll.eintraege) e.text],
+        zeilen,
         contains(startsWith('Plugin „Beispiel“ nicht gestartet: Das Plugin hat nicht binnen 2 Sekunden')),
       );
+      expect(zeilen, contains(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: Das Plugin hat nicht binnen 2 Sekunden')));
+    });
+
+    test('antwortet es beim ersten Versuch nicht, startet der zweite; einen Absturz danach fängt kein Neustart mehr auf', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final plugins = await beispielAngenommen([profil]);
+      final warten = File(p.join(wurzel.path, 'warten.dart'))
+        ..writeAsStringSync('Future<void> main() => Future<void>.delayed(const Duration(minutes: 5));\n');
+      final prozesse = <Process>[];
+      final l = LaufendePlugins(
+        protokoll,
+        startfrist: const Duration(seconds: 2),
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          final prozess = prozesse.isEmpty
+              ? await Process.start(_dart(), [warten.path])
+              : await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
+          prozesse.add(prozess);
+          return prozess;
+        },
+      );
+
+      await starten(plugins, mit: l);
+      final e = plugins.eintraege.single;
+      expect(l.laeuft(e), isTrue);
+      expect(await _laeuft(prozesse.first.pid), isFalse);
+      final client = await verbinden(profil, l);
+      expect(await client.tool('beispiel_echo', {'text': 'a'}), startsWith('Echo: a'));
+
+      final r = await client.call('tools/call', {'name': 'beispiel_absturz', 'arguments': <String, Object?>{}});
+
+      expect(r['isError'], true);
+      expect(prozesse, hasLength(2), reason: 'Startversuch und Neustart teilen sich den einen');
+      expect(l.ausgefallen(e), isTrue);
+      expect(l.ausgefalleneNamen, ['Beispiel']);
+    });
+  });
+
+  group('Absturz eines laufenden Plugins', () {
+    /// Startet das Beispiel-Plugin mit einem Starter, der jeden Prozess
+    /// sammelt, und verbindet einen Client über den MCP-Server des Profils.
+    Future<({LaufendePlugins laufende, McpTestClient client, Plugins plugins, List<Process> prozesse, List<String> starts})>
+    gestartet(Profil profil) async {
+      final prozesse = <Process>[];
+      final starts = <String>[];
+      final l = LaufendePlugins(
+        protokoll,
+        startfrist: const Duration(seconds: 10),
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          starts.add('${argumente.last} ${umgebung[schluesselVariable]}');
+          final prozess = await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
+          prozesse.add(prozess);
+          return prozess;
+        },
+      );
+      final plugins = await beispielAngenommen([profil]);
+      await starten(plugins, mit: l);
+      expect(l.laeuft(plugins.eintraege.single), isTrue);
+      final client = await verbinden(profil, l);
+      return (laufende: l, client: client, plugins: plugins, prozesse: prozesse, starts: starts);
+    }
+
+    Future<Map> absturz(McpTestClient c) =>
+        c.call('tools/call', {'name': 'beispiel_absturz', 'arguments': <String, Object?>{}});
+
+    String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+
+    void ausfallMeldung(Map r) {
+      expect(r['isError'], true);
+      expect(text(r), contains('„Beispiel“'));
+      expect(text(r), contains('ausgefallen'));
+      expect(text(r), contains('moocp neu gestartet'));
+    }
+
+    test('ein Absturz: der laufende Aufruf bekommt sofort den Fehler, ein Neustart mit neuem Port und Schlüssel, danach arbeitet es wieder', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+
+      final uhr = Stopwatch()..start();
+      final r = await absturz(g.client);
+      uhr.stop();
+
+      ausfallMeldung(r);
+      expect(uhr.elapsed, lessThan(const Duration(seconds: 5)), reason: 'sofort, nicht erst nach einem Zeitlimit');
+      // Ein neuer Aufruf wartet auf den Neustart und geht dann durch.
+      expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
+      expect(g.laufende.laeuft(g.plugins.eintraege.single), isTrue);
+      expect(g.laufende.ausgefalleneNamen, isEmpty);
+      expect(g.starts, hasLength(2));
+      expect(g.starts.toSet(), hasLength(2), reason: 'neuer Port und neuer Schlüssel');
+      expect(g.starts[0].split(' ').first, isNot(g.starts[1].split(' ').first));
+      expect(g.starts[0].split(' ').last, isNot(g.starts[1].split(' ').last));
+      expect(await _laeuft(g.prozesse.first.pid), isFalse);
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (2 Werkzeuge)'));
+      for (final s in g.starts) {
+        expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
+      }
+    });
+
+    test('ein zweiter Absturz: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+
+      ausfallMeldung(await absturz(g.client));
+      ausfallMeldung(await absturz(g.client));
+
+      final e = g.plugins.eintraege.single;
+      expect(g.laufende.ausgefallen(e), isTrue);
+      expect(g.laufende.ausgefalleneNamen, ['Beispiel']);
+      expect(g.starts, hasLength(2), reason: 'nur ein Neustart je Lauf');
+      ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+      final neu = McpTestClient(profil.port);
+      clients.add(neu);
+      await neu.initialize();
+      expect(await werkzeugnamen(neu), containsAll(['beispiel_echo', 'beispiel_absturz']));
+      ausfallMeldung(await neu.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+      for (final prozess in g.prozesse) {
+        expect(await _laeuft(prozess.pid), isFalse);
+      }
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'), hasLength(2));
+      expect(zeilen, contains(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: ')));
+    });
+
+    test('haben sich seine Dateien vor dem Neustart geändert, startet es nicht neu und ist ausgefallen', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+      final e = g.plugins.eintraege.single;
+      File(p.join(e.pfad, 'neu.txt')).writeAsStringSync('dazugekommen');
+
+      ausfallMeldung(await absturz(g.client));
+      ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+
+      expect(g.starts, hasLength(1), reason: 'kein Neustart');
+      expect(g.laufende.ausgefallen(e), isTrue);
+      expect(g.laufende.startfehler(e), contains('geändert'));
+      expect(
+        [for (final z in protokoll.eintraege) z.text],
+        contains(allOf(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: '), contains('geändert'))),
+      );
+    });
+
+    test('das reguläre Beenden ist kein Absturz: kein Neustart, keine Anzeige', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+
+      await g.laufende.beenden();
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      expect(g.starts, hasLength(1));
+      expect(g.laufende.ausgefalleneNamen, isEmpty);
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen, isNot(contains(contains('unerwartet'))));
+      expect(zeilen, isNot(contains(contains('ausgefallen'))));
     });
   });
 
@@ -468,7 +634,7 @@ void main() {
         for (final t in (await client.call('tools/list'))['tools'] as List)
           if ((t as Map)['name'] == 'beispiel_echo') t,
       ].single;
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo']);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
 
       // Die App ist zu und das Plugin mit ihr; die Datei bleibt.
       await l.beenden();
@@ -499,7 +665,7 @@ void main() {
       final neu = await starten(plugins);
 
       expect(neu.laeuft(plugins.eintraege.single), isTrue);
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo']);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
       expect(einstellungen.gespeichert, 0);
     });
 

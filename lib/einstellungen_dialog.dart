@@ -615,6 +615,10 @@ class _PluginsDialogState extends State<PluginsDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: switch (widget.laufende!.startfehler(e)) {
+                  final String grund when widget.laufende!.ausgefallen(e) => Text(
+                    'Ausgefallen: $grund Es läuft erst nach einem Neustart von moocp wieder.',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
                   final String grund => Text('Nicht gestartet: $grund', style: TextStyle(color: theme.colorScheme.error)),
                   null => Text('Das Plugin läuft ab dem nächsten Start von moocp.', style: klein),
                 },

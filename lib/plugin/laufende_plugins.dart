@@ -1,6 +1,7 @@
 // Die laufenden Plugins (E35): starten, was die Lehrkraft angenommen hat,
 // ihre Werkzeuge in den MCP-Servern der Profile anbieten, in denen sie
-// eingeschaltet sind, und beim Beenden der App wieder beenden.
+// eingeschaltet sind, nach einem Absturz einmal neu starten und beim Beenden
+// der App wieder beenden.
 //
 // Ein Plugin läuft einmal je App, auch mit mehreren Instanzprofilen; jeder
 // Aufruf trägt das Profil, über das er kam (verbindung.dart). Gestartet wird
@@ -22,6 +23,21 @@
 // nicht an. Die Standardeingabe bleibt offen; endet sie, weil die App fort
 // ist, beendet sich ein Plugin selbst (README, Teil 4) -- so bleibt keines
 // zurück, auch wenn die App nicht ordentlich enden konnte.
+//
+// Ausfall: Je Lauf der App bekommt jedes Plugin genau einen zweiten Start,
+// gleich wofür -- weil es beim Start nicht binnen der Startfrist antwortete
+// oder sich dabei beendete, oder weil sein Programm später unerwartet endete.
+// Der zweite Start ist ein ganz neuer: neuer Port, neuer Schlüssel, und die
+// Prüfsumme des Ordners wird wieder gegen die Zustimmung geprüft. Danach gilt
+// das Plugin bis zum nächsten Start der App als ausgefallen. Nicht öfter, weil
+// ein Plugin, das immer wieder abstürzt, sonst die App in einer Schleife
+// beschäftigte und die KI Aufruf um Aufruf ins Leere schickte. Ein Aufruf,
+// der beim Absturz lief, wird nicht wiederholt: Ein Schreibvorgang könnte
+// schon halb gelaufen sein. Die Werkzeuge eines ausgefallenen Plugins bleiben
+// in der Werkzeugliste und antworten mit einem Fehler, der das Plugin nennt:
+// So bekommt die KI einen Grund, den sie der Lehrkraft sagen kann, statt
+// „unbekanntes Werkzeug“. Ins Protokoll gehen Absturz (mit Exit-Code),
+// Neustart und Ausfall, nie etwas aus stdout oder stderr des Plugins.
 
 import 'dart:async';
 import 'dart:convert';
@@ -59,6 +75,19 @@ Future<Process> _prozessStarten(
   workingDirectory: arbeitsordner,
 );
 
+/// Wie oft das Programm eines Plugins je Lauf der App starten darf: der
+/// Start und ein zweiter Versuch.
+const _startsHoechstens = 2;
+
+/// Name und Version eines Plugins für das Protokoll.
+String _name(PluginEintrag e) => '„${e.anzeigename}“ ${e.beschreibung!.version}';
+
+/// Was die KI von jedem Werkzeug eines ausgefallenen Plugins bekommt, und
+/// von dem Aufruf, der beim Absturz lief.
+String _ausfallText(PluginEintrag e) =>
+    'Das Plugin „${e.anzeigename}“ ist ausgefallen. Seine Werkzeuge stehen erst '
+    'wieder zur Verfügung, wenn moocp neu gestartet wird.';
+
 class _Laufend {
   _Laufend(this.eintrag, this.prozess, this.verbindung, this.beendet);
   final PluginEintrag eintrag;
@@ -66,7 +95,12 @@ class _Laufend {
   final PluginVerbindung verbindung;
   final Future<int> beendet;
 
-  String get name => '„${eintrag.anzeigename}“ ${eintrag.beschreibung!.version}';
+  /// Erfüllt sich, wenn das Programm unerwartet endet; ein laufender Aufruf
+  /// bekommt dann sofort den Fehler, statt auf eine Antwort zu warten, die
+  /// nicht mehr kommt.
+  final abgestuerzt = Completer<void>();
+
+  String get name => _name(eintrag);
 }
 
 /// Die laufenden Plugins und ihre Werkzeuge, als eine Werkzeugquelle für die
@@ -85,18 +119,37 @@ class LaufendePlugins implements WerkzeugQuelle {
   final ProzessStarter starter;
 
   /// So lange darf ein Plugin brauchen, bis es auf initialize antwortet und
-  /// seine Werkzeuge nennt; danach gilt es als nicht gestartet.
+  /// seine Werkzeuge nennt; danach gilt der Versuch als gescheitert.
   final Duration startfrist;
 
   Plugins? _plugins;
+
+  /// Die Namen der eingebauten Werkzeuge, aus [starten]; auch ein Neustart
+  /// prüft die Werkzeugnamen dagegen.
+  Set<String> _eingebaut = const {};
+
   final _laufend = <String, _Laufend>{};
   final _fehler = <String, String>{};
+
+  /// Wie oft das Programm eines Plugins in diesem Lauf der App gestartet
+  /// wurde (je Ordner); höchstens [_startsHoechstens].
+  final _starts = <String, int>{};
+
+  /// Plugins, die nach einem Absturz gerade neu starten: die Werkzeuge von
+  /// vorher, damit sie in der Liste bleiben, und der Neustart, auf den ein
+  /// Aufruf wartet.
+  final _neustart = <String, ({PluginEintrag eintrag, List<WerkzeugBeschreibung> werkzeuge, Future<void> fertig})>{};
+
+  /// Ausgefallene Plugins mit den Werkzeugen, die sie zuletzt genannt haben;
+  /// leer, wenn sie nie welche genannt haben.
+  final _ausgefallen = <String, ({PluginEintrag eintrag, List<WerkzeugBeschreibung> werkzeuge})>{};
 
   /// Prozesse, deren Plugin gerade startet: [beenden] beendet auch sie, damit
   /// keines zurückbleibt, wenn die App während des Starts geschlossen wird.
   final _imStart = <Process, Future<int>>{};
 
-  /// Gesetzt von [beenden]; danach startet nichts mehr.
+  /// Gesetzt von [beenden]; danach startet nichts mehr, und ein endendes
+  /// Programm ist kein Absturz.
   bool _beendet = false;
 
   /// Warum das Plugin nicht läuft, ein Satz auf Deutsch; null, wenn es läuft
@@ -106,12 +159,23 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// Ob das Plugin läuft.
   bool laeuft(PluginEintrag e) => _laufend.containsKey(e.ordner);
 
+  /// Ob das Plugin ausgefallen ist: Es läuft bis zum nächsten Start der App
+  /// nicht mehr; der Grund steht in [startfehler].
+  bool ausgefallen(PluginEintrag e) => _ausgefallen.containsKey(e.ordner);
+
+  /// Die Namen der ausgefallenen Plugins, für die Titelzeile. Jeder Ausfall
+  /// schreibt eine Zeile ins Protokoll; die Titelzeile folgt dem Protokoll
+  /// und erfährt so davon.
+  List<String> get ausgefalleneNamen => [for (final a in _ausgefallen.values) a.eintrag.anzeigename];
+
   /// Startet jedes Plugin, dem für seinen jetzigen Stand zugestimmt ist und
   /// das noch nicht läuft, nacheinander in der Reihenfolge von
   /// [Plugins.eintraege]. [eingebaut] sind die Namen der eingebauten
   /// Werkzeuge; ein Plugin, dessen Werkzeug einen davon oder den eines schon
   /// gestarteten Plugins trägt, lädt nicht. Was nicht startet, steht mit dem
-  /// Grund im Protokoll und in [startfehler]; die App läuft ohne es.
+  /// Grund im Protokoll und in [startfehler]; die App läuft ohne es. Antwortet
+  /// ein Plugin nicht binnen der [startfrist] oder endet es dabei, bekommt es
+  /// einen zweiten Versuch; scheitert auch der, ist es ausgefallen.
   ///
   /// Die Werkzeugliste eines gestarteten Plugins merkt sich die App in den
   /// Einstellungen ([Plugins.werkzeugeMerken]), damit `moocp.exe
@@ -121,32 +185,50 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// Suchen, weil erst jetzt feststeht, wem die Lehrkraft zugestimmt hat.
   Future<void> starten(Plugins plugins, {required Set<String> eingebaut}) async {
     _plugins = plugins;
+    _eingebaut = eingebaut;
     await plugins.werkzeugeAufraeumen();
     for (final stand in plugins.staende) {
       if (_beendet) return;
       final e = stand.eintrag;
-      if (stand.zustand != PluginZustand.zugestimmt || _laufend.containsKey(e.ordner)) continue;
-      try {
-        final laufend = await _starten(e, eingebaut);
-        _laufend[e.ordner] = laufend;
-        _fehler.remove(e.ordner);
-        _protokoll.eintrag(
-          Art.info,
-          'Plugin ${laufend.name} gestartet (${laufend.verbindung.werkzeuge.length} Werkzeuge)',
-        );
-        await plugins.werkzeugeMerken(e, laufend.verbindung.werkzeuge);
-      } on PluginFehler catch (f) {
-        _fehler[e.ordner] = f.grund;
-        _protokoll.eintrag(Art.fehler, 'Plugin „${e.anzeigename}“ nicht gestartet: ${f.grund}');
+      if (stand.zustand != PluginZustand.zugestimmt || _bekannt(e.ordner)) continue;
+      while (true) {
+        try {
+          final laufend = await _starten(e);
+          _einsetzen(laufend);
+          _protokoll.eintrag(
+            Art.info,
+            'Plugin ${laufend.name} gestartet (${laufend.verbindung.werkzeuge.length} Werkzeuge)',
+          );
+          await plugins.werkzeugeMerken(e, laufend.verbindung.werkzeuge);
+        } on PluginStartFehler catch (f) {
+          if (_beendet) return;
+          if (_nochEinStart(e)) {
+            _protokoll.eintrag(
+              Art.fehler,
+              'Plugin „${e.anzeigename}“ nicht gestartet: ${f.grund} moocp versucht es noch einmal.',
+            );
+            continue;
+          }
+          _ausfallen(e, const [], f.grund);
+        } on PluginFehler catch (f) {
+          _fehler[e.ordner] = f.grund;
+          _protokoll.eintrag(Art.fehler, 'Plugin „${e.anzeigename}“ nicht gestartet: ${f.grund}');
+        }
+        break;
       }
     }
   }
 
-  Future<_Laufend> _starten(PluginEintrag e, Set<String> eingebaut) async {
+  bool _bekannt(String ordner) =>
+      _laufend.containsKey(ordner) || _neustart.containsKey(ordner) || _ausgefallen.containsKey(ordner);
+
+  bool _nochEinStart(PluginEintrag e) => (_starts[e.ordner] ?? 0) < _startsHoechstens;
+
+  Future<_Laufend> _starten(PluginEintrag e) async {
     final b = e.beschreibung!;
-    // Unmittelbar vor dem Start noch einmal: Zwischen der Suche und jetzt
-    // kann jemand Dateien ausgetauscht haben. Weicht die Summe ab, startet
-    // das Plugin nicht; beim nächsten Start fragt die Zustimmung neu.
+    // Unmittelbar vor dem Start noch einmal, auch vor einem Neustart: Seit der
+    // Suche kann jemand Dateien ausgetauscht haben. Weicht die Summe ab,
+    // startet das Plugin nicht; beim nächsten Start fragt die Zustimmung neu.
     final String summe;
     try {
       summe = await pluginPruefsumme(Directory(e.pfad));
@@ -158,8 +240,10 @@ class LaufendePlugins implements WerkzeugQuelle {
         'Die Dateien des Plugins haben sich seit der Zustimmung geändert; moocp fragt beim nächsten Start neu.',
       );
     }
+    if (_beendet) throw const PluginFehler('moocp wurde während des Starts beendet.');
     final port = await _freierPort();
     final schluessel = _schluessel();
+    _starts[e.ordner] = (_starts[e.ordner] ?? 0) + 1;
     final Process prozess;
     try {
       prozess = await starter(
@@ -182,10 +266,7 @@ class LaufendePlugins implements WerkzeugQuelle {
         port: port,
         schluessel: schluessel,
         kurzname: b.kurzname,
-        vergeben: {
-          ...eingebaut,
-          for (final l in _laufend.values) ...l.verbindung.werkzeuge.map((w) => w.name),
-        },
+        vergeben: _vergeben(ohne: e.ordner),
         frist: startfrist,
         weiter: () => lebt && !_beendet,
       );
@@ -202,38 +283,164 @@ class LaufendePlugins implements WerkzeugQuelle {
     }
   }
 
+  /// Die Werkzeugnamen der eingebauten Werkzeuge und aller anderen Plugins,
+  /// auch der ausgefallenen: Deren Werkzeuge bleiben in der Liste.
+  Set<String> _vergeben({required String ohne}) => {
+    ..._eingebaut,
+    for (final (e, liste) in _alle())
+      if (e.ordner != ohne) ...liste.map((w) => w.name),
+  };
+
+  /// Jedes Plugin mit Werkzeugen in der Liste: laufend, im Neustart,
+  /// ausgefallen.
+  Iterable<(PluginEintrag, List<WerkzeugBeschreibung>)> _alle() sync* {
+    for (final l in _laufend.values) {
+      yield (l.eintrag, l.verbindung.werkzeuge);
+    }
+    for (final n in _neustart.values) {
+      yield (n.eintrag, n.werkzeuge);
+    }
+    for (final a in _ausgefallen.values) {
+      yield (a.eintrag, a.werkzeuge);
+    }
+  }
+
+  /// Nimmt ein gestartetes Plugin auf und achtet von nun an darauf, ob sein
+  /// Programm unerwartet endet.
+  void _einsetzen(_Laufend l) {
+    _laufend[l.eintrag.ordner] = l;
+    _fehler.remove(l.eintrag.ordner);
+    unawaited(l.beendet.then((code) => _abgestuerzt(l, code)));
+  }
+
+  /// Das Programm eines laufenden Plugins ist zu Ende. Hat die App es selbst
+  /// beendet ([beenden] nimmt es vorher aus der Liste), ist das kein Absturz.
+  void _abgestuerzt(_Laufend l, int code) {
+    final e = l.eintrag;
+    if (_beendet || !identical(_laufend[e.ordner], l)) return;
+    _laufend.remove(e.ordner);
+    l.abgestuerzt.complete();
+    unawaited(l.verbindung.schliessen());
+    _protokoll.eintrag(Art.fehler, 'Plugin ${l.name} unerwartet beendet (Exit-Code $code)');
+    final werkzeuge = l.verbindung.werkzeuge;
+    if (!_nochEinStart(e)) {
+      _ausfallen(e, werkzeuge, 'Es hat sich unerwartet beendet und hatte seinen zweiten Start schon.');
+      return;
+    }
+    _neustart[e.ordner] = (eintrag: e, werkzeuge: werkzeuge, fertig: _neustarten(e, werkzeuge));
+  }
+
+  /// Der eine Neustart nach einem Absturz. Liefert das Plugin danach andere
+  /// Werkzeuge, gelten sie ab der nächsten Sitzung eines KI-Werkzeugs (der
+  /// MCP-Server fragt die Liste je Sitzung); die Namensregeln gelten neu.
+  Future<void> _neustarten(PluginEintrag e, List<WerkzeugBeschreibung> vorher) async {
+    // Erst nach einem Schritt, damit _abgestuerzt den Neustart eingetragen
+    // hat, bevor er ihn wieder austrägt.
+    await Future<void>.delayed(Duration.zero);
+    final _Laufend l;
+    try {
+      l = await _starten(e);
+    } on PluginFehler catch (f) {
+      _neustart.remove(e.ordner);
+      if (!_beendet) _ausfallen(e, vorher, f.grund);
+      return;
+    } catch (x) {
+      _neustart.remove(e.ordner);
+      if (!_beendet) _ausfallen(e, vorher, 'Der Neustart ist gescheitert (${x.runtimeType}).');
+      return;
+    }
+    _neustart.remove(e.ordner);
+    _einsetzen(l);
+    _protokoll.eintrag(Art.info, 'Plugin ${l.name} neu gestartet (${l.verbindung.werkzeuge.length} Werkzeuge)');
+    try {
+      await _plugins?.werkzeugeMerken(e, l.verbindung.werkzeuge);
+    } catch (x) {
+      _protokoll.eintrag(Art.fehler, 'Werkzeugliste des Plugins ${l.name} nicht gemerkt (${x.runtimeType})');
+    }
+  }
+
+  void _ausfallen(PluginEintrag e, List<WerkzeugBeschreibung> werkzeuge, String grund) {
+    _ausgefallen[e.ordner] = (eintrag: e, werkzeuge: werkzeuge);
+    _fehler[e.ordner] = grund;
+    _protokoll.eintrag(
+      Art.fehler,
+      'Plugin ${_name(e)} ausgefallen: $grund Es läuft erst nach einem Neustart von moocp wieder.',
+    );
+  }
+
   @override
   List<WerkzeugBeschreibung> werkzeuge(Profil profil) => [
-    for (final l in _laufend.values)
-      if (_aktiv(l, profil)) ...l.verbindung.werkzeuge,
+    for (final (e, liste) in _alle())
+      if (_aktiv(e, profil)) ...liste,
   ];
 
-  bool _aktiv(_Laufend l, Profil profil) =>
-      _plugins?.stand(l.eintrag).aktivIn(profil.kennung) ?? false;
+  bool _aktiv(PluginEintrag e, Profil profil) => _plugins?.stand(e).aktivIn(profil.kennung) ?? false;
 
   @override
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
-    for (final l in _laufend.values) {
-      if (!l.verbindung.werkzeuge.any((w) => w.name == aufruf.name)) continue;
+    while (true) {
+      final e = _besitzer(aufruf.name);
+      if (e == null) throw MoodleFehler('Das Werkzeug „${aufruf.name}“ gehört zu keinem laufenden Plugin.');
       // Gefragt wird bei jedem Aufruf: Ausschalten im Dialog „Plugins“ wirkt
       // sofort, auch in einer Sitzung, die das Werkzeug noch in ihrer Liste
       // hat.
-      if (!_aktiv(l, aufruf.profil)) {
+      if (!_aktiv(e, aufruf.profil)) {
         throw MoodleFehler(
-          'Das Plugin „${l.eintrag.anzeigename}“ ist im Profil „${aufruf.profil.name}“ nicht eingeschaltet; '
+          'Das Plugin „${e.anzeigename}“ ist im Profil „${aufruf.profil.name}“ nicht eingeschaltet; '
           'sein Werkzeug steht hier nicht zur Verfügung.',
         );
       }
-      return l.verbindung.aufrufen(aufruf);
+      // Startet das Plugin gerade neu, wartet der Aufruf darauf und schaut
+      // dann noch einmal: Danach läuft es, ist ausgefallen oder hat das
+      // Werkzeug nicht mehr.
+      final neustart = _neustart[e.ordner];
+      if (neustart != null) {
+        await neustart.fertig;
+        continue;
+      }
+      final l = _laufend[e.ordner];
+      if (l == null) throw MoodleFehler(_ausfallText(e));
+      return _aufrufenBei(l, aufruf);
     }
-    throw MoodleFehler('Das Werkzeug „${aufruf.name}“ gehört zu keinem laufenden Plugin.');
+  }
+
+  PluginEintrag? _besitzer(String werkzeug) {
+    for (final (e, liste) in _alle()) {
+      if (liste.any((w) => w.name == werkzeug)) return e;
+    }
+    return null;
+  }
+
+  /// Ein Aufruf bei einem laufenden Plugin. Endet sein Programm dabei, kommt
+  /// der Fehler des Ausfalls sofort; der Aufruf wird nicht wiederholt, auch
+  /// wenn der Neustart gelingt.
+  Future<String> _aufrufenBei(_Laufend l, WerkzeugAufruf aufruf) async {
+    final text = _ausfallText(l.eintrag);
+    try {
+      return await Future.any([
+        l.verbindung.aufrufen(aufruf),
+        l.abgestuerzt.future.then<String>((_) => throw MoodleFehler(text)),
+      ]);
+    } on MoodleFehler {
+      rethrow;
+    } catch (_) {
+      // Endet das Programm, bricht oft zuerst die Verbindung ab, und das Ende
+      // des Prozesses kommt einen Augenblick später. Ist es dann zu Ende,
+      // war es der Absturz; sonst bleibt es beim Fehler der Verbindung.
+      final weg = await l.abgestuerzt.future
+          .then((_) => true)
+          .timeout(const Duration(seconds: 2), onTimeout: () => false);
+      if (weg) throw MoodleFehler(text);
+      rethrow;
+    }
   }
 
   /// Beendet alle laufenden Plugins: Verbindung schließen, Standardeingabe
   /// schließen, höchstens drei Sekunden warten, dann hart beenden
   /// (plattform.dart, unter Windows samt den Prozessen, die das Plugin selbst
   /// gestartet hat). Alle zugleich, damit das Beenden der App nicht je Plugin
-  /// wartet; ebenso ein Plugin, das gerade startet.
+  /// wartet; ebenso ein Plugin, das gerade startet oder neu startet. Das ist
+  /// kein Absturz: kein Neustart, kein Ausfall.
   Future<void> beenden() async {
     _beendet = true;
     final alle = _laufend.values.toList();

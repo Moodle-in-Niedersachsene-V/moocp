@@ -1323,6 +1323,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
           _mehrere ? '$appName — ${_profil.name} (${_profil.mcpName})' : appName,
         ),
         actions: [
+          // Unabhängig vom gewählten Profil; neu gezeichnet wird mit dem
+          // Protokoll, in das jeder Ausfall eine Zeile schreibt.
+          if (widget.laufendePlugins?.ausgefalleneNamen case final namen? when namen.isNotEmpty)
+            Flexible(child: PluginAusfallAnzeige(namen: namen)),
           BestaetigungenFeld(stufe: _freigaben.stufe, aendern: _stufeAendern),
           IconButton(
             icon: const Icon(Icons.help_outline),
@@ -1585,6 +1589,59 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       ),
     ),
   );
+}
+
+/// Der Text der Anzeige ausgefallener Plugins: „Plugin „A“ ausgefallen“,
+/// bei mehreren „Plugins „A“, „B“ ausgefallen“.
+String pluginAusfallText(List<String> namen) =>
+    '${namen.length == 1 ? 'Plugin' : 'Plugins'} '
+    '${namen.map((n) => '„$n“').join(', ')} ausgefallen';
+
+/// Die Anzeige in der Titelzeile, sobald ein Plugin ausgefallen ist
+/// (plugin/laufende_plugins.dart): rot wie die Stufe „keine“ und für jedes
+/// Instanzprofil, denn ein Plugin läuft einmal je App. Sie schrumpft mit der
+/// Titelzeile; der Tooltip zeigt den ganzen Text und was zu tun ist. Ohne
+/// ausgefallenes Plugin zeigt sie nichts.
+class PluginAusfallAnzeige extends StatelessWidget {
+  const PluginAusfallAnzeige({required this.namen, super.key});
+
+  final List<String> namen;
+
+  @override
+  Widget build(BuildContext context) {
+    if (namen.isEmpty) return const SizedBox.shrink();
+    final farbe = Theme.of(context).colorScheme;
+    final text = pluginAusfallText(namen);
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message:
+            '$text. Seine Werkzeuge antworten mit einem Fehler, bis moocp neu '
+            'gestartet ist; der Grund steht im Protokoll.',
+        child: Material(
+          color: farbe.error,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.extension_off_outlined, size: 18, color: farbe.onError),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    text,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: farbe.onError, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Ein Satz je Stufe, fürs Protokoll.

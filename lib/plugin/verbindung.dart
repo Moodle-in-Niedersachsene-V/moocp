@@ -43,6 +43,13 @@ Map<String, dynamic> vertragBeimInitialize() => {
   'schnittstelle': schnittstellenVersion,
 };
 
+/// Das Plugin kam nicht hoch: keine Antwort binnen der Startfrist, oder sein
+/// Programm endete dabei. Anders als ein Verstoß gegen die Regeln kann hier
+/// ein zweiter Versuch helfen (laufende_plugins.dart).
+class PluginStartFehler extends PluginFehler {
+  const PluginStartFehler(super.grund);
+}
+
 /// Prüft die Werkzeugnamen eines Plugins mit [kurzname] gegen die Regeln und
 /// gegen [vergeben] (eingebaute Werkzeuge und die anderer Plugins). Wirft
 /// [PluginFehler] mit dem ersten Verstoß; der Grund nennt das Werkzeug.
@@ -85,8 +92,9 @@ class PluginVerbindung {
   final McpClient _client;
   final StreamableHttpClientTransport _transport;
 
-  /// Die Werkzeuge, wie das Plugin sie beim Start nannte. Die Liste gilt, bis
-  /// die App endet; ein späteres `tools/list_changed` beachtet sie nicht.
+  /// Die Werkzeuge, wie das Plugin sie beim Start nannte. Die Liste gilt für
+  /// diese Verbindung, also bis die App oder das Plugin endet; ein späteres
+  /// `tools/list_changed` beachtet sie nicht.
   final List<WerkzeugBeschreibung> werkzeuge;
 
   /// Verbindet sich mit dem Plugin auf [port] und liest seine Werkzeuge.
@@ -103,14 +111,14 @@ class PluginVerbindung {
     bool Function()? weiter,
   }) async {
     final ende = DateTime.now().add(frist);
-    final zeitGrund = PluginFehler(
+    final zeitGrund = PluginStartFehler(
       'Das Plugin hat nicht binnen ${frist.inSeconds} Sekunden auf die Verbindung geantwortet.',
     );
     while (true) {
       final rest = ende.difference(DateTime.now());
       if (rest <= Duration.zero) throw zeitGrund;
       if (weiter != null && !weiter()) {
-        throw const PluginFehler('Das Programm des Plugins hat sich beim Start beendet.');
+        throw const PluginStartFehler('Das Programm des Plugins hat sich beim Start beendet.');
       }
       final transport = StreamableHttpClientTransport(
         Uri.parse('http://127.0.0.1:$port/mcp'),

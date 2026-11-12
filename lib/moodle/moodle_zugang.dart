@@ -13,6 +13,9 @@
 //     entscheidet Moodle selbst -- die App darf genau, was die Lehrkraft darf.
 //     Was nicht auf der Liste steht, wird nicht angefragt. Das ist die Grenze,
 //     die im Skill bisher nur beschrieben war; hier ist sie erzwungen.
+//     Welche Listen gelten und wie die Zeile im Protokoll lautet, bestimmt der
+//     Aufrufer der Anfrage ([Aufrufer]); den Download eingeschlossen, geht
+//     jede Anfrage dafür durch dieselben zwei Stellen.
 //  3. Eine abgelaufene Sitzung erkennen (Umleitung auf die Anmeldeseite),
 //     genau einmal neu anmelden. Lesen wird wiederholt; Schreiben meldet
 //     SitzungAbgelaufen, und das Werkzeug baut den ganzen Vorgang neu auf.
@@ -212,6 +215,79 @@ String? themeStylesheetIn(dom.Document doc) {
     }
   }
   return null;
+}
+
+/// Wer eine Anfrage an Moodle stellt. Vom Aufrufer hängen ab, gegen welche
+/// Listen die Adresse geprüft wird und in welcher Form das Protokoll die
+/// Anfrage nennt; alles Übrige -- der Rechner der Instanz, die Sitzung, das
+/// Senden -- ist für jeden Aufrufer dasselbe und bleibt in [MoodleZugang].
+///
+/// Jede Anfrage fragt ihren Aufrufer an denselben Stellen, auch ein Download:
+/// die Prüfung vor dem Senden (`_pruefePositivliste`), die Zeile danach
+/// (`_protokolliere`). Es gibt einen Aufrufer, die eingebauten Werkzeuge der
+/// App; für sie gelten Sperrliste und Positivliste wie in E3, und im
+/// Protokoll steht nie ein Wert (A4).
+abstract class Aufrufer {
+  /// Die Regel der Sperrliste, die [uri] sperrt, sonst null. Sie wird vor
+  /// [erlaubt] gefragt: Was sie sperrt, geht nie hinaus.
+  String? gesperrtDurch(Uri uri);
+
+  /// Ob die Positivliste diese Anfrage erlaubt.
+  bool erlaubt(
+    String methode,
+    Uri uri,
+    Felder? formular,
+    String? rumpf,
+    Anhang? anhang,
+  );
+
+  /// Die Protokollzeile einer Anfrage, die [gesperrtDurch] mit [regel] sperrt.
+  String sperrzeile(String methode, Uri uri, String regel);
+
+  /// Die Protokollzeile einer Anfrage, die [erlaubt] nicht durchlässt.
+  String ablehnzeile(String methode, Uri uri, Felder? formular);
+
+  /// Die Protokollzeile einer gestellten Anfrage ohne ihren Status.
+  String anfragezeile(String methode, Uri uri, Anhang? anhang);
+}
+
+/// Die eingebauten Werkzeuge der App: Sperrliste (sperrliste.dart) und
+/// Positivliste dieses Zugangs; im Protokoll stehen Methode, Pfad und Query
+/// (ohne sesskey), bei gesperrten Anfragen nur die Namen der Parameter.
+class _EingebauteWerkzeuge extends Aufrufer {
+  _EingebauteWerkzeuge(this._zugang);
+
+  final MoodleZugang _zugang;
+
+  @override
+  String? gesperrtDurch(Uri uri) => sperrregel(uri);
+
+  @override
+  bool erlaubt(
+    String methode,
+    Uri uri,
+    Felder? formular,
+    String? rumpf,
+    Anhang? anhang,
+  ) => _zugang.erlaubt(methode, uri, formular, rumpf, anhang);
+
+  // Parameterwerte gehören nicht ins Protokoll: studentid=45 wäre genau das
+  // Datum, um das es geht.
+  @override
+  String sperrzeile(String methode, Uri uri, String regel) =>
+      'Datenschutz-Sperre: $methode ${adresseOhneWerte(uri)} (Regel $regel)';
+
+  // Zur Fehlersuche die NAMEN der Parameter und Felder, nie ihre Werte.
+  @override
+  String ablehnzeile(String methode, Uri uri, Felder? formular) =>
+      'Gesperrt: $methode ${adresseOhneWerte(uri)}'
+      '${formular == null ? '' : ' (Felder: ${formular.map((e) => e.key).toSet().join(', ')})'}'
+      '${formular == null || !const {'/backup/restore.php', '/group/assign.php'}.contains(uri.path) ? '' : ' (Wertformen: ${formular.map((e) => '${e.key}=${MoodleZugang._wertform(e.value)}').join(', ')})'}';
+
+  @override
+  String anfragezeile(String methode, Uri uri, Anhang? anhang) =>
+      '$methode ${uri.path}${_zugang._querySicher(uri)}'
+      '${anhang != null ? " (${anhang.dateiname})" : ""}';
 }
 
 class MoodleZugang {
@@ -1427,6 +1503,9 @@ class MoodleZugang {
   /// http. Sonst gilt überall https.
   bool _testInstanz = false;
 
+  /// Der Aufrufer jeder Anfrage dieses Zugangs ([Aufrufer]).
+  late final Aufrufer _werkzeuge = _EingebauteWerkzeuge(this);
+
   /// Ein Zugang gegen eine lokale Testinstanz (Test-Doppel auf 127.0.0.1), mit
   /// derselben Anmeldung wie [anmelden], aber ohne die https-Pflicht. Der
   /// einzige Weg, http zu erlauben; die Positivliste lässt http nur für genau
@@ -1850,8 +1929,9 @@ class MoodleZugang {
   /// ([DownloadZuGross]).
   Future<int> herunterladen(String pfadMitQuery, File ziel, {int maxBytes = archivGrenzeStandard}) async {
     _pruefeAngemeldet();
+    final aufrufer = _werkzeuge;
     final uri = _adresse(pfadMitQuery);
-    _pruefePositivliste('GET', uri, null, null);
+    _pruefePositivliste(aufrufer, 'GET', uri, null, null);
     if (await ziel.exists()) {
       throw MoodleFehler('Zieldatei existiert schon; nichts überschrieben.');
     }
@@ -1866,10 +1946,7 @@ class MoodleZugang {
       req.followRedirects = false;
       _cookies.forEach((k, v) => req.cookies.add(Cookie(k, v)));
       final res = await req.close().timeout(antwortgrenze);
-      protokoll.eintrag(
-        Art.moodle,
-        'GET ${uri.path}${_querySicher(uri)} → ${res.statusCode}',
-      );
+      _protokolliere(aufrufer, Art.moodle, 'GET', uri, res.statusCode);
       if (res.statusCode != 200) {
         throw MoodleFehler('Download abgelehnt (HTTP ${res.statusCode}).');
       }
@@ -1984,7 +2061,12 @@ class MoodleZugang {
           uri.scheme == 'http' &&
           uri.port == _basis!.port);
 
+  /// Die Prüfung vor dem Senden, für jede Anfrage dieselbe -- auch für den
+  /// Download. Der Rechner und das Schema sind Sache der Instanz; was auf den
+  /// beiden Listen steht und wie die Ablehnung im Protokoll lautet, sagt der
+  /// [aufrufer].
   void _pruefePositivliste(
+    Aufrufer aufrufer,
     String methode,
     Uri uri,
     Felder? formular,
@@ -1996,14 +2078,9 @@ class MoodleZugang {
         'Gesperrt: fremder Rechner oder kein https (${uri.host}).',
       );
     }
-    final regel = sperrregel(uri);
+    final regel = aufrufer.gesperrtDurch(uri);
     if (regel != null) {
-      // Parameterwerte gehören nicht ins Protokoll: studentid=45 wäre genau
-      // das Datum, um das es geht.
-      protokoll.eintrag(
-        Art.gesperrt,
-        'Datenschutz-Sperre: $methode ${adresseOhneWerte(uri)} (Regel $regel)',
-      );
+      protokoll.eintrag(Art.gesperrt, aufrufer.sperrzeile(methode, uri, regel));
       throw MoodleFehler(
         'Gesperrt (Datenschutz): ${uri.path} zeigt personenbezogene Daten -- Bewertungen, '
         'Abgaben, Versuche, Profile oder Protokolle. Die App liest sie grundsätzlich nicht. '
@@ -2011,17 +2088,34 @@ class MoodleZugang {
         'Adresse harmlos ist -- dass die Sperre zu weit ist (Regel $regel).',
       );
     }
-    if (erlaubt(methode, uri, formular, rumpf, anhang)) return;
-    // Zur Fehlersuche die NAMEN der Parameter und Felder, nie ihre Werte.
+    if (aufrufer.erlaubt(methode, uri, formular, rumpf, anhang)) return;
     protokoll.eintrag(
       Art.gesperrt,
-      'Gesperrt: $methode ${adresseOhneWerte(uri)}'
-      '${formular == null ? '' : ' (Felder: ${formular.map((e) => e.key).toSet().join(', ')})'}'
-      '${formular == null || !const {'/backup/restore.php', '/group/assign.php'}.contains(uri.path) ? '' : ' (Wertformen: ${formular.map((e) => '${e.key}=${_wertform(e.value)}').join(', ')})'}',
+      aufrufer.ablehnzeile(methode, uri, formular),
     );
     throw MoodleFehler(
       'Gesperrt: $methode ${uri.path} steht nicht auf der Positivliste dieses Servers '
       '(oder die Werte passen nicht zu dem, was dort erlaubt ist).',
+    );
+  }
+
+  /// Trägt eine gestellte Anfrage ins Protokoll ein, für jede Anfrage
+  /// dieselbe -- auch für den Download: die Zeile des [aufrufer], der Status
+  /// und, was ein Schutzdienst dazu sagt ([hinweis]).
+  void _protokolliere(
+    Aufrufer aufrufer,
+    Art art,
+    String methode,
+    Uri uri,
+    int status, {
+    Anhang? anhang,
+    bool browser = false,
+    String hinweis = '',
+  }) {
+    protokoll.eintrag(
+      art,
+      '${browser ? 'Browser: ' : ''}${aufrufer.anfragezeile(methode, uri, anhang)}'
+      ' → $status$hinweis',
     );
   }
 
@@ -2064,9 +2158,12 @@ class MoodleZugang {
     String? rumpf,
     bool browser = false,
   }) async {
+    final aufrufer = _werkzeuge;
     // Anfragen des Browsers sind in fuerBrowser geprüft, gegen ihre eigene
     // Liste; die Sperrliste gilt dort zuerst wie hier.
-    if (!browser) _pruefePositivliste(methode, uri, formular, rumpf, anhang);
+    if (!browser) {
+      _pruefePositivliste(aufrufer, methode, uri, formular, rumpf, anhang);
+    }
     final client = HttpClient()
       ..userAgent = 'moocp (lokal)'
       ..connectionTimeout = verbindungsgrenze;
@@ -2173,16 +2270,20 @@ class MoodleZugang {
       final schreibt = rumpf != null
           ? schreibendeDienste.contains(dienst)
           : methode != 'GET' || uri.queryParameters.containsKey('sesskey');
-      protokoll.eintrag(
+      _protokolliere(
+        aufrufer,
         schreibt ? Art.schreiben : Art.moodle,
-        '${browser ? 'Browser: ' : ''}$methode ${uri.path}${_querySicher(uri)}'
-        '${anhang != null ? " (${anhang.dateiname})" : ""}'
-        ' → ${res.statusCode}'
-        '${switch (schutz) {
-          Schutz.pruefung => ' (Schutzdienst: Prüfung verlangt',
-          Schutz.sperre => ' (Schutzdienst: abgewiesen',
-          null => '',
-        }}${schutz == null ? '' : '${ray == null ? '' : ', Ray-ID $ray'})'}',
+        methode,
+        uri,
+        res.statusCode,
+        anhang: anhang,
+        browser: browser,
+        hinweis:
+            '${switch (schutz) {
+              Schutz.pruefung => ' (Schutzdienst: Prüfung verlangt',
+              Schutz.sperre => ' (Schutzdienst: abgewiesen',
+              null => '',
+            }}${schutz == null ? '' : '${ray == null ? '' : ', Ray-ID $ray'})'}',
       );
       // Die Seite des Schutzdienstes ist keine Antwort von Moodle; als solche
       // gelesen, sähe sie wie ein fehlendes Recht oder eine leere Seite aus.

@@ -71,6 +71,35 @@ void main() {
     });
   });
 
+  group('Datei im Release nach einem anderen Namensmuster', () {
+    Map<String, dynamic> anhang(String name) => {'name': name, 'browser_download_url': 'https://x/$name'};
+
+    test('der Name setzt sich aus Anfang, Version und .exe zusammen', () {
+      expect(installerName('1.2.0', anfang: 'zusatz_setup'), 'zusatz_setup_1.2.0.exe');
+      expect(installerName('1.2.0'), 'moocp_setup_1.2.0.exe');
+    });
+
+    test('die zur Version passende Datei, nicht die von moocp', () {
+      final gefunden = releaseDatei([
+        anhang('moocp_setup_1.2.0.exe'),
+        anhang('zusatz_setup_1.1.0.exe'),
+        anhang('zusatz_setup_1.2.0.exe'),
+      ], '1.2.0', anfang: 'zusatz_setup');
+      expect(gefunden?['name'], 'zusatz_setup_1.2.0.exe');
+    });
+
+    test('heißt sie anders, wird die erste Datei mit diesem Anfang genommen', () {
+      final gefunden = releaseDatei(
+          [anhang('moocp_setup_1.2.0.exe'), anhang('zusatz_setup1.2.0+1.exe')], '1.2.0',
+          anfang: 'zusatz_setup');
+      expect(gefunden?['name'], 'zusatz_setup1.2.0+1.exe');
+    });
+
+    test('ohne Datei mit diesem Anfang kein Treffer', () {
+      expect(releaseDatei([anhang('moocp_setup_1.2.0.exe')], '1.2.0', anfang: 'zusatz_setup'), isNull);
+    });
+  });
+
   group('Wann überhaupt geprüft wird', () {
     test('unter macOS nie: es gibt keinen Installer zum Selbstersetzen', () {
       expect(updateMoeglich([], {'LOCALAPPDATA': '/x', 'HOME': '/Users/x'}), isFalse);

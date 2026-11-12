@@ -49,10 +49,11 @@ class UpdateFehler implements Exception {
   String toString() => meldung;
 }
 
-/// Keine der Herkünfte (updateliste.dart) taugt noch: GitHub war erreichbar
-/// und hat für jede gesagt, dass es dort kein Release mehr gibt. Vorübergehende
-/// Störungen sind das nie, sie bleiben ein gewöhnlicher [UpdateFehler]; sonst
-/// bekäme jeder hinter einem Schulproxy täglich eine falsche Warnung.
+/// Keine der Herkünfte der Prüfung (für moocp: updateliste.dart) taugt noch:
+/// GitHub war erreichbar und hat für jede gesagt, dass es dort kein Release
+/// mehr gibt. Vorübergehende Störungen sind das nie, sie bleiben ein
+/// gewöhnlicher [UpdateFehler]; sonst bekäme jeder hinter einem Schulproxy
+/// täglich eine falsche Warnung.
 class UpdateAdressenWeg extends UpdateFehler {
   UpdateAdressenWeg() : super('Die hinterlegten Update-Adressen bei GitHub gibt es nicht mehr.');
 }
@@ -139,9 +140,13 @@ List<int> _zahlen(String version) => version
     .map((t) => int.tryParse(RegExp(r'^\d+').firstMatch(t.trim())?.group(0) ?? '') ?? 0)
     .toList();
 
-/// Der Name, unter dem der Installer im Release liegt (installer/moocp.nsi,
-/// OutFile).
-String installerName(String version) => 'moocp_setup_$version.exe';
+/// Der Anfang des Dateinamens, unter dem der Installer von moocp im Release
+/// liegt (installer/moocp.nsi, OutFile).
+const String moocpInstallerAnfang = 'moocp_setup';
+
+/// Der Name, unter dem der Installer im Release liegt: `<anfang>_<Version>.exe`.
+String installerName(String version, {String anfang = moocpInstallerAnfang}) =>
+    '${anfang}_$version.exe';
 
 /// Die heruntergeladene Datei liegt im Temp-Verzeichnis, nicht im
 /// Arbeitsordner: Den leert die App beim Beenden -- also genau dann, wenn
@@ -149,25 +154,39 @@ String installerName(String version) => 'moocp_setup_$version.exe';
 File installerDatei(String version) =>
     File(p.join(Directory.systemTemp.path, 'moocp_update_$version.exe'));
 
-/// Sucht im Release die Datei, die zur Version gehört.
-Map<String, dynamic>? releaseDatei(List<dynamic> anhaenge, String version) {
+/// Sucht im Release die Datei, die zur Version gehört. [anfang] ist der Anfang
+/// des Dateinamens (siehe [installerName]).
+Map<String, dynamic>? releaseDatei(List<dynamic> anhaenge, String version,
+    {String anfang = moocpInstallerAnfang}) {
   final passend = anhaenge.whereType<Map<String, dynamic>>().where((a) {
     final n = a['name'];
-    return n is String && n.startsWith('moocp_setup') && n.endsWith('.exe');
+    return n is String && n.startsWith(anfang) && n.endsWith('.exe');
   }).toList();
   for (final a in passend) {
-    if (a['name'] == installerName(version)) return a;
+    if (a['name'] == installerName(version, anfang: anfang)) return a;
   }
   return passend.isEmpty ? null : passend.first;
 }
 
 /// Eine Prüfung samt Download. Eine je Vorgang; [abbrechen] bricht ab, was
 /// gerade läuft.
+///
+/// [quellen] sind die Herkünfte (Repositorys bei GitHub), aus denen die
+/// Versionen kommen, in der Reihenfolge der Abfrage; ohne Angabe die von
+/// moocp selbst (updateliste.dart). [installerAnfang] ist der Anfang des
+/// Dateinamens des Installers im Release ([installerName]).
 class Update {
-  Update(this.protokoll, {this.grenze = abfragegrenze});
+  Update(
+    this.protokoll, {
+    this.grenze = abfragegrenze,
+    this.quellen = herkuenfte,
+    this.installerAnfang = moocpInstallerAnfang,
+  });
 
   final Protokoll protokoll;
   final Duration grenze;
+  final List<String> quellen;
+  final String installerAnfang;
 
   HttpClient? _klient;
   bool _abgebrochen = false;
@@ -194,10 +213,16 @@ class Update {
   /// Rückgabe: die neue Version, oder null, wenn die laufende schon die
   /// neueste ist. Wirft [UpdateAdressenWeg], wenn keine Herkunft mehr taugt.
   Future<NeueVersion?> pruefen(String eigene) async {
+    // Vor der ersten Anfrage: Eine leere Liste würde sonst als „keine Herkunft
+    // mehr“ gemeldet, also als Warnung, obwohl nichts gefragt wurde, und ein
+    // Name, der keine Herkunft ist, ließe sich nicht zu einer Adresse machen.
+    if (quellen.isEmpty || !quellen.every(herkunftGueltig)) {
+      throw UpdateFehler('Die hinterlegten Update-Adressen sind nicht brauchbar.');
+    }
     final klient = _neuerKlient();
     try {
       HttpClientResponse? antwort;
-      for (final herkunft in herkuenfte) {
+      for (final herkunft in quellen) {
         try {
           antwort = await _holen(releaseAbfrage(herkunft), klient, download: false);
           break;
@@ -219,12 +244,13 @@ class Update {
         protokoll.eintrag(Art.info, 'Update: neueste Version ist $version, läuft bereits ($eigene)');
         return null;
       }
-      final anhang = releaseDatei((j['assets'] as List?) ?? const [], version);
+      final anhang = releaseDatei((j['assets'] as List?) ?? const [], version, anfang: installerAnfang);
       if (anhang == null) {
-        throw UpdateFehler('Im Release $version liegt kein Installer (${installerName(version)}).');
+        throw UpdateFehler(
+            'Im Release $version liegt kein Installer (${installerName(version, anfang: installerAnfang)}).');
       }
       final adresse = Uri.parse(anhang['browser_download_url'] as String);
-      final grund = updateGesperrt(adresse, download: true);
+      final grund = updateGesperrt(adresse, download: true, quellen: quellen);
       if (grund != null) {
         protokoll.eintrag(Art.gesperrt, 'Update gesperrt: ${_kurz(adresse)} ($grund)');
         throw UpdateFehler('Die Adresse des Installers ist nicht erlaubt ($grund).');
@@ -312,7 +338,7 @@ class Update {
   Future<HttpClientResponse> _holen(Uri start, HttpClient klient, {required bool download}) async {
     var uri = start;
     for (var i = 0; i < 5; i++) {
-      final grund = updateGesperrt(uri, download: download);
+      final grund = updateGesperrt(uri, download: download, quellen: quellen);
       if (grund != null) {
         protokoll.eintrag(Art.gesperrt, 'Update gesperrt: GET ${_kurz(uri)} ($grund)');
         // Ein umgezogenes Repository leitet GitHub innerhalb der API auf eine

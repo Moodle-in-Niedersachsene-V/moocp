@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.11.0
+- Neu: Plugins – zusätzliche Erweiterungen aus eigenen Projekten nehmen Sie in einem eigenen Dialog an oder lehnen sie ab, für jede Version einzeln; unter dem Zahnrad sehen Sie den Stand und ändern ihn je Moodle-Instanz.
+
 ## 0.10.2
 - Updates: moocp findet neue Versionen auch, wenn das Projekt zum Verein Moodle in Niedersachsen e. V. umzieht; gibt es die hinterlegten Update-Adressen nicht mehr, warnt die App bei der täglichen Suche.
 - Wiederherstellung: Eingebettete Bilder lösen keinen Fehlalarm mehr aus, auch wenn im Dateibereich alte, nicht mehr eingebundene Dateien liegen oder Moodle einen Zähler wie „ (1)“ im Namen vergeben hat.

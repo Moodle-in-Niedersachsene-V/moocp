@@ -111,9 +111,20 @@ Eine Funktion der App, die ein KI-Werkzeug über den MCP-Server aufruft, etwa zu
 _Nicht zu verwechseln mit_: Skill.
 
 **Plugin**
-Eine zusätzlich installierbare Erweiterung der App aus einem eigenen Projekt, die eigene Werkzeuge und Skills mitbringt. Die App nutzt ein Plugin erst, nachdem die Lehrkraft es in der Einrichtung angenommen hat.
+Eine zusätzlich installierbare Erweiterung der App aus einem eigenen Projekt, die eigene Werkzeuge und Skills mitbringt. Die App nutzt ein Plugin erst, nachdem die Lehrkraft ihm zugestimmt hat.
 _Nicht zu verwechseln mit_: Moodle-Plugin (eine Erweiterung der Moodle-Instanz; die App setzt keines voraus).
 _Vermeiden_: internes Plugin, Modul als Bezeichnung für Teile der App selbst
+
+**Zustimmung**
+Das Annehmen eines Plugins durch die Lehrkraft, für genau eine Version und einen Stand der Dateien, mit der Wahl der Instanzprofile, in denen es eingeschaltet ist. Eine Zustimmung gibt nur die Lehrkraft in der App.
+_Nicht zu verwechseln mit_: Freigabe (nur der Schreibvorgang in Moodle).
+_Vermeiden_: Freigabe für ein Plugin, Installieren für das Annehmen
+
+**Beschreibungsdatei**
+Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatzadressen und weitere Angaben, die die App vor jeder Zustimmung liest, ohne Code des Plugins auszuführen.
+
+**Zusatzadresse**
+Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu.
 
 **Fragensammlung**
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.

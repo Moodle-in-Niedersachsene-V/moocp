@@ -35,6 +35,46 @@ class AnmeldeAuftrag {
   final bool merken;
 }
 
+/// Wie der Start bis zur Anmeldung ausgeht.
+enum StartAusgang {
+  /// Ein Update-Installer läuft: Die App beendet sich.
+  beenden,
+
+  /// Es geht nicht weiter: ohne Einrichtung (die App läuft dann nicht) oder
+  /// weil die Oberfläche weg ist.
+  abgebrochen,
+
+  /// Eingerichtet; der Aufrufer meldet an.
+  bereit,
+}
+
+/// Die Schritte des Starts vor der Anmeldung in fester Reihenfolge (E13, E35):
+///
+/// 1. [update] der App. Liefert true, wenn ein Installer läuft; dann endet der
+///    Start. Ein Update bringt auch neue Skills, und die Einrichtung soll nicht
+///    die Version einrichten, die gleich ersetzt wird.
+/// 2. [plugins]: die Lehrkraft entscheidet über Plugins, die neu oder
+///    geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
+///    mitbringen, die die Einrichtung behandelt, und vor der Anmeldung, weil
+///    ein Plugin ohne Anmeldung arbeiten kann.
+/// 3. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
+///    Einrichtung der KI-Werkzeuge, dann die Anmeldung.
+///
+/// [weiter] sagt vor jedem Schritt nach dem ersten, ob die Oberfläche noch da
+/// ist; sonst stünde ein Dialog vor einem Fenster, das nicht mehr besteht.
+Future<StartAusgang> startBisAnmeldung({
+  required Future<bool> Function() update,
+  required Future<void> Function() plugins,
+  required Future<bool> Function() einrichtungUndAnmeldung,
+  required bool Function() weiter,
+}) async {
+  if (await update()) return StartAusgang.beenden;
+  if (!weiter()) return StartAusgang.abgebrochen;
+  await plugins();
+  if (!weiter()) return StartAusgang.abgebrochen;
+  return await einrichtungUndAnmeldung() ? StartAusgang.bereit : StartAusgang.abgebrochen;
+}
+
 /// Hält den normalen Start bei der Einrichtung an; nur eine explizite
 /// Testprofilbindung darf die Testanmeldung vor dem Einrichtungsdialog starten.
 Future<bool> testprofilVorEinrichtungStarten({

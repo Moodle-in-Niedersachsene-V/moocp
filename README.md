@@ -453,15 +453,27 @@ Ist die Suche eingeschaltet, läuft sie beim Start der App, bevor etwas anderes 
 
 Die App fragt zuerst das Repository des Vereins Moodle in Niedersachsen e. V. und nur dann das bisherige, wenn es beim Verein kein Release gibt. Meldet GitHub für beide, dass es dort nichts mehr gibt, warnt die App bei der Suche, dass automatische Updates anscheinend nicht mehr möglich sind; sie funktioniert weiter, aber eine neue Version müssen Sie dann selbst besorgen.
 
-Gibt es eine neue Version, zeigt die App, was sich ändert, und fragt: „Herunterladen und installieren" oder „Jetzt nicht". Bei „Jetzt nicht" passiert nichts weiter; am nächsten Tag fragt sie wieder. Sonst lädt sie den Installer – Sie sehen den Fortschritt – und startet ihn sichtbar. moocp schließt sich dafür und startet nach der Installation wieder; Einstellungen, gespeicherte Anmeldedaten und die Einrichtung der KI-Werkzeuge bleiben erhalten. Eine laufende Sitzung im KI-Werkzeug verliert dabei die Verbindung und muss neu gestartet werden. Lief etwas schief, sagt es die App beim nächsten Start im Protokoll und nennt den Pfad der geladenen Datei.
+Gibt es eine neue Version, zeigt die App, was sich ändert, und fragt: „Herunterladen und installieren" oder „Jetzt nicht". Bei „Jetzt nicht" passiert nichts weiter; am nächsten Tag fragt sie wieder. Sonst lädt sie den Installer – Sie sehen den Fortschritt – und startet ihn sichtbar. moocp schließt sich dafür und startet nach der Installation wieder; Einstellungen, gespeicherte Anmeldedaten, installierte Plugins und die Einrichtung der KI-Werkzeuge bleiben erhalten. Eine laufende Sitzung im KI-Werkzeug verliert dabei die Verbindung und muss neu gestartet werden. Lief etwas schief, sagt es die App beim nächsten Start im Protokoll und nennt den Pfad der geladenen Datei.
 
 Was GitHub dabei erfährt: Ihre IP-Adresse und den Zeitpunkt der Anfrage, wie bei jedem Aufruf einer Webseite. Nichts aus Moodle wird übertragen, kein Benutzername, kein Passwort – die Suche benutzt eine eigene Verbindung ohne Ihre Moodle-Sitzung und darf nur die Auskunft über die neueste Version und die Installationsdatei des Releases anfragen ([lib/update/updateliste.dart](lib/update/updateliste.dart)). Jede Anfrage steht mit ihrem Ergebnis im Protokoll.
 
 Sucht die App nicht nach Updates, schauen Sie von Zeit zu Zeit selbst unter „Releases" nach. Nicht gesucht wird außerdem, wenn die App nicht aus `%LOCALAPPDATA%\Programs\moocp` läuft – dann würde ein Update sie gar nicht ersetzen – oder wenn sie mit `--kein-update` gestartet wird; so lässt sich die Suche auch über die Verknüpfung abschalten.
 
+### Plugins
+
+Plugins sind zusätzlich installierbare Erweiterungen aus eigenen Projekten, die eigene Werkzeuge und Skills mitbringen. moocp sucht sie beim Start im Ordner `plugins` seines Einstellungsordners (`%APPDATA%\moocp\plugins`), jedes in einem eigenen Unterordner, den der Installer des Plugins anlegt; ein Plugin, das erst nach dem Start dazukommt, findet die App beim nächsten Start. Ohne Plugin-Ordner ändert sich nichts: Die App fragt nichts und zeigt nichts an.
+
+Für jedes Plugin, das neu ist oder sich geändert hat, fragt die App beim Start, noch vor der Einrichtung der KI-Werkzeuge, in einem eigenen Dialog „Plugin zulassen“. Er nennt Name, Version und Herkunft und die Zusatzadressen mit Art („lesen“ oder „schreiben“) und Grund: Seiten Ihrer Moodle-Instanz, die das Plugin über moocp ansprechen darf, auch wenn moocp sie sonst nicht freigibt; hinter ihnen können Namen von Personen stehen. Dazu steht jedes Mal der Hinweis, wofür moocp einsteht und wofür nicht: Die Zusagen von moocp gelten für moocp und für alles, was durch moocp zu Moodle geht; für die Fehler des Plugins, für Schäden und für seine eigenen Datenwege steht sein Autor ein, und moocp gibt dafür keine Gewähr. Sie stimmen zu oder lehnen ab, nur mit der Maus und erst nach einer kurzen Wartezeit, wie bei einer Freigabe; eine Freigabe ist es nicht, so heißt nur der Schreibvorgang in Moodle. Eine Ablehnung wird gemerkt, damit die App nicht bei jedem Start noch einmal fragt.
+
+Die Zustimmung gilt für genau diesen Stand: für die Version und für den Inhalt aller Dateien im Plugin-Ordner. Eine neue Version fragt neu, auch wenn die Zusatzadressen gleich geblieben sind, und ebenso ein ausgetauschtes Programm unter derselben Versionsnummer. Ein Plugin, dessen Beschreibungsdatei sich nicht lesen lässt oder eine Regel bricht – etwa eine Zusatzadresse im Adminbereich oder bei der Anmeldung –, wird nicht geladen; die App fragt dann nicht, und der Grund steht unter „Plugins“ in den Einstellungen und im Protokoll.
+
+Arbeiten Sie mit mehreren Moodle-Instanzen, wählen Sie bei der Zustimmung, in welchen Profilen das Plugin eingeschaltet ist; vorgewählt sind alle. Mit einer Instanz gibt es diese Wahl nicht. Ein Profil, das Sie später anlegen, ist für ein zugestimmtes Plugin ausgeschaltet, bis Sie es einschalten.
+
+Unter dem Zahnrad oben rechts erscheint, sobald es Plugins gibt, „Plugins ansehen und ändern …“. Dort steht je Plugin der Stand (zugestimmt, abgelehnt, noch nicht entschieden oder nicht geladen, mit Grund). Mit mehreren Instanzen schalten Sie ein zugestimmtes Plugin je Profil ein oder aus, sofort und ohne neue Zustimmung. „Zustimmung ändern …“ öffnet denselben Dialog wie beim Start. Ein Plugin nehmen nur Sie in der App an und schalten es ein; für die KI gibt es dazu weder ein Werkzeug noch einen anderen Weg.
+
 ### Deinstallieren
 
-In den Windows-Einstellungen unter „Apps", „Installierte Apps", bei moocp „Deinstallieren". Das entfernt alles, was die App auf den Rechner gebracht hat: die App selbst, Einstellungen mit Zugangsschlüssel, Protokoll, gespeicherte Anmeldedaten, den Arbeitsordner und in Claude Code, Codex CLI und LM Studio die Verbindung „moodle" und die Skills der App. Läuft die App noch, bittet die Deinstallation, sie zu schließen; LM Studio darf dabei offen bleiben, ebenso bei einem Update. Lässt sich etwas nicht entfernen, etwa weil Claude Code nicht gefunden wird, sagt sie, was von Hand zu tun ist.
+In den Windows-Einstellungen unter „Apps", „Installierte Apps", bei moocp „Deinstallieren". Das entfernt alles, was die App auf den Rechner gebracht hat: die App selbst, Einstellungen mit Zugangsschlüssel, Protokoll, gespeicherte Anmeldedaten, installierte Plugins, den Arbeitsordner und in Claude Code, Codex CLI und LM Studio die Verbindung „moodle" und die Skills der App. Läuft die App noch, bittet die Deinstallation, sie zu schließen; LM Studio darf dabei offen bleiben, ebenso bei einem Update. Lässt sich etwas nicht entfernen, etwa weil Claude Code nicht gefunden wird, sagt sie, was von Hand zu tun ist.
 
 ---
 
@@ -535,7 +547,9 @@ skills/  (Wissen: Didaktik, Regeln,        moocp (Flutter, Windows)
 | `lib/freigabe.dart` | Freigaben mit Frist, und die drei Stufen der Bestätigungen |
 | `lib/einrichtung.dart`, `einrichtung_dialog.dart`, `lib/plattform/signatur_windows.dart` | KI-Werkzeuge einrichten: Claude Code, Codex CLI und LM Studio finden (unter Windows nimmt die App nur eine claude.exe mit gültiger Signatur von Anthropic), je den MCP-Eintrag prüfen und setzen, Skills vergleichen und installieren; beim Deinstallieren beides entfernen |
 | `lib/update/update.dart`, `updateliste.dart`, `update_dialoge.dart` | Suche nach Updates bei GitHub: Version vergleichen, Installer holen und starten; die Adressen, die dabei erlaubt sind |
-| `lib/einstellungen_dialog.dart` | Dialog „Einstellungen": Updates, Weg zu „KI-Werkzeuge einrichten", weitere Moodle-Instanz verbinden |
+| `lib/einstellungen_dialog.dart` | Dialog „Einstellungen": Updates, Weg zu „KI-Werkzeuge einrichten", Plugins, weitere Moodle-Instanz verbinden; dazu die Dialoge „Plugin zulassen" und „Plugins" |
+| `lib/plugin/` | Plugins finden und ihnen zustimmen: `adressmuster.dart` (Muster der Zusatzadressen, gesperrte Bereiche), `beschreibung.dart` (`plugin.json` lesen und prüfen), `pruefsumme.dart` (SHA-256 über den Plugin-Ordner), `entscheidung.dart` (die Entscheidung in den Einstellungen), `plugins.dart` (finden, Stand der Zustimmung, Profile, in denen ein Plugin eingeschaltet ist) |
+| `lib/nur_maus.dart` | `Sperrzeit` und `NurMaus`: Dialoge, die sich nach vorn holen (Freigaben, Zustimmung zu Plugins), entscheiden nur mit der Maus und erst nach der Wartezeit |
 | `lib/profil.dart`, `lib/profile_dialog.dart`, `lib/moodle/instanzen.dart` | Instanzprofile: je Moodle-Instanz Zugang, Freigabestufe und MCP-Server mit eigenem Port, Namen und Zugangsschlüssel; sichtbar erst ab zwei Profilen |
 | `lib/main.dart`, `BestaetigungenFeld` | das Feld für die Stufe der Bestätigungen in der Titelzeile samt Hilfe-Dialog |
 | `lib/ueber.dart` | Dialog „Über moocp": Version, Lizenz, Lizenzen der Pakete |
@@ -687,6 +701,57 @@ python skills\pruefung\pruefe-lernsituation-skript.py
 Auf den eigenen Rechner kommen die Skills über die App: `tool/neustart.sh`
 baut sie vor der App, und beim Start bietet der Dialog „KI-Werkzeuge einrichten"
 an, die neue Version zu installieren.
+
+### Plugins
+
+Ein Plugin ist ein eigenes Programm mit eigenen Werkzeugen und Skills aus einem eigenen Projekt, zusätzlich zu moocp installiert; es läuft nie im Prozess der App. Dieser Abschnitt nennt, was ein Plugin in seinem Ordner mitbringt und wie die App es findet, prüft und ihm zustimmen lässt. Alles hier Genannte liest die App, ohne Code des Plugins auszuführen.
+
+#### Ordner
+
+```
+<Einstellungsordner von moocp>/plugins/<name>/
+    plugin.json          Beschreibungsdatei
+    <programm>           das Programm, das plugin.json nennt
+    skills/*.skill       Skill-Pakete, im Format der Skills von moocp
+```
+
+Der Einstellungsordner ist unter Windows `%APPDATA%\moocp` und auf dem Mac `~/Library/Application Support/moocp`; die Regel ist für beide dieselbe. Unter Windows wandert er mit dem Benutzerprofil, sodass Plugins und Zustimmungen auf jedem Rechner bereitstehen, auf dem moocp installiert ist. Jeder Unterordner von `plugins` ist ein Plugin; sein Name ist frei und der Schlüssel der Zustimmung. Der Installer eines Plugins legt es nach `plugins/<name>` und bricht ab, wenn moocp fehlt. Ein Plugin schreibt nichts in seinen eigenen Ordner (dafür gibt es den Arbeitsordner), denn die Prüfsumme der Zustimmung läuft über alle Dateien darin. Verknüpfungen (Symlinks, Junctions) darf der Ordner nicht enthalten: Ihr Ziel läge außerhalb der Prüfsumme, ein Plugin mit einer wird nicht geladen.
+
+#### Beschreibungsdatei `plugin.json`
+
+| Feld | Bedeutung |
+|---|---|
+| `name` | Anzeigename; steht im Dialog der Zustimmung. |
+| `kurzname` | Technischer Kurzname: Kleinbuchstaben und Ziffern, beginnt mit einem Buchstaben, höchstens 12 Zeichen, damit der Werkzeugname `mcp__<Profil>__<Kurzname>_<Werkzeug>` in die 64 Zeichen passt, die Claude Code zulässt. Jedes Werkzeug des Plugins beginnt mit `<kurzname>_`. Haben zwei Plugins denselben Kurznamen, wird das spätere in der Reihenfolge der Ordnernamen nicht geladen. |
+| `version` | Version des Plugins, als Text. |
+| `schnittstelle` | Version der Plugin-Schnittstelle, die das Plugin braucht; eine ganze Zahl ab 1. |
+| `programm` | Das Programm, relativ zum Plugin-Ordner: nicht absolut, ohne Laufwerk, ohne `..`, eine Datei, die es gibt. |
+| `herkunft` | Wer das Plugin herausgibt; steht im Dialog der Zustimmung. |
+| `updateQuellen` | GitHub-Repositorys `Besitzer/Name` in fester Reihenfolge. Freiwillig. |
+| `zusatzadressen` | Liste von `{ "muster": …, "art": "lesen" oder "schreiben", "grund": … }`. `grund` ist ein Satz auf Deutsch, den die Lehrkraft vor ihrer Zustimmung liest. Freiwillig. |
+| `wahlSkills` | Skills, die nur mit Haken installiert werden: ein Objekt aus Skill-Name und Beschreibung, wie `appWahlSkills` in `lib/einrichtung.dart`. Freiwillig. |
+| `ohneAnmeldung` | Die Namen der Werkzeuge, die ohne Moodle-Anmeldung arbeiten, als Liste. Freiwillig. |
+| `entwicklungsPort` | Fester Port, auf dem das Plugin im Debugger seines Entwicklers läuft; eine Portnummer. Freiwillig. |
+
+Die Datei ist UTF-8; eine Byte-Order-Mark stört nicht. Unbekannte Felder überliest die App. Texte enthalten keine Steuerzeichen. Eine Datei, die sich nicht lesen lässt, ein fehlendes oder falsch geschriebenes Feld, ein zu langer Kurzname, ein Programm, das fehlt, und ein Adressmuster in einem gesperrten Bereich halten das Plugin vom Laden ab. Die Meldung nennt das Feld und die Regel, nie den Inhalt der Datei; sie steht im Dialog „Plugins“ und im Protokoll.
+
+#### Adressmuster
+
+Ein Muster in `zusatzadressen` ist ein Pfad, der mit `/` beginnt und von der Moodle-Instanz aus gilt, etwa `/mod/beispiel/view.php` oder `/pluginfile.php/*`. `*` ist der einzige Platzhalter und steht für beliebige Zeichen, auch für `/` und für nichts; reguläre Ausdrücke gibt es nicht. Ein Muster sagt nichts über Parameter. Verglichen wird es mit dem Pfad einer Anfrage nach der Normalisierung: Prozentkodierung aufgelöst, `\` als `/`, `//` und `.` entfernt, `..` aufgelöst. Ungültig ist ein Muster ohne `/` am Anfang, mit Schema oder Rechnernamen (`//` am Anfang), mit `?`, `#` oder `..` und mit Steuerzeichen.
+
+#### Gesperrte Bereiche
+
+Für jedes Plugin gesperrt bleiben der Adminbereich (`/admin/`), die Anmeldung (`/login/`), die Anmeldeverfahren (`/auth/`), die Web-Services (`/webservice/`) und die Seite für Zugangsschlüssel (`/user/managetoken.php`). Ein Muster, das einen Pfad in einem dieser Bereiche treffen kann, hält das Plugin vom Laden ab, nicht erst `/admin/index.php`, sondern auch `/*`, `/a*`, `/*/x.php` und `/login*`. Dabei zählt die Schreibweise nicht: Groß- und Kleinschreibung, Prozentkodierung und `\` helfen nicht vorbei, und auch `/admin` ohne `/` am Ende gehört zum Bereich. `/mod/beispiel/view.php` und `/pluginfile.php/*` sind in Ordnung.
+
+#### Zustimmung
+
+Die App nutzt ein Plugin erst, nachdem die Lehrkraft genau diesem Stand zugestimmt hat. Beim Start sucht sie die Plugins, nach dem Update der App und vor der Einrichtung der KI-Werkzeuge und der Anmeldung, und fragt für jedes, über dessen jetzigen Stand nichts entschieden ist, im Dialog „Plugin zulassen“: Name, Version, Herkunft, jede Zusatzadresse mit Art und Grund und, jedes Mal, den Hinweis, dass die Zusagen von moocp für moocp und für alles gelten, was durch moocp zu Moodle geht, während der Autor des Plugins für dessen Fehler, für Schäden und für seine eigenen Datenwege einsteht und moocp dafür keine Gewähr gibt. „Zustimmung“ heißt das Annehmen eines Plugins, „Freigabe“ nur der Schreibvorgang. Der Dialog wird wie eine Freigabe nur mit der Maus und erst nach der Wartezeit entschieden (`lib/nur_maus.dart`) und hat keinen Weg hinaus außer seinen zwei Knöpfen.
+
+Gespeichert wird je Plugin-Ordner in den Einstellungen: die Version, eine SHA-256-Prüfsumme, die Entscheidung (Zustimmung oder Ablehnung) und die Instanzprofile, in denen das Plugin eingeschaltet ist. Die Prüfsumme läuft über jede Datei des Plugin-Ordners, mit dem relativen Pfad (immer mit `/`) und dem Inhalt, nach Pfad sortiert, sodass auch eine Umbenennung sie ändert; sie wird bei jedem Start neu gebildet. Jede Abweichung von Version oder Prüfsumme heißt „noch nicht entschieden“, und die App fragt neu: bei einer neuen Version auch dann, wenn die Zusatzadressen gleich geblieben sind, bei einem ausgetauschten Programm unter derselben Versionsnummer und nach einer Ablehnung ebenso wie nach einer Zustimmung. Eine beschädigte Angabe in den Einstellungen gilt als nicht entschieden, nie als Zustimmung. Ein Plugin, das nicht lädt, wird nicht gefragt.
+
+Mit der Zustimmung wählt die Lehrkraft die Instanzprofile, in denen das Plugin eingeschaltet ist; vorgewählt sind alle, und mit nur einem Profil gibt es die Wahl nicht (das Plugin gilt dort). Gespeichert wird die ausdrückliche Menge: Ein Profil, das später dazukommt, ist ausgeschaltet, bis die Lehrkraft es unter „Plugins“ in den Einstellungen einschaltet, und ein gelöschtes verschwindet aus der Menge, die Zustimmung bleibt. Wer wissen will, welche Plugins in einem Profil gelten, fragt `Plugins.aktivIn(<Kennung des Profils>)` in `lib/plugin/plugins.dart`.
+
+Kein MCP-Werkzeug und kein Schalter auf der Kommandozeile stimmt einem Plugin zu oder schaltet es ein, und der Testbetrieb tut es auch nicht: Das tut nur die Lehrkraft im Dialog der App.
 
 ### Veröffentlichen
 

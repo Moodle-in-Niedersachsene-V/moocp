@@ -34,6 +34,9 @@ import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
+import 'nur_maus.dart';
+import 'plugin/entscheidung.dart';
+import 'plugin/plugins.dart';
 import 'profil.dart';
 import 'protokoll.dart';
 import 'ueber.dart';
@@ -42,6 +45,7 @@ import 'testschalter.dart';
 import 'update/update_dialoge.dart';
 
 export 'anmeldung.dart' show Instanz, AnmeldeAuftrag, gespeicherteAnmeldedatenVerwenden;
+export 'nur_maus.dart' show Sperrzeit;
 
 Future<void> main(List<String> argumente) async {
   // Keine Ausgabe auf die Konsole, von niemandem: debugPrint schweigt -- auch
@@ -140,6 +144,7 @@ Future<void> main(List<String> argumente) async {
       weitere: instanzen.sublist(1),
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
+      pluginsLaden: () => Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
       fokus: einzel.fokus,
     ),
   );
@@ -282,6 +287,7 @@ class MoocpApp extends StatelessWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.pluginsLaden,
     this.fokus,
     super.key,
   });
@@ -295,6 +301,11 @@ class MoocpApp extends StatelessWidget {
   /// Die weiteren Profile neben dem Hauptprofil (moodle, dienst, freigaben).
   final List<Instanz> weitere;
   final Instanz Function(Profil profil)? instanzErstellen;
+
+  /// Sucht die Plugins beim Start (plugin/plugins.dart); null, wenn die App
+  /// keine sucht. Die App setzt es in `main`, Tests nicht: So liest ein Test
+  /// nie im Einstellungsordner der App.
+  final Future<Plugins> Function()? pluginsLaden;
 
   /// Ob diese App sich selbst aktualisieren kann (update.dart,
   /// updateMoeglich). Nur dann wird geprüft und überhaupt gefragt.
@@ -332,6 +343,7 @@ class MoocpApp extends StatelessWidget {
         instanzErstellen: instanzErstellen,
         einrichtungsstand: einrichtungsstand,
         updatefaehig: updatefaehig,
+        pluginsLaden: pluginsLaden,
         fokus: fokus,
       ),
     );
@@ -350,6 +362,7 @@ class Hauptseite extends StatefulWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.pluginsLaden,
     this.fokus,
     super.key,
   });
@@ -363,6 +376,7 @@ class Hauptseite extends StatefulWidget {
   final Instanz Function(Profil profil)? instanzErstellen;
   final Future<Einrichtungsstand> Function()? einrichtungsstand;
   final bool updatefaehig;
+  final Future<Plugins> Function()? pluginsLaden;
   final Stream<void>? fokus;
 
   @override
@@ -424,6 +438,14 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// Einstellungen; leer, wenn sie sich nicht lesen lässt.
   String _version = '';
 
+  /// Die beim Start gefundenen Plugins mit der Entscheidung der Lehrkraft
+  /// (_pluginSchritt); null, solange nicht gesucht wurde oder die App keine
+  /// sucht.
+  Plugins? _plugins;
+
+  /// Alle Instanzprofile, wie sie jetzt stehen.
+  List<Profil> get _alleProfile => [for (final i in _instanzen) _profilFuer(i)];
+
   // Anmeldestatus und Kopfzeile folgen dem Protokoll: Jede Neuanmeldung oder
   // jedes Verwerfen der Zugangsdaten schreibt dort einen Eintrag.
   void _aktualisieren() {
@@ -453,11 +475,13 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     }
   }
 
-  /// Der Start in fester Reihenfolge: Updates, KI-Werkzeuge einrichten,
-  /// anmelden, dann der MCP-Server (_mcpStarten). Nur ausdrücklich gebundene
-  /// Debug-Testprofile melden sich vor einem wartenden Einrichtungsdialog an,
-  /// damit ihr MCP-Server für den Live-Test bereitsteht. Die Einrichtung selbst
-  /// bleibt erforderlich und wird nicht automatisch geändert.
+  /// Der Start in fester Reihenfolge: Updates, Zustimmung zu Plugins,
+  /// KI-Werkzeuge einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
+  /// Reihenfolge der ersten Schritte steht in startBisAnmeldung. Nur
+  /// ausdrücklich gebundene Debug-Testprofile melden sich vor einem wartenden
+  /// Einrichtungsdialog an, damit ihr MCP-Server für den Live-Test bereitsteht.
+  /// Die Einrichtung selbst bleibt erforderlich und wird nicht automatisch
+  /// geändert.
   ///
   /// Die Update-Prüfung steht davor: Ein Update bringt auch neue Skills;
   /// würde die App vorher einrichten, installierte sie die Version, die
@@ -478,39 +502,67 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         'Bestätigungen: ${stufe.text} -- ${_stufeKurz[stufe]!}',
       );
     }
-    _version = await _eigeneVersion();
-    if (_version.isNotEmpty) {
-      await updateStandMelden(widget.einstellungen, _version, widget.protokoll);
-      if (!mounted) return;
-      if (widget.updatefaehig) {
-        final beenden = await updateSchritt(
-          context,
-          einstellungen: widget.einstellungen,
-          protokoll: widget.protokoll,
-          eigene: _version,
-        );
-        if (beenden) {
-          await _beenden();
-          return;
-        }
-        if (!mounted) return;
-      }
-    }
     final testprofilGebunden = _instanzen.any(
       (i) => Testzugang.fuer(i.dienst.profil) != null,
     );
-    if (!await testprofilVorEinrichtungStarten(
-      gebunden: testprofilGebunden,
-      anmelden: () => testprofileStarten(_instanzen, widget.protokoll),
-      einrichtungPruefen: _einrichtungPruefen,
-    )) {
-      return;
+    final ausgang = await startBisAnmeldung(
+      update: _updateSchritt,
+      plugins: _pluginSchritt,
+      einrichtungUndAnmeldung: () => testprofilVorEinrichtungStarten(
+        gebunden: testprofilGebunden,
+        anmelden: () => testprofileStarten(_instanzen, widget.protokoll),
+        einrichtungPruefen: _einrichtungPruefen,
+      ),
+      weiter: () => mounted,
+    );
+    switch (ausgang) {
+      case StartAusgang.beenden:
+        await _beenden();
+        return;
+      case StartAusgang.abgebrochen:
+        return;
+      case StartAusgang.bereit:
+        break;
     }
     if (!mounted) return;
     setState(() => _eingerichtet = true);
     if (mounted && Testzugang.fuer(_profil) == null) {
       await _gespeichertAnmelden();
     }
+  }
+
+  /// Das Update der App beim Start. Liefert true, wenn ein Installer läuft und
+  /// die App sich beenden muss.
+  Future<bool> _updateSchritt() async {
+    _version = await _eigeneVersion();
+    if (_version.isEmpty) return false;
+    await updateStandMelden(widget.einstellungen, _version, widget.protokoll);
+    if (!mounted || !widget.updatefaehig) return false;
+    return updateSchritt(
+      context,
+      einstellungen: widget.einstellungen,
+      protokoll: widget.protokoll,
+      eigene: _version,
+    );
+  }
+
+  /// Sucht die Plugins und fragt die Lehrkraft nach denen, über die noch nicht
+  /// entschieden ist (einstellungen_dialog.dart, pluginSchritt). Ohne Plugin
+  /// im Ordner -- und ohne Suche, wenn die App keine einsetzt -- geschieht
+  /// nichts, auch kein Eintrag im Protokoll. Nichts davon startet ein Plugin.
+  Future<void> _pluginSchritt() async {
+    final laden = widget.pluginsLaden;
+    if (laden == null) return;
+    final Plugins plugins;
+    try {
+      plugins = await laden();
+    } catch (e) {
+      widget.protokoll.eintrag(Art.fehler, 'Plugins nicht gelesen (${e.runtimeType})');
+      return;
+    }
+    _plugins = plugins;
+    if (!mounted) return;
+    await pluginSchritt(context, plugins: plugins, profile: _alleProfile);
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -544,6 +596,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         // KI-Werkzeugen (E6, E21).
         profilLoeschenMoeglich: _mehrere && !_profil.istStandard,
         weitereInstanzMoeglich: widget.instanzErstellen != null,
+        plugins: _plugins,
+        profile: _alleProfile,
       ),
     );
     if (!mounted) return;
@@ -556,10 +610,23 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         await _profilLoeschen();
       case EinstellungenErgebnis.profilHinzufuegen:
         await _profilBearbeiten(neu: true);
+      case EinstellungenErgebnis.plugins:
+        await _pluginsVerwalten();
       case EinstellungenErgebnis.fertig:
       case null:
         break;
     }
+  }
+
+  /// Der Dialog „Plugins": Stand je Plugin, Zustimmung ändern, Profile ein-
+  /// und ausschalten.
+  Future<void> _pluginsVerwalten() async {
+    final plugins = _plugins;
+    if (plugins == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PluginsDialog(plugins: plugins, profile: _alleProfile),
+    );
   }
 
   Future<void> _profilLoeschen() async {
@@ -597,11 +664,16 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     final neueProfile = alteProfile
         .where((p) => p.kennung != profil.kennung)
         .toList();
+    // Das gelöschte Profil fällt auch aus den Plugin-Zustimmungen: Die
+    // Zustimmung bleibt, das Plugin ist dort nur nicht mehr eingeschaltet.
+    final altePlugins = widget.einstellungen.plugins;
     widget.einstellungen.profile = neueProfile;
+    widget.einstellungen.plugins = pluginEntscheidungenOhneProfil(altePlugins, profil.kennung);
     try {
       await widget.einstellungen.speichern();
     } catch (e) {
       widget.einstellungen.profile = alteProfile;
+      widget.einstellungen.plugins = altePlugins;
       widget.protokoll.eintrag(
         Art.fehler,
         'Profil nicht gelöscht: Einstellungen nicht gespeichert (${e.runtimeType})',
@@ -2017,19 +2089,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
         ],
       ),
     );
-    // Der Dialog kommt nach vorn, oft während die Lehrkraft woanders schreibt:
-    // Ein Return oder Leerzeichen, das gerade unterwegs ist, löste sonst den
-    // Knopf mit dem Fokus aus -- eine Freigabe, die niemand gegeben hat.
-    // Entschieden wird deshalb nur mit der Maus.
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.enter):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.numpadEnter):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.space):
-            DoNothingAndStopPropagationIntent(),
-      },
+    // Entschieden wird nur mit der Maus (nur_maus.dart).
+    return NurMaus(
       child: AlertDialog(
         backgroundColor: knoepfe ? const Color(0xFFFFF3E0) : null,
         title: Column(
@@ -2352,47 +2413,6 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
       ),
     );
   }
-}
-
-/// Die Knöpfe eines Dialogs, der sich nach vorn holt, nehmen erst nach
-/// [dauer] etwas an: Ein Klick, der gerade einem anderen Fenster galt, träfe
-/// sonst den Dialog, der darüber aufgeht. Ausgegraut, damit die Lehrkraft
-/// sieht, dass es kurz dauert.
-class Sperrzeit extends StatefulWidget {
-  const Sperrzeit({
-    super.key,
-    required this.builder,
-    this.dauer = dauerVorgabe,
-  });
-  final Widget Function(bool bereit) builder;
-  final Duration dauer;
-
-  static const dauerVorgabe = Duration(milliseconds: 1500);
-
-  @override
-  State<Sperrzeit> createState() => _SperrzeitState();
-}
-
-class _SperrzeitState extends State<Sperrzeit> {
-  bool _bereit = false;
-  late final Timer _uhr;
-
-  @override
-  void initState() {
-    super.initState();
-    _uhr = Timer(widget.dauer, () {
-      if (mounted) setState(() => _bereit = true);
-    });
-  }
-
-  @override
-  void dispose() {
-    _uhr.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.builder(_bereit);
 }
 
 /// Die Taste, die auf dieser Plattform kopiert und einfügt, für die Schritte

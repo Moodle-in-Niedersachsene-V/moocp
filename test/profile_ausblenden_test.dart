@@ -7,21 +7,32 @@
 //
 // Die Einstellungen schreiben hier nichts: Eine Unterklasse ersetzt `speichern`,
 // denn sonst überschriebe der Test die echte Einstellungsdatei der App.
+//
+// Am Ende stehen die Dialoge zu Plugins (Zustimmung beim Start, Eintrag
+// „Plugins“ in den Einstellungen): Auch sie zeigen Profile erst ab dem zweiten
+// (E32), und die Zustimmung ist wie eine Freigabe nur mit der Maus und erst
+// nach der Wartezeit zu entscheiden (E4).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/arbeitsordner.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/einrichtung_dialog.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/einstellungen_dialog.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/main.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
+import 'package:moocp/plugin/adressmuster.dart';
+import 'package:moocp/plugin/beschreibung.dart';
+import 'package:moocp/plugin/entscheidung.dart';
+import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -29,7 +40,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile, required super.schluessel});
+  _EinstellungenOhneDatei({super.profile, super.plugins, required super.schluessel});
   int gespeichert = 0;
 
   @override
@@ -93,6 +104,38 @@ class _Aufbau {
   final List<Instanz> instanzen;
 }
 
+/// Ein gefundenes Plugin, ohne dass etwas auf der Platte liegt: Prüfsumme und
+/// Beschreibung stehen fest im Speicher.
+PluginEintrag _pluginEintrag({
+  String ordner = 'beispiel',
+  String version = '1.0',
+  List<Zusatzadresse> adressen = const [],
+  String? fehler,
+}) =>
+    fehler != null
+        ? PluginEintrag(ordner: ordner, pfad: 'plugins/$ordner', fehler: fehler)
+        : PluginEintrag(
+            ordner: ordner,
+            pfad: 'plugins/$ordner',
+            pruefsumme: 'summe-$version',
+            beschreibung: PluginBeschreibung(
+              name: 'Beispiel-Plugin',
+              kurzname: 'beispiel',
+              version: version,
+              schnittstelle: 1,
+              programm: 'beispiel.exe',
+              herkunft: 'Beispiel-Projekt',
+              zusatzadressen: adressen,
+            ),
+          );
+
+final _lesen = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/*'), ZugriffsArt.lesen, 'Liest die Seiten der Aktivität.');
+final _schreiben = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/save.php'), ZugriffsArt.schreiben, 'Speichert die Einstellungen.');
+
+/// Zugestimmt, für den Stand, den [_pluginEintrag] liefert.
+PluginEntscheidung _zugestimmt(Set<String> profile, {bool ja = true}) =>
+    PluginEntscheidung(version: '1.0', pruefsumme: 'summe-1.0', zugestimmt: ja, profile: profile);
+
 void main() {
   setUp(() {
     // ignore: invalid_use_of_visible_for_testing_member
@@ -110,11 +153,14 @@ void main() {
     WidgetTester tester,
     List<Profil> profile, {
     List<bool> ablehnen = const [],
+    List<PluginEintrag> plugins = const [],
+    Map<String, PluginEntscheidung> entscheidungen = const {},
+    List<String>? ablauf,
   }) async {
     tester.view.physicalSize = const Size(2000, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    final einstellungen = _EinstellungenOhneDatei(profile: profile, schluessel: 'global');
+    final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen, schluessel: 'global');
     final protokoll = Protokoll();
     final instanzen = [
       for (var i = 0; i < einstellungen.profile.length; i++)
@@ -129,7 +175,16 @@ void main() {
       const Arbeitsordner('arbeitsordner'),
       weitere: instanzen.sublist(1),
       instanzErstellen: (neu) => _instanz(einstellungen, protokoll, neu),
-      einrichtungsstand: _eingerichtet,
+      einrichtungsstand: () {
+        ablauf?.add('einrichtung');
+        return _eingerichtet();
+      },
+      pluginsLaden: plugins.isEmpty
+          ? null
+          : () async {
+              ablauf?.add('plugins');
+              return Plugins(einstellungen, protokoll, plugins);
+            },
     ));
     await tester.pumpAndSettle();
     return _Aufbau(einstellungen, protokoll, instanzen);
@@ -533,4 +588,332 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  group('Plugins: Dialog „Plugin zulassen“', () {
+    final zweiProfile = [standard, test];
+
+    /// Zeigt den Dialog wie die App: als Dialog über einer Seite.
+    Future<_Antwort> zeigen(
+      WidgetTester tester,
+      PluginEintrag eintrag,
+      List<Profil> profile, {
+      Set<String>? vorgewaehlt,
+    }) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final antwort = _Antwort();
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () => showDialog<PluginAntwort>(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => PluginZustimmungDialog(eintrag: eintrag, profile: profile, vorgewaehlt: vorgewaehlt),
+              ).then((w) {
+                antwort.wert = w;
+                antwort.fertig = true;
+              }),
+              child: const Text('öffnen'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('öffnen'));
+      await tester.pumpAndSettle();
+      return antwort;
+    }
+
+    testWidgets('nennt Name, Version, Herkunft, jede Zusatzadresse mit Art und Grund und den Satz zur Verantwortung',
+        (tester) async {
+      await zeigen(tester, _pluginEintrag(adressen: [_lesen, _schreiben]), [standard]);
+
+      expect(find.text('Plugin zulassen'), findsOneWidget);
+      expect(find.text('Beispiel-Plugin'), findsOneWidget);
+      expect(find.text('Version 1.0'), findsOneWidget);
+      expect(find.text('Herkunft: Beispiel-Projekt'), findsOneWidget);
+      expect(find.text('Zusatzadressen'), findsOneWidget);
+      for (final text in [
+        'lesen',
+        '/mod/beispiel/*',
+        'Liest die Seiten der Aktivität.',
+        'schreiben',
+        '/mod/beispiel/save.php',
+        'Speichert die Einstellungen.',
+      ]) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
+      expect(find.textContaining('Die Zusagen von moocp gelten für moocp und für alles, was durch moocp zu Moodle geht.'),
+          findsOneWidget);
+      expect(find.textContaining('Für die Fehler des Plugins, für Schäden und für seine eigenen Datenwege steht sein Autor ein'),
+          findsOneWidget);
+      expect(find.textContaining('moocp gibt dafür keine Gewähr'), findsOneWidget);
+      expect(find.textContaining('genau diese Version'), findsOneWidget);
+    });
+
+    testWidgets('der Satz zur Verantwortung steht auch ohne Zusatzadressen jedes Mal da', (tester) async {
+      await zeigen(tester, _pluginEintrag(), [standard]);
+      expect(find.textContaining('Zusatzadressen: keine'), findsOneWidget);
+      expect(find.textContaining('moocp gibt dafür keine Gewähr'), findsOneWidget);
+    });
+
+    testWidgets('in der Wartezeit nimmt kein Knopf etwas an; danach entscheidet die Maus', (tester) async {
+      final antwort = await zeigen(tester, _pluginEintrag(), [standard]);
+
+      await tester.tap(find.text('Zustimmen'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(antwort.fertig, isFalse, reason: 'Klick in der Wartezeit');
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Zustimmen')).onPressed, isNull);
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Zustimmen'));
+      await tester.pumpAndSettle();
+      expect(antwort.fertig, isTrue);
+      expect(antwort.wert!.zugestimmt, isTrue);
+    });
+
+    testWidgets('Return, Enter, Leertaste und Escape entscheiden nichts, auch nicht auf dem Knopf mit dem Fokus',
+        (tester) async {
+      final antwort = await zeigen(tester, _pluginEintrag(), [standard]);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      final knopf = find.widgetWithText(FilledButton, 'Zustimmen');
+      Focus.of(tester.element(find.descendant(of: knopf, matching: find.text('Zustimmen')))).requestFocus();
+      await tester.pump();
+      for (final taste in [
+        LogicalKeyboardKey.enter,
+        LogicalKeyboardKey.numpadEnter,
+        LogicalKeyboardKey.space,
+        LogicalKeyboardKey.escape,
+      ]) {
+        await tester.sendKeyEvent(taste);
+        await tester.pumpAndSettle();
+      }
+      expect(antwort.fertig, isFalse);
+      expect(find.text('Plugin zulassen'), findsOneWidget, reason: 'der Dialog ist noch offen');
+
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(antwort.wert!.zugestimmt, isFalse, reason: 'mit der Maus geht es');
+    });
+
+    testWidgets('mit nur einem Profil gibt es keine Auswahl; die Zustimmung gilt für dieses Profil', (tester) async {
+      final antwort = await zeigen(tester, _pluginEintrag(), [standard]);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.textContaining('Moodle-Instanz'), findsNothing);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Zustimmen'));
+      await tester.pumpAndSettle();
+      expect(antwort.wert!.profile, {Profil.standardKennung});
+    });
+
+    testWidgets('mit zwei Profilen sind alle vorgewählt, und die Lehrkraft wählt ab', (tester) async {
+      final antwort = await zeigen(tester, _pluginEintrag(), zweiProfile);
+      final eins = find.widgetWithText(CheckboxListTile, 'Moodle (moodle)');
+      final zwei = find.widgetWithText(CheckboxListTile, 'Moodle Test (moodle-test)');
+      expect(tester.widget<CheckboxListTile>(eins).value, isTrue);
+      expect(tester.widget<CheckboxListTile>(zwei).value, isTrue);
+
+      await tester.tap(zwei);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxListTile>(zwei).value, isFalse);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Zustimmen'));
+      await tester.pumpAndSettle();
+      expect(antwort.wert!.zugestimmt, isTrue);
+      expect(antwort.wert!.profile, {Profil.standardKennung});
+    });
+
+    testWidgets('Ablehnen gibt keine Profile weiter', (tester) async {
+      final antwort = await zeigen(tester, _pluginEintrag(), zweiProfile);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(antwort.wert!.zugestimmt, isFalse);
+      expect(antwort.wert!.profile, isEmpty);
+    });
+
+    testWidgets('beim Ändern einer Zustimmung ist vorgewählt, was eingeschaltet war', (tester) async {
+      await zeigen(tester, _pluginEintrag(), zweiProfile, vorgewaehlt: {'k2'});
+      expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, 'Moodle (moodle)')).value, isFalse);
+      expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, 'Moodle Test (moodle-test)')).value, isTrue);
+    });
+  });
+
+  group('Plugins: Start und Einstellungen', () {
+    final zweiProfile = [standard, test];
+
+    testWidgets('ohne Plugins ändert sich nichts: keine Frage, kein Eintrag in den Einstellungen', (tester) async {
+      final ablauf = <String>[];
+      await starten(tester, [standard], ablauf: ablauf);
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(ablauf, ['einrichtung']);
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('Einstellungen'), findsOneWidget);
+      expect(find.text('Plugins'), findsNothing);
+      expect(find.text('Plugins ansehen und ändern …'), findsNothing);
+    });
+
+    testWidgets('ein Plugin ohne Entscheidung: Der Dialog kommt vor der Einrichtung, die Zustimmung wird gespeichert',
+        (tester) async {
+      final ablauf = <String>[];
+      final a = await starten(tester, [standard], plugins: [_pluginEintrag()], ablauf: ablauf);
+      expect(find.text('Plugin zulassen'), findsOneWidget);
+      expect(ablauf, ['plugins'], reason: 'die Einrichtung wartet auf die Entscheidung');
+      expect(a.einstellungen.plugins, isEmpty, reason: 'auch im Testbetrieb stimmt nichts von selbst zu');
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Zustimmen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(ablauf, ['plugins', 'einrichtung']);
+      expect(a.einstellungen.plugins['beispiel']!.zugestimmt, isTrue);
+      expect(a.einstellungen.plugins['beispiel']!.profile, {Profil.standardKennung});
+      expect(a.einstellungen.gespeichert, greaterThan(0));
+    });
+
+    testWidgets('Ablehnen wird gespeichert, die App läuft ohne das Plugin weiter', (tester) async {
+      final ablauf = <String>[];
+      final a = await starten(tester, [standard], plugins: [_pluginEintrag()], ablauf: ablauf);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(a.einstellungen.plugins['beispiel']!.zugestimmt, isFalse);
+      expect(ablauf, ['plugins', 'einrichtung']);
+      expect(find.text('Moodle-Anmeldung'), findsOneWidget);
+    });
+
+    for (final ja in [true, false]) {
+      testWidgets('eine gespeicherte ${ja ? 'Zustimmung' : 'Ablehnung'} für diesen Stand fragt nicht noch einmal', (tester) async {
+        final ablauf = <String>[];
+        await starten(tester, [standard],
+            plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung}, ja: ja)}, ablauf: ablauf);
+        expect(find.text('Plugin zulassen'), findsNothing);
+        expect(ablauf, ['plugins', 'einrichtung']);
+      });
+    }
+
+    testWidgets('eine neue Version fragt neu', (tester) async {
+      await starten(tester, [standard],
+          plugins: [_pluginEintrag(version: '1.1')], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung})});
+      expect(find.text('Plugin zulassen'), findsOneWidget);
+      expect(find.text('Version 1.1'), findsOneWidget);
+    });
+
+    testWidgets('ein Plugin, das nicht lädt, kommt nicht in den Dialog; die App läuft weiter', (tester) async {
+      final ablauf = <String>[];
+      await starten(tester, [standard], plugins: [_pluginEintrag(fehler: 'Die Beschreibungsdatei plugin.json fehlt.')], ablauf: ablauf);
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(ablauf, ['plugins', 'einrichtung']);
+    });
+
+    testWidgets('mehrere offene Plugins kommen nacheinander', (tester) async {
+      final a = await starten(tester, [standard], plugins: [_pluginEintrag(ordner: 'a'), _pluginEintrag(ordner: 'b')]);
+      for (final ordner in ['a', 'b']) {
+        expect(find.text('Plugin zulassen'), findsOneWidget);
+        await tester.pump(Sperrzeit.dauerVorgabe);
+        await tester.tap(find.text(ordner == 'a' ? 'Zustimmen' : 'Ablehnen'));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(a.einstellungen.plugins['a']!.zugestimmt, isTrue);
+      expect(a.einstellungen.plugins['b']!.zugestimmt, isFalse);
+    });
+
+    testWidgets('Einstellungen: „Plugins“ erscheint, wenn es welche gibt, und zeigt den Stand ohne Profilauswahl', (tester) async {
+      await starten(tester, [standard],
+          plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung})});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugins'), findsOneWidget);
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Beispiel-Plugin'), findsOneWidget);
+      expect(find.text('Version 1.0'), findsOneWidget);
+      expect(find.text('Zugestimmt'), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNothing, reason: 'mit einem Profil gibt es keine Auswahl');
+    });
+
+    testWidgets('die Zustimmung ändern öffnet denselben Dialog: nur mit der Maus, nach der Wartezeit', (tester) async {
+      final a = await starten(tester, [standard],
+          plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung})});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Zustimmung ändern …'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsOneWidget);
+      await tester.tap(find.text('Ablehnen'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsOneWidget, reason: 'Klick in der Wartezeit');
+      expect(a.einstellungen.plugins['beispiel']!.zugestimmt, isTrue);
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(find.text('Abgelehnt'), findsOneWidget);
+      expect(a.einstellungen.plugins['beispiel']!.zugestimmt, isFalse);
+      expect(a.einstellungen.plugins['beispiel']!.profile, isEmpty);
+    });
+
+    testWidgets('mit zwei Profilen lässt sich das Plugin je Profil ein- und ausschalten, ohne neue Zustimmung', (tester) async {
+      final a = await starten(tester, zweiProfile,
+          plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung, 'k2'})});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      final zwei = find.widgetWithText(CheckboxListTile, 'Moodle Test (moodle-test)');
+      expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, 'Moodle (moodle)')).value, isTrue);
+      expect(tester.widget<CheckboxListTile>(zwei).value, isTrue);
+      final vorher = a.einstellungen.gespeichert;
+
+      await tester.tap(zwei);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxListTile>(zwei).value, isFalse);
+      expect(a.einstellungen.plugins['beispiel']!.profile, {Profil.standardKennung});
+      expect(a.einstellungen.plugins['beispiel']!.zugestimmt, isTrue);
+      expect(a.einstellungen.gespeichert, vorher + 1);
+      expect(find.text('Plugin zulassen'), findsNothing, reason: 'Ein- und Ausschalten fragt nicht neu');
+
+      await tester.tap(zwei);
+      await tester.pumpAndSettle();
+      expect(a.einstellungen.plugins['beispiel']!.profile, {Profil.standardKennung, 'k2'});
+    });
+
+    testWidgets('ein abgelehntes Plugin ist in keinem Profil einzuschalten; „Zustimmung ändern“ bleibt der Weg', (tester) async {
+      await starten(tester, zweiProfile,
+          plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt(const {}, ja: false)});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+      expect(find.text('Abgelehnt'), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.text('Zustimmung ändern …'), findsOneWidget);
+    });
+
+    testWidgets('ein Plugin, das nicht lädt, steht mit dem Grund da und lässt sich nicht annehmen', (tester) async {
+      await starten(tester, [standard], plugins: [_pluginEintrag(fehler: 'Die Beschreibungsdatei plugin.json fehlt.')]);
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+      expect(find.text('Wird nicht geladen'), findsOneWidget);
+      expect(find.text('Die Beschreibungsdatei plugin.json fehlt.'), findsOneWidget);
+      expect(find.text('Zustimmung ändern …'), findsNothing);
+      expect(find.text('Entscheiden …'), findsNothing);
+    });
+  });
+}
+
+class _Antwort {
+  PluginAntwort? wert;
+  bool fertig = false;
 }

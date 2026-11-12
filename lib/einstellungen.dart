@@ -15,6 +15,7 @@ import 'dart:math';
 
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
+import 'plugin/entscheidung.dart';
 import 'profil.dart';
 
 class Einstellungen {
@@ -30,7 +31,9 @@ class Einstellungen {
     this.updatePruefen,
     this.updateZuletzt,
     this.updateErwartet,
-  }) : profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
+    Map<String, PluginEntscheidung>? plugins,
+  })  : plugins = Map.of(plugins ?? const {}),
+        profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
   /// Die Moodle-Instanzen, mit denen die App angemeldet sein kann. Das erste
   /// Profil hat die Kennung `standard` (profil.dart), wenn es aus dem
@@ -140,6 +143,13 @@ class Einstellungen {
   /// App ist währenddessen beendet und sieht sonst nichts davon.
   String? updateErwartet;
 
+  /// Was die Lehrkraft über Plugins entschieden hat, je Plugin-Ordner
+  /// (plugin/entscheidung.dart). Die Zustimmung steht hier und nicht neben dem
+  /// Plugin: Sie gehört der Lehrkraft, und ein Plugin kann sie nicht selbst
+  /// mitbringen. Wer die Map ändert, ersetzt sie als Ganzes (so lässt sich ein
+  /// Speicherfehler zurückrollen).
+  Map<String, PluginEntscheidung> plugins;
+
   static File get _datei => einstellungenDatei;
 
   static String neuerSchluessel() {
@@ -221,6 +231,7 @@ class Einstellungen {
       updatePruefen: j['updatePruefen'] as bool?,
       updateZuletzt: j['updateZuletzt'] as String?,
       updateErwartet: j['updateErwartet'] as String?,
+      plugins: pluginEntscheidungenAus(j['plugins']),
     );
   }
 
@@ -236,6 +247,7 @@ class Einstellungen {
         if (updatePruefen != null) 'updatePruefen': updatePruefen,
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
+        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
       };
 
   Future<void> speichern() async {

@@ -39,6 +39,7 @@ import 'mcp/werkzeugquelle.dart';
 import 'plugin/entscheidung.dart';
 import 'plugin/laufende_plugins.dart';
 import 'plugin/plugins.dart';
+import 'plugin/werkzeugliste.dart';
 import 'profil.dart';
 import 'protokoll.dart';
 import 'ueber.dart';
@@ -160,9 +161,9 @@ Future<void> main(List<String> argumente) async {
 }
 
 /// Die Werkzeugquellen jedes MCP-Servers neben den eingebauten Werkzeugen:
-/// die Plugins. Beide Stellen, die einen McpDienst bauen (_instanzFuer und
-/// _werkzeugliste), nehmen sie von hier, damit die Brücke dieselbe Liste
-/// bekommt wie ein KI-Werkzeug.
+/// die Plugins. `moocp.exe --werkzeugliste` (_werkzeugliste) baut seinen
+/// Server selbst und nimmt die Werkzeuge der Plugins aus dem, was die App von
+/// ihnen gemerkt hat (plugin/werkzeugliste.dart): Dort läuft kein Plugin.
 List<WerkzeugQuelle> _werkzeugquellen(LaufendePlugins plugins) => [plugins];
 
 /// Ein Instanzprofil mit allem, was daran hängt: Zugang, Freigaben und
@@ -259,27 +260,25 @@ Future<List<String>> _gespeicherteMcpNamen() async {
 /// `moocp.exe --werkzeugliste`, für die Brücke (mcp/bruecke.dart), wenn die
 /// App nicht angemeldet ist oder nicht läuft: die Werkzeugliste als eine
 /// Zeile JSON nach stdout, dann enden. Ohne Fenster (wie _claudeEntfernen),
-/// und ohne Einstellungen, Protokoll oder Arbeitsordner anzufassen -- die
-/// Beschreibungen der Werkzeuge hängen an keinem davon, und neben einer
-/// laufenden App verschränkten sich sonst die Zeilen im Protokoll. Eine
-/// Ausnahme von E11 wie die Brücke selbst: Auf stdout stehen nur Namen,
-/// Beschreibungen und Parameter der Werkzeuge. Meldungen von mcp_dart gehen
-/// an den Logger, und dem hört hier niemand zu.
+/// und ohne Einstellungen, Protokoll oder Arbeitsordner zu schreiben -- die
+/// Beschreibungen der eingebauten Werkzeuge hängen an keinem davon, und neben
+/// einer laufenden App verschränkten sich sonst die Zeilen im Protokoll. Die
+/// Einstellungsdatei wird nur gelesen: Aus ihr stammen die gemerkten
+/// Werkzeuge der Plugins (plugin/werkzeugliste.dart), ohne dass ein Plugin
+/// läuft. Eine Ausnahme von E11 wie die Brücke selbst: Auf stdout stehen nur
+/// Namen, Beschreibungen und Parameter der Werkzeuge. Meldungen von mcp_dart
+/// gehen an den Logger, und dem hört hier niemand zu.
 Future<int> _werkzeugliste() async {
   try {
     mcpLogsUmleiten();
-    final protokoll = Protokoll();
-    final dienst = McpDienst(
-      Einstellungen(schluessel: ''),
-      MoodleZugang(protokoll),
-      protokoll,
-      Freigaben(protokoll),
-      '',
-      profil: Profil.migriert(''),
-      // Hier läuft kein Plugin: Ihre Werkzeuge fehlen in dieser Liste.
-      werkzeugquellen: _werkzeugquellen(LaufendePlugins(protokoll)),
+    stdout.writeln(
+      jsonEncode(
+        await werkzeuglisteFuerBruecke(
+          einstellungen: () => einstellungenDatei,
+          plugins: () => Directory(pluginsOrdner),
+        ),
+      ),
     );
-    stdout.writeln(jsonEncode(await dienst.werkzeugliste()));
     await stdout.flush();
     return 0;
   } catch (_) {

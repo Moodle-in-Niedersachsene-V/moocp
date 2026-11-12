@@ -112,8 +112,16 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// Werkzeuge; ein Plugin, dessen Werkzeug einen davon oder den eines schon
   /// gestarteten Plugins trägt, lädt nicht. Was nicht startet, steht mit dem
   /// Grund im Protokoll und in [startfehler]; die App läuft ohne es.
+  ///
+  /// Die Werkzeugliste eines gestarteten Plugins merkt sich die App in den
+  /// Einstellungen ([Plugins.werkzeugeMerken]), damit `moocp.exe
+  /// --werkzeugliste` sie ohne das Plugin ausgeben kann; vorher verwirft sie
+  /// die gemerkten Listen, die zu keinem zugestimmten Stand mehr gehören
+  /// ([Plugins.werkzeugeAufraeumen]). Aufgeräumt wird hier und nicht beim
+  /// Suchen, weil erst jetzt feststeht, wem die Lehrkraft zugestimmt hat.
   Future<void> starten(Plugins plugins, {required Set<String> eingebaut}) async {
     _plugins = plugins;
+    await plugins.werkzeugeAufraeumen();
     for (final stand in plugins.staende) {
       if (_beendet) return;
       final e = stand.eintrag;
@@ -126,6 +134,7 @@ class LaufendePlugins implements WerkzeugQuelle {
           Art.info,
           'Plugin ${laufend.name} gestartet (${laufend.verbindung.werkzeuge.length} Werkzeuge)',
         );
+        await plugins.werkzeugeMerken(e, laufend.verbindung.werkzeuge);
       } on PluginFehler catch (f) {
         _fehler[e.ordner] = f.grund;
         _protokoll.eintrag(Art.fehler, 'Plugin „${e.anzeigename}“ nicht gestartet: ${f.grund}');

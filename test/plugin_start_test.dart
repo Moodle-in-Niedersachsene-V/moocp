@@ -18,6 +18,7 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
+import 'package:moocp/plugin/werkzeugliste.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -27,8 +28,11 @@ import 'mcp_client.dart';
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
 
+  /// Wie oft die App ihre Einstellungen geschrieben hätte.
+  int gespeichert = 0;
+
   @override
-  Future<void> speichern() async {}
+  Future<void> speichern() async => gespeichert++;
 }
 
 /// Das `dart` des Flutter-SDK, mit dem die Tests laufen: `flutter test`
@@ -446,6 +450,71 @@ void main() {
         [for (final e in protokoll.eintraege) e.text],
         contains(startsWith('Plugin „Beispiel“ nicht gestartet: Das Plugin hat nicht binnen 2 Sekunden')),
       );
+    });
+  });
+
+  group('Die Werkzeugliste für die Brücke', () {
+    /// Ob ein Prozess dieses Programms läuft (nur Windows).
+    Future<bool> programmLaeuft(String name) async {
+      final r = await Process.run('tasklist', ['/FI', 'IMAGENAME eq $name', '/NH']);
+      return '${r.stdout}'.toLowerCase().contains(name.toLowerCase());
+    }
+
+    test('nach dem Start ist die Liste gemerkt; --werkzeugliste nennt sie wie der Server, ohne ein Plugin zu starten', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l);
+      final vomServer = [
+        for (final t in (await client.call('tools/list'))['tools'] as List)
+          if ((t as Map)['name'] == 'beispiel_echo') t,
+      ].single;
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo']);
+
+      // Die App ist zu und das Plugin mit ihr; die Datei bleibt.
+      await l.beenden();
+      expect(await programmLaeuft('beispiel.exe'), isFalse);
+      final datei = File(p.join(wurzel.path, 'einstellungen.json'))..writeAsStringSync(jsonEncode(einstellungen.zuJson()));
+      final ausgabe = await werkzeuglisteFuerBruecke(
+        einstellungen: () => datei,
+        plugins: () => Directory(p.join(wurzel.path, 'plugins')),
+      );
+
+      final echo = [
+        for (final t in (ausgabe['tools'] as Map)['tools'] as List)
+          if ((t as Map)['name'] == 'beispiel_echo') t,
+      ].single;
+      expect(jsonEncode(echo), jsonEncode(vomServer), reason: 'dieselbe Beschreibung wie beim laufenden Plugin');
+      expect(await programmLaeuft('beispiel.exe'), isFalse, reason: '--werkzeugliste startet kein Plugin');
+    }, skip: Platform.isWindows ? false : 'prüft die Prozessliste von Windows');
+
+    test('beim nächsten Start der App ist dieselbe Liste schon gemerkt: nichts wird erneut geschrieben', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      await l.beenden();
+      final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
+      einstellungen = _EinstellungenOhneDatei(profile: [profil])
+        ..plugins = Einstellungen.aus(json, Einstellungen(schluessel: 'x')).plugins;
+
+      final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
+      final neu = await starten(plugins);
+
+      expect(neu.laeuft(plugins.eintraege.single), isTrue);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo']);
+      expect(einstellungen.gespeichert, 0);
+    });
+
+    test('wird das Plugin ausgetauscht, fehlt seine Liste, bis es mit neuer Zustimmung gestartet ist', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      await l.beenden();
+      File(p.join(wurzel.path, 'plugins', 'beispiel', 'plugin.json'))
+          .writeAsStringSync(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync().replaceFirst('1.0.0', '1.0.1'));
+
+      final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
+      final neu = await starten(plugins);
+
+      expect(neu.laeuft(plugins.eintraege.single), isFalse, reason: 'ohne Zustimmung zu diesem Stand läuft nichts');
+      expect(einstellungen.plugins['beispiel']!.werkzeuge, isNull);
     });
   });
 

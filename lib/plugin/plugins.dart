@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../einstellungen.dart';
+import '../mcp/werkzeugquelle.dart';
 import '../protokoll.dart';
 import 'beschreibung.dart';
 import 'entscheidung.dart';
@@ -213,6 +214,11 @@ class Plugins {
     if (!e.ladbar || b == null || summe == null) {
       throw StateError('Über ein Plugin, das nicht lädt, wird nicht entschieden.');
     }
+    // Die Werkzeugliste gehört zum Stand, dem zugestimmt war: Wer demselben
+    // Stand noch einmal zustimmt (etwa mit anderen Profilen), behält sie, jede
+    // andere Entscheidung beginnt ohne.
+    final alt = _einstellungen.plugins[e.ordner];
+    final behalten = zugestimmt && alt != null && alt.zugestimmt && alt.gilt(b.version, summe) ? alt.werkzeuge : null;
     _einstellungen.plugins = {
       ..._einstellungen.plugins,
       e.ordner: PluginEntscheidung(
@@ -220,10 +226,55 @@ class Plugins {
         pruefsumme: summe,
         zugestimmt: zugestimmt,
         profile: zugestimmt ? {...profile} : const {},
+        werkzeuge: behalten,
       ),
     };
     _protokoll.eintrag(Art.info, 'Plugin im Ordner „${e.ordner}“: ${zugestimmt ? 'Zustimmung erteilt' : 'abgelehnt'}');
     await _speichern();
+  }
+
+  /// Merkt die Werkzeugliste, die das gestartete Plugin [e] genannt hat, bei
+  /// seiner Zustimmung in den Einstellungen, damit `moocp.exe
+  /// --werkzeugliste` sie ohne das Plugin ausgeben kann (werkzeugliste.dart).
+  /// Ohne Zustimmung für den jetzigen Stand geschieht nichts; ist die Liste
+  /// dieselbe wie die gemerkte, wird nichts geschrieben (die Brücke liest die
+  /// Datei, und ein Schreiben bei jedem Start brächte ihr nichts).
+  Future<void> werkzeugeMerken(PluginEintrag e, List<WerkzeugBeschreibung> werkzeuge) async {
+    if (stand(e).zustand != PluginZustand.zugestimmt) return;
+    final alt = _einstellungen.plugins[e.ordner]!;
+    if (alt.hatWerkzeuge(werkzeuge)) return;
+    _einstellungen.plugins = {..._einstellungen.plugins, e.ordner: alt.mitWerkzeugen(werkzeuge)};
+    _protokoll.eintrag(
+      Art.info,
+      'Plugin im Ordner „${e.ordner}“: Werkzeugliste gemerkt (${werkzeuge.length} ${werkzeuge.length == 1 ? 'Werkzeug' : 'Werkzeuge'})',
+    );
+    await _speichern('Werkzeugliste eines Plugins');
+  }
+
+  /// Verwirft jede gemerkte Werkzeugliste, die zu keinem zugestimmten Stand
+  /// mehr gehört: Das Plugin gibt es nicht mehr oder lädt nicht, es ist
+  /// abgelehnt, oder sein Stand (Version, Prüfsumme) ist ein anderer als der,
+  /// dem zugestimmt war. Die Zustimmung selbst bleibt unberührt. Ohne etwas zu
+  /// verwerfen wird nichts geschrieben.
+  Future<void> werkzeugeAufraeumen() async {
+    final verworfen = <String>[];
+    final neu = <String, PluginEntscheidung>{};
+    for (final MapEntry(:key, :value) in _einstellungen.plugins.entries) {
+      final eintrag = eintraege.where((e) => e.ordner == key).firstOrNull;
+      final gilt = eintrag != null && stand(eintrag).zustand == PluginZustand.zugestimmt;
+      if (gilt || value.werkzeuge == null) {
+        neu[key] = value;
+      } else {
+        neu[key] = value.mitWerkzeugen(null);
+        verworfen.add(key);
+      }
+    }
+    if (verworfen.isEmpty) return;
+    _einstellungen.plugins = neu;
+    for (final ordner in verworfen) {
+      _protokoll.eintrag(Art.info, 'Plugin im Ordner „$ordner“: Werkzeugliste verworfen');
+    }
+    await _speichern('Werkzeugliste eines Plugins');
   }
 
   /// Schaltet ein zugestimmtes Plugin in einem Profil ein oder aus, ohne neue
@@ -245,11 +296,11 @@ class Plugins {
     await _speichern();
   }
 
-  Future<void> _speichern() async {
+  Future<void> _speichern([String was = 'Plugin-Entscheidung']) async {
     try {
       await _einstellungen.speichern();
     } catch (e) {
-      _protokoll.eintrag(Art.fehler, 'Plugin-Entscheidung nicht gespeichert (${e.runtimeType})');
+      _protokoll.eintrag(Art.fehler, '$was nicht gespeichert (${e.runtimeType})');
     }
   }
 }

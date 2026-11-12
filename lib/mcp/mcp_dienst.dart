@@ -22,6 +22,7 @@ import '../einstellungen_ort.dart';
 import '../freigabe.dart';
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
+import 'werkzeugquelle.dart';
 import 'testbetrieb.dart';
 import '../testzugang.dart';
 import '../uebertragung_zusammenfassung.dart';
@@ -109,6 +110,7 @@ class McpDienst {
     this.sicherungsordner,
     this.uebertragungsprotokollPfad,
     this.antwortfrist = const Duration(minutes: 1),
+    this.werkzeugquellen = const [],
   });
 
   final Einstellungen einstellungen;
@@ -142,6 +144,12 @@ class McpDienst {
 
   /// Abweichender Protokollpfad für isolierte MCP-Vertragstests.
   final String? uebertragungsprotokollPfad;
+
+  /// Quellen weiterer Werkzeuge neben den eingebauten (werkzeugquelle.dart).
+  /// Jede Sitzung und die Werkzeugliste für die Brücke fragen dieselben
+  /// Quellen; die eingebauten Werkzeuge bleiben fester Code und laufen nicht
+  /// darüber.
+  final List<WerkzeugQuelle> werkzeugquellen;
 
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
@@ -346,13 +354,14 @@ class McpDienst {
     return text.length > 80 ? '${text.substring(0, 79)}…' : text;
   }
 
-  /// Ein Server für eine Sitzung. Ohne [protokollieren] für die
-  /// Werkzeugliste: Die App fragt sich dort selbst, das ist keine Verbindung
-  /// eines KI-Werkzeugs.
   /// Das MCP-Profil des Servers; die Werkzeugliste nennt die Versionen
   /// daraus.
   static const _protokoll = McpProtocol.stable;
 
+  /// Ein Server für eine Sitzung: die eingebauten Werkzeuge, danach die der
+  /// [werkzeugquellen]. Ohne [protokollieren] für die Werkzeugliste: Die App
+  /// fragt sich dort selbst, das ist keine Verbindung eines KI-Werkzeugs.
+  /// Ein Werkzeugname, der zweimal vorkommt, bricht ab und nennt den Namen.
   McpServer _erzeugen({bool protokollieren = true}) {
     final server = McpServer(
       const Implementation(name: 'moocp', version: '0.3.0'),
@@ -368,6 +377,21 @@ class McpDienst {
         'KI-Werkzeug verbunden: ${_client(server)}',
       );
     }
+    _eingebauteWerkzeuge(server);
+    for (final quelle in werkzeugquellen) {
+      for (final werkzeug in quelle.werkzeuge()) {
+        _aufrufe.registrierenBeschrieben(
+          server,
+          werkzeug,
+          ausfuehren: (a) => quelle.aufrufen(werkzeug.name, a),
+        );
+      }
+    }
+    return server;
+  }
+
+  /// Die Werkzeuge der App selbst, in der Reihenfolge der Werkzeugliste.
+  void _eingebauteWerkzeuge(McpServer server) {
     final ao = arbeitsordner;
     final vorgaenge = Vorgaenge(
       sicherungsordner ?? sicherungenOrdner,
@@ -2366,7 +2390,5 @@ class McpDienst {
         aktionen: objekte(a['aktionen'], 'aktionen'),
       ),
     );
-
-    return server;
   }
 }

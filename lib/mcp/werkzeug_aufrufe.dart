@@ -8,6 +8,7 @@ import '../freigabe.dart';
 import '../log.dart';
 import '../moodle/moodle_zugang.dart';
 import '../protokoll.dart';
+import 'werkzeugquelle.dart';
 
 class WerkzeugAufrufe {
   WerkzeugAufrufe(this.protokoll, this.freigaben, {required this.ausfuehren});
@@ -31,11 +32,81 @@ class WerkzeugAufrufe {
     bool nurLesen = false,
     bool zerstoerend = false,
     required Future<String> Function(Map<String, dynamic> a) ausfuehren,
+  }) => _anmelden(
+    server,
+    name,
+    titel: titel,
+    beschreibung: beschreibung,
+    eingabeSchema: JsonSchema.object(properties: parameter, required: pflicht),
+    pflicht: pflicht,
+    nurLesen: nurLesen,
+    zerstoerend: zerstoerend,
+    ausfuehren: ausfuehren,
+  );
+
+  /// Ein Werkzeug, das nur mit Name, Beschreibung und fertigem JSON-Schema
+  /// beschrieben ist (eine [WerkzeugQuelle]): dieselbe Hülle wie bei
+  /// [registrieren]. Ein Schema, das kein Objekt beschreibt, bricht ab -- die
+  /// Eingabe eines MCP-Werkzeugs ist immer ein Objekt.
+  void registrierenBeschrieben(
+    McpServer server,
+    WerkzeugBeschreibung werkzeug, {
+    required Future<String> Function(Map<String, dynamic> a) ausfuehren,
   }) {
+    final JsonSchema schema;
+    try {
+      schema = JsonSchema.fromJson(werkzeug.eingabeSchema);
+    } on FormatException catch (x) {
+      throw StateError(
+        'Das Eingabeschema des Werkzeugs „${werkzeug.name}" ist ungültig: ${x.message}',
+      );
+    }
+    if (schema is! JsonObject) {
+      throw StateError(
+        'Das Eingabeschema des Werkzeugs „${werkzeug.name}" beschreibt kein Objekt.',
+      );
+    }
+    _anmelden(
+      server,
+      werkzeug.name,
+      titel: werkzeug.titel,
+      beschreibung: werkzeug.beschreibung,
+      eingabeSchema: schema,
+      pflicht: schema.required ?? const [],
+      nurLesen: werkzeug.nurLesen,
+      zerstoerend: werkzeug.zerstoerend,
+      ausfuehren: ausfuehren,
+    );
+  }
+
+  /// Die Namen, die je Server schon vergeben sind. mcp_dart wiese einen
+  /// doppelten Namen auch ab, aber mit einem englischen ArgumentError; so
+  /// meldet die Hülle jeden Fall gleich, deutsch und mit dem Namen.
+  final _namen = Expando<Set<String>>('Werkzeugnamen je Server');
+
+  /// Die eine Hülle für alle Werkzeuge: Aufruf ins Protokoll, Abbruch,
+  /// Fehlerantwort. [registrieren] und [registrierenBeschrieben] führen
+  /// beide hierher; was sich daran ändert, ändert sich für alle Werkzeuge.
+  void _anmelden(
+    McpServer server,
+    String name, {
+    required String? titel,
+    required String beschreibung,
+    required JsonObject eingabeSchema,
+    required List<String> pflicht,
+    required bool nurLesen,
+    required bool zerstoerend,
+    required Future<String> Function(Map<String, dynamic> a) ausfuehren,
+  }) {
+    if (!(_namen[server] ??= {}).add(name)) {
+      throw StateError(
+        'Das Werkzeug „$name" ist schon registriert: Werkzeugnamen müssen auf dem Server eindeutig sein.',
+      );
+    }
     server.registerTool(
       name,
       description: beschreibung,
-      inputSchema: JsonSchema.object(properties: parameter, required: pflicht),
+      inputSchema: eingabeSchema,
       annotations: ToolAnnotations(
         title: titel,
         readOnlyHint: nurLesen,

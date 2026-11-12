@@ -41,17 +41,18 @@ class WerkzeugAufrufe {
     pflicht: pflicht,
     nurLesen: nurLesen,
     zerstoerend: zerstoerend,
-    ausfuehren: ausfuehren,
+    ausfuehren: (a, _) => ausfuehren(a),
   );
 
   /// Ein Werkzeug, das nur mit Name, Beschreibung und fertigem JSON-Schema
   /// beschrieben ist (eine [WerkzeugQuelle]): dieselbe Hülle wie bei
   /// [registrieren]. Ein Schema, das kein Objekt beschreibt, bricht ab -- die
-  /// Eingabe eines MCP-Werkzeugs ist immer ein Objekt.
+  /// Eingabe eines MCP-Werkzeugs ist immer ein Objekt. [ausfuehren] bekommt
+  /// neben den Argumenten, was sich erfüllt, wenn der Client abbricht.
   void registrierenBeschrieben(
     McpServer server,
     WerkzeugBeschreibung werkzeug, {
-    required Future<String> Function(Map<String, dynamic> a) ausfuehren,
+    required Future<String> Function(Map<String, dynamic> a, Future<void> abbruch) ausfuehren,
   }) {
     final JsonSchema schema;
     try {
@@ -96,7 +97,7 @@ class WerkzeugAufrufe {
     required List<String> pflicht,
     required bool nurLesen,
     required bool zerstoerend,
-    required Future<String> Function(Map<String, dynamic> a) ausfuehren,
+    required Future<String> Function(Map<String, dynamic> a, Future<void> abbruch) ausfuehren,
   }) {
     if (!(_namen[server] ??= {}).add(name)) {
       throw StateError(
@@ -141,7 +142,7 @@ class WerkzeugAufrufe {
         try {
           final text = await Freigaben.mitAbbruch(
             abbruch.future,
-            () => this.ausfuehren(name, args, () => ausfuehren(args)),
+            () => this.ausfuehren(name, args, () => ausfuehren(args, abbruch.future)),
             zaehler: zaehler,
           );
           protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');

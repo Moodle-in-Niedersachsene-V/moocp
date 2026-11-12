@@ -91,12 +91,17 @@ class _Quelle implements WerkzeugQuelle {
   final Future<String> Function(String name, Map<String, dynamic> args)?
   verhalten;
 
-  @override
-  List<WerkzeugBeschreibung> werkzeuge() => beschreibungen;
+  /// Die Aufrufe, wie sie bei der Quelle ankamen.
+  final aufrufe = <WerkzeugAufruf>[];
 
   @override
-  Future<String> aufrufen(String name, Map<String, dynamic> args) =>
-      verhalten!(name, args);
+  List<WerkzeugBeschreibung> werkzeuge(Profil profil) => beschreibungen;
+
+  @override
+  Future<String> aufrufen(WerkzeugAufruf aufruf) {
+    aufrufe.add(aufruf);
+    return verhalten!(aufruf.name, aufruf.args);
+  }
 }
 
 WerkzeugBeschreibung _werkzeug(
@@ -253,6 +258,12 @@ void main() {
         expect((aufraeumen['annotations'] as Map)['readOnlyHint'], false);
       },
     );
+
+    test('die Namen der eingebauten Werkzeuge sind genau diese, ohne die der Quellen', () async {
+      final quelle = _Quelle([_werkzeug('probe_gruss')]);
+
+      expect(await dienstMit([quelle]).eingebauteWerkzeugnamen(), _eingebaut.toSet());
+    });
 
     test('ein Werkzeug mit dem Namen eines eingebauten bricht ab und nennt den Namen', () async {
       final quelle = _Quelle([_werkzeug('status')]);
@@ -414,6 +425,47 @@ void main() {
         fehlerzeilen.where((z) => z.startsWith('probe_ausnahme: ')),
         isNotEmpty,
       );
+    });
+
+    test('ein Aufruf bringt das Profil des Servers und je Aufruf ein eigenes Token mit, das nicht ins Protokoll geht', () async {
+      final quelle = _Quelle([_werkzeug('probe_gruss')], (name, args) async => 'ok');
+      final client = await verbinden([quelle]);
+
+      await client.tool('probe_gruss', {'name': 'a'});
+      await client.tool('probe_gruss', {'name': 'b'});
+
+      expect(quelle.aufrufe, hasLength(2));
+      expect(quelle.aufrufe.map((a) => a.profil.mcpName), ['test', 'test']);
+      final tokens = quelle.aufrufe.map((a) => a.token).toList();
+      expect(tokens.every((t) => t.length >= 40), isTrue, reason: '$tokens');
+      expect(tokens.toSet(), hasLength(2), reason: 'je Aufruf ein neues Token');
+      final zeilen = [for (final e in protokoll.eintraege) e.text].join('\n');
+      for (final t in tokens) {
+        expect(zeilen, isNot(contains(t)));
+      }
+    });
+
+    test('bricht der Client ab, erfährt es die Quelle', () async {
+      final laeuft = Completer<void>();
+      late final _Quelle quelle;
+      quelle = _Quelle([_werkzeug('probe_warten')], (name, args) async {
+        laeuft.complete();
+        await quelle.aufrufe.single.abbruch;
+        return 'abgebrochen';
+      });
+      final client = await verbinden([quelle]);
+      final verworfen = client
+          .call('tools/call', {'name': 'probe_warten', 'arguments': {'name': 'x'}})
+          .then<void>((_) {}, onError: (Object e) {
+            if (e is! HttpException && e is! SocketException) throw e;
+          });
+      await laeuft.future;
+      final aufruf = quelle.aufrufe.single;
+      await client.notification('notifications/cancelled', {'requestId': client.id, 'reason': 'Testabbruch'});
+
+      await aufruf.abbruch.timeout(const Duration(seconds: 10));
+      client.http.close(force: true);
+      await verworfen;
     });
 
     test('bricht der Client ab, verfällt die Freigabe des Aufrufs', () async {

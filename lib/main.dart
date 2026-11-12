@@ -35,7 +35,9 @@ import 'moodle/instanzen.dart';
 import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
+import 'mcp/werkzeugquelle.dart';
 import 'plugin/entscheidung.dart';
+import 'plugin/laufende_plugins.dart';
 import 'plugin/plugins.dart';
 import 'profil.dart';
 import 'protokoll.dart';
@@ -108,6 +110,10 @@ Future<void> main(List<String> argumente) async {
   // dazukommt oder wegfällt.
   protokoll.profilnamenZeigen = profile.length > 1;
   final register = MoodleInstanzen(protokoll);
+  // Die Plugins laufen einmal je App; ihre Werkzeuge bietet jeder MCP-Server
+  // an, in dessen Profil sie eingeschaltet sind. Gestartet werden sie erst
+  // nach der Zustimmung (_HauptseiteState._pluginsStarten).
+  final laufendePlugins = LaufendePlugins(protokoll);
   final instanzen = [
     for (final pr in profile)
       _instanzFuer(
@@ -116,6 +122,7 @@ Future<void> main(List<String> argumente) async {
         register,
         protokoll,
         arbeitsordner,
+        laufendePlugins,
         mehrere: profile.length > 1,
       ),
   ];
@@ -125,6 +132,7 @@ Future<void> main(List<String> argumente) async {
     register,
     protokoll,
     arbeitsordner,
+    laufendePlugins,
     mehrere: true,
   );
   // Reste früherer Updates im Temp-Verzeichnis; der Installer, der die App
@@ -145,10 +153,17 @@ Future<void> main(List<String> argumente) async {
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
       pluginsLaden: () => Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
+      laufendePlugins: laufendePlugins,
       fokus: einzel.fokus,
     ),
   );
 }
+
+/// Die Werkzeugquellen jedes MCP-Servers neben den eingebauten Werkzeugen:
+/// die Plugins. Beide Stellen, die einen McpDienst bauen (_instanzFuer und
+/// _werkzeugliste), nehmen sie von hier, damit die Brücke dieselbe Liste
+/// bekommt wie ein KI-Werkzeug.
+List<WerkzeugQuelle> _werkzeugquellen(LaufendePlugins plugins) => [plugins];
 
 /// Ein Instanzprofil mit allem, was daran hängt: Zugang, Freigaben und
 /// MCP-Server. Mit mehreren Profilen bekommt jedes seinen Unterordner im
@@ -159,7 +174,8 @@ Instanz _instanzFuer(
   Einstellungen einstellungen,
   MoodleInstanzen register,
   Protokoll protokoll,
-  Arbeitsordner arbeitsordner, {
+  Arbeitsordner arbeitsordner,
+  LaufendePlugins plugins, {
   required bool mehrere,
 }) {
   final ansicht = protokoll.fuer(pr.name);
@@ -176,7 +192,15 @@ Instanz _instanzFuer(
   return Instanz(
     zugang,
     freigaben,
-    McpDienst(einstellungen, zugang, ansicht, freigaben, ordner, profil: pr),
+    McpDienst(
+      einstellungen,
+      zugang,
+      ansicht,
+      freigaben,
+      ordner,
+      profil: pr,
+      werkzeugquellen: _werkzeugquellen(plugins),
+    ),
   );
 }
 
@@ -252,6 +276,8 @@ Future<int> _werkzeugliste() async {
       Freigaben(protokoll),
       '',
       profil: Profil.migriert(''),
+      // Hier läuft kein Plugin: Ihre Werkzeuge fehlen in dieser Liste.
+      werkzeugquellen: _werkzeugquellen(LaufendePlugins(protokoll)),
     );
     stdout.writeln(jsonEncode(await dienst.werkzeugliste()));
     await stdout.flush();
@@ -288,6 +314,7 @@ class MoocpApp extends StatelessWidget {
     this.einrichtungsstand,
     this.updatefaehig = false,
     this.pluginsLaden,
+    this.laufendePlugins,
     this.fokus,
     super.key,
   });
@@ -297,6 +324,10 @@ class MoocpApp extends StatelessWidget {
   final McpDienst dienst;
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
+
+  /// Die laufenden Plugins, eine Werkzeugquelle aller MCP-Server; null, wenn
+  /// die App keine startet (Tests).
+  final LaufendePlugins? laufendePlugins;
 
   /// Die weiteren Profile neben dem Hauptprofil (moodle, dienst, freigaben).
   final List<Instanz> weitere;
@@ -344,6 +375,7 @@ class MoocpApp extends StatelessWidget {
         einrichtungsstand: einrichtungsstand,
         updatefaehig: updatefaehig,
         pluginsLaden: pluginsLaden,
+        laufendePlugins: laufendePlugins,
         fokus: fokus,
       ),
     );
@@ -363,6 +395,7 @@ class Hauptseite extends StatefulWidget {
     this.einrichtungsstand,
     this.updatefaehig = false,
     this.pluginsLaden,
+    this.laufendePlugins,
     this.fokus,
     super.key,
   });
@@ -372,6 +405,7 @@ class Hauptseite extends StatefulWidget {
   final McpDienst dienst;
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
+  final LaufendePlugins? laufendePlugins;
   final List<Instanz> weitere;
   final Instanz Function(Profil profil)? instanzErstellen;
   final Future<Einrichtungsstand> Function()? einrichtungsstand;
@@ -475,8 +509,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     }
   }
 
-  /// Der Start in fester Reihenfolge: Updates, Zustimmung zu Plugins,
-  /// KI-Werkzeuge einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
+  /// Der Start in fester Reihenfolge: Updates, Zustimmung zu Plugins, ihr
+  /// Start, KI-Werkzeuge einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
   /// Reihenfolge der ersten Schritte steht in startBisAnmeldung. Nur
   /// ausdrücklich gebundene Debug-Testprofile melden sich vor einem wartenden
   /// Einrichtungsdialog an, damit ihr MCP-Server für den Live-Test bereitsteht.
@@ -507,7 +541,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     );
     final ausgang = await startBisAnmeldung(
       update: _updateSchritt,
-      plugins: _pluginSchritt,
+      pluginZustimmung: _pluginSchritt,
+      pluginsStarten: _pluginsStarten,
       einrichtungUndAnmeldung: () => testprofilVorEinrichtungStarten(
         gebunden: testprofilGebunden,
         anmelden: () => testprofileStarten(_instanzen, widget.protokoll),
@@ -520,6 +555,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         await _beenden();
         return;
       case StartAusgang.abgebrochen:
+        // Ist die Oberfläche fort, endet die App: Kein Plugin bleibt zurück.
+        if (!mounted) await widget.laufendePlugins?.beenden();
         return;
       case StartAusgang.bereit:
         break;
@@ -563,6 +600,16 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     _plugins = plugins;
     if (!mounted) return;
     await pluginSchritt(context, plugins: plugins, profile: _alleProfile);
+  }
+
+  /// Startet die Plugins, denen die Lehrkraft zugestimmt hat
+  /// (plugin/laufende_plugins.dart), einmal je App. Was nicht startet, steht
+  /// mit dem Grund im Protokoll und im Dialog „Plugins“.
+  Future<void> _pluginsStarten() async {
+    final plugins = _plugins;
+    final laufende = widget.laufendePlugins;
+    if (plugins == null || laufende == null) return;
+    await laufende.starten(plugins, eingebaut: await widget.dienst.eingebauteWerkzeugnamen());
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -625,7 +672,7 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     if (plugins == null) return;
     await showDialog<void>(
       context: context,
-      builder: (_) => PluginsDialog(plugins: plugins, profile: _alleProfile),
+      builder: (_) => PluginsDialog(plugins: plugins, profile: _alleProfile, laufende: widget.laufendePlugins),
     );
   }
 
@@ -901,6 +948,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     if (_beendet) return;
     _beendet = true;
     try {
+      // Zuerst die Plugins: Verbindung zu, Prozess beendet, nach drei
+      // Sekunden hart (laufende_plugins.dart).
+      await widget.laufendePlugins?.beenden();
       final geblieben = widget.arbeitsordner.leeren();
       widget.protokoll.eintrag(
         Art.info,

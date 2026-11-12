@@ -53,24 +53,30 @@ enum StartAusgang {
 /// 1. [update] der App. Liefert true, wenn ein Installer läuft; dann endet der
 ///    Start. Ein Update bringt auch neue Skills, und die Einrichtung soll nicht
 ///    die Version einrichten, die gleich ersetzt wird.
-/// 2. [plugins]: die Lehrkraft entscheidet über Plugins, die neu oder
-///    geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
+/// 2. [pluginZustimmung]: die Lehrkraft entscheidet über Plugins, die neu
+///    oder geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
 ///    mitbringen, die die Einrichtung behandelt, und vor der Anmeldung, weil
 ///    ein Plugin ohne Anmeldung arbeiten kann.
-/// 3. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
+/// 3. [pluginsStarten]: die angenommenen Plugins starten, einmal je App. Vor
+///    der Einrichtung und vor dem MCP-Server, damit jede Sitzung ihre
+///    Werkzeuge schon vorfindet.
+/// 4. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
 ///    Einrichtung der KI-Werkzeuge, dann die Anmeldung.
 ///
 /// [weiter] sagt vor jedem Schritt nach dem ersten, ob die Oberfläche noch da
 /// ist; sonst stünde ein Dialog vor einem Fenster, das nicht mehr besteht.
 Future<StartAusgang> startBisAnmeldung({
   required Future<bool> Function() update,
-  required Future<void> Function() plugins,
+  required Future<void> Function() pluginZustimmung,
+  required Future<void> Function() pluginsStarten,
   required Future<bool> Function() einrichtungUndAnmeldung,
   required bool Function() weiter,
 }) async {
   if (await update()) return StartAusgang.beenden;
   if (!weiter()) return StartAusgang.abgebrochen;
-  await plugins();
+  await pluginZustimmung();
+  if (!weiter()) return StartAusgang.abgebrochen;
+  await pluginsStarten();
   if (!weiter()) return StartAusgang.abgebrochen;
   return await einrichtungUndAnmeldung() ? StartAusgang.bereit : StartAusgang.abgebrochen;
 }

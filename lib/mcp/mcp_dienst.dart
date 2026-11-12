@@ -194,8 +194,18 @@ class McpDienst {
   /// statt über HTTP -- so steht darin genau, was ein Client bekäme, ohne dass
   /// der Server lauschen oder die App angemeldet sein muss: Die Werkzeuge
   /// hängen von keinem der beiden ab.
-  Future<Map<String, dynamic>> werkzeugliste() async {
-    final server = _erzeugen(protokollieren: false);
+  Future<Map<String, dynamic>> werkzeugliste() async => _werkzeugliste(_erzeugen(protokollieren: false));
+
+  /// Die Namen der eingebauten Werkzeuge, ohne die der [werkzeugquellen]:
+  /// Gegen sie prüft der Start eines Plugins dessen Werkzeugnamen.
+  Future<Set<String>> eingebauteWerkzeugnamen() async {
+    final liste = await _werkzeugliste(_erzeugen(protokollieren: false, mitQuellen: false));
+    return {
+      for (final t in (liste['tools'] as Map)['tools'] as List) (t as Map)['name'] as String,
+    };
+  }
+
+  Future<Map<String, dynamic>> _werkzeugliste(McpServer server) async {
     final hin = StreamController<List<int>>();
     final zurueck = StreamController<List<int>>();
     final antworten = <int, Completer<Map<String, dynamic>>>{
@@ -362,7 +372,7 @@ class McpDienst {
   /// [werkzeugquellen]. Ohne [protokollieren] für die Werkzeugliste: Die App
   /// fragt sich dort selbst, das ist keine Verbindung eines KI-Werkzeugs.
   /// Ein Werkzeugname, der zweimal vorkommt, bricht ab und nennt den Namen.
-  McpServer _erzeugen({bool protokollieren = true}) {
+  McpServer _erzeugen({bool protokollieren = true, bool mitQuellen = true}) {
     final server = McpServer(
       const Implementation(name: 'moocp', version: '0.3.0'),
       options: const McpServerOptions(protocol: _protokoll),
@@ -378,12 +388,22 @@ class McpDienst {
       );
     }
     _eingebauteWerkzeuge(server);
-    for (final quelle in werkzeugquellen) {
-      for (final werkzeug in quelle.werkzeuge()) {
+    for (final quelle in mitQuellen ? werkzeugquellen : const <WerkzeugQuelle>[]) {
+      for (final werkzeug in quelle.werkzeuge(profil)) {
         _aufrufe.registrierenBeschrieben(
           server,
           werkzeug,
-          ausfuehren: (a) => quelle.aufrufen(werkzeug.name, a),
+          // Das Profil zum Zeitpunkt des Aufrufs: Die Oberfläche tauscht es
+          // beim Bearbeiten aus.
+          ausfuehren: (a, abbruch) => quelle.aufrufen(
+            WerkzeugAufruf(
+              name: werkzeug.name,
+              args: a,
+              profil: profil,
+              token: aufrufToken(),
+              abbruch: abbruch,
+            ),
+          ),
         );
       }
     }

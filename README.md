@@ -469,7 +469,9 @@ Die Zustimmung gilt für genau diesen Stand: für die Version und für den Inhal
 
 Arbeiten Sie mit mehreren Moodle-Instanzen, wählen Sie bei der Zustimmung, in welchen Profilen das Plugin eingeschaltet ist; vorgewählt sind alle. Mit einer Instanz gibt es diese Wahl nicht. Ein Profil, das Sie später anlegen, ist für ein zugestimmtes Plugin ausgeschaltet, bis Sie es einschalten.
 
-Unter dem Zahnrad oben rechts erscheint, sobald es Plugins gibt, „Plugins ansehen und ändern …“. Dort steht je Plugin der Stand (zugestimmt, abgelehnt, noch nicht entschieden oder nicht geladen, mit Grund). Mit mehreren Instanzen schalten Sie ein zugestimmtes Plugin je Profil ein oder aus, sofort und ohne neue Zustimmung. „Zustimmung ändern …“ öffnet denselben Dialog wie beim Start. Ein Plugin nehmen nur Sie in der App an und schalten es ein; für die KI gibt es dazu weder ein Werkzeug noch einen anderen Weg.
+Ein Plugin, dem Sie zugestimmt haben, startet moocp gleich nach der Zustimmung, noch vor der Einrichtung der KI-Werkzeuge; seine Werkzeuge stehen der KI dann neben denen von moocp zur Verfügung. Stimmen Sie erst später in den Einstellungen zu, startet es beim nächsten Start von moocp. Beim Beenden von moocp endet auch jedes Plugin.
+
+Unter dem Zahnrad oben rechts erscheint, sobald es Plugins gibt, „Plugins ansehen und ändern …“. Dort steht je Plugin der Stand (zugestimmt, abgelehnt, noch nicht entschieden oder nicht geladen, mit Grund), und bei einem zugestimmten, das nicht läuft, warum es nicht gestartet ist. Mit mehreren Instanzen schalten Sie ein zugestimmtes Plugin je Profil ein oder aus, ohne neue Zustimmung: Ausgeschaltet lehnt moocp Aufrufe seiner Werkzeuge in diesem Profil sofort ab; aus der Liste, die sie sieht, verschwinden sie mit ihrer nächsten Sitzung. „Zustimmung ändern …“ öffnet denselben Dialog wie beim Start. Ein Plugin nehmen nur Sie in der App an und schalten es ein; für die KI gibt es dazu weder ein Werkzeug noch einen anderen Weg.
 
 ### Deinstallieren
 
@@ -548,7 +550,9 @@ skills/  (Wissen: Didaktik, Regeln,        moocp (Flutter, Windows)
 | `lib/einrichtung.dart`, `einrichtung_dialog.dart`, `lib/plattform/signatur_windows.dart` | KI-Werkzeuge einrichten: Claude Code, Codex CLI und LM Studio finden (unter Windows nimmt die App nur eine claude.exe mit gültiger Signatur von Anthropic), je den MCP-Eintrag prüfen und setzen, Skills vergleichen und installieren; beim Deinstallieren beides entfernen |
 | `lib/update/update.dart`, `updateliste.dart`, `update_dialoge.dart` | Suche nach Updates bei GitHub: Version vergleichen, Installer holen und starten; die Adressen, die dabei erlaubt sind |
 | `lib/einstellungen_dialog.dart` | Dialog „Einstellungen": Updates, Weg zu „KI-Werkzeuge einrichten", Plugins, weitere Moodle-Instanz verbinden; dazu die Dialoge „Plugin zulassen" und „Plugins" |
-| `lib/plugin/` | Plugins finden und ihnen zustimmen: `adressmuster.dart` (Muster der Zusatzadressen, gesperrte Bereiche), `beschreibung.dart` (`plugin.json` lesen und prüfen), `pruefsumme.dart` (SHA-256 über den Plugin-Ordner), `entscheidung.dart` (die Entscheidung in den Einstellungen), `plugins.dart` (finden, Stand der Zustimmung, Profile, in denen ein Plugin eingeschaltet ist) |
+| `lib/plugin/` | Plugins finden, ihnen zustimmen und sie starten: `adressmuster.dart` (Muster der Zusatzadressen, gesperrte Bereiche), `beschreibung.dart` (`plugin.json` lesen und prüfen), `pruefsumme.dart` (SHA-256 über den Plugin-Ordner), `entscheidung.dart` (die Entscheidung in den Einstellungen), `plugins.dart` (finden, Stand der Zustimmung, Profile, in denen ein Plugin eingeschaltet ist), `laufende_plugins.dart` (starten, beenden, Werkzeuge je Profil anbieten), `verbindung.dart` (MCP-Client zum Plugin: Vertrag, Werkzeugnamen, Aufrufe) |
+| `lib/mcp/werkzeugquelle.dart` | Werkzeugquellen: Werkzeuge, die der MCP-Server neben den eingebauten durch dieselbe Hülle anbietet (die der Plugins) |
+| `beispiele/plugin/` | das Beispiel-Plugin: Vorlage für Plugin-Autoren und das Plugin, gegen das die Tests laufen; der Installer liefert es nicht mit |
 | `lib/nur_maus.dart` | `Sperrzeit` und `NurMaus`: Dialoge, die sich nach vorn holen (Freigaben, Zustimmung zu Plugins), entscheiden nur mit der Maus und erst nach der Wartezeit |
 | `lib/profil.dart`, `lib/profile_dialog.dart`, `lib/moodle/instanzen.dart` | Instanzprofile: je Moodle-Instanz Zugang, Freigabestufe und MCP-Server mit eigenem Port, Namen und Zugangsschlüssel; sichtbar erst ab zwei Profilen |
 | `lib/main.dart`, `BestaetigungenFeld` | das Feld für die Stufe der Bestätigungen in der Titelzeile samt Hilfe-Dialog |
@@ -752,6 +756,32 @@ Gespeichert wird je Plugin-Ordner in den Einstellungen: die Version, eine SHA-25
 Mit der Zustimmung wählt die Lehrkraft die Instanzprofile, in denen das Plugin eingeschaltet ist; vorgewählt sind alle, und mit nur einem Profil gibt es die Wahl nicht (das Plugin gilt dort). Gespeichert wird die ausdrückliche Menge: Ein Profil, das später dazukommt, ist ausgeschaltet, bis die Lehrkraft es unter „Plugins“ in den Einstellungen einschaltet, und ein gelöschtes verschwindet aus der Menge, die Zustimmung bleibt. Wer wissen will, welche Plugins in einem Profil gelten, fragt `Plugins.aktivIn(<Kennung des Profils>)` in `lib/plugin/plugins.dart`.
 
 Kein MCP-Werkzeug und kein Schalter auf der Kommandozeile stimmt einem Plugin zu oder schaltet es ein, und der Testbetrieb tut es auch nicht: Das tut nur die Lehrkraft im Dialog der App.
+
+#### Start und Verbindung
+
+Beim Start der App, nach der Zustimmung und vor der Einrichtung der KI-Werkzeuge, der Anmeldung und dem MCP-Server, startet die App jedes Plugin, dem für seinen jetzigen Stand zugestimmt ist, auch eines, das gerade in keinem Profil eingeschaltet ist. Ein Plugin läuft einmal je App, auch mit mehreren Instanzprofilen. Unmittelbar vor dem Start bildet die App die Prüfsumme noch einmal; weicht sie von der zugestimmten ab, startet das Plugin nicht, und beim nächsten Start fragt die Zustimmung neu. Eine Zustimmung, die die Lehrkraft erst später in den Einstellungen gibt, wirkt beim nächsten Start der App.
+
+Die App startet `programm` im Plugin-Ordner (das ist auch das Arbeitsverzeichnis) mit dem Parameter `--port <Zahl>`: einem freien Port auf `127.0.0.1`, den die App wählt. Den Schlüssel, bei jedem Start neu und zufällig, bekommt das Programm in der Umgebungsvariablen `MOOCP_PLUGIN_SCHLUESSEL`, nie auf der Kommandozeile, wo er in jeder Prozessliste stünde. Das Plugin bietet MCP über Streamable HTTP unter `http://127.0.0.1:<Port>/mcp` an und weist jede Anfrage ab, die nicht den Kopf `Authorization: Bearer <Schlüssel>` trägt. Antwortet es nicht binnen 20 Sekunden auf `initialize` und `tools/list`, gilt es als nicht gestartet, und die App beendet das Programm. Was ein Plugin auf stdout und stderr schreibt, liest die App und verwirft es.
+
+Die App verbindet sich als MCP-Client mit dem Ablauf über `initialize` und gibt dort unter `capabilities.experimental.moocp` mit, was das Plugin über die App wissen muss, derzeit `{"schnittstelle": 1}`, die Version der Schnittstelle. Jeder `tools/call` trägt in `_meta` zwei Angaben: `moocp/profil`, den technischen Namen des Instanzprofils, über das der Aufruf kam (etwa `moodle`), und `moocp/aufruf`, ein Token nur für diesen Aufruf. Das Token ist geheim wie der Schlüssel; ein Plugin gibt es nirgends aus. Bricht das KI-Werkzeug einen Aufruf ab, schickt die App `notifications/cancelled` an das Plugin.
+
+Wenn die App endet, schließt sie die Verbindung und die Standardeingabe des Programms und wartet höchstens drei Sekunden; läuft es dann noch, beendet sie es hart, unter Windows samt den Programmen, die das Plugin selbst gestartet hat. Ein Plugin beendet sich selbst, sobald seine Standardeingabe endet: So bleibt keines zurück, auch wenn die App nicht ordentlich enden konnte. Ein Plugin, das nicht startet, steht mit dem Grund im Protokoll und im Dialog „Plugins“; die App läuft ohne es.
+
+#### Werkzeuge eines Plugins
+
+Die App liest die Werkzeugliste einmal beim Start; sie gilt, bis die App endet, und ein späteres `tools/list_changed` beachtet sie nicht. Jeder Werkzeugname beginnt mit `<kurzname>_`, ist höchstens 40 Zeichen lang und besteht nur aus Buchstaben, Ziffern, `_` und `-` (den Punkt, den MCP zuließe, nimmt Claude Code in Werkzeugnamen nicht an); er darf weder einem eingebauten Werkzeug noch dem eines anderen Plugins gleichen. Verletzt ein Werkzeug eine dieser Regeln, lädt das Plugin nicht, und die Meldung nennt das Werkzeug.
+
+Die Werkzeuge erscheinen im MCP-Server jedes Profils, in dem das Plugin eingeschaltet ist, und laufen durch dieselbe Hülle wie die eingebauten: Eintrag im Protokoll, Abbruch, Fehlerantwort. Schaltet die Lehrkraft ein Plugin in einem Profil aus, lehnt die App seine Aufrufe dort sofort ab; aus der Werkzeugliste verschwinden sie mit der nächsten Sitzung des KI-Werkzeugs. An die KI geht nur Text: Bilder und andere Inhalte einer Antwort gibt die App nicht weiter und sagt in der Antwort, dass etwas fehlt. Eine Antwort mit `isError` wird ein Werkzeugfehler mit ihrem Text.
+
+#### Das Beispiel-Plugin
+
+`beispiele/plugin/` ist Vorlage für Plugin-Autoren und das Plugin, gegen das die Tests der App laufen: eine vollständige Beschreibungsdatei und ein kleines Dart-Programm, `beispiel.dart`, mit dem einen Werkzeug `beispiel_echo`. Es gibt den Text zurück, dazu das Profil des Aufrufs, ob ein Token angekommen ist (nie das Token selbst) und die Version der Schnittstelle; der Quelltext erklärt jeden Schritt. Es benutzt die Pakete von moocp und hat keine eigene `pubspec.yaml`. Übersetzt wird es mit
+
+```
+dart compile exe beispiele/plugin/beispiel.dart -o <Plugin-Ordner>/beispiel.exe
+```
+
+neben eine Kopie von `plugin.json` in einem Unterordner von `plugins`. Die Tests (`test/plugin_start_test.dart`) tun genau das in einem Temp-Ordner, mit dem `dart` des Flutter-SDK, und starten es dann als Kindprozess; dafür braucht es weder Netz noch `pub get`. Der Installer der App liefert das Beispiel nicht mit.
 
 ### Veröffentlichen
 

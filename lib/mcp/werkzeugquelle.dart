@@ -7,6 +7,11 @@
 // die eingebauten (WerkzeugAufrufe: Protokoll, Abbruch, Fehlerantwort) und
 // bricht ab, wenn ein Name zweimal vorkommt.
 
+import 'dart:convert';
+import 'dart:math';
+
+import '../profil.dart';
+
 /// Ein Werkzeug einer [WerkzeugQuelle], beschrieben wie in der MCP-Werkzeugliste.
 class WerkzeugBeschreibung {
   const WerkzeugBeschreibung({
@@ -38,16 +43,52 @@ class WerkzeugBeschreibung {
   final bool zerstoerend;
 }
 
+/// Ein Aufruf eines Werkzeugs einer [WerkzeugQuelle], so wie er über den
+/// MCP-Server eines Instanzprofils kam.
+class WerkzeugAufruf {
+  const WerkzeugAufruf({
+    required this.name,
+    required this.args,
+    required this.profil,
+    required this.token,
+    required this.abbruch,
+  });
+
+  /// Das Werkzeug aus der Liste der Quelle.
+  final String name;
+  final Map<String, dynamic> args;
+
+  /// Das Instanzprofil des Servers, über den der Aufruf kam.
+  final Profil profil;
+
+  /// Ein Token nur für diesen Aufruf ([aufrufToken]), zufällig und geheim:
+  /// Es geht in kein Protokoll und in keine Antwort.
+  final String token;
+
+  /// Erfüllt sich, wenn der Client den Aufruf abbricht (sein Zeitlimit, ein
+  /// Abbruch in der Sitzung); sonst nie.
+  final Future<void> abbruch;
+}
+
+/// Ein frisches Token für einen Aufruf: 32 Bytes aus dem sicheren Zufall,
+/// Base64url ohne Auffüllung.
+String aufrufToken() {
+  final zufall = Random.secure();
+  return base64Url
+      .encode([for (var i = 0; i < 32; i++) zufall.nextInt(256)])
+      .replaceAll('=', '');
+}
+
 /// Eine Quelle weiterer Werkzeuge des MCP-Servers.
 abstract interface class WerkzeugQuelle {
-  /// Die Werkzeuge dieser Quelle. Gefragt wird bei jeder Sitzung und bei der
-  /// Werkzeugliste für die Brücke (`moocp.exe --werkzeugliste`); die Antwort
-  /// muss dort dieselbe sein und darf keine Sitzung oder Anmeldung brauchen.
-  List<WerkzeugBeschreibung> werkzeuge();
+  /// Die Werkzeuge dieser Quelle im Server von [profil]. Gefragt wird bei
+  /// jeder Sitzung und bei der Werkzeugliste für die Brücke (`moocp.exe
+  /// --werkzeugliste`); die Antwort darf keine Sitzung oder Anmeldung
+  /// brauchen.
+  List<WerkzeugBeschreibung> werkzeuge(Profil profil);
 
-  /// Führt das Werkzeug [name] aus der Liste mit [args] aus und liefert den
-  /// Text der Antwort. Ein Fehler, den die KI lesen soll, ist ein
-  /// `MoodleFehler`; jede andere Ausnahme meldet die Hülle als unerwarteten
-  /// Fehler.
-  Future<String> aufrufen(String name, Map<String, dynamic> args);
+  /// Führt den Aufruf eines Werkzeugs aus der Liste aus und liefert den Text
+  /// der Antwort. Ein Fehler, den die KI lesen soll, ist ein `MoodleFehler`;
+  /// jede andere Ausnahme meldet die Hülle als unerwarteten Fehler.
+  Future<String> aufrufen(WerkzeugAufruf aufruf);
 }

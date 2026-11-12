@@ -38,3 +38,12 @@ abstract interface class PlattformBrowser {
 
 /// Die einzige Stelle, die nach dem Betriebssystem fragt.
 final PlattformBrowser plattformBrowser = Platform.isMacOS ? MacBrowser() : WindowsBrowser();
+
+/// Beendet [prozess] hart, unter Windows samt den Prozessen, die er selbst
+/// gestartet hat (windows.dart, prozessbaumBeendenWindows). Auf dem Mac nur
+/// den Prozess selbst: Dart startet ihn nicht in einer eigenen
+/// Prozessgruppe, ein Signal an die Gruppe träfe die App mit.
+Future<void> prozessbaumBeenden(Process prozess) async {
+  if (Platform.isWindows) await prozessbaumBeendenWindows(prozess.pid);
+  prozess.kill(ProcessSignal.sigkill);
+}

@@ -52,6 +52,18 @@ class WindowsBrowser implements PlattformBrowser {
   }
 }
 
+/// Beendet den Prozess [pid] und alle, die er gestartet hat (`taskkill /T`).
+/// Windows beendet die Kinder eines Prozesses nicht mit ihm; `/T` geht den
+/// Baum über die Elternnummer ab und muss deshalb laufen, solange [pid] noch
+/// lebt. Fehlt taskkill, bleibt es beim Prozess selbst (plattform.dart).
+Future<void> prozessbaumBeendenWindows(int pid) async {
+  try {
+    await Process.run('taskkill', ['/PID', '$pid', '/T', '/F']);
+  } on ProcessException {
+    // Ohne taskkill beendet der Aufrufer nur den Prozess selbst.
+  }
+}
+
 Future<String> _reg(List<String> argumente) async {
   try {
     return '${(await Process.run('reg', ['query', ...argumente])).stdout}';

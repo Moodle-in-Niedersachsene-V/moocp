@@ -1,0 +1,13 @@
+{
+  "name": "Beispiel",
+  "kurzname": "beispiel",
+  "version": "1.0.0",
+  "schnittstelle": 1,
+  "programm": "beispiel.exe",
+  "herkunft": "Beispiel-Plugin aus dem Repository von moocp",
+  "updateQuellen": [],
+  "zusatzadressen": [],
+  "wahlSkills": {},
+  "ohneAnmeldung": [],
+  "entwicklungsPort": 47900
+}

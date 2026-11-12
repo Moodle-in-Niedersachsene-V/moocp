@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'einstellungen.dart';
 import 'nur_maus.dart';
 import 'plugin/beschreibung.dart';
+import 'plugin/laufende_plugins.dart';
 import 'plugin/plugins.dart';
 import 'profil.dart';
 import 'protokoll.dart';
@@ -539,12 +540,19 @@ Future<void> pluginSchritt(
 /// Der Dialog „Plugins“ (Einstellungen): je gefundenem Plugin der Stand, mit
 /// Profilen, in denen es eingeschaltet ist, wenn es mehrere gibt (E32). Die
 /// Zustimmung ändern führt in denselben Dialog wie beim Start; ein Profil ein-
-/// oder ausschalten braucht keine neue Zustimmung und gilt gleich.
+/// oder ausschalten braucht keine neue Zustimmung und gilt für Aufrufe
+/// gleich, in der Werkzeugliste eines KI-Werkzeugs ab seiner nächsten
+/// Sitzung. Gestartet wird ein Plugin nur beim Start der App: Wer später
+/// zustimmt, liest, dass es ab dem nächsten Start läuft.
 class PluginsDialog extends StatefulWidget {
-  const PluginsDialog({required this.plugins, required this.profile, super.key});
+  const PluginsDialog({required this.plugins, required this.profile, this.laufende, super.key});
 
   final Plugins plugins;
   final List<Profil> profile;
+
+  /// Die laufenden Plugins, für ihren Zustand; null, wenn die App keine
+  /// startet.
+  final LaufendePlugins? laufende;
 
   @override
   State<PluginsDialog> createState() => _PluginsDialogState();
@@ -603,6 +611,14 @@ class _PluginsDialogState extends State<PluginsDialog> {
             ],
             Text('Ordner: ${e.ordner}', style: klein),
             const SizedBox(height: 4),
+            if (s.zustand == PluginZustand.zugestimmt && widget.laufende != null && !widget.laufende!.laeuft(e))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: switch (widget.laufende!.startfehler(e)) {
+                  final String grund => Text('Nicht gestartet: $grund', style: TextStyle(color: theme.colorScheme.error)),
+                  null => Text('Das Plugin läuft ab dem nächsten Start von moocp.', style: klein),
+                },
+              ),
             switch (s.zustand) {
               PluginZustand.nichtGeladen => Text(e.fehler!, style: TextStyle(color: theme.colorScheme.error)),
               PluginZustand.abgelehnt => Text('moocp nutzt dieses Plugin nicht.', style: klein),

@@ -120,6 +120,10 @@ Das Annehmen eines Plugins durch die Lehrkraft, für genau eine Version und eine
 _Nicht zu verwechseln mit_: Freigabe (nur der Schreibvorgang in Moodle).
 _Vermeiden_: Freigabe für ein Plugin, Installieren für das Annehmen
 
+**Entwicklungs-Plugin**
+Ein Plugin, das sein Entwickler selbst gestartet hat und das die App mit `--plugin-entwicklung <Ordner>` anhängt, statt es zu starten. Statt einer Zustimmung fragt bei jedem Start der App ein eigener Dialog; die Antwort wird nicht gespeichert.
+_Nicht zu verwechseln mit_: ein installiertes Plugin, dem die Lehrkraft zugestimmt hat.
+
 **Beschreibungsdatei**
 Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatzadressen und weitere Angaben, die die App vor jeder Zustimmung liest, ohne Code des Plugins auszuführen.
 

@@ -11,7 +11,9 @@
 // Am Ende stehen die Dialoge zu Plugins (Zustimmung beim Start, Eintrag
 // „Plugins“ in den Einstellungen): Auch sie zeigen Profile erst ab dem zweiten
 // (E32), und die Zustimmung ist wie eine Freigabe nur mit der Maus und erst
-// nach der Wartezeit zu entscheiden (E4).
+// nach der Wartezeit zu entscheiden (E4). Ebenso der Dialog vor dem Anhängen
+// eines Entwicklungs-Plugins (`--plugin-entwicklung`), der bei jedem Start
+// fragt und nichts speichert.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -32,6 +34,8 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
 import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/entscheidung.dart';
+import 'package:moocp/plugin/entwicklung.dart';
+import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
@@ -132,6 +136,37 @@ PluginEintrag _pluginEintrag({
 final _lesen = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/*'), ZugriffsArt.lesen, 'Liest die Seiten der Aktivität.');
 final _schreiben = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/save.php'), ZugriffsArt.schreiben, 'Speichert die Einstellungen.');
 
+/// Laufende Plugins, die nichts starten und sich nirgends verbinden: Sie
+/// halten nur fest, was die App von ihnen verlangt.
+class _Laufende extends LaufendePlugins {
+  _Laufende(super.protokoll);
+  final angehaengt = <EntwicklungsPlugin>[];
+  int gestartet = 0;
+
+  @override
+  Future<void> anhaengen(EntwicklungsPlugin plugin, {required Set<String> eingebaut}) async => angehaengt.add(plugin);
+
+  @override
+  Future<void> starten(Plugins plugins, {required Set<String> eingebaut}) async => gestartet++;
+}
+
+/// Ein Entwicklungs-Plugin wie nach entwicklungVorbereiten.
+EntwicklungsPlugin _entwicklungsPlugin({List<Zusatzadresse> adressen = const []}) => EntwicklungsPlugin(
+      'geheimer-schluessel-des-tests',
+      ordner: r'C:\Entwicklung\beispiel',
+      port: 47900,
+      beschreibung: PluginBeschreibung(
+        name: 'Beispiel-Plugin',
+        kurzname: 'beispiel',
+        version: '1.0',
+        schnittstelle: 1,
+        programm: 'beispiel.exe',
+        herkunft: 'Beispiel-Projekt',
+        zusatzadressen: adressen,
+        entwicklungsPort: 47900,
+      ),
+    );
+
 /// Zugestimmt, für den Stand, den [_pluginEintrag] liefert.
 PluginEntscheidung _zugestimmt(Set<String> profile, {bool ja = true}) =>
     PluginEntscheidung(version: '1.0', pruefsumme: 'summe-1.0', zugestimmt: ja, profile: profile);
@@ -156,6 +191,8 @@ void main() {
     List<PluginEintrag> plugins = const [],
     Map<String, PluginEntscheidung> entscheidungen = const {},
     List<String>? ablauf,
+    EntwicklungsPlugin Function()? entwicklung,
+    LaufendePlugins? laufende,
   }) async {
     tester.view.physicalSize = const Size(2000, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -184,6 +221,13 @@ void main() {
           : () async {
               ablauf?.add('plugins');
               return Plugins(einstellungen, protokoll, plugins);
+            },
+      laufendePlugins: laufende,
+      entwicklungVorbereiten: entwicklung == null
+          ? null
+          : () {
+              ablauf?.add('entwicklung');
+              return entwicklung();
             },
     ));
     await tester.pumpAndSettle();
@@ -911,9 +955,236 @@ void main() {
       expect(find.text('Entscheiden …'), findsNothing);
     });
   });
+
+  group('Plugins: Entwicklungs-Plugin anhängen', () {
+    /// Zeigt den Dialog wie die App: als Dialog über einer Seite.
+    Future<_EntwicklungsAntwort> zeigen(WidgetTester tester, EntwicklungsPlugin plugin) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final antwort = _EntwicklungsAntwort();
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () => showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => EntwicklungsPluginDialog(plugin: plugin),
+              ).then((w) {
+                antwort.wert = w;
+                antwort.fertig = true;
+              }),
+              child: const Text('öffnen'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('öffnen'));
+      await tester.pumpAndSettle();
+      return antwort;
+    }
+
+    testWidgets('nennt Ordner, Port, Name und Zusatzadressen, warnt vor dem fremden Programm, nie den Schlüssel',
+        (tester) async {
+      await zeigen(tester, _entwicklungsPlugin(adressen: [_lesen, _schreiben]));
+
+      expect(find.text('Entwicklungs-Plugin anhängen'), findsOneWidget);
+      expect(find.text('Beispiel-Plugin'), findsOneWidget);
+      expect(find.text(r'Ordner: C:\Entwicklung\beispiel'), findsOneWidget);
+      expect(find.text('Port: 127.0.0.1:47900'), findsOneWidget);
+      for (final text in [
+        'lesen',
+        '/mod/beispiel/*',
+        'Liest die Seiten der Aktivität.',
+        'schreiben',
+        '/mod/beispiel/save.php',
+        'Speichert die Einstellungen.',
+      ]) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
+      expect(find.textContaining('außerhalb der Installation von moocp'), findsOneWidget);
+      expect(find.textContaining('nur an, wenn Sie es selbst so gestartet haben'), findsOneWidget);
+      expect(find.textContaining('Ein fremdes Programm'), findsOneWidget);
+      expect(find.textContaining('wird nicht gespeichert'), findsOneWidget);
+      expect(find.textContaining('moocp gibt dafür keine Gewähr'), findsOneWidget);
+      expect(find.textContaining('geheimer-schluessel'), findsNothing);
+    });
+
+    testWidgets('in der Wartezeit nimmt kein Knopf etwas an; Tasten entscheiden nie, die Maus danach schon', (tester) async {
+      final antwort = await zeigen(tester, _entwicklungsPlugin());
+
+      await tester.tap(find.text('Anhängen'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(antwort.fertig, isFalse, reason: 'Klick in der Wartezeit');
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Anhängen')).onPressed, isNull);
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      final knopf = find.widgetWithText(FilledButton, 'Anhängen');
+      Focus.of(tester.element(find.descendant(of: knopf, matching: find.text('Anhängen')))).requestFocus();
+      await tester.pump();
+      for (final taste in [
+        LogicalKeyboardKey.enter,
+        LogicalKeyboardKey.numpadEnter,
+        LogicalKeyboardKey.space,
+        LogicalKeyboardKey.escape,
+      ]) {
+        await tester.sendKeyEvent(taste);
+        await tester.pumpAndSettle();
+      }
+      expect(antwort.fertig, isFalse);
+      expect(find.text('Entwicklungs-Plugin anhängen'), findsOneWidget);
+
+      await tester.tap(find.text('Anhängen'));
+      await tester.pumpAndSettle();
+      expect(antwort.wert, isTrue);
+    });
+
+    testWidgets('beim Start: der Dialog vor der Einrichtung; angenommen hängt die App an, gespeichert wird nichts',
+        (tester) async {
+      final ablauf = <String>[];
+      final laufende = _Laufende(Protokoll());
+      final a = await starten(tester, [standard], entwicklung: _entwicklungsPlugin, laufende: laufende, ablauf: ablauf);
+      expect(find.text('Entwicklungs-Plugin anhängen'), findsOneWidget);
+      expect(ablauf, ['entwicklung'], reason: 'die Einrichtung wartet auf die Entscheidung');
+      expect(laufende.angehaengt, isEmpty, reason: 'ohne Antwort keine Verbindung, auch nicht im Testbetrieb');
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Anhängen'));
+      await tester.pumpAndSettle();
+      // Die Namen der eingebauten Werkzeuge ermittelt die App echt asynchron.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Entwicklungs-Plugin anhängen'), findsNothing);
+      expect(ablauf, ['entwicklung', 'einrichtung']);
+      expect(laufende.angehaengt.single.name, 'Beispiel-Plugin');
+      expect(a.einstellungen.gespeichert, 0);
+      expect(a.einstellungen.plugins, isEmpty);
+      final zeilen = [for (final e in a.protokoll.eintraege) e.text];
+      expect(zeilen, contains(r'Entwicklungs-Plugin angefragt: „Beispiel-Plugin“ aus C:\Entwicklung\beispiel, Port 47900'));
+      expect(zeilen, contains('Entwicklungs-Plugin „Beispiel-Plugin“: angenommen, für diesen Lauf'));
+      expect(zeilen.join('\n'), isNot(contains('geheimer-schluessel')));
+    });
+
+    testWidgets('abgelehnt: keine Verbindung, nichts gespeichert, die App läuft ohne das Plugin weiter', (tester) async {
+      final ablauf = <String>[];
+      final laufende = _Laufende(Protokoll());
+      final a = await starten(tester, [standard], entwicklung: _entwicklungsPlugin, laufende: laufende, ablauf: ablauf);
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+
+      expect(laufende.angehaengt, isEmpty);
+      expect(ablauf, ['entwicklung', 'einrichtung']);
+      expect(find.text('Moodle-Anmeldung'), findsOneWidget);
+      expect(a.einstellungen.gespeichert, 0);
+      expect(
+        [for (final e in a.protokoll.eintraege) e.text],
+        contains('Entwicklungs-Plugin „Beispiel-Plugin“: abgelehnt; moocp läuft ohne es'),
+      );
+    });
+
+    testWidgets('ein Fehler davor, etwa ohne Schlüssel: ein Hinweis mit dem Grund, kein Dialog, keine Verbindung',
+        (tester) async {
+      final ablauf = <String>[];
+      final laufende = _Laufende(Protokoll());
+      final a = await starten(
+        tester,
+        [standard],
+        entwicklung: () => throw const PluginFehler('Die Umgebungsvariable fehlt.'),
+        laufende: laufende,
+        ablauf: ablauf,
+      );
+
+      expect(find.text('Entwicklungs-Plugin nicht angehängt'), findsOneWidget);
+      expect(find.textContaining('Die Umgebungsvariable fehlt. moocp läuft ohne dieses Plugin.'), findsOneWidget);
+      expect(find.text('Entwicklungs-Plugin anhängen'), findsNothing);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      expect(laufende.angehaengt, isEmpty);
+      expect(ablauf, ['entwicklung', 'einrichtung']);
+      expect(
+        [for (final e in a.protokoll.eintraege) e.text],
+        contains('Entwicklungs-Plugin nicht angehängt: Die Umgebungsvariable fehlt.'),
+      );
+    });
+
+    testWidgets('angehängt: kein Dialog für ein installiertes Plugin mit demselben Kurznamen, dessen Zustimmung bleibt offen',
+        (tester) async {
+      final laufende = _Laufende(Protokoll());
+      final a = await starten(tester, [standard],
+          plugins: [_pluginEintrag()], entwicklung: _entwicklungsPlugin, laufende: laufende);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Anhängen'));
+      await tester.pumpAndSettle();
+      // Die Namen der eingebauten Werkzeuge ermittelt die App echt asynchron.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(a.einstellungen.plugins, isEmpty);
+      expect(laufende.angehaengt, hasLength(1));
+      expect(laufende.gestartet, 1, reason: 'die übrigen Plugins starten wie sonst');
+    });
+
+    testWidgets('abgelehnt: ein installiertes Plugin mit demselben Kurznamen wird wie sonst gefragt', (tester) async {
+      await starten(tester, [standard],
+          plugins: [_pluginEintrag()], entwicklung: _entwicklungsPlugin, laufende: _Laufende(Protokoll()));
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsOneWidget);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Die Anzeige in der Titelzeile: deutlich, ohne Verbindung rot, bei Platzmangel gekürzt', (tester) async {
+      Future<void> zeigen({required bool verbunden, String name = 'Beispiel'}) => tester.pumpWidget(MaterialApp(
+            home: Scaffold(
+              appBar: AppBar(
+                actions: [
+                  Flexible(child: EntwicklungsPluginAnzeige(name: name, verbunden: verbunden)),
+                  BestaetigungenFeld(stufe: Bestaetigungen.mittel, aendern: (_) async {}),
+                ],
+              ),
+            ),
+          ));
+      expect(entwicklungsPluginText('Beispiel', verbunden: true), 'Entwicklungs-Plugin: Beispiel');
+      expect(entwicklungsPluginText('Beispiel', verbunden: false), 'Entwicklungs-Plugin: Beispiel (nicht verbunden)');
+      final anzeige = find.byType(EntwicklungsPluginAnzeige);
+      Color farbe() => tester.widget<Material>(find.descendant(of: anzeige, matching: find.byType(Material)).first).color!;
+
+      await zeigen(verbunden: true);
+      expect(find.text('Entwicklungs-Plugin: Beispiel'), findsOneWidget);
+      expect(farbe(), ThemeData().colorScheme.tertiary);
+      await zeigen(verbunden: false);
+      expect(find.text('Entwicklungs-Plugin: Beispiel (nicht verbunden)'), findsOneWidget);
+      expect(farbe(), ThemeData().colorScheme.error);
+      expect(
+        tester.widget<Tooltip>(find.descendant(of: anzeige, matching: find.byType(Tooltip))).message,
+        contains('außerhalb der Installation'),
+      );
+
+      tester.view.physicalSize = const Size(520, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await zeigen(verbunden: false, name: 'Ein Plugin mit einem sehr langen Namen');
+      expect(tester.takeException(), isNull, reason: 'kein Überlauf der Titelzeile');
+      expect(tester.widget<Text>(find.textContaining('Entwicklungs-Plugin:')).overflow, TextOverflow.ellipsis);
+    });
+  });
 }
 
 class _Antwort {
   PluginAntwort? wert;
+  bool fertig = false;
+}
+
+class _EntwicklungsAntwort {
+  bool? wert;
   bool fertig = false;
 }

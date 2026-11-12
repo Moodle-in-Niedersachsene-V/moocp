@@ -88,7 +88,7 @@ Future<List<PluginEintrag>> pluginsFinden(Directory ordner) async {
       continue;
     }
     try {
-      final beschreibung = _lesen(pfad);
+      final beschreibung = beschreibungLesen(pfad);
       final vorher = kurznamen[beschreibung.kurzname];
       if (vorher != null) {
         ergebnis.add(fehler('Der Kurzname gehört schon zum Plugin im Ordner „$vorher“.'));
@@ -110,8 +110,10 @@ Future<List<PluginEintrag>> pluginsFinden(Directory ordner) async {
   return ergebnis;
 }
 
-/// Liest `plugin.json` im Plugin-Ordner [pfad].
-PluginBeschreibung _lesen(String pfad) {
+/// Liest `plugin.json` im Plugin-Ordner [pfad]; wirft [PluginFehler]. Auch für
+/// den Ordner eines Entwicklungs-Plugins (entwicklung.dart): Dort gilt die
+/// Beschreibungsdatei wie bei einem installierten Plugin.
+PluginBeschreibung beschreibungLesen(String pfad) {
   final datei = File(p.join(pfad, 'plugin.json'));
   if (!datei.existsSync()) throw const PluginFehler('Die Beschreibungsdatei plugin.json fehlt.');
   final String text;

@@ -8,7 +8,8 @@
 // nie und sieht von Profilen sonst nichts.
 //
 // Dazu die Dialoge zu Plugins (E35): „Plugin zulassen" beim Start und beim
-// Ändern einer Zustimmung, und „Plugins" mit dem Stand je Plugin. Sie stehen
+// Ändern einer Zustimmung, „Plugins" mit dem Stand je Plugin und
+// „Entwicklungs-Plugin anhängen" beim Start mit `--plugin-entwicklung`. Sie stehen
 // hier, weil sie zu den Einstellungen gehören und Material nutzen: Jede Datei,
 // die es einbindet, zeigt eine Meldung der Analyse zur Umstellung auf
 // material_ui, und die Zahl der Dateien soll nicht wachsen.
@@ -23,6 +24,7 @@ import 'package:flutter/material.dart';
 import 'einstellungen.dart';
 import 'nur_maus.dart';
 import 'plugin/beschreibung.dart';
+import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
 import 'plugin/plugins.dart';
 import 'profil.dart';
@@ -518,13 +520,20 @@ class _ZusatzadresseZeile extends StatelessWidget {
 /// Dialog „Plugin zulassen“. Die Antwort -- auch eine Ablehnung -- wird
 /// gespeichert, damit nicht bei jedem Start gefragt wird; ein Plugin, das nicht
 /// lädt, kommt nicht dran. Nichts hier startet ein Plugin.
+///
+/// [ohneKurzname]: Ist ein Entwicklungs-Plugin mit diesem Kurznamen
+/// angehängt, fragt der Schritt nicht nach dem installierten mit demselben
+/// Kurznamen; es startet in diesem Lauf ohnehin nicht, und seine Zustimmung
+/// bleibt, wie sie ist.
 Future<void> pluginSchritt(
   BuildContext context, {
   required Plugins plugins,
   required List<Profil> profile,
+  String? ohneKurzname,
 }) async {
   for (final stand in plugins.offene) {
     if (!context.mounted) return;
+    if (ohneKurzname != null && stand.eintrag.beschreibung?.kurzname == ohneKurzname) continue;
     final antwort = await showDialog<PluginAntwort>(
       context: context,
       barrierDismissible: false,
@@ -535,6 +544,175 @@ Future<void> pluginSchritt(
     if (antwort == null) continue;
     await plugins.entscheiden(stand.eintrag, zugestimmt: antwort.zugestimmt, profile: antwort.profile);
   }
+}
+
+/// Der Dialog „Entwicklungs-Plugin anhängen“ (plugin/entwicklung.dart): Er
+/// kommt bei jedem Start mit `--plugin-entwicklung`, bevor die App sich mit
+/// dem Plugin verbindet, und tritt an die Stelle von Zustimmung und
+/// Prüfsumme. Er nennt Ordner, Port, Name und die Zusatzadressen, sagt, dass
+/// ein Programm außerhalb der Installation angehängt wird, und dass ablehnen
+/// soll, wer es nicht selbst so gestartet hat. Den Schlüssel nennt er nicht.
+/// Rückgabe: true heißt anhängen; die Antwort gilt für diesen Lauf der App
+/// und wird nie gespeichert.
+///
+/// Entschieden wird wie bei einer Freigabe nur mit der Maus und erst nach der
+/// Wartezeit ([NurMaus], [Sperrzeit], E4); kein Escape, kein Klick daneben.
+class EntwicklungsPluginDialog extends StatelessWidget {
+  const EntwicklungsPluginDialog({required this.plugin, super.key});
+
+  final EntwicklungsPlugin plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = plugin.beschreibung;
+    final theme = Theme.of(context);
+    final klein = theme.textTheme.bodySmall;
+    return PopScope(
+      canPop: false,
+      child: NurMaus(
+        child: AlertDialog(
+          title: const Text('Entwicklungs-Plugin anhängen'),
+          content: SizedBox(
+            width: 620,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'moocp wurde mit $pluginEntwicklungSchalter gestartet und soll ein Plugin anhängen, das schon '
+                    'läuft. Das Programm liegt außerhalb der Installation von moocp; welcher Code dahinter läuft, '
+                    'kann moocp nicht prüfen.',
+                  ),
+                  const SizedBox(height: 16),
+                  Text(b.name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text('Version ${b.version}'),
+                  Text('Ordner: ${plugin.ordner}'),
+                  Text('Port: 127.0.0.1:${plugin.port}'),
+                  const SizedBox(height: 16),
+                  if (b.zusatzadressen.isEmpty)
+                    const Text('Zusatzadressen: keine.')
+                  else ...[
+                    Text('Zusatzadressen', style: theme.textTheme.titleSmall),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 8),
+                      child: Text(
+                        'Diese Seiten Ihrer Moodle-Instanz darf das Plugin über moocp ansprechen, auch wenn '
+                        'moocp sie sonst nicht freigibt. Hinter ihnen können Namen von Personen stehen.',
+                        style: klein,
+                      ),
+                    ),
+                    for (final z in b.zusatzadressen) _ZusatzadresseZeile(z),
+                  ],
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Hängen Sie das Plugin nur an, wenn Sie es selbst so gestartet haben. Sonst lehnen Sie ab: '
+                      'Ein fremdes Programm bekäme hier über moocp Zugriff auf Ihre Moodle-Kurse.',
+                      style: TextStyle(color: theme.colorScheme.onErrorContainer, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: theme.colorScheme.outline),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(pluginVerantwortung),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Die Antwort gilt, bis moocp endet, und wird nicht gespeichert; beim nächsten Start fragt moocp '
+                    'wieder. Das Plugin ist in jedem Moodle-Profil eingeschaltet.',
+                    style: klein,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            // Die Knöpfe nehmen erst nach der Wartezeit etwas an (Sperrzeit).
+            Sperrzeit(
+              builder: (bereit) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  OutlinedButton(
+                    onPressed: bereit ? () => Navigator.pop(context, false) : null,
+                    child: const Text('Ablehnen'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: bereit ? () => Navigator.pop(context, true) : null,
+                    child: const Text('Anhängen'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Der Schritt beim Start mit `--plugin-entwicklung` (anmeldung.dart,
+/// startBisAnmeldung, an der Stelle der Zustimmung zu Plugins). [vorbereiten]
+/// liest Beschreibungsdatei und Schlüssel (plugin/entwicklung.dart,
+/// entwicklungVorbereiten); scheitert das, sagt ein Hinweis den Grund, und
+/// die App läuft ohne das Plugin. Sonst fragt [EntwicklungsPluginDialog].
+/// Liefert das Plugin, wenn die Lehrkraft es anhängen will, sonst null.
+/// Nichts davon wird gespeichert, und der Testbetrieb beantwortet nichts.
+Future<EntwicklungsPlugin?> entwicklungSchritt(
+  BuildContext context, {
+  required EntwicklungsPlugin Function() vorbereiten,
+  required Protokoll protokoll,
+}) async {
+  final EntwicklungsPlugin plugin;
+  try {
+    plugin = vorbereiten();
+  } on PluginFehler catch (f) {
+    protokoll.eintrag(Art.fehler, 'Entwicklungs-Plugin nicht angehängt: ${f.grund}');
+    if (context.mounted) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Entwicklungs-Plugin nicht angehängt'),
+          content: SizedBox(
+            width: 520,
+            child: Text(
+              'moocp wurde mit $pluginEntwicklungSchalter gestartet, kann das Plugin aber nicht anhängen: '
+              '${f.grund} moocp läuft ohne dieses Plugin.',
+            ),
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
+    }
+    return null;
+  }
+  protokoll.eintrag(
+    Art.info,
+    'Entwicklungs-Plugin angefragt: „${plugin.name}“ aus ${plugin.ordner}, Port ${plugin.port}',
+  );
+  if (!context.mounted) return null;
+  final ja = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => EntwicklungsPluginDialog(plugin: plugin),
+  );
+  if (ja == true) {
+    protokoll.eintrag(Art.info, 'Entwicklungs-Plugin „${plugin.name}“: angenommen, für diesen Lauf');
+    return plugin;
+  }
+  protokoll.eintrag(Art.info, 'Entwicklungs-Plugin „${plugin.name}“: abgelehnt; moocp läuft ohne es');
+  return null;
 }
 
 /// Der Dialog „Plugins“ (Einstellungen): je gefundenem Plugin der Stand, mit

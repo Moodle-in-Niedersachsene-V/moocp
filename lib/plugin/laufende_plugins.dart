@@ -24,6 +24,13 @@
 // ist, beendet sich ein Plugin selbst (README, Teil 4) -- so bleibt keines
 // zurück, auch wenn die App nicht ordentlich enden konnte.
 //
+// Ein Entwicklungs-Plugin (entwicklung.dart) startet die App nicht, sie hängt
+// es an ([anhaengen]); seine Werkzeuge bietet sie hier mit an, in jedem
+// Instanzprofil. Ein installiertes Plugin mit demselben Kurznamen startet in
+// diesem Lauf nicht; seine Zustimmung und seine gemerkte Werkzeugliste bleiben,
+// wie sie sind. Neustart und Ausfall unten gelten für ein angehängtes Plugin
+// nicht.
+//
 // Ausfall: Je Lauf der App bekommt jedes Plugin genau einen zweiten Start,
 // gleich wofür -- weil es beim Start nicht binnen der Startfrist antwortete
 // oder sich dabei beendete, oder weil sein Programm später unerwartet endete.
@@ -50,6 +57,7 @@ import '../plattform/plattform.dart';
 import '../profil.dart';
 import '../protokoll.dart';
 import 'beschreibung.dart';
+import 'entwicklung.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
 import 'verbindung.dart';
@@ -110,6 +118,8 @@ class LaufendePlugins implements WerkzeugQuelle {
     this._protokoll, {
     this.starter = _prozessStarten,
     this.startfrist = const Duration(seconds: 20),
+    this.entwicklungsIntervall = const Duration(seconds: 3),
+    this.entwicklungsFrist = const Duration(seconds: 2),
   });
 
   final Protokoll _protokoll;
@@ -122,7 +132,17 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// seine Werkzeuge nennt; danach gilt der Versuch als gescheitert.
   final Duration startfrist;
 
+  /// Für ein Entwicklungs-Plugin: wie oft die App nachsieht, ob die
+  /// Verbindung steht, und wie lange ein Versuch dauern darf
+  /// ([AngehaengtesPlugin]).
+  final Duration entwicklungsIntervall;
+  final Duration entwicklungsFrist;
+
   Plugins? _plugins;
+
+  /// Das angehängte Entwicklungs-Plugin; null ohne `--plugin-entwicklung` oder
+  /// wenn die Lehrkraft es abgelehnt hat.
+  AngehaengtesPlugin? _angehaengt;
 
   /// Die Namen der eingebauten Werkzeuge, aus [starten]; auch ein Neustart
   /// prüft die Werkzeugnamen dagegen.
@@ -168,6 +188,34 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// und erfährt so davon.
   List<String> get ausgefalleneNamen => [for (final a in _ausgefallen.values) a.eintrag.anzeigename];
 
+  /// Das angehängte Entwicklungs-Plugin für die Titelzeile: Name und ob es
+  /// gerade verbunden ist; null, wenn keines angehängt ist. Jede Verbindung
+  /// und jeder Verlust schreibt eine Zeile ins Protokoll, dem die Titelzeile
+  /// folgt.
+  ({String name, bool verbunden})? get entwicklung => switch (_angehaengt) {
+    final a? => (name: a.plugin.name, verbunden: a.verbunden),
+    null => null,
+  };
+
+  /// Hängt das Entwicklungs-Plugin an, dem die Lehrkraft in diesem Lauf
+  /// zugestimmt hat (entwicklung.dart): einmal je App, vor [starten], damit
+  /// ein installiertes Plugin mit demselben Kurznamen nicht startet. Wartet
+  /// höchstens auf den ersten Versuch; ist das Plugin noch nicht erreichbar,
+  /// verbindet sich die App später. Nichts davon geht in die Einstellungen.
+  Future<void> anhaengen(EntwicklungsPlugin plugin, {required Set<String> eingebaut}) async {
+    if (_angehaengt != null || _beendet) return;
+    _eingebaut = eingebaut;
+    final a = AngehaengtesPlugin(
+      plugin,
+      _protokoll,
+      vergeben: () => _vergeben(ohne: ''),
+      intervall: entwicklungsIntervall,
+      versuchsfrist: entwicklungsFrist,
+    );
+    _angehaengt = a;
+    await a.starten();
+  }
+
   /// Startet jedes Plugin, dem für seinen jetzigen Stand zugestimmt ist und
   /// das noch nicht läuft, nacheinander in der Reihenfolge von
   /// [Plugins.eintraege]. [eingebaut] sind die Namen der eingebauten
@@ -191,6 +239,12 @@ class LaufendePlugins implements WerkzeugQuelle {
       if (_beendet) return;
       final e = stand.eintrag;
       if (stand.zustand != PluginZustand.zugestimmt || _bekannt(e.ordner)) continue;
+      if (_angehaengt case final a? when a.plugin.kurzname == e.beschreibung!.kurzname) {
+        const grund = 'In diesem Lauf ist ein Entwicklungs-Plugin mit demselben Kurznamen angehängt.';
+        _fehler[e.ordner] = grund;
+        _protokoll.eintrag(Art.info, 'Plugin „${e.anzeigename}“ nicht gestartet: $grund');
+        continue;
+      }
       while (true) {
         try {
           final laufend = await _starten(e);
@@ -284,11 +338,14 @@ class LaufendePlugins implements WerkzeugQuelle {
   }
 
   /// Die Werkzeugnamen der eingebauten Werkzeuge und aller anderen Plugins,
-  /// auch der ausgefallenen: Deren Werkzeuge bleiben in der Liste.
+  /// auch der ausgefallenen: Deren Werkzeuge bleiben in der Liste. Für das
+  /// Entwicklungs-Plugin selbst ist [ohne] leer; seine eigenen Werkzeuge
+  /// zählen dann nicht, für jedes andere Plugin schon.
   Set<String> _vergeben({required String ohne}) => {
     ..._eingebaut,
     for (final (e, liste) in _alle())
       if (e.ordner != ohne) ...liste.map((w) => w.name),
+    if (ohne.isNotEmpty) ...?_angehaengt?.werkzeuge.map((w) => w.name),
   };
 
   /// Jedes Plugin mit Werkzeugen in der Liste: laufend, im Neustart,
@@ -372,12 +429,18 @@ class LaufendePlugins implements WerkzeugQuelle {
   List<WerkzeugBeschreibung> werkzeuge(Profil profil) => [
     for (final (e, liste) in _alle())
       if (_aktiv(e, profil)) ...liste,
+    // Ein Entwicklungs-Plugin ist in jedem Profil eingeschaltet.
+    ...?_angehaengt?.werkzeuge,
   ];
 
   bool _aktiv(PluginEintrag e, Profil profil) => _plugins?.stand(e).aktivIn(profil.kennung) ?? false;
 
   @override
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
+    final angehaengt = _angehaengt;
+    if (angehaengt != null && angehaengt.werkzeuge.any((w) => w.name == aufruf.name)) {
+      return angehaengt.aufrufen(aufruf);
+    }
     while (true) {
       final e = _besitzer(aufruf.name);
       if (e == null) throw MoodleFehler('Das Werkzeug „${aufruf.name}“ gehört zu keinem laufenden Plugin.');
@@ -446,6 +509,7 @@ class LaufendePlugins implements WerkzeugQuelle {
     final alle = _laufend.values.toList();
     _laufend.clear();
     await Future.wait([
+      ?_angehaengt?.beenden(),
       for (final MapEntry(key: prozess, value: beendet) in _imStart.entries.toList())
         _prozessBeenden(prozess, beendet),
       for (final l in alle)

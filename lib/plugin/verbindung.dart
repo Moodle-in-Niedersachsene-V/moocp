@@ -3,7 +3,8 @@
 // Schnittstelle, soweit er über MCP läuft -- was beim initialize mitgeht, was
 // an jedem Werkzeugaufruf hängt, welche Werkzeugnamen gelten und was von einer
 // Antwort an die KI weitergeht. Den Prozess startet und beendet
-// laufende_plugins.dart.
+// laufende_plugins.dart; ein Entwicklungs-Plugin, das schon läuft, hängt
+// entwicklung.dart an.
 
 import 'dart:async';
 
@@ -256,6 +257,18 @@ class PluginVerbindung {
     ].join('\n');
     if (ergebnis.isError) throw MoodleFehler(text.isEmpty ? 'Das Plugin meldet einen Fehler.' : text);
     return text;
+  }
+
+  /// Ob das Plugin auf dieser Verbindung noch antwortet: ein `ping` binnen
+  /// [frist]. Ein Plugin, das neu gestartet wurde, kennt die Sitzung nicht
+  /// mehr und weist den ping ab; auch das heißt false.
+  Future<bool> lebt({Duration frist = const Duration(seconds: 2)}) async {
+    try {
+      await _client.ping().timeout(frist);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Beendet die Sitzung beim Plugin und schließt die Verbindung. Antwortet

@@ -32,6 +32,17 @@
 //    lief, wird nicht wiederholt. Endet es danach noch einmal, gilt es bis
 //    zum nächsten Start von moocp als ausgefallen.
 //
+// Entwickeln (README, Teil 4, „Ein Plugin entwickeln“): Wer ein Plugin
+// entwickelt, startet es selbst, im Debugger, auf dem Port aus
+// `entwicklungsPort` in plugin.json, mit einem selbst erzeugten Schlüssel in
+// MOOCP_PLUGIN_SCHLUESSEL, und startet dann die installierte App mit
+// `--plugin-entwicklung <Ordner>` und derselben Variablen. moocp startet das
+// Plugin dann nicht, sondern verbindet sich damit, und verbindet sich wieder,
+// wenn es neu gebaut und neu gestartet wird. entwickeln.ps1 (Windows) und
+// entwickeln.sh (Mac) tun das für dieses Beispiel. Dabei läuft es mit
+// `--entwicklung`: Seine Standardeingabe gehört dann nicht moocp, und es endet
+// nicht mit ihr (Punkt 6), sondern wenn sein Entwickler es beendet.
+//
 // Was moocp mitgibt:
 // - beim `initialize` unter `capabilities.experimental.moocp` die Version der
 //   Schnittstelle (`schnittstelle`);
@@ -75,6 +86,10 @@ Future<void> main(List<String> argumente) async {
         'Bearer $schluessel',
   );
   await server.start();
+
+  // Zum Entwickeln von Hand gestartet: kein moocp am anderen Ende der
+  // Standardeingabe; das Plugin läuft, bis sein Entwickler es beendet.
+  if (argumente.contains('--entwicklung')) return;
 
   // Endet die Standardeingabe, ist moocp fort: aufräumen und enden.
   stdin.listen(

@@ -37,6 +37,7 @@ import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
 import 'plugin/entscheidung.dart';
+import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
 import 'plugin/plugins.dart';
 import 'plugin/werkzeugliste.dart';
@@ -75,6 +76,10 @@ Future<void> main(List<String> argumente) async {
   // zurück.
   final einzel = await Einzelstart.sichern(einstellungenOrdner);
   if (einzel == null) exit(0);
+  // Erst nach dem Einzelstart: Läuft die App schon, holt ein zweiter Start
+  // mit `--plugin-entwicklung` nur das Fenster nach vorn, und der Parameter
+  // wirkt nicht (plugin/entwicklung.dart).
+  final entwicklungsOrdner = entwicklungsOrdnerAus(argumente);
   final einstellungen = await Einstellungen.laden();
   final protokoll = Protokoll(
     datei: File(p.join(einstellungenOrdner, 'protokoll.log')),
@@ -155,6 +160,9 @@ Future<void> main(List<String> argumente) async {
       updatefaehig: updateMoeglich(argumente, Platform.environment),
       pluginsLaden: () => Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
       laufendePlugins: laufendePlugins,
+      entwicklungVorbereiten: entwicklungsOrdner == null
+          ? null
+          : () => entwicklungVorbereiten(entwicklungsOrdner, Platform.environment),
       fokus: einzel.fokus,
     ),
   );
@@ -314,6 +322,7 @@ class MoocpApp extends StatelessWidget {
     this.updatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
+    this.entwicklungVorbereiten,
     this.fokus,
     super.key,
   });
@@ -323,6 +332,11 @@ class MoocpApp extends StatelessWidget {
   final McpDienst dienst;
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
+
+  /// Mit `--plugin-entwicklung` gesetzt: liest Beschreibungsdatei und
+  /// Schlüssel des Entwicklungs-Plugins (plugin/entwicklung.dart) und wirft
+  /// `PluginFehler`, wenn das nicht geht. Sonst null.
+  final EntwicklungsPlugin Function()? entwicklungVorbereiten;
 
   /// Die laufenden Plugins, eine Werkzeugquelle aller MCP-Server; null, wenn
   /// die App keine startet (Tests).
@@ -375,6 +389,7 @@ class MoocpApp extends StatelessWidget {
         updatefaehig: updatefaehig,
         pluginsLaden: pluginsLaden,
         laufendePlugins: laufendePlugins,
+        entwicklungVorbereiten: entwicklungVorbereiten,
         fokus: fokus,
       ),
     );
@@ -395,6 +410,7 @@ class Hauptseite extends StatefulWidget {
     this.updatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
+    this.entwicklungVorbereiten,
     this.fokus,
     super.key,
   });
@@ -405,6 +421,7 @@ class Hauptseite extends StatefulWidget {
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
   final LaufendePlugins? laufendePlugins;
+  final EntwicklungsPlugin Function()? entwicklungVorbereiten;
   final List<Instanz> weitere;
   final Instanz Function(Profil profil)? instanzErstellen;
   final Future<Einrichtungsstand> Function()? einrichtungsstand;
@@ -475,6 +492,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// (_pluginSchritt); null, solange nicht gesucht wurde oder die App keine
   /// sucht.
   Plugins? _plugins;
+
+  /// Das Entwicklungs-Plugin, das die Lehrkraft in diesem Lauf anhängen will
+  /// (_pluginSchritt); null ohne `--plugin-entwicklung` oder nach Ablehnung.
+  EntwicklungsPlugin? _entwicklung;
 
   /// Alle Instanzprofile, wie sie jetzt stehen.
   List<Profil> get _alleProfile => [for (final i in _instanzen) _profilFuer(i)];
@@ -586,7 +607,16 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// entschieden ist (einstellungen_dialog.dart, pluginSchritt). Ohne Plugin
   /// im Ordner -- und ohne Suche, wenn die App keine einsetzt -- geschieht
   /// nichts, auch kein Eintrag im Protokoll. Nichts davon startet ein Plugin.
+  ///
+  /// Mit `--plugin-entwicklung` kommt davor die Frage nach dem
+  /// Entwicklungs-Plugin (einstellungen_dialog.dart, entwicklungSchritt); hängt
+  /// die Lehrkraft es an, fragt der Schritt nicht nach einem installierten mit
+  /// demselben Kurznamen.
   Future<void> _pluginSchritt() async {
+    final vorbereiten = widget.entwicklungVorbereiten;
+    if (vorbereiten != null && mounted) {
+      _entwicklung = await entwicklungSchritt(context, vorbereiten: vorbereiten, protokoll: widget.protokoll);
+    }
     final laden = widget.pluginsLaden;
     if (laden == null) return;
     final Plugins plugins;
@@ -598,17 +628,21 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     }
     _plugins = plugins;
     if (!mounted) return;
-    await pluginSchritt(context, plugins: plugins, profile: _alleProfile);
+    await pluginSchritt(context, plugins: plugins, profile: _alleProfile, ohneKurzname: _entwicklung?.kurzname);
   }
 
   /// Startet die Plugins, denen die Lehrkraft zugestimmt hat
   /// (plugin/laufende_plugins.dart), einmal je App. Was nicht startet, steht
-  /// mit dem Grund im Protokoll und im Dialog „Plugins“.
+  /// mit dem Grund im Protokoll und im Dialog „Plugins“. Ein angenommenes
+  /// Entwicklungs-Plugin hängt sie davor an.
   Future<void> _pluginsStarten() async {
     final plugins = _plugins;
     final laufende = widget.laufendePlugins;
-    if (plugins == null || laufende == null) return;
-    await laufende.starten(plugins, eingebaut: await widget.dienst.eingebauteWerkzeugnamen());
+    final entwicklung = _entwicklung;
+    if (laufende == null || (plugins == null && entwicklung == null)) return;
+    final eingebaut = await widget.dienst.eingebauteWerkzeugnamen();
+    if (entwicklung != null) await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
+    if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -1325,6 +1359,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         actions: [
           // Unabhängig vom gewählten Profil; neu gezeichnet wird mit dem
           // Protokoll, in das jeder Ausfall eine Zeile schreibt.
+          if (widget.laufendePlugins?.entwicklung case final e?)
+            Flexible(child: EntwicklungsPluginAnzeige(name: e.name, verbunden: e.verbunden)),
           if (widget.laufendePlugins?.ausgefalleneNamen case final namen? when namen.isNotEmpty)
             Flexible(child: PluginAusfallAnzeige(namen: namen)),
           BestaetigungenFeld(stufe: _freigaben.stufe, aendern: _stufeAendern),
@@ -1589,6 +1625,60 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       ),
     ),
   );
+}
+
+/// Der Text der Anzeige eines Entwicklungs-Plugins:
+/// „Entwicklungs-Plugin: A“, ohne Verbindung mit „(nicht verbunden)“.
+String entwicklungsPluginText(String name, {required bool verbunden}) =>
+    'Entwicklungs-Plugin: $name${verbunden ? '' : ' (nicht verbunden)'}';
+
+/// Die Anzeige in der Titelzeile, solange ein Entwicklungs-Plugin angehängt
+/// ist (plugin/entwicklung.dart), für jedes Instanzprofil, auch wenn die
+/// Verbindung gerade fehlt: Die Lehrkraft soll nie übersehen, dass ein
+/// Programm von außerhalb der Installation mitarbeitet. Ohne Verbindung rot.
+/// Sie schrumpft mit der Titelzeile; der Tooltip sagt, was das heißt.
+class EntwicklungsPluginAnzeige extends StatelessWidget {
+  const EntwicklungsPluginAnzeige({required this.name, required this.verbunden, super.key});
+
+  final String name;
+  final bool verbunden;
+
+  @override
+  Widget build(BuildContext context) {
+    final farbe = Theme.of(context).colorScheme;
+    final text = entwicklungsPluginText(name, verbunden: verbunden);
+    final (hinten, vorn) = verbunden ? (farbe.tertiary, farbe.onTertiary) : (farbe.error, farbe.onError);
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message:
+            '$text. moocp wurde mit $pluginEntwicklungSchalter gestartet und hat ein Plugin von außerhalb der '
+            'Installation angehängt, in jedem Moodle-Profil. Ohne Verbindung antworten seine Werkzeuge mit einem '
+            'Fehler, bis es wieder erreichbar ist.',
+        child: Material(
+          color: hinten,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.developer_mode, size: 18, color: vorn),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    text,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: vorn, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Der Text der Anzeige ausgefallener Plugins: „Plugin „A“ ausgefallen“,

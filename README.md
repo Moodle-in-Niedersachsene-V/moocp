@@ -475,6 +475,8 @@ Stürzt ein Plugin ab, startet moocp es von selbst einmal neu; ebenso bekommt ei
 
 Unter dem Zahnrad oben rechts erscheint, sobald es Plugins gibt, „Plugins ansehen und ändern …“. Dort steht je Plugin der Stand (zugestimmt, abgelehnt, noch nicht entschieden oder nicht geladen, mit Grund), und bei einem zugestimmten, das nicht läuft, warum es nicht gestartet oder ausgefallen ist. Mit mehreren Instanzen schalten Sie ein zugestimmtes Plugin je Profil ein oder aus, ohne neue Zustimmung: Ausgeschaltet lehnt moocp Aufrufe seiner Werkzeuge in diesem Profil sofort ab; aus der Liste, die sie sieht, verschwinden sie mit ihrer nächsten Sitzung. „Zustimmung ändern …“ öffnet denselben Dialog wie beim Start. Ein Plugin nehmen nur Sie in der App an und schalten es ein; für die KI gibt es dazu weder ein Werkzeug noch einen anderen Weg.
 
+Fragt moocp beim Start, ob es ein „Entwicklungs-Plugin anhängen“ soll, ist moocp mit einem Schalter für Plugin-Entwickler gestartet worden. Stimmen Sie nur zu, wenn Sie das selbst so veranlasst haben, sonst lehnen Sie ab; moocp läuft dann ohne dieses Plugin.
+
 ### Deinstallieren
 
 In den Windows-Einstellungen unter „Apps", „Installierte Apps", bei moocp „Deinstallieren". Das entfernt alles, was die App auf den Rechner gebracht hat: die App selbst, Einstellungen mit Zugangsschlüssel, Protokoll, gespeicherte Anmeldedaten, installierte Plugins, den Arbeitsordner und in Claude Code, Codex CLI und LM Studio die Verbindung „moodle" und die Skills der App. Läuft die App noch, bittet die Deinstallation, sie zu schließen; LM Studio darf dabei offen bleiben, ebenso bei einem Update. Lässt sich etwas nicht entfernen, etwa weil Claude Code nicht gefunden wird, sagt sie, was von Hand zu tun ist.
@@ -552,10 +554,10 @@ skills/  (Wissen: Didaktik, Regeln,        moocp (Flutter, Windows)
 | `lib/einrichtung.dart`, `einrichtung_dialog.dart`, `lib/plattform/signatur_windows.dart` | KI-Werkzeuge einrichten: Claude Code, Codex CLI und LM Studio finden (unter Windows nimmt die App nur eine claude.exe mit gültiger Signatur von Anthropic), je den MCP-Eintrag prüfen und setzen, Skills vergleichen und installieren; beim Deinstallieren beides entfernen |
 | `lib/update/update.dart`, `updateliste.dart`, `update_dialoge.dart` | Suche nach Updates bei GitHub: Version vergleichen, Installer holen und starten; die Adressen, die dabei erlaubt sind |
 | `lib/einstellungen_dialog.dart` | Dialog „Einstellungen": Updates, Weg zu „KI-Werkzeuge einrichten", Plugins, weitere Moodle-Instanz verbinden; dazu die Dialoge „Plugin zulassen" und „Plugins" |
-| `lib/plugin/` | Plugins finden, ihnen zustimmen und sie starten: `adressmuster.dart` (Muster der Zusatzadressen, gesperrte Bereiche), `beschreibung.dart` (`plugin.json` lesen und prüfen), `pruefsumme.dart` (SHA-256 über den Plugin-Ordner), `entscheidung.dart` (die Entscheidung in den Einstellungen), `plugins.dart` (finden, Stand der Zustimmung, Profile, in denen ein Plugin eingeschaltet ist), `laufende_plugins.dart` (starten, nach einem Absturz einmal neu starten, beenden, Werkzeuge je Profil anbieten, die Werkzeugliste merken), `verbindung.dart` (MCP-Client zum Plugin: Vertrag, Werkzeugnamen, Aufrufe), `werkzeugliste.dart` (die Liste für `--werkzeugliste`: die gemerkten Werkzeuge der Plugins, ohne ein Plugin zu starten) |
+| `lib/plugin/` | Plugins finden, ihnen zustimmen und sie starten: `adressmuster.dart` (Muster der Zusatzadressen, gesperrte Bereiche), `beschreibung.dart` (`plugin.json` lesen und prüfen), `pruefsumme.dart` (SHA-256 über den Plugin-Ordner), `entscheidung.dart` (die Entscheidung in den Einstellungen), `plugins.dart` (finden, Stand der Zustimmung, Profile, in denen ein Plugin eingeschaltet ist), `laufende_plugins.dart` (starten, nach einem Absturz einmal neu starten, beenden, Werkzeuge je Profil anbieten, die Werkzeugliste merken), `entwicklung.dart` (ein Entwicklungs-Plugin anhängen und wieder verbinden, `--plugin-entwicklung`), `verbindung.dart` (MCP-Client zum Plugin: Vertrag, Werkzeugnamen, Aufrufe), `werkzeugliste.dart` (die Liste für `--werkzeugliste`: die gemerkten Werkzeuge der Plugins, ohne ein Plugin zu starten) |
 | `lib/mcp/werkzeugquelle.dart` | Werkzeugquellen: Werkzeuge, die der MCP-Server neben den eingebauten durch dieselbe Hülle anbietet (die der Plugins) |
-| `beispiele/plugin/` | das Beispiel-Plugin: Vorlage für Plugin-Autoren und das Plugin, gegen das die Tests laufen; der Installer liefert es nicht mit |
-| `lib/nur_maus.dart` | `Sperrzeit` und `NurMaus`: Dialoge, die sich nach vorn holen (Freigaben, Zustimmung zu Plugins), entscheiden nur mit der Maus und erst nach der Wartezeit |
+| `beispiele/plugin/` | das Beispiel-Plugin: Vorlage für Plugin-Autoren und das Plugin, gegen das die Tests laufen, mit den Startskripten zum Entwickeln (`entwickeln.ps1`, `entwickeln.sh`); der Installer liefert es nicht mit |
+| `lib/nur_maus.dart` | `Sperrzeit` und `NurMaus`: Dialoge, die sich nach vorn holen (Freigaben, Zustimmung zu Plugins, Entwicklungs-Plugin), entscheiden nur mit der Maus und erst nach der Wartezeit |
 | `lib/profil.dart`, `lib/profile_dialog.dart`, `lib/moodle/instanzen.dart` | Instanzprofile: je Moodle-Instanz Zugang, Freigabestufe und MCP-Server mit eigenem Port, Namen und Zugangsschlüssel; sichtbar erst ab zwei Profilen |
 | `lib/main.dart`, `BestaetigungenFeld` | das Feld für die Stufe der Bestätigungen in der Titelzeile samt Hilfe-Dialog |
 | `lib/ueber.dart` | Dialog „Über moocp": Version, Lizenz, Lizenzen der Pakete |
@@ -608,6 +610,7 @@ Schalter von `moocp.exe`; die Auskünfte schreiben nach stdout, und weil `moocp.
 | Schalter | Wirkung |
 |---|---|
 | `--kein-update` | keine Suche nach Updates (siehe [Updates](#updates)) |
+| `--plugin-entwicklung <Ordner>` | hängt das Plugin aus diesem Ordner an, das schon auf seinem Entwicklungsport läuft, statt es zu starten; den Schlüssel liest die App aus `MOOCP_PLUGIN_SCHLUESSEL` (siehe „Ein Plugin entwickeln“). Wirkt nicht, wenn moocp schon läuft |
 | `--version` | gibt die Version aus und endet |
 | `--werkzeugliste` | gibt als eine Zeile JSON aus, was der MCP-Server des Standardprofils auf `initialize` und `tools/list` antwortet, und endet; daraus antwortet die Brücke. Die Werkzeuge der Plugins stehen darin aus dem, was die App von ihnen gemerkt hat (siehe „Werkzeuge eines Plugins“); ein Plugin wird dafür nicht gestartet |
 | `--claude-entfernen` | entfernt die Einrichtung in allen KI-Werkzeugen und endet; ruft die Deinstallation auf (der Name stammt aus der Zeit, als es nur Claude Code gab, und bleibt, damit auch ältere Deinstallationen wirken) |
@@ -757,7 +760,7 @@ Gespeichert wird je Plugin-Ordner in den Einstellungen: die Version, eine SHA-25
 
 Mit der Zustimmung wählt die Lehrkraft die Instanzprofile, in denen das Plugin eingeschaltet ist; vorgewählt sind alle, und mit nur einem Profil gibt es die Wahl nicht (das Plugin gilt dort). Gespeichert wird die ausdrückliche Menge: Ein Profil, das später dazukommt, ist ausgeschaltet, bis die Lehrkraft es unter „Plugins“ in den Einstellungen einschaltet, und ein gelöschtes verschwindet aus der Menge, die Zustimmung bleibt. Wer wissen will, welche Plugins in einem Profil gelten, fragt `Plugins.aktivIn(<Kennung des Profils>)` in `lib/plugin/plugins.dart`.
 
-Kein MCP-Werkzeug und kein Schalter auf der Kommandozeile stimmt einem Plugin zu oder schaltet es ein, und der Testbetrieb tut es auch nicht: Das tut nur die Lehrkraft im Dialog der App.
+Kein MCP-Werkzeug und kein Schalter auf der Kommandozeile stimmt einem Plugin zu oder schaltet es ein, und der Testbetrieb tut es auch nicht: Das tut nur die Lehrkraft im Dialog der App. Auch ein Entwicklungs-Plugin (`--plugin-entwicklung`, siehe „Ein Plugin entwickeln“) hängt die App erst nach einem eigenen Dialog an.
 
 #### Start und Verbindung
 
@@ -794,6 +797,35 @@ dart compile exe beispiele/plugin/beispiel.dart -o <Plugin-Ordner>/beispiel.exe
 ```
 
 neben eine Kopie von `plugin.json` in einem Unterordner von `plugins`. Die Tests (`test/plugin_start_test.dart`) tun genau das in einem Temp-Ordner, mit dem `dart` des Flutter-SDK, und starten es dann als Kindprozess; dafür braucht es weder Netz noch `pub get`. Der Installer der App liefert das Beispiel nicht mit.
+
+#### Ein Plugin entwickeln
+
+Wer ein Plugin entwickelt, arbeitet gegen die installierte moocp und muss moocp nicht selbst bauen. Das Plugin läuft dabei im Debugger seines Entwicklers; moocp startet es nicht, sondern hängt sich an:
+
+```
+moocp.exe --plugin-entwicklung <Ordner des Plugins>
+```
+
+Die App liest `plugin.json` aus diesem Ordner, der irgendwo liegen darf, mit denselben Prüfungen wie bei einem installierten Plugin (Felder, gesperrte Bereiche, Länge des Kurznamens); Zusatzadressen sind nur die dort angemeldeten. Das Programm aus `programm` muss im Ordner nicht liegen. Dann verbindet sie sich mit `http://127.0.0.1:<entwicklungsPort>/mcp`; ohne `entwicklungsPort` in der Beschreibungsdatei hängt sie nichts an.
+
+Den Schlüssel erzeugt, wer das Plugin startet, und gibt ihn dem Plugin und moocp in der Umgebungsvariablen `MOOCP_PLUGIN_SCHLUESSEL` mit, derselben, in der ein gestartetes Plugin ihn bekommt; nie auf der Kommandozeile, dort stünde er in jeder Prozessliste. Fehlt die Variable oder ist sie leer, verbindet sich moocp nicht: Sonst stünde die Adresse der App für das Plugin jedem Programm auf dem Rechner offen. Fehlt der Ordner, lässt sich die Beschreibungsdatei nicht lesen oder bricht sie eine Regel, oder fehlt der Schlüssel, zeigt moocp beim Start einen Hinweis mit dem Grund und läuft ohne das Plugin.
+
+Vor dem Verbinden fragt moocp bei jedem Start im Dialog „Entwicklungs-Plugin anhängen“. Er nennt Name, Version, Ordner, Port und die Zusatzadressen mit Art und Grund, sagt, dass ein Programm außerhalb der Installation angehängt wird, dass die Lehrkraft nur zustimmen soll, wenn sie es selbst so gestartet hat, und den Satz zur Verantwortung wie bei einer Zustimmung. Entschieden wird nur mit der Maus und erst nach der Wartezeit einer Freigabe; die Antwort wird nie gespeichert, und der Testbetrieb beantwortet den Dialog nie. Der Dialog tritt an die Stelle von Zustimmung und Prüfsumme: moocp weiß nicht, welcher Code hinter dem Port läuft, und eine gemerkte Zustimmung wäre nichts wert. Er steht im Start dort, wo sonst die Zustimmung zu Plugins steht, vor der Einrichtung der KI-Werkzeuge. Abgelehnt, läuft moocp ohne das Plugin.
+
+Angenommen, ist das Plugin in jedem Instanzprofil eingeschaltet. In die Einstellungen schreibt moocp nichts über es: keine Zustimmung, keine Werkzeugliste, und `--werkzeugliste` nennt seine Werkzeuge nicht. Ein installiertes Plugin mit demselben Kurznamen startet in diesem Lauf nicht und wird auch nicht gefragt; seine Zustimmung und seine gemerkte Werkzeugliste bleiben, wie sie sind. Solange das Plugin angehängt ist, steht in der Titelzeile „Entwicklungs-Plugin: <Name>“, ohne Verbindung mit „(nicht verbunden)“ und rot.
+
+Ob die Verbindung steht, fragt moocp alle drei Sekunden mit einem `ping` nach. Reißt sie ab, weil das Plugin beendet, neu gebaut oder neu gestartet wurde, versucht moocp es im selben Takt wieder, ohne neuen Dialog und mit demselben Schlüssel; ein Neubau kostet also keinen Klick, solange das neue Plugin denselben Schlüssel bekommt. Beim Wiederverbinden liest moocp die Werkzeugliste neu und prüft die Namensregeln erneut; die neue Liste sieht ein KI-Werkzeug ab seiner nächsten Sitzung. Solange keine Verbindung besteht, bleiben die zuletzt bekannten Werkzeuge gelistet und antworten mit einem Fehler, der sagt, dass das Entwicklungs-Plugin gerade nicht verbunden ist. War das Plugin beim Start von moocp noch nicht erreichbar, verbindet sich moocp ebenso später, und Werkzeuge gibt es ab der ersten Verbindung. Den einen Neustart und den Ausfall eines gestarteten Plugins gibt es hier nicht: moocp hat das Plugin nicht gestartet und beendet es auch nicht, beim Beenden trennt es nur die Verbindung. Im Protokoll stehen die Anfrage (Name, Ordner, Port), die Antwort der Lehrkraft, jede Verbindung, jeder Verlust und jede abgelehnte Werkzeugliste, nie der Schlüssel.
+
+Läuft moocp schon, holt ein zweiter Start mit `--plugin-entwicklung` nur das Fenster nach vorn; der Parameter wirkt nicht, und nichts wird an die laufende App weitergereicht. moocp also vorher beenden.
+
+Für das Beispiel-Plugin tun das die Startskripte in `beispiele/plugin/`: `entwickeln.ps1` unter Windows, `entwickeln.sh` auf dem Mac. Sie erzeugen einen zufälligen Schlüssel, setzen `MOOCP_PLUGIN_SCHLUESSEL`, starten das Beispiel aus dem Quelltext (`dart run`) auf dem Entwicklungsport aus `plugin.json` und dann moocp mit `--plugin-entwicklung` und diesem Ordner:
+
+```
+powershell -ExecutionPolicy Bypass -File beispiele\plugin\entwickeln.ps1 [-Moocp <Pfad zur moocp.exe>]
+bash beispiele/plugin/entwickeln.sh [<Pfad zum Programm von moocp>]
+```
+
+Unter Windows ist die Vorgabe die installierte App (`%LOCALAPPDATA%\Programs\moocp\moocp.exe`), auf dem Mac der Entwicklungsbau im Repository (`build/macos/Build/Products/Debug/moocp.app`). Das Beispiel läuft dabei mit `--entwicklung`: Seine Standardeingabe gehört dann nicht moocp, und es endet nicht mit ihr, sondern mit Strg+C.
 
 ### Veröffentlichen
 

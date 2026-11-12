@@ -118,6 +118,7 @@ class McpDienst implements AufrufKontext {
 
   /// Das Instanzprofil dieses Servers (E31): Port, Name und Adresse kommen von dort.
   Profil profil;
+  @override
   final MoodleZugang moodle;
   @override
   final Protokoll protokoll;
@@ -2511,6 +2512,9 @@ class _KontextImAufruf implements AufrufKontext {
 
   @override
   String get arbeitsordner => _dienst.arbeitsordner;
+
+  @override
+  MoodleZugang get moodle => _dienst.moodle;
 
   @override
   Future<EingebautErgebnis> eingebautAufrufen(

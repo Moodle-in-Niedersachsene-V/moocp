@@ -91,6 +91,10 @@ _Nicht zu verwechseln mit_: Positivliste.
 Die Liste im Code, die festlegt, welche Moodle-Adressen die App überhaupt anfragen darf. Sie ist die eigentliche Grenze für den Zugriff auf Moodle.
 _Nicht zu verwechseln mit_: Sperrliste.
 
+**Lesender Teil der Positivliste**
+Die Regeln der Positivliste, die eine Seite oder Datei zeigen, ohne in Moodle etwas zu ändern, und kein Schritt eines Schreibvorgangs sind. Nur sie gelten für ein Plugin, das Moodle über die Adresse der App liest; schreiben kann ein Plugin nur über die eingebauten Werkzeuge.
+_Nicht zu verwechseln mit_: Zusatzadresse (geht über die Positivliste hinaus und braucht die Zustimmung der Lehrkraft).
+
 **Protokoll**
 Der Verlauf in der App, in dem jede Anfrage an Moodle mit Methode, Pfad und Status steht, ohne Formularwerte und ohne Zugangsdaten.
 
@@ -131,7 +135,7 @@ Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatz
 Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu.
 
 **Adresse der App (für Plugins)**
-Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge und Freigaben. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
+Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge, Freigaben und Lesen in Moodle. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
 _Nicht zu verwechseln mit_: Zusatzadresse (eine Seite der Moodle-Instanz).
 _Vermeiden_: Host-Schnittstelle, Callback-Server
 

@@ -26,6 +26,7 @@ import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
 import 'mcp_client.dart';
+import 'plugin_moodle_test.dart' show PluginTestMoodle, sitzungsCookie;
 
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
@@ -68,6 +69,8 @@ const _beispielWerkzeuge = [
   'beispiel_pfad',
   'beispiel_hinweis',
   'beispiel_freigabe',
+  'beispiel_moodle_lesen',
+  'beispiel_moodle_gesperrt',
 ];
 
 /// Eine Protokollzeile an die Adresse der App (`/v1/protokoll`), wie von einem Plugin mit
@@ -232,10 +235,11 @@ void main() {
     LaufendePlugins quelle, {
     String arbeitsordner = '',
     Freigaben? freigaben,
+    MoodleZugang? moodle,
   }) async {
     final d = McpDienst(
       einstellungen,
-      MoodleZugang(protokoll),
+      moodle ?? MoodleZugang(protokoll),
       protokoll,
       freigaben ?? Freigaben(protokoll),
       arbeitsordner,
@@ -265,7 +269,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (10 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (12 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -344,6 +348,28 @@ void main() {
       expect(zeilen.join('\n'), isNot(contains(gewaehlt.path)));
       expect(dialoge.aktuell, isNull);
       expect(freigaben.aktuell, isNull);
+    });
+
+    test('Moodle über die Adresse der App: eine erlaubte Seite gelesen, der Adminbereich ohne Dialog abgelehnt', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      moodle.angefragt.clear();
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l, moodle: zugang);
+
+      final gelesen = await client.tool('beispiel_moodle_lesen', {'kurs': 12});
+      final gesperrt = await client.tool('beispiel_moodle_gesperrt', {});
+
+      expect(gelesen, matches(RegExp(r'^Moodle antwortet mit Status 200 \(text/html, \d+ Zeichen\)\.$')));
+      expect(gesperrt, startsWith('Abgelehnt (HTTP 403): Gesperrt für jedes Plugin: /admin/index.php'));
+      expect(moodle.angefragt, ['GET /question/banks.php?courseid=12']);
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: GET /question/banks.php?courseid=… → 200'));
+      expect(zeilen, contains('Plugin „Beispiel“: Gesperrt für Plugins: GET /admin/index.php (Bereich Adminbereich)'));
+      expect(zeilen.join('\n'), isNot(contains(sitzungsCookie)));
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
@@ -670,7 +696,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (10 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (12 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }

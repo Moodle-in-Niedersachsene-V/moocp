@@ -64,8 +64,9 @@
 // `beispiel_datei` (eine Datei im Arbeitsordner ablegen),
 // `beispiel_status` (das eingebaute Werkzeug `status` aufrufen),
 // `beispiel_auswahl`, `beispiel_eingabe`, `beispiel_pfad` und
-// `beispiel_hinweis` (je eine Art Dialog) und `beispiel_freigabe` (um eine
-// Freigabe bitten).
+// `beispiel_hinweis` (je eine Art Dialog), `beispiel_freigabe` (um eine
+// Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
+// lesen) und `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -428,6 +429,58 @@ McpServer _server() {
         );
       } on MoocpFehler catch (f) {
         return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  // Moodle lesen: moocp stellt die Anfrage mit der Sitzung des Profils des
+  // Aufrufs, nur GET und nur, was der lesende Teil seiner Positivliste
+  // erlaubt; jedes Umleitungsziel prüft es genauso. Die Antwort hat `status`,
+  // `inhaltstyp`, `pfad` (nach Umleitungen, ohne Rechner) und `text`, nie
+  // Cookies. Was nicht erlaubt ist, lehnt moocp ohne Dialog ab und nennt den
+  // Grund im Feld `fehler`. Schreiben geht nicht hier, sondern über die
+  // eingebauten Werkzeuge (`/v1/werkzeug`), mit Freigabe und Rücklesen.
+  server.registerTool(
+    'beispiel_moodle_lesen',
+    description:
+        'Liest über moocp die Seite mit den Fragensammlungen eines Kurses und nennt Status, Inhaltstyp und Länge, '
+        'nicht den Inhalt. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'kurs': JsonSchema.integer(description: 'Kurs-ID, die Zahl hinter course/view.php?id=')},
+      required: ['kurs'],
+    ),
+    annotations: hinweise('Moodle lesen (Beispiel)'),
+    callback: (args, extra) async {
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/moodle/lesen', {
+          'pfad': '/question/banks.php?courseid=${(args['kurs'] as num).toInt()}',
+        }, aufruf: token(extra));
+        // Den Inhalt gibt das Beispiel nicht an die KI weiter: Jede Seite von
+        // Moodle nennt im Kopf den Namen der angemeldeten Lehrkraft.
+        return text(
+          'Moodle antwortet mit Status ${antwort['status']} (${antwort['inhaltstyp']}, '
+          '${(antwort['text'] as String).length} Zeichen).',
+        );
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_moodle_gesperrt',
+    description:
+        'Versucht über moocp den Adminbereich von Moodle zu lesen und gibt die Ablehnung von moocp zurück. '
+        '$nurSchnittstelle',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: hinweise('Moodle gesperrt (Beispiel)'),
+    callback: (args, extra) async {
+      try {
+        await anMoocp(adresse(), '/v1/moodle/lesen', {'pfad': '/admin/index.php'}, aufruf: token(extra));
+        return text('Unerwartet: moocp hat den Adminbereich gelesen.', fehler: true);
+      } on MoocpFehler catch (f) {
+        // Die Ablehnung ist hier das erwartete Ergebnis.
+        return text('Abgelehnt (HTTP ${f.status}): ${f.text}');
       }
     },
   );

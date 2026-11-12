@@ -49,6 +49,11 @@ class _Kontext implements AufrufKontext {
   final Protokoll protokoll;
   @override
   final String arbeitsordner;
+
+  /// Nicht angemeldet: Moodle erreicht ein Plugin hier nicht
+  /// (test/plugin_moodle_test.dart prüft den Weg dorthin).
+  @override
+  late final MoodleZugang moodle = MoodleZugang(protokoll);
   final Future<EingebautErgebnis> Function(String name, Future<void> abbruch)? werkzeug;
 
   final aufgerufen = <({String name, Map<String, dynamic> args, String aufrufer})>[];

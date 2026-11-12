@@ -36,7 +36,11 @@
 // Ins Protokoll gehen Plugin, Art und Ausgang, nie die Werte, die die
 // Lehrkraft eingibt oder wählt (A4, E11).
 //
-// Moodle erreicht ein Plugin hier nicht.
+// Moodle: Ein Plugin liest Seiten und lädt Dateien über die App, mit der
+// Sitzung des Profils des Aufrufs und nur in den Grenzen des lesenden Teils
+// der Positivliste (moodle_lesen.dart). Schreiben geht nur über die
+// eingebauten Werkzeuge. Die Antwort trägt nie Cookies oder Kopfzeilen von
+// Moodle, nur Status, Inhaltstyp, den Pfad nach Umleitungen und den Inhalt.
 
 import 'dart:async';
 import 'dart:convert';
@@ -47,10 +51,12 @@ import 'package:path/path.dart' as p;
 
 import '../freigabe.dart' show Bestaetigungen;
 import '../mcp/werkzeugquelle.dart';
-import '../moodle/moodle_zugang.dart' show MoodleFehler;
+import '../moodle/moodle_zugang.dart';
+import '../moodle/sperrliste.dart' show adresseOhneWerte;
 import '../protokoll.dart';
 import 'dialoge.dart';
 import 'klartext.dart';
+import 'moodle_lesen.dart';
 
 export 'klartext.dart' show einzeilig;
 
@@ -66,6 +72,8 @@ const pfadEingabe = '/v1/dialog/eingabe';
 const pfadPfadwahl = '/v1/dialog/pfad';
 const pfadHinweis = '/v1/dialog/hinweis';
 const pfadFreigabe = '/v1/freigabe';
+const pfadMoodleLesen = '/v1/moodle/lesen';
+const pfadMoodleDatei = '/v1/moodle/datei';
 
 /// So lang darf eine Protokollzeile eines Plugins höchstens werden; was
 /// darüber hinausgeht, schneidet die App ab.
@@ -352,7 +360,172 @@ class AppAdresse {
     ])
       pfad: _Funktion(mitAufruf: true, ausfuehren: (a, pl, au, d) => _dialogZeigen(art, a, pl, au, d)),
     pfadFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _freigabeAnfragen),
+    pfadMoodleLesen: const _Funktion(mitAufruf: true, ausfuehren: _moodleLesen),
+    pfadMoodleDatei: const _Funktion(mitAufruf: true, ausfuehren: _moodleDatei),
   };
+
+  static _Antwort _abgebrochen() => _fehler(
+    HttpStatus.conflict,
+    'Abgebrochen: Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen.',
+  );
+
+  /// Ein Fehler des Moodle-Zugangs als Antwort: abgewiesen (403), nicht
+  /// angemeldet (503), zu groß (413), sonst ein Fehler von Moodle oder der
+  /// Verbindung (502). Die Meldungen nennen keine Parameterwerte.
+  static _Antwort _moodleFehler(MoodleFehler x) => switch (x) {
+    AnfrageGesperrt() => _fehler(HttpStatus.forbidden, x.meldung),
+    NichtAngemeldet() => _fehler(HttpStatus.serviceUnavailable, x.meldung),
+    AntwortZuGross() => _fehler(
+      HttpStatus.requestEntityTooLarge,
+      '${x.meldung} Größere Inhalte über $pfadMoodleDatei in den Ordner des Plugins laden.',
+    ),
+    DownloadZuGross() => _fehler(HttpStatus.requestEntityTooLarge, x.meldung),
+    _ => _fehler(HttpStatus.badGateway, x.meldung),
+  };
+
+  /// Prüft `pfad` und `methode` einer Anfrage an Moodle und liefert die
+  /// Adresse an der Instanz; sonst die Antwort mit dem Fehler. Eine andere
+  /// Methode als GET lehnt die App ab, bevor sie etwas fragt: Ein Plugin liest
+  /// hier nur.
+  static Object _moodleAdresse(_Plugin plugin, _Aufruf aufruf, Map<String, Object?> daten) {
+    final moodle = aufruf.kontext.moodle;
+    final basis = moodle.basis;
+    if (!moodle.angemeldet || basis == null) return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
+    final Uri uri;
+    try {
+      uri = pluginAdresse(basis, daten['pfad']);
+    } on FormatException catch (x) {
+      aufruf.kontext.protokoll.eintrag(Art.gesperrt, '${plugin.aufrufer}: Anfrage an Moodle abgewiesen (Pfad ungültig)');
+      return _fehler(HttpStatus.badRequest, x.message);
+    }
+    final methode = daten['methode'] ?? 'GET';
+    if (methode != 'GET') {
+      final m = methode is String ? einzeilig(methode, 10) : '?';
+      aufruf.kontext.protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Gesperrt: $m ${adresseOhneWerte(uri)} (nur Lesen)',
+      );
+      return _fehler(
+        HttpStatus.methodNotAllowed,
+        'Abgelehnt: Ein Plugin liest über die Adresse der App nur (GET). Ändern in Moodle geht über die '
+        'eingebauten Werkzeuge ($pfadWerkzeug), mit Freigabe, Namensprüfung und Rücklesen.',
+      );
+    }
+    return uri;
+  }
+
+  /// `POST /v1/moodle/lesen` `{"pfad": "/…?…"}`: liest eine Seite oder Datei
+  /// der Instanz des Profils des Aufrufs, mit dessen Sitzung, und folgt
+  /// Umleitungen, jede geprüft wie die Adresse selbst. Antwort `{"status": …,
+  /// "inhaltstyp": …, "pfad": …, "text": …}`: der Status von Moodle, der
+  /// Inhaltstyp, der Pfad nach den Umleitungen (ohne Rechner) und der Inhalt
+  /// als Text, höchstens [textHoechstens] Bytes. Nie Cookies oder andere
+  /// Kopfzeilen von Moodle. Endet der äußere Aufruf, geht nichts mehr hinaus.
+  static Future<_Antwort> _moodleLesen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final adresse = _moodleAdresse(plugin, aufruf!, daten);
+    if (adresse case final _Antwort fehler) return fehler;
+    final moodle = aufruf.kontext.moodle;
+    try {
+      final antwort = await Future.any<_Antwort?>([
+        moodle
+            .lesenAls(PluginAufrufer(moodle, plugin.aufrufer), adresse as Uri, hoechstens: textHoechstens)
+            .then(
+              (r) => (
+                status: HttpStatus.ok,
+                json: {
+                  'status': r.status,
+                  'inhaltstyp': r.inhaltstyp,
+                  'pfad': '${r.adresse.path}${MoodleZugang.querySicher(r.adresse)}',
+                  'text': r.text,
+                },
+              ),
+            ),
+        aufruf.ende.then((_) => null),
+      ]);
+      return aufruf.vorbei || antwort == null ? _abgebrochen() : antwort;
+    } on MoodleFehler catch (x) {
+      return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
+    }
+  }
+
+  /// `POST /v1/moodle/datei` `{"pfad": "/…", "dateiname": …}`: lädt eine
+  /// Datei der Instanz in den Unterordner des Plugins im Arbeitsordner des
+  /// Profils (`plugin-<Kurzname>`, wie /v1/arbeitsordner), mit denselben
+  /// Prüfungen wie /v1/moodle/lesen und den Grenzen des Downloads der
+  /// eingebauten Werkzeuge (Größe, keine Seite statt einer Datei, keine
+  /// Umleitung). `dateiname` ist optional, sonst der letzte Teil des Pfads.
+  /// Eine vorhandene Datei wird nie überschrieben. Antwort `{"datei": …,
+  /// "bytes": …}`. Endet der äußere Aufruf, bricht das Laden ab, und es bleibt
+  /// keine Datei liegen.
+  static Future<_Antwort> _moodleDatei(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final adresse = _moodleAdresse(plugin, aufruf!, daten);
+    if (adresse case final _Antwort fehler) return fehler;
+    final uri = adresse as Uri;
+    final name = _dateiname(daten['dateiname'], uri);
+    if (name == null) {
+      return _fehler(
+        HttpStatus.badRequest,
+        'dateiname ist ein einfacher Dateiname ohne Ordner, ohne Steuerzeichen und ohne \\ / : * ? " < > |, '
+        'höchstens 120 Zeichen, nicht mit „.“ am Anfang.',
+      );
+    }
+    final ordner = p.normalize(p.absolute(aufruf.kontext.arbeitsordner, 'plugin-${plugin.kurzname}'));
+    final ziel = File(p.join(ordner, name));
+    if (!p.isWithin(ordner, ziel.path)) return _fehler(HttpStatus.badRequest, 'dateiname ist ungültig.');
+    try {
+      await Directory(ordner).create(recursive: true);
+      if (await ziel.exists()) {
+        return _fehler(HttpStatus.conflict, 'Die Datei $name liegt schon im Ordner des Plugins; nichts überschrieben.');
+      }
+    } on FileSystemException catch (x) {
+      return _fehler(HttpStatus.internalServerError, 'Der Ordner $ordner ließ sich nicht anlegen (${x.runtimeType}).');
+    }
+    final moodle = aufruf.kontext.moodle;
+    final laden = moodle.herunterladenAls(PluginAufrufer(moodle, plugin.aufrufer), uri, ziel, abbruch: aufruf.ende);
+    // Wurde die Datei im selben Augenblick fertig, in dem der Aufruf endete,
+    // bleibt sie nicht liegen.
+    unawaited(
+      laden.then(
+        (_) async {
+          if (aufruf.vorbei) await ziel.delete().then((_) {}, onError: (Object _) {});
+        },
+        onError: (Object _) {},
+      ),
+    );
+    try {
+      final bytes = await Future.any<int?>([laden, aufruf.ende.then((_) => null)]);
+      if (aufruf.vorbei || bytes == null) return _abgebrochen();
+      return (status: HttpStatus.ok, json: {'datei': ziel.path, 'bytes': bytes});
+    } on MoodleFehler catch (x) {
+      return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
+    }
+  }
+
+  /// Der Dateiname für einen Download: der genannte, wenn er gültig ist,
+  /// sonst null; ohne Angabe der letzte Teil des Pfads, mit „_“ statt
+  /// Zeichen, die in keinen Dateinamen gehören.
+  static String? _dateiname(Object? genannt, Uri uri) {
+    final verboten = RegExp(r'[\x00-\x1f\x7f\\/:*?"<>|]');
+    bool gueltig(String n) => n.isNotEmpty && n.length <= 120 && !n.startsWith('.') && !verboten.hasMatch(n);
+    if (genannt != null) return genannt is String && gueltig(genannt) ? genannt : null;
+    final letzter = uri.pathSegments.where((s) => s.isNotEmpty).lastOrNull ?? '';
+    var n = letzter.replaceAll(verboten, '_');
+    while (n.startsWith('.')) {
+      n = n.substring(1);
+    }
+    if (n.length > 120) n = n.substring(n.length - 120);
+    return n.isEmpty ? 'datei' : n;
+  }
 
   /// Höchstens ein Dialog oder eine Freigabe je Aufruf zugleich: Wer einen
   /// zweiten will, solange der erste offen ist, bekommt 409. Ein Plugin mit

@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../freigabe.dart' show Bestaetigungen;
+import '../moodle/moodle_zugang.dart' show MoodleZugang;
 import '../profil.dart';
 import '../protokoll.dart';
 
@@ -111,6 +112,10 @@ abstract interface class AufrufKontext {
 
   /// Der Arbeitsordner des Profils.
   String get arbeitsordner;
+
+  /// Der Moodle-Zugang des Profils: Sitzung, Listen und Protokoll dieser
+  /// Instanz. Ein Plugin liest darüber nur (plugin/moodle_lesen.dart).
+  MoodleZugang get moodle;
 
   /// Ruft das eingebaute Werkzeug [name] mit [args] auf, durch dieselbe Hülle
   /// wie ein Aufruf eines KI-Werkzeugs (Protokoll, Freigaben, Abbruch,

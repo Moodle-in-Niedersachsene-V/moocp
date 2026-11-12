@@ -118,6 +118,10 @@ Sperrbereich? sperrbereichDerAdresse(String pfad) {
 /// hinaus). Ein „/" am Ende bleibt.
 String pfadNormalisieren(String pfad) => _falten(_stufen(pfad).last);
 
+/// Der Text mit aufgelöster Prozentkodierung, so oft, bis nichts mehr zu
+/// lösen ist (wie in [pfadNormalisieren]), sonst unverändert.
+String prozentAufgeloest(String text) => _stufen(text).last;
+
 /// Der Text nach jeder Runde Prozentdekodierung, der erste unverändert. Eine
 /// Kodierung wird mehrfach aufgelöst, weil „%252e" nach der ersten Runde
 /// „%2e" und nach der zweiten „." ist; ein Muster, das dahinter etwas

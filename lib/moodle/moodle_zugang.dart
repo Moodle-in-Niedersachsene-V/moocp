@@ -57,6 +57,27 @@ class DownloadZuGross extends MoodleFehler {
             'Eine kleinere Auswahl sichern.');
 }
 
+/// Eine Anfrage, die vor dem Senden abgewiesen wurde: fremder Rechner,
+/// Sperrliste, Positivliste oder eine Regel des [Aufrufer]. Moodle hat sie nie
+/// gesehen; ein neuer Versuch hilft nicht.
+class AnfrageGesperrt extends MoodleFehler {
+  AnfrageGesperrt(super.meldung);
+}
+
+/// Der Zugang ist nicht angemeldet: Die Lehrkraft muss sich in der App
+/// anmelden. Nichts wurde gesendet.
+class NichtAngemeldet extends MoodleFehler {
+  NichtAngemeldet() : super('Nicht angemeldet. Bitte in der App anmelden.');
+}
+
+/// Eine Antwort ist größer als die Grenze, die der Aufrufer für Text gesetzt
+/// hat ([MoodleZugang.lesenAls]); gelesen wird nur bis zur Grenze, dann bricht
+/// die Anfrage ab.
+class AntwortZuGross extends MoodleFehler {
+  AntwortZuGross(int hoechstens)
+    : super('Die Antwort von Moodle ist größer als ${hoechstens ~/ 1024} KB; als Text nicht geliefert.');
+}
+
 /// Moodle war nicht zu erreichen: keine Verbindung, Abbruch, TLS-Fehler oder
 /// keine Antwort innerhalb der Zeitgrenze.
 class MoodleNichtErreichbar extends MoodleFehler {
@@ -172,10 +193,22 @@ class Erlaubt {
     this.formular,
     this.inhalt,
     this.anhang,
+    this.lesend = false,
   });
   final String methode;
   final String pfad;
   final String zweck;
+
+  /// Ob die Regel eine Seite oder Datei nur liest: ein GET, das Inhalt oder
+  /// Einstellungen zeigt, ohne in Moodle etwas zu ändern, und nicht nur als
+  /// Schritt eines Schreibvorgangs da ist (Formular für Neues, Rückfrage vor dem
+  /// Löschen, Aktion mit sesskey). Nur solche Regeln gelten für Plugins
+  /// ([MoodleZugang.erlaubtZumLesen]): Ein Plugin schreibt nur über die
+  /// eingebauten Werkzeuge, mit Freigabe, Namensprüfung, Stand-Prüfung und
+  /// Rücklesen (E36). Für die eingebauten Werkzeuge ändert die Angabe nichts.
+  /// Im Zweifel bleibt sie false: Ein GET mit Nebenwirkung (eine Sperre, ein
+  /// angelegter Datensatz) ist kein Lesen.
+  final bool lesend;
   final bool Function(Map<String, String> q)? parameter;
   final bool Function(Felder f)? formular;
 
@@ -224,9 +257,11 @@ String? themeStylesheetIn(dom.Document doc) {
 ///
 /// Jede Anfrage fragt ihren Aufrufer an denselben Stellen, auch ein Download:
 /// die Prüfung vor dem Senden (`_pruefePositivliste`), die Zeile danach
-/// (`_protokolliere`). Es gibt einen Aufrufer, die eingebauten Werkzeuge der
-/// App; für sie gelten Sperrliste und Positivliste wie in E3, und im
-/// Protokoll steht nie ein Wert (A4).
+/// (`_protokolliere`). Es gibt zwei Aufrufer: die eingebauten Werkzeuge der
+/// App, für die Sperrliste und Positivliste wie in E3 gelten, und ein Plugin,
+/// das über die Adresse der App liest (plugin/moodle_lesen.dart). Im
+/// Protokoll steht bei beiden nie ein Wert (A4). Die Anmeldung stellt immer
+/// die App selbst, nie ein Plugin.
 abstract class Aufrufer {
   /// Die Regel der Sperrliste, die [uri] sperrt, sonst null. Sie wird vor
   /// [erlaubt] gefragt: Was sie sperrt, geht nie hinaus.
@@ -249,6 +284,20 @@ abstract class Aufrufer {
 
   /// Die Protokollzeile einer gestellten Anfrage ohne ihren Status.
   String anfragezeile(String methode, Uri uri, Anhang? anhang);
+
+  /// Die Meldung, wenn [gesperrtDurch] die Anfrage mit [regel] sperrt; ohne
+  /// Parameterwerte.
+  String sperrmeldung(Uri uri, String regel) =>
+      'Gesperrt (Datenschutz): ${uri.path} zeigt personenbezogene Daten -- Bewertungen, '
+      'Abgaben, Versuche, Profile oder Protokolle. Die App liest sie grundsätzlich nicht. '
+      'Dem Nutzer sagen, dass dieser Teil der Aufgabe offen bleibt, oder -- falls die '
+      'Adresse harmlos ist -- dass die Sperre zu weit ist (Regel $regel).';
+
+  /// Die Meldung, wenn [erlaubt] die Anfrage nicht durchlässt; ohne
+  /// Parameterwerte.
+  String ablehnmeldung(String methode, Uri uri) =>
+      'Gesperrt: $methode ${uri.path} steht nicht auf der Positivliste dieses Servers '
+      '(oder die Werte passen nicht zu dem, was dort erlaubt ist).';
 }
 
 /// Die eingebauten Werkzeuge der App: Sperrliste (sperrliste.dart) und
@@ -286,7 +335,7 @@ class _EingebauteWerkzeuge extends Aufrufer {
 
   @override
   String anfragezeile(String methode, Uri uri, Anhang? anhang) =>
-      '$methode ${uri.path}${_zugang._querySicher(uri)}'
+      '$methode ${uri.path}${MoodleZugang.querySicher(uri)}'
       '${anhang != null ? " (${anhang.dateiname})" : ""}';
 }
 
@@ -596,12 +645,14 @@ class MoodleZugang {
       r'^/course/modedit\.php$',
       'Bearbeitungsformular lesen',
       parameter: (q) => q.length == 1 && _zahl(q['update']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/course/editsection\.php$',
       'Abschnittsformular lesen',
       parameter: (q) => _nurSchluessel(q, {'id', 'sr'}) && _zahl(q['id']),
+      lesend: true,
     ),
     // Nur lesen: Mit Formularwerten würde dieselbe Adresse Filter umschalten.
     Erlaubt(
@@ -609,6 +660,7 @@ class MoodleZugang {
       r'^/filter/manage\.php$',
       'Filtereinstellungen eines Kurses (kurs_filter)',
       parameter: (q) => q.length == 1 && _zahl(q['contextid']),
+      lesend: true,
     ),
     // Fragen und Tests: nie die Fragenübersicht (question/edit.php) -- sie
     // zeigt „Erstellt von" mit Klarnamen.
@@ -617,18 +669,21 @@ class MoodleZugang {
       r'^/question/banks\.php$',
       'Fragensammlungen eines Kurses',
       parameter: (q) => q.length == 1 && _zahl(q['courseid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/question/bank/importquestions/import\.php$',
       'Kategorien, Importformular',
       parameter: (q) => q.length == 1 && _zahl(q['cmid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/question/bank/exportquestions/export\.php$',
       'Exportformular',
       parameter: (q) => q.length == 1 && _zahl(q['cmid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -654,12 +709,14 @@ class MoodleZugang {
             'returnurl',
           }) &&
           _zahl(q['cmid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/quiz/edit\.php$',
       'Zusammenstellung eines Tests',
       parameter: (q) => q.length == 1 && _zahl(q['cmid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -677,24 +734,28 @@ class MoodleZugang {
       'STACK: CAS-Notizblock',
       parameter: (q) =>
           q.length == 2 && _zahl(q['questionid']) && _zahl(q['cmid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/checklist/edit\.php$',
       'Fortschrittsliste: die Einträge',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/wiki/view\.php$',
       'Wiki: Startseite oder eine Seite',
       parameter: (q) => q.length == 1 && (_zahl(q['id']) || _zahl(q['pageid'])),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/learningmap/view\.php$',
       'Lernlandkarte ansehen',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -702,12 +763,14 @@ class MoodleZugang {
       'Wiki: Seitenliste (option 5; 1 und 6 zeigen Namen)',
       parameter: (q) =>
           q.length == 2 && _zahl(q['pageid']) && q['option'] == '5',
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/board/view\.php$',
       'Board: die Board-ID',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -723,18 +786,21 @@ class MoodleZugang {
           _nurSchluessel(q, {'contextid', 'component', 'area'}) &&
           _zahl(q['contextid']) &&
           q['component'] == 'mod_assign',
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/grade/grading/form/(rubric|guide)/edit\.php$',
       'Bewertungsschema: Definitionsformular',
       parameter: (q) => q.length == 1 && _zahl(q['areaid']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
       r'^/mod/book/tool/print/index\.php$',
       'Buch: alle Kapitel mit chapterid',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -744,6 +810,7 @@ class MoodleZugang {
           _nurSchluessel(q, {'cmid', 'id', 'pagenum', 'subchapter'}) &&
           _zahl(q['cmid']) &&
           (_zahl(q['id']) || _zahl(q['pagenum'])),
+      lesend: true,
     ),
     // Sicherung einer Aktivität (sicherung.dart). Nur die gemessenen Schritte
     // der Assistenten; Nutzerdaten bleiben aus (sicherung_regeln.dart).
@@ -773,8 +840,9 @@ class MoodleZugang {
       'GET',
       r'^/draftfile\.php/\d+/user/draft/\d+/.+',
       'Datei im Entwurfsbereich',
+      lesend: true,
     ),
-    Erlaubt('GET', r'^/pluginfile\.php/\d+/.+', 'Datei im Kurs'),
+    Erlaubt('GET', r'^/pluginfile\.php/\d+/.+', 'Datei im Kurs', lesend: true),
     Erlaubt(
       'POST',
       r'^/lib/ajax/service\.php$',
@@ -866,6 +934,7 @@ class MoodleZugang {
       r'^/group/groupings\.php$',
       'Gruppierungen eines Kurses (nur Namen)',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'GET',
@@ -884,6 +953,7 @@ class MoodleZugang {
       r'^/group/assign\.php$',
       'Gruppen einer Gruppierung (nur Namen)',
       parameter: (q) => q.length == 1 && _zahl(q['id']),
+      lesend: true,
     ),
     Erlaubt(
       'POST',
@@ -1492,6 +1562,20 @@ class MoodleZugang {
     return false;
   }
 
+  /// Ob eine Regel der Positivliste, die nur liest ([Erlaubt.lesend]), ein GET
+  /// auf [uri] erlaubt. Das ist die Positivliste eines Plugins (E36): dieselben
+  /// Regeln wie für die eingebauten Werkzeuge, ohne die Schritte von
+  /// Schreibvorgängen.
+  bool erlaubtZumLesen(Uri uri) {
+    for (final e in positivliste) {
+      if (!e.lesend || e.methode != 'GET' || !RegExp(e.pfad).hasMatch(uri.path)) continue;
+      if (e.formular != null || e.anhang != null || e.inhalt != null) continue;
+      if (e.parameter != null && !e.parameter!(uri.queryParameters)) continue;
+      return true;
+    }
+    return false;
+  }
+
   Uri? _basis;
   String? _benutzer;
   String? _passwort;
@@ -1761,9 +1845,7 @@ class MoodleZugang {
   }
 
   void _pruefeAngemeldet() {
-    if (_basis == null || _passwort == null) {
-      throw MoodleFehler('Nicht angemeldet. Bitte in der App anmelden.');
-    }
+    if (_basis == null || _passwort == null) throw NichtAngemeldet();
   }
 
   // ---------------------------------------------------------------------
@@ -1777,10 +1859,23 @@ class MoodleZugang {
     final uri = pfadMitQuery.startsWith('http')
         ? Uri.parse(pfadMitQuery)
         : _adresse(pfadMitQuery);
-    var r = await _mitUmleitungen(uri);
+    return _lesen(uri, _werkzeuge);
+  }
+
+  /// Liest [uri] wie [lesen], für [aufrufer]: Die Adresse und jedes
+  /// Umleitungsziel prüft dessen Listen, und die Protokollzeilen nennt er. Mehr
+  /// als [hoechstens] Bytes liest es nicht ([AntwortZuGross]). Eine abgelaufene
+  /// Sitzung meldet die App selbst neu an, genau einmal, wie bei [lesen].
+  Future<Antwort> lesenAls(Aufrufer aufrufer, Uri uri, {int? hoechstens}) async {
+    _pruefeAngemeldet();
+    return _lesen(uri, aufrufer, hoechstens: hoechstens);
+  }
+
+  Future<Antwort> _lesen(Uri uri, Aufrufer aufrufer, {int? hoechstens}) async {
+    var r = await _mitUmleitungen(uri, aufrufer, hoechstens);
     if (_istAnmeldeseite(r.adresse)) {
       await _neuAnmelden();
-      r = await _mitUmleitungen(uri);
+      r = await _mitUmleitungen(uri, aufrufer, hoechstens);
       if (_istAnmeldeseite(r.adresse)) {
         throw MoodleFehler(
           'Nach der Neuanmeldung landet die Anfrage wieder auf der Anmeldeseite.',
@@ -1927,10 +2022,30 @@ class MoodleZugang {
   /// Größe wird vorher geprüft, und beim Laden zählt jedes Stück mit, damit eine
   /// Datei, die mehr liefert als angekündigt, den Speicherplatz nicht füllt
   /// ([DownloadZuGross]).
+  ///
   Future<int> herunterladen(String pfadMitQuery, File ziel, {int maxBytes = archivGrenzeStandard}) async {
     _pruefeAngemeldet();
-    final aufrufer = _werkzeuge;
-    final uri = _adresse(pfadMitQuery);
+    return _herunterladen(_adresse(pfadMitQuery), ziel, maxBytes, _werkzeuge, null);
+  }
+
+  /// Wie [herunterladen], für [aufrufer] (ein Plugin, plugin/moodle_lesen.dart):
+  /// Dessen Listen prüfen die Adresse, und seine Zeile steht im Protokoll.
+  /// Erfüllt sich [abbruch], hört das Laden beim nächsten Stück auf, und der
+  /// Teil verschwindet.
+  Future<int> herunterladenAls(
+    Aufrufer aufrufer,
+    Uri uri,
+    File ziel, {
+    int maxBytes = archivGrenzeStandard,
+    Future<void>? abbruch,
+  }) async {
+    _pruefeAngemeldet();
+    return _herunterladen(uri, ziel, maxBytes, aufrufer, abbruch);
+  }
+
+  Future<int> _herunterladen(Uri uri, File ziel, int maxBytes, Aufrufer aufrufer, Future<void>? abbruch) async {
+    var abgebrochen = false;
+    unawaited(abbruch?.then((_) => abgebrochen = true));
     _pruefePositivliste(aufrufer, 'GET', uri, null, null);
     if (await ziel.exists()) {
       throw MoodleFehler('Zieldatei existiert schon; nichts überschrieben.');
@@ -1966,6 +2081,7 @@ class MoodleZugang {
       senke = teil.openWrite();
       var gelesen = 0;
       await for (final d in res.timeout(antwortgrenze)) {
+        if (abgebrochen) throw MoodleFehler('Abgebrochen; nichts übernommen.');
         gelesen += d.length;
         if (gelesen > maxBytes) throw DownloadZuGross(maxBytes);
         senke.add(d);
@@ -1978,6 +2094,7 @@ class MoodleZugang {
           'Die Datei ist unvollständig ($gelesen von $erwartet Bytes).',
         );
       }
+      if (abgebrochen) throw MoodleFehler('Abgebrochen; nichts übernommen.');
       await teil.rename(ziel.path);
       fertig = true;
       return gelesen;
@@ -2022,10 +2139,10 @@ class MoodleZugang {
 
   bool _istAnmeldeseite(Uri u) => u.path == '/login/index.php';
 
-  Future<Antwort> _mitUmleitungen(Uri start) async {
+  Future<Antwort> _mitUmleitungen(Uri start, Aufrufer aufrufer, int? hoechstens) async {
     var uri = start;
     for (var i = 0; i < 8; i++) {
-      final r = await _roh('GET', uri);
+      final r = await _roh('GET', uri, aufrufer: aufrufer, hoechstens: hoechstens);
       final ziel = _umleitung(r);
       if (ziel == null) return r;
       // Umleitung auf die Anmeldeseite: nicht folgen, Aufrufer entscheidet.
@@ -2074,29 +2191,21 @@ class MoodleZugang {
     Anhang? anhang,
   ]) {
     if (_basis == null || uri.host != _basis!.host || !_schemeErlaubt(uri)) {
-      throw MoodleFehler(
+      throw AnfrageGesperrt(
         'Gesperrt: fremder Rechner oder kein https (${uri.host}).',
       );
     }
     final regel = aufrufer.gesperrtDurch(uri);
     if (regel != null) {
       protokoll.eintrag(Art.gesperrt, aufrufer.sperrzeile(methode, uri, regel));
-      throw MoodleFehler(
-        'Gesperrt (Datenschutz): ${uri.path} zeigt personenbezogene Daten -- Bewertungen, '
-        'Abgaben, Versuche, Profile oder Protokolle. Die App liest sie grundsätzlich nicht. '
-        'Dem Nutzer sagen, dass dieser Teil der Aufgabe offen bleibt, oder -- falls die '
-        'Adresse harmlos ist -- dass die Sperre zu weit ist (Regel $regel).',
-      );
+      throw AnfrageGesperrt(aufrufer.sperrmeldung(uri, regel));
     }
     if (aufrufer.erlaubt(methode, uri, formular, rumpf, anhang)) return;
     protokoll.eintrag(
       Art.gesperrt,
       aufrufer.ablehnzeile(methode, uri, formular),
     );
-    throw MoodleFehler(
-      'Gesperrt: $methode ${uri.path} steht nicht auf der Positivliste dieses Servers '
-      '(oder die Werte passen nicht zu dem, was dort erlaubt ist).',
-    );
+    throw AnfrageGesperrt(aufrufer.ablehnmeldung(methode, uri));
   }
 
   /// Trägt eine gestellte Anfrage ins Protokoll ein, für jede Anfrage
@@ -2157,8 +2266,12 @@ class MoodleZugang {
     Anhang? anhang,
     String? rumpf,
     bool browser = false,
+    Aufrufer? aufrufer,
+    int? hoechstens,
   }) async {
-    final aufrufer = _werkzeuge;
+    // Ohne Angabe die App selbst -- auch die Anmeldung, wenn ein Plugin sie
+    // ausgelöst hat.
+    aufrufer ??= _werkzeuge;
     // Anfragen des Browsers sind in fuerBrowser geprüft, gegen ihre eigene
     // Liste; die Sperrliste gilt dort zuerst wie hier.
     if (!browser) {
@@ -2234,9 +2347,21 @@ class MoodleZugang {
           _cookies[c.name] = c.value;
         }
       }
-      final bytes = await res
-          .fold<BytesBuilder>(BytesBuilder(copy: false), (b, d) => b..add(d))
-          .timeout(antwortgrenze);
+      final bytes = BytesBuilder(copy: false);
+      var zuGross = false;
+      await for (final d in res.timeout(antwortgrenze)) {
+        if (hoechstens != null && bytes.length + d.length > hoechstens) {
+          // Nicht weiterlesen: Das Verlassen der Schleife beendet die Antwort,
+          // und die Verbindung schließt finally.
+          zuGross = true;
+          break;
+        }
+        bytes.add(d);
+      }
+      if (zuGross) {
+        _protokolliere(aufrufer, Art.moodle, methode, uri, res.statusCode, hinweis: ' (zu groß, abgebrochen)');
+        throw AntwortZuGross(hoechstens!);
+      }
       final roh = bytes.takeBytes();
       final schutz = schutzErkennen(
         res.statusCode,
@@ -2319,7 +2444,9 @@ class MoodleZugang {
     }
   }
 
-  String _querySicher(Uri uri) {
+  /// Die Query einer Adresse für das Protokoll, mit „?“ davor: der sesskey als
+  /// „…“, die Query der Anmeldeseite ganz als „…“.
+  static String querySicher(Uri uri) {
     if (uri.query.isEmpty) return '';
     if (uri.path == '/login/index.php') return '?…';
     // Der sesskey ist ein Schlüssel der Sitzung: nicht ins Protokoll.

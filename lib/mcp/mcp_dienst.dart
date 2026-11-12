@@ -404,7 +404,10 @@ class McpDienst implements AufrufKontext {
               profil: profil,
               token: aufrufToken(),
               abbruch: abbruch,
-              kontext: this,
+              // Mit dem Zähler dieses Aufrufs: Lässt die Stufe eine Freigabe
+              // aus, um die das Plugin bittet, erfährt die KI es in der
+              // Antwort auf genau diesen Aufruf.
+              kontext: _KontextImAufruf(this, Freigaben.zaehlerImAufruf),
             ),
           ),
         );
@@ -443,6 +446,51 @@ class McpDienst implements AufrufKontext {
       text: [for (final c in r.content) if (c is TextContent) c.text].join('\n'),
       fehlgeschlagen: r.isError == true,
     );
+  }
+
+  @override
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null);
+
+  /// [zaehler] ist der des Werkzeugaufrufs, zu dem die Freigabe gehört
+  /// (_KontextImAufruf); er bekommt eine ausgelassene Freigabe mitgezählt.
+  /// Titel und Zusammenfassung stammen vom Plugin: Der Dialog kennzeichnet
+  /// sie so (FreigabeAnfrage.vomPlugin), und ins Protokoll geht statt des
+  /// Titels nur, dass ein Plugin fragt.
+  Future<PluginFreigabeAusgang> _pluginFreigabe(
+    String titel,
+    String zusammenfassung,
+    Bestaetigungen ab,
+    Future<void> abbruch,
+    String aufrufer,
+    AufrufZaehler? zaehler,
+  ) async {
+    final a = FreigabeAnfrage(
+      titel: titel,
+      punkte: const [],
+      vergleich: const [],
+      knopf: 'Freigeben',
+      ablehnen: 'Ablehnen',
+      ohneEntscheidung: 'wird nichts freigegeben',
+      ab: ab,
+      vomPlugin: zusammenfassung,
+      protokolltitel: 'Freigabe eines Plugins',
+    );
+    final eigener = AufrufZaehler();
+    final ja = await Freigaben.ohneTestfreigabe(
+      () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), zaehler: eigener, aufrufer: aufrufer),
+    );
+    if (eigener.ausgelassen > 0) {
+      zaehler?.ausgelassen += eigener.ausgelassen;
+      return PluginFreigabeAusgang.ohneFrage;
+    }
+    if (ja) return PluginFreigabeAusgang.freigegeben;
+    return a.verfallen ? PluginFreigabeAusgang.abgebrochen : PluginFreigabeAusgang.abgelehnt;
   }
 
   /// Die Werkzeuge der App selbst, in der Reihenfolge der Werkzeugliste.
@@ -2446,4 +2494,38 @@ class McpDienst implements AufrufKontext {
       ),
     );
   }
+}
+
+/// Der Kontext eines Werkzeugaufrufs, der an ein Plugin geht: der MCP-Dienst
+/// des Profils, dazu der Zähler dieses Aufrufs (Freigaben.zaehlerImAufruf).
+/// Die Adresse der App bearbeitet die Anfragen des Plugins außerhalb der Zone
+/// des Aufrufs; ohne den Zähler hier erführe die KI nicht, dass eine
+/// Freigabe des Plugins wegen der Stufe ausgelassen wurde.
+class _KontextImAufruf implements AufrufKontext {
+  _KontextImAufruf(this._dienst, this._zaehler);
+  final McpDienst _dienst;
+  final AufrufZaehler? _zaehler;
+
+  @override
+  Protokoll get protokoll => _dienst.protokoll;
+
+  @override
+  String get arbeitsordner => _dienst.arbeitsordner;
+
+  @override
+  Future<EingebautErgebnis> eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst.eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer);
+
+  @override
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler);
 }

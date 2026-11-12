@@ -10,6 +10,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import '../freigabe.dart' show Bestaetigungen;
 import '../profil.dart';
 import '../protokoll.dart';
 
@@ -81,10 +82,29 @@ class WerkzeugAufruf {
 /// bekäme, und ob es ein Werkzeugfehler ist (MCP `isError`).
 typedef EingebautErgebnis = ({String text, bool fehlgeschlagen});
 
+/// Wie eine Freigabe ausging, um die ein Plugin gebeten hat
+/// ([AufrufKontext.pluginFreigabe]).
+enum PluginFreigabeAusgang {
+  /// Die Lehrkraft hat freigegeben.
+  freigegeben,
+
+  /// Die eingestellte Stufe lässt die Frage aus; das gilt als freigegeben,
+  /// und die KI erfährt es wie bei jeder ausgelassenen Freigabe.
+  ohneFrage,
+
+  /// Die Lehrkraft hat abgelehnt.
+  abgelehnt,
+
+  /// Ohne Entscheidung: Frist abgelaufen, oder der Aufruf ist zu Ende oder
+  /// abgebrochen.
+  abgebrochen,
+}
+
 /// Was ein Aufruf aus dem MCP-Server seines Instanzprofils mitbringt, damit
 /// ein Plugin während des Aufrufs die App nutzen kann (Adresse der App,
-/// plugin/app_adresse.dart): Protokoll und Arbeitsordner dieses Profils und
-/// seine eingebauten Werkzeuge. Der MCP-Dienst des Profils ist es selbst.
+/// plugin/app_adresse.dart): Protokoll und Arbeitsordner dieses Profils, seine
+/// eingebauten Werkzeuge und seine Freigaben. Umgesetzt vom MCP-Dienst des
+/// Profils.
 abstract interface class AufrufKontext {
   /// Das Protokoll des Profils (die Sicht aus `Protokoll.fuer`).
   Protokoll get protokoll;
@@ -101,6 +121,21 @@ abstract interface class AufrufKontext {
   Future<EingebautErgebnis> eingebautAufrufen(
     String name,
     Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  });
+
+  /// Stellt eine Freigabe, um die das Plugin [aufrufer] bittet, durch die
+  /// Freigaben dieses Profils (Freigaben.anfragen): mit [titel] und
+  /// [zusammenfassung] des Plugins (schon bereinigt), gefragt ab der Stufe
+  /// [ab], mit allen Regeln einer Freigabe (nur Maus, Wartezeit, Frist,
+  /// Protokoll). Der Testbetrieb gibt sie nie automatisch frei. Lässt die
+  /// Stufe der Lehrkraft die Frage aus, zählt das für den Aufruf des Plugins
+  /// wie jede ausgelassene Freigabe. Erfüllt sich [abbruch], verfällt sie.
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
   });

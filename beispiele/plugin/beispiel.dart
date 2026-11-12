@@ -59,10 +59,13 @@
 // <Schlüssel>`) und dem Token des laufenden Aufrufs im Kopf `Moocp-Aufruf`.
 // Sie gilt nur, solange die KI ein Werkzeug des Plugins aufruft; danach lehnt
 // moocp das Token ab. Die Hilfsfunktion [anMoocp] unten lässt sich in ein
-// eigenes Plugin übernehmen. Drei Werkzeuge zeigen je einen Weg:
+// eigenes Plugin übernehmen. Je ein Werkzeug zeigt einen Weg:
 // `beispiel_protokoll` (eine Zeile ins Protokoll von moocp),
-// `beispiel_datei` (eine Datei im Arbeitsordner ablegen) und
-// `beispiel_status` (das eingebaute Werkzeug `status` aufrufen).
+// `beispiel_datei` (eine Datei im Arbeitsordner ablegen),
+// `beispiel_status` (das eingebaute Werkzeug `status` aufrufen),
+// `beispiel_auswahl`, `beispiel_eingabe`, `beispiel_pfad` und
+// `beispiel_hinweis` (je eine Art Dialog) und `beispiel_freigabe` (um eine
+// Freigabe bitten).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -273,6 +276,156 @@ McpServer _server() {
           aufruf: token(extra),
         );
         return text('${antwort['text']}', fehler: antwort['fehlgeschlagen'] == true);
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  // Dialoge: Ein Plugin öffnet keine Fenster, es beschreibt den Dialog, und
+  // moocp zeigt ihn mit dem Plugin als Absender. Alles ist reiner Text; die
+  // Knöpfe beschriftet moocp. Die Antwort enthält immer `abgebrochen`; ist es
+  // false, stehen die Felder der Art daneben. Je Aufruf ist nur ein Dialog
+  // zugleich offen. Ein Dialog ist keine Freigabe.
+  const nurSchnittstelle = 'Zeigt nur die Schnittstelle der Plugins.';
+  ToolAnnotations hinweise(String titel) =>
+      ToolAnnotations(title: titel, readOnlyHint: true, destructiveHint: false, openWorldHint: false);
+
+  server.registerTool(
+    'beispiel_auswahl',
+    description:
+        'Lässt die Lehrkraft in moocp aus einer Liste mit Suchfeld wählen und nennt, was sie gewählt hat. '
+        '$nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'mehrfach': JsonSchema.boolean(description: 'Ob mehrere Einträge wählbar sind.')},
+    ),
+    annotations: hinweise('Auswahl (Beispiel)'),
+    callback: (args, extra) async {
+      const farben = ['Rot', 'Grün', 'Blau', 'Gelb', 'Schwarz', 'Weiß'];
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/dialog/auswahl', {
+          'titel': 'Farben wählen',
+          'text': 'Welche Farben soll das Beispiel nennen?',
+          'eintraege': farben,
+          'mehrfach': args['mehrfach'] == true,
+        }, aufruf: token(extra));
+        if (antwort['abgebrochen'] == true) return text('Die Lehrkraft hat nichts gewählt.');
+        // Gewählt sind Nummern in der Liste, ab 0.
+        final gewaehlt = [for (final i in antwort['gewaehlt'] as List) farben[i as int]];
+        return text('Gewählt: ${gewaehlt.join(', ')}');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_eingabe',
+    description:
+        'Lässt die Lehrkraft in moocp einen Text oder Link eingeben und gibt ihn zurück. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'link': JsonSchema.boolean(description: 'Ob ein Link (http oder https) verlangt ist.')},
+    ),
+    annotations: hinweise('Eingabe (Beispiel)'),
+    callback: (args, extra) async {
+      final link = args['link'] == true;
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/dialog/eingabe', {
+          'titel': link ? 'Link eingeben' : 'Text eingeben',
+          'art': link ? 'link' : 'text',
+          'vorgabe': link ? 'https://' : '',
+        }, aufruf: token(extra));
+        if (antwort['abgebrochen'] == true) return text('Die Lehrkraft hat nichts eingegeben.');
+        return text('Eingegeben: ${antwort['text']}');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_pfad',
+    description:
+        'Lässt die Lehrkraft in moocp einen Ordner oder eine Datei wählen und nennt, wie viele Einträge der '
+        'Ordner hat oder wie groß die Datei ist. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'datei': JsonSchema.boolean(description: 'Ob eine Datei statt eines Ordners gewählt wird.')},
+    ),
+    annotations: hinweise('Ordner oder Datei wählen (Beispiel)'),
+    callback: (args, extra) async {
+      final datei = args['datei'] == true;
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/dialog/pfad', {
+          'titel': datei ? 'Datei wählen' : 'Ordner wählen',
+          'art': datei ? 'datei' : 'ordner',
+        }, aufruf: token(extra));
+        if (antwort['abgebrochen'] == true) return text('Die Lehrkraft hat nichts gewählt.');
+        // moocp nennt nur den Pfad; lesen tut das Plugin selbst, mit den
+        // Rechten der Lehrkraft. Den Pfad gibt dieses Beispiel nicht an die
+        // KI weiter: Er kann Namen enthalten.
+        final pfad = antwort['pfad'] as String;
+        return text(
+          datei
+              ? 'Die gewählte Datei hat ${await File(pfad).length()} Bytes.'
+              : 'Der gewählte Ordner hat ${await Directory(pfad).list().length} Einträge.',
+        );
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      } on FileSystemException {
+        return text('Das Gewählte ließ sich nicht lesen.', fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_hinweis',
+    description: 'Zeigt der Lehrkraft in moocp einen Hinweis und wartet, bis sie ihn bestätigt. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'text': JsonSchema.string(description: 'Der Text des Hinweises.')},
+      required: ['text'],
+    ),
+    annotations: hinweise('Hinweis (Beispiel)'),
+    callback: (args, extra) async {
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/dialog/hinweis', {
+          'titel': 'Hinweis des Beispiels',
+          'text': '${args['text']}',
+        }, aufruf: token(extra));
+        return text(antwort['abgebrochen'] == true ? 'Der Hinweis wurde nicht bestätigt.' : 'Bestätigt.');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  // Eine Freigabe: Das Plugin nennt Titel und Zusammenfassung und die Stufe,
+  // ab der gefragt wird („mittel“, „alle“ oder „keine“ für jede Stufe). Es
+  // gelten alle Regeln einer Freigabe von moocp; der Dialog kennzeichnet die
+  // Zusammenfassung als vom Plugin, nicht von moocp geprüft. Hat die Stufe
+  // der Lehrkraft die Frage ausgelassen, ist `ohneFrage` true.
+  server.registerTool(
+    'beispiel_freigabe',
+    description:
+        'Bittet die Lehrkraft in moocp um eine Freigabe und nennt den Ausgang. Ändert nichts. '
+        '$nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'ab': JsonSchema.string(
+          description: 'Ab welcher Stufe gefragt wird: mittel, alle oder keine (auf jeder Stufe).',
+        ),
+      },
+    ),
+    annotations: hinweise('Freigabe (Beispiel)'),
+    callback: (args, extra) async {
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/freigabe', {
+          'titel': 'Beispiel freigeben?',
+          'zusammenfassung': 'Das Beispiel-Plugin fragt nur zur Probe.\nEs ändert nichts.',
+          'ab': args['ab'] ?? 'mittel',
+        }, aufruf: token(extra));
+        return text(
+          'Ausgang: ${antwort['ausgang']}${antwort['ohneFrage'] == true ? ' (ohne Frage, wegen der Stufe)' : ''}',
+        );
       } on MoocpFehler catch (f) {
         return text(f.text, fehler: true);
       }

@@ -1,11 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
-import 'package:moocp/main.dart' show FreigabeDialog, FreigabeDialoge, Sperrzeit;
+import 'package:moocp/main.dart'
+    show FreigabeDialog, FreigabeDialoge, PluginDialogAnzeige, PluginDialogFenster, Sperrzeit;
+import 'package:moocp/mcp/mcp_dienst.dart';
+import 'package:moocp/mcp/werkzeugquelle.dart';
+import 'package:moocp/moodle/moodle_zugang.dart';
+import 'package:moocp/plugin/dialoge.dart';
+import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
+import 'package:path/path.dart' as p;
 
 FreigabeAnfrage _anfrage(String titel) =>
     FreigabeAnfrage(titel: titel, punkte: const [], vergleich: const []);
@@ -17,6 +28,25 @@ Widget _fenster(Freigaben freigaben) => MaterialApp(
     child: const Scaffold(body: Text('Hauptfenster')),
   ),
 );
+
+/// Das Fenster der App mit den Dialogen der Plugins.
+Widget _pluginFenster(PluginDialoge dialoge) => MaterialApp(
+  home: PluginDialogAnzeige(
+    dialoge: dialoge,
+    nachVorn: () async {},
+    child: const Scaffold(body: Text('Hauptfenster')),
+  ),
+);
+
+PluginDialog _pluginDialog(PluginDialogArt art, Map<String, Object?> json) =>
+    PluginDialog.ausJson(art, 'Plugin „Beispiel“', json);
+
+/// Ob der Knopf mit [text] gerade etwas annimmt.
+bool _knopfFrei(WidgetTester tester, String text) =>
+    tester
+        .widget<ButtonStyleButton>(find.ancestor(of: find.text(text), matching: find.bySubtype<ButtonStyleButton>()))
+        .onPressed !=
+    null;
 
 void main() {
   for (final ja in [true, false]) {
@@ -303,6 +333,314 @@ void main() {
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, knopf)).onPressed, isNotNull);
       f.entscheiden(true);
       expect(await antwort, isTrue);
+    });
+  });
+
+  group('Dialoge eines Plugins', () {
+    late PluginDialoge dialoge;
+    setUp(() => dialoge = PluginDialoge());
+
+    /// Zeigt [d] im Fenster der App; liefert die Antwort und das Ende des
+    /// Aufrufs, zu dem er gehört.
+    Future<({Future<Map<String, Object?>?> antwort, Completer<void> ende})> zeigen(
+      WidgetTester tester,
+      PluginDialog d,
+    ) async {
+      await tester.pumpWidget(_pluginFenster(dialoge));
+      final ende = Completer<void>();
+      final antwort = dialoge.zeigen(d, ende: ende.future);
+      await tester.pumpAndSettle();
+      return (antwort: antwort, ende: ende);
+    }
+
+    testWidgets('Auswahl, einfach: das Plugin oben als Absender, das Suchfeld filtert, ein Haken, die Nummer zurück', (tester) async {
+      final z = await zeigen(
+        tester,
+        _pluginDialog(PluginDialogArt.auswahl, {
+          'titel': 'Farbe wählen',
+          'eintraege': ['Rot', 'Grün', 'Blau', 'Grau'],
+        }),
+      );
+
+      expect(find.text('Absender: Plugin „Beispiel“'), findsOneWidget);
+      expect(find.text('Farbe wählen'), findsOneWidget);
+      expect(find.text('Rot'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'gr');
+      await tester.pump();
+      expect(find.text('Rot'), findsNothing);
+      expect(find.text('Blau'), findsNothing);
+      expect(find.text('Grün'), findsOneWidget);
+      expect(find.text('Grau'), findsOneWidget);
+
+      await tester.tap(find.text('Grün'));
+      await tester.tap(find.text('Grau'));
+      await tester.pump();
+      expect(_knopfFrei(tester, 'Übernehmen'), isFalse, reason: 'Sperrzeit');
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(_knopfFrei(tester, 'Übernehmen'), isTrue);
+      await tester.tap(find.text('Übernehmen'));
+      await tester.pumpAndSettle();
+
+      expect(await z.antwort, {
+        'gewaehlt': [3],
+      }, reason: 'einfach: der zweite Haken ersetzt den ersten');
+      expect(find.text('Farbe wählen'), findsNothing);
+      expect(dialoge.aktuell, isNull);
+    });
+
+    testWidgets('Auswahl, mehrfach: mehrere Haken, auch über die Suche hinweg; ohne Haken geht Übernehmen nicht', (tester) async {
+      final z = await zeigen(
+        tester,
+        _pluginDialog(PluginDialogArt.auswahl, {
+          'titel': 'Farben wählen',
+          'eintraege': ['Rot', 'Grün', 'Blau'],
+          'mehrfach': true,
+        }),
+      );
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(_knopfFrei(tester, 'Übernehmen'), isFalse);
+
+      await tester.tap(find.text('Blau'));
+      await tester.enterText(find.byType(TextField), 'rot');
+      await tester.pump();
+      await tester.tap(find.text('Rot'));
+      await tester.pump();
+      expect(find.text('Mehrere wählbar, 2 gewählt'), findsOneWidget);
+      await tester.tap(find.text('Übernehmen'));
+      await tester.pumpAndSettle();
+
+      expect(await z.antwort, {
+        'gewaehlt': [0, 2],
+      });
+    });
+
+    testWidgets('Text des Plugins erscheint roh: kein Markdown, kein HTML, kein Link', (tester) async {
+      const roh = 'Siehe **fett** und <b>dick</b>, [Link](https://moodle.schule.example)\nzweite Zeile';
+      final z = await zeigen(tester, _pluginDialog(PluginDialogArt.hinweis, {'titel': '# Kein Titel', 'text': roh}));
+
+      expect(find.text(roh), findsOneWidget);
+      expect(find.text('# Kein Titel'), findsOneWidget);
+      expect(
+        find.ancestor(of: find.text(roh), matching: find.byType(InkWell)),
+        findsNothing,
+        reason: 'nichts im Text ist anklickbar',
+      );
+      dialoge.beantworten(dialoge.aktuell!, null);
+      await tester.pumpAndSettle();
+      expect(await z.antwort, isNull);
+    });
+
+    testWidgets('Hinweis: nur „OK“, die Antwort ist leer; Return, Leertaste und Tabulator entscheiden nichts', (tester) async {
+      final z = await zeigen(tester, _pluginDialog(PluginDialogArt.hinweis, {'titel': 'Fertig', 'text': 'Erledigt.'}));
+      expect(find.text('Abbrechen'), findsNothing);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+
+      for (final taste in [
+        LogicalKeyboardKey.tab,
+        LogicalKeyboardKey.enter,
+        LogicalKeyboardKey.space,
+        LogicalKeyboardKey.tab,
+        LogicalKeyboardKey.enter,
+      ]) {
+        await tester.sendKeyEvent(taste);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('Fertig'), findsOneWidget);
+      expect(dialoge.aktuell?.offen, isTrue);
+
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(await z.antwort, <String, Object?>{});
+    });
+
+    testWidgets('Eingabe: Text mit Vorgabe; Abbrechen liefert abgebrochen', (tester) async {
+      var z = await zeigen(tester, _pluginDialog(PluginDialogArt.eingabe, {'titel': 'Name', 'vorgabe': 'ZZ'}));
+      expect(find.text('ZZ'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '  ZZ Probe  ');
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Übernehmen'));
+      await tester.pumpAndSettle();
+      expect(await z.antwort, {'text': 'ZZ Probe'});
+
+      z = await zeigen(tester, _pluginDialog(PluginDialogArt.eingabe, {'titel': 'Name'}));
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(_knopfFrei(tester, 'Übernehmen'), isFalse, reason: 'leer');
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      expect(await z.antwort, isNull);
+    });
+
+    testWidgets('Eingabe eines Links: erst eine Adresse mit http oder https gilt', (tester) async {
+      final z = await zeigen(tester, _pluginDialog(PluginDialogArt.eingabe, {'titel': 'Link', 'art': 'link'}));
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.enterText(find.byType(TextField), 'moodle.schule.example');
+      await tester.pump();
+      expect(_knopfFrei(tester, 'Übernehmen'), isFalse);
+      expect(find.text('Ein Link beginnt mit https:// oder http://.'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'https://moodle.schule.example/course/view.php?id=12');
+      await tester.pump();
+      await tester.tap(find.text('Übernehmen'));
+      await tester.pumpAndSettle();
+      expect(await z.antwort, {'text': 'https://moodle.schule.example/course/view.php?id=12'});
+    });
+
+    group('Wahl eines Ordners oder einer Datei', () {
+      late Directory start;
+      setUp(() {
+        start = Directory.systemTemp.createTempSync('moocp_pfadwahl_');
+        Directory(p.join(start.path, 'Unterordner')).createSync();
+        File(p.join(start.path, 'a.txt')).writeAsStringSync('a');
+      });
+      tearDown(() => start.deleteSync(recursive: true));
+
+      testWidgets('Ordner: beginnt im Startordner, ein Klick öffnet den Unterordner, Übernehmen nennt ihn', (tester) async {
+        final z = await zeigen(
+          tester,
+          _pluginDialog(PluginDialogArt.pfad, {'titel': 'Ordner wählen', 'art': 'ordner', 'start': start.path}),
+        );
+        expect(find.text('Unterordner'), findsOneWidget);
+        expect(find.text('a.txt'), findsNothing, reason: 'bei der Ordnerwahl keine Dateien');
+
+        await tester.tap(find.text('Unterordner'));
+        await tester.pump(Sperrzeit.dauerVorgabe);
+        await tester.tap(find.text('Übernehmen'));
+        await tester.pumpAndSettle();
+
+        expect(await z.antwort, {'pfad': p.join(start.path, 'Unterordner')});
+      });
+
+      testWidgets('Datei: ein Klick wählt sie; ein Pfad, den es nicht gibt, gilt nicht', (tester) async {
+        final z = await zeigen(
+          tester,
+          _pluginDialog(PluginDialogArt.pfad, {'titel': 'Datei wählen', 'art': 'datei', 'start': start.path}),
+        );
+        await tester.pump(Sperrzeit.dauerVorgabe);
+        expect(_knopfFrei(tester, 'Übernehmen'), isFalse);
+        await tester.enterText(find.byType(TextField), p.join(start.path, 'fehlt.txt'));
+        await tester.pump();
+        expect(_knopfFrei(tester, 'Übernehmen'), isFalse);
+        expect(find.text('Diese Datei gibt es nicht.'), findsOneWidget);
+
+        await tester.tap(find.text('a.txt'));
+        await tester.pump();
+        await tester.tap(find.text('Übernehmen'));
+        await tester.pumpAndSettle();
+
+        expect(await z.antwort, {'pfad': p.join(start.path, 'a.txt')});
+      });
+
+      testWidgets('ohne Startordner im Benutzerordner', (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: PluginDialogFenster(
+                _pluginDialog(PluginDialogArt.pfad, {'titel': 'Ordner wählen', 'art': 'ordner'}),
+                umgebung: {'USERPROFILE': start.path, 'HOME': start.path},
+              ),
+            ),
+          ),
+        );
+        expect(find.text('Unterordner'), findsOneWidget);
+        expect(find.widgetWithText(TextField, p.normalize(start.path)), findsOneWidget);
+      });
+    });
+
+    testWidgets('endet der Aufruf oder läuft die Frist ab, schließt sich der Dialog: abgebrochen', (tester) async {
+      var z = await zeigen(tester, _pluginDialog(PluginDialogArt.hinweis, {'titel': 'Eins'}));
+      z.ende.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Eins'), findsNothing);
+      expect(await z.antwort, isNull);
+
+      dialoge = PluginDialoge(frist: const Duration(seconds: 3));
+      z = await zeigen(tester, _pluginDialog(PluginDialogArt.hinweis, {'titel': 'Zwei'}));
+      expect(find.text('Zwei'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('Zwei'), findsNothing);
+      expect(await z.antwort, isNull);
+    });
+
+    testWidgets('zwei Dialoge verschiedener Aufrufe: der zweite kommt nach dem ersten', (tester) async {
+      final eins = await zeigen(tester, _pluginDialog(PluginDialogArt.hinweis, {'titel': 'Eins'}));
+      final zwei = dialoge.zeigen(
+        _pluginDialog(PluginDialogArt.hinweis, {'titel': 'Zwei'}),
+        ende: Completer<void>().future,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Eins'), findsOneWidget);
+      expect(find.text('Zwei'), findsNothing);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(await eins.antwort, <String, Object?>{});
+      expect(find.text('Zwei'), findsOneWidget);
+      dialoge.beantworten(dialoge.aktuell!, null);
+      await tester.pumpAndSettle();
+      expect(await zwei, isNull);
+    });
+  });
+
+  group('Freigabe eines Plugins im Dialog', () {
+    late Freigaben freigaben;
+    late McpDienst dienst;
+    setUp(() {
+      final protokoll = Protokoll();
+      freigaben = Freigaben(protokoll);
+      dienst = McpDienst(
+        Einstellungen(schluessel: 'test'),
+        MoodleZugang(protokoll),
+        protokoll,
+        freigaben,
+        '',
+        profil: Profil.migriert(''),
+      );
+    });
+
+    Future<PluginFreigabeAusgang> bitten() => dienst.pluginFreigabe(
+      titel: 'Beispiel freigeben?',
+      zusammenfassung: 'Das Beispiel ändert **nichts**.\n<i>Probe</i>',
+      ab: Bestaetigungen.mittel,
+      abbruch: Completer<void>().future,
+      aufrufer: 'Plugin „Beispiel“',
+    );
+
+    testWidgets('die Zusammenfassung erscheint roh und als vom Plugin, ungeprüft; nur Maus, erst nach der Wartezeit', (tester) async {
+      await tester.pumpWidget(_fenster(freigaben));
+      final ausgang = bitten();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Beispiel freigeben?'), findsOneWidget);
+      expect(find.text('Aufgerufen vom Plugin „Beispiel“, nicht direkt von der KI'), findsOneWidget);
+      expect(
+        find.text('Titel und Beschreibung stammen vom Plugin „Beispiel“; moocp hat sie nicht geprüft:'),
+        findsOneWidget,
+      );
+      expect(find.text('Das Beispiel ändert **nichts**.\n<i>Probe</i>'), findsOneWidget);
+      expect(find.text('Ohne Entscheidung innerhalb von 30 Minuten wird nichts freigegeben.'), findsOneWidget);
+
+      await tester.tap(find.text('Freigeben'));
+      await tester.pumpAndSettle();
+      expect(freigaben.aktuell, isNotNull, reason: 'vor der Wartezeit nimmt der Knopf nichts an');
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      expect(freigaben.aktuell, isNotNull, reason: 'Return und Leertaste entscheiden nichts');
+
+      await tester.tap(find.text('Freigeben'));
+      await tester.pumpAndSettle();
+      expect(await ausgang, PluginFreigabeAusgang.freigegeben);
+    });
+
+    testWidgets('Ablehnen', (tester) async {
+      await tester.pumpWidget(_fenster(freigaben));
+      final ausgang = bitten();
+      await tester.pumpAndSettle();
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(await ausgang, PluginFreigabeAusgang.abgelehnt);
     });
   });
 }

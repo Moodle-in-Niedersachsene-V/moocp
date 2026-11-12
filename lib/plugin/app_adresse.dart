@@ -28,9 +28,15 @@
 // beim MCP-Server (E6): Ein offener Port auf localhost ist auch für jede
 // Webseite im Browser erreichbar, die es darauf anlegt.
 //
-// Moodle erreicht ein Plugin hier nicht, und Dialoge oder Freigaben des
-// Plugins selbst gibt es hier noch nicht; die Pfade dafür kommen unter
-// demselben Präfix dazu ([_funktionen]).
+// Dialoge und Freigaben: Ein Plugin öffnet keine Fenster. Es beschreibt
+// einen Dialog (dialoge.dart) oder bittet um eine Freigabe, und moocp zeigt
+// sie. Je Aufruf ist höchstens einer davon zugleich offen; ein zweiter wird
+// abgewiesen, bis der erste beantwortet ist. Beide schließen sich, wenn der
+// Aufruf endet oder der Client abbricht, und haben die Frist einer Freigabe.
+// Ins Protokoll gehen Plugin, Art und Ausgang, nie die Werte, die die
+// Lehrkraft eingibt oder wählt (A4, E11).
+//
+// Moodle erreicht ein Plugin hier nicht.
 
 import 'dart:async';
 import 'dart:convert';
@@ -39,9 +45,14 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
+import '../freigabe.dart' show Bestaetigungen;
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import '../protokoll.dart';
+import 'dialoge.dart';
+import 'klartext.dart';
+
+export 'klartext.dart' show einzeilig;
 
 /// Der Kopf, in dem das Token des Aufrufs mitgeht.
 const aufrufKopf = 'Moocp-Aufruf';
@@ -50,24 +61,15 @@ const aufrufKopf = 'Moocp-Aufruf';
 const pfadProtokoll = '/v1/protokoll';
 const pfadArbeitsordner = '/v1/arbeitsordner';
 const pfadWerkzeug = '/v1/werkzeug';
+const pfadAuswahl = '/v1/dialog/auswahl';
+const pfadEingabe = '/v1/dialog/eingabe';
+const pfadPfadwahl = '/v1/dialog/pfad';
+const pfadHinweis = '/v1/dialog/hinweis';
+const pfadFreigabe = '/v1/freigabe';
 
 /// So lang darf eine Protokollzeile eines Plugins höchstens werden; was
 /// darüber hinausgeht, schneidet die App ab.
 const protokollzeileHoechstens = 500;
-
-/// Bringt einen Text von außen auf eine Zeile: Steuerzeichen, Zeilen- und
-/// Absatztrenner und Richtungszeichen werden zu Leerzeichen, Leerraum fällt
-/// zusammen, und was über [hoechstens] Zeichen hinausgeht, endet mit „…“. So
-/// fälscht ein Plugin keine Zeile im Protokoll.
-String einzeilig(String text, int hoechstens) {
-  final t = text
-      .replaceAll(RegExp('[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  final zeichen = t.runes.toList();
-  if (zeichen.length <= hoechstens) return t;
-  return '${String.fromCharCodes(zeichen.take(hoechstens - 1))}…';
-}
 
 class _Plugin {
   _Plugin(this.kurzname, this.name, this.schluessel);
@@ -96,6 +98,9 @@ class _Aufruf {
   void beenden() {
     if (!_ende.isCompleted) _ende.complete();
   }
+
+  /// Ob gerade ein Dialog oder eine Freigabe dieses Aufrufs offen ist.
+  bool dialogOffen = false;
 }
 
 /// Eine Antwort: Status und JSON.
@@ -106,15 +111,20 @@ _Antwort _fehler(int status, String text) => (status: status, json: {'fehler': t
 /// Die Adresse der App für Plugins: der Server, die angemeldeten Plugins mit
 /// ihren Schlüsseln und die laufenden Aufrufe mit ihren Token.
 class AppAdresse {
-  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens);
+  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens, this._dialoge);
 
   /// Öffnet den Server auf 127.0.0.1 mit einem freien Port. [protokoll] ist
   /// das Protokoll der App ohne Profilbezug: Dorthin geht eine Protokollzeile
   /// ohne Token. [anfrageHoechstens] begrenzt den Inhalt einer Anfrage in
-  /// Bytes.
-  static Future<AppAdresse> starten(Protokoll protokoll, {int anfrageHoechstens = 1024 * 1024}) async {
+  /// Bytes. [dialoge] zeigt die Dialoge der Plugins; ohne sie lehnt die
+  /// Adresse jeden Dialog ab.
+  static Future<AppAdresse> starten(
+    Protokoll protokoll, {
+    int anfrageHoechstens = 1024 * 1024,
+    PluginDialoge? dialoge,
+  }) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final a = AppAdresse._(server, protokoll, anfrageHoechstens);
+    final a = AppAdresse._(server, protokoll, anfrageHoechstens, dialoge);
     server.listen(a._bearbeiten, onError: (Object _) {});
     protokoll.eintrag(Art.info, 'Adresse der App für Plugins: ${a.adresse}');
     return a;
@@ -123,6 +133,7 @@ class AppAdresse {
   final HttpServer _server;
   final Protokoll _protokoll;
   final int anfrageHoechstens;
+  final PluginDialoge? _dialoge;
 
   /// Die Adresse, wie sie beim initialize an das Plugin geht.
   Uri get adresse => Uri.parse('http://127.0.0.1:${_server.port}');
@@ -333,7 +344,117 @@ class AppAdresse {
     pfadProtokoll: const _Funktion(mitAufruf: false, ausfuehren: _protokollSchreiben),
     pfadArbeitsordner: const _Funktion(mitAufruf: true, ausfuehren: _arbeitsordnerGeben),
     pfadWerkzeug: const _Funktion(mitAufruf: true, ausfuehren: _werkzeugAufrufen),
+    for (final (pfad, art) in [
+      (pfadAuswahl, PluginDialogArt.auswahl),
+      (pfadEingabe, PluginDialogArt.eingabe),
+      (pfadPfadwahl, PluginDialogArt.pfad),
+      (pfadHinweis, PluginDialogArt.hinweis),
+    ])
+      pfad: _Funktion(mitAufruf: true, ausfuehren: (a, pl, au, d) => _dialogZeigen(art, a, pl, au, d)),
+    pfadFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _freigabeAnfragen),
   };
+
+  /// Höchstens ein Dialog oder eine Freigabe je Aufruf zugleich: Wer einen
+  /// zweiten will, solange der erste offen ist, bekommt 409. Ein Plugin mit
+  /// mehreren Fragen stellt sie nacheinander; die Lehrkraft sieht nie zwei
+  /// Fenster eines Aufrufs übereinander.
+  static Future<_Antwort> _einzeln(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf aufruf,
+    Future<_Antwort> Function() f,
+  ) async {
+    if (aufruf.dialogOffen) {
+      a._protokollzeile(plugin, aufruf.kontext.protokoll, 'zweiter Dialog im selben Aufruf abgewiesen');
+      return _fehler(
+        HttpStatus.conflict,
+        'Es ist schon ein Dialog oder eine Freigabe dieses Aufrufs offen; je Aufruf geht nur einer zugleich. '
+        'Erst die Antwort abwarten.',
+      );
+    }
+    aufruf.dialogOffen = true;
+    try {
+      return await f();
+    } finally {
+      aufruf.dialogOffen = false;
+    }
+  }
+
+  /// `POST /v1/dialog/<art>`: zeigt einen Dialog der Art [art] (dialoge.dart,
+  /// Felder je Art) und wartet auf die Antwort: `{"abgebrochen": false, …}`
+  /// mit den Feldern der Art, oder `{"abgebrochen": true}`, wenn die
+  /// Lehrkraft abbricht, die Frist abläuft oder der Aufruf endet -- ein
+  /// Ausgang, kein Fehler. Ins Protokoll gehen nur Plugin, Art und Ausgang.
+  static Future<_Antwort> _dialogZeigen(
+    PluginDialogArt art,
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final dialoge = a._dialoge;
+    if (dialoge == null) return _fehler(HttpStatus.serviceUnavailable, 'moocp kann hier keine Dialoge zeigen.');
+    final PluginDialog dialog;
+    try {
+      dialog = PluginDialog.ausJson(art, plugin.aufrufer, daten);
+    } on FormatException catch (x) {
+      return _fehler(HttpStatus.badRequest, x.message);
+    }
+    return _einzeln(a, plugin, aufruf!, () async {
+      final protokoll = aufruf.kontext.protokoll;
+      a._protokollzeile(plugin, protokoll, 'Dialog „${art.name}“ geöffnet');
+      final antwort = await dialoge.zeigen(dialog, ende: aufruf.ende);
+      a._protokollzeile(plugin, protokoll, 'Dialog „${art.name}“ ${antwort == null ? 'abgebrochen' : 'beantwortet'}');
+      return (status: HttpStatus.ok, json: {'abgebrochen': antwort == null, ...?antwort});
+    });
+  }
+
+  /// `POST /v1/freigabe` `{"titel": …, "zusammenfassung": …, "ab": …}`: bittet
+  /// um eine Freigabe im Profil des Aufrufs, durch die eine Stelle für
+  /// Freigaben (AufrufKontext.pluginFreigabe), mit dem Plugin als Aufrufer.
+  /// `ab` ist die Stufe, ab der gefragt wird: „mittel“, „alle“ oder „keine“
+  /// (auf jeder Stufe). Antwort `{"ausgang": "freigegeben" | "abgelehnt" |
+  /// "abgebrochen", "ohneFrage": …}`; `ohneFrage` ist true, wenn die Stufe
+  /// der Lehrkraft die Frage ausgelassen hat und deshalb freigegeben ist.
+  static Future<_Antwort> _freigabeAnfragen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final t = daten['titel'];
+    final z = daten['zusammenfassung'];
+    final titel = t is String ? einzeilig(t, dialogTitelHoechstens) : '';
+    final zusammenfassung = z is String ? mehrzeilig(z, dialogTextHoechstens) : '';
+    final ab = Bestaetigungen.values.where((b) => b.text == daten['ab']).firstOrNull;
+    if (titel.isEmpty) return _fehler(HttpStatus.badRequest, 'titel fehlt: eine Zeile Text als Überschrift.');
+    if (zusammenfassung.isEmpty) {
+      return _fehler(HttpStatus.badRequest, 'zusammenfassung fehlt: was freigegeben werden soll, als Text.');
+    }
+    if (ab == null) {
+      return _fehler(HttpStatus.badRequest, 'ab fehlt: „mittel“, „alle“ oder „keine“ (auf jeder Stufe fragen).');
+    }
+    return _einzeln(a, plugin, aufruf!, () async {
+      final ausgang = await aufruf.kontext.pluginFreigabe(
+        titel: titel,
+        zusammenfassung: zusammenfassung,
+        ab: ab,
+        abbruch: aufruf.ende,
+        aufrufer: plugin.aufrufer,
+      );
+      final (wort, ausgangText) = switch (ausgang) {
+        PluginFreigabeAusgang.freigegeben => ('erteilt', 'freigegeben'),
+        PluginFreigabeAusgang.ohneFrage => ('ohne Frage erteilt', 'freigegeben'),
+        PluginFreigabeAusgang.abgelehnt => ('abgelehnt', 'abgelehnt'),
+        PluginFreigabeAusgang.abgebrochen => ('abgebrochen', 'abgebrochen'),
+      };
+      a._protokollzeile(plugin, aufruf.kontext.protokoll, 'Freigabe ab Stufe „${ab.text}“ -- $wort');
+      return (
+        status: HttpStatus.ok,
+        json: {'ausgang': ausgangText, 'ohneFrage': ausgang == PluginFreigabeAusgang.ohneFrage},
+      );
+    });
+  }
 
   /// `POST /v1/protokoll` `{"text": …}`: eine Zeile ins Protokoll der App,
   /// mit dem Namen des Plugins davor, einzeilig und gekürzt. Mit Token ins

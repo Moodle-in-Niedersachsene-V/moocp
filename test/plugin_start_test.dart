@@ -16,6 +16,7 @@ import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
+import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
@@ -62,6 +63,11 @@ const _beispielWerkzeuge = [
   'beispiel_protokoll',
   'beispiel_datei',
   'beispiel_status',
+  'beispiel_auswahl',
+  'beispiel_eingabe',
+  'beispiel_pfad',
+  'beispiel_hinweis',
+  'beispiel_freigabe',
 ];
 
 /// Eine Protokollzeile an die Adresse der App (`/v1/protokoll`), wie von einem Plugin mit
@@ -221,12 +227,17 @@ void main() {
     return l;
   }
 
-  Future<McpTestClient> verbinden(Profil profil, LaufendePlugins quelle, {String arbeitsordner = ''}) async {
+  Future<McpTestClient> verbinden(
+    Profil profil,
+    LaufendePlugins quelle, {
+    String arbeitsordner = '',
+    Freigaben? freigaben,
+  }) async {
     final d = McpDienst(
       einstellungen,
       MoodleZugang(protokoll),
       protokoll,
-      Freigaben(protokoll),
+      freigaben ?? Freigaben(protokoll),
       arbeitsordner,
       profil: profil,
       werkzeugquellen: [quelle],
@@ -254,7 +265,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (5 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (10 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -279,6 +290,60 @@ void main() {
       expect(status, contains('Profil: moodle (moodle)'));
       expect(zeilen, contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
       expect(l.appAdresse?.host, '127.0.0.1');
+    });
+
+    test('Dialoge und Freigabe: jede Art über die Adresse der App, die Antwort kommt beim Plugin an', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final gewaehlt = Directory(p.join(wurzel.path, 'gewaehlt'))..createSync();
+      File(p.join(gewaehlt.path, 'eins.txt')).writeAsStringSync('1');
+      File(p.join(gewaehlt.path, 'zwei.txt')).writeAsStringSync('22');
+      // An Stelle der Oberfläche: Jeder Dialog wird beantwortet, sobald er
+      // offen ist, wie von der Lehrkraft.
+      final dialoge = PluginDialoge();
+      dialoge.addListener(() {
+        final d = dialoge.aktuell;
+        if (d == null || !d.offen) return;
+        scheduleMicrotask(
+          () => dialoge.beantworten(d, switch (d) {
+            AuswahlDialog() => AuswahlDialog.antwort([0, 2]),
+            final EingabeDialog e => EingabeDialog.antwort(e.link ? 'https://moodle.schule.example' : 'Hallo'),
+            final PfadDialog w => PfadDialog.antwort(w.ordner ? gewaehlt.path : p.join(gewaehlt.path, 'zwei.txt')),
+            HinweisDialog() => const {},
+          }),
+        );
+      });
+      final freigaben = Freigaben(protokoll);
+      var ja = true;
+      freigaben.addListener(() {
+        if (freigaben.aktuell?.offen == true) scheduleMicrotask(() => freigaben.entscheiden(ja));
+      });
+      final l = await starten(await beispielAngenommen([profil]), mit: LaufendePlugins(protokoll, dialoge: dialoge));
+      final client = await verbinden(profil, l, freigaben: freigaben);
+
+      expect(await client.tool('beispiel_auswahl', {'mehrfach': true}), 'Gewählt: Rot, Blau');
+      expect(await client.tool('beispiel_eingabe', {'link': true}), 'Eingegeben: https://moodle.schule.example');
+      expect(await client.tool('beispiel_pfad', {}), 'Der gewählte Ordner hat 2 Einträge.');
+      expect(await client.tool('beispiel_pfad', {'datei': true}), 'Die gewählte Datei hat 2 Bytes.');
+      expect(await client.tool('beispiel_hinweis', {'text': 'Fertig.'}), 'Bestätigt.');
+      expect(await client.tool('beispiel_freigabe', {'ab': 'mittel'}), 'Ausgang: freigegeben');
+      ja = false;
+      expect(await client.tool('beispiel_freigabe', {'ab': 'mittel'}), 'Ausgang: abgelehnt');
+      // Lässt die Stufe die Frage aus, erfährt es das Plugin und, in der
+      // Antwort auf seinen Aufruf, die KI.
+      freigaben.stufe = Bestaetigungen.keine;
+      final ohne = await client.tool('beispiel_freigabe', {'ab': 'mittel'});
+      expect(ohne, startsWith('Ausgang: freigegeben (ohne Frage, wegen der Stufe)'));
+      expect(ohne, contains('Ohne Freigabe ausgeführt (1 Vorgang)'));
+      expect(await client.tool('beispiel_freigabe', {'ab': 'keine'}), 'Ausgang: abgelehnt');
+
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      for (final art in ['Auswahl', 'Eingabe', 'Ordner- oder Dateiwahl', 'Hinweis']) {
+        expect(zeilen, contains('Plugin „Beispiel“: Dialog „$art“ beantwortet'));
+      }
+      expect(zeilen, contains('Plugin „Beispiel“: Freigabe ab Stufe „mittel“ -- ohne Frage erteilt'));
+      expect(zeilen.join('\n'), isNot(contains(gewaehlt.path)));
+      expect(dialoge.aktuell, isNull);
+      expect(freigaben.aktuell, isNull);
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
@@ -605,7 +670,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (5 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (10 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }

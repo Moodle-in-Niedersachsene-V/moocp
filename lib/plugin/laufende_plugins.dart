@@ -63,6 +63,7 @@ import '../profil.dart';
 import '../protokoll.dart';
 import 'app_adresse.dart';
 import 'beschreibung.dart';
+import 'dialoge.dart';
 import 'entwicklung.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
@@ -130,9 +131,15 @@ class LaufendePlugins implements WerkzeugQuelle {
     this.startfrist = const Duration(seconds: 20),
     this.entwicklungsIntervall = const Duration(seconds: 3),
     this.entwicklungsFrist = const Duration(seconds: 2),
+    this.dialoge,
   });
 
   final Protokoll _protokoll;
+
+  /// Die Dialoge der Plugins, die die Oberfläche zeigt (dialoge.dart); null,
+  /// wenn niemand sie zeigt (Tests): Dann lehnt die Adresse der App jeden
+  /// Dialog ab.
+  final PluginDialoge? dialoge;
 
   /// Wie das Programm eines Plugins gestartet wird; die Vorgabe ist
   /// [Process.start] mit Umgebung und Arbeitsordner.
@@ -190,7 +197,7 @@ class LaufendePlugins implements WerkzeugQuelle {
   AppAdresse? _offen;
 
   Future<AppAdresse> _adresseHolen() =>
-      _adresse ??= AppAdresse.starten(_protokoll).then((a) => _offen = a);
+      _adresse ??= AppAdresse.starten(_protokoll, dialoge: dialoge).then((a) => _offen = a);
 
   /// Die Adresse der App für Plugins; null, solange kein Plugin gestartet
   /// oder angehängt ist.

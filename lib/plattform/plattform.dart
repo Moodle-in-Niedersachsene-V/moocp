@@ -47,3 +47,11 @@ Future<void> prozessbaumBeenden(Process prozess) async {
   if (Platform.isWindows) await prozessbaumBeendenWindows(prozess.pid);
   prozess.kill(ProcessSignal.sigkill);
 }
+
+/// Der Benutzerordner aus [umgebung]: USERPROFILE unter Windows, sonst HOME;
+/// null, wenn er nicht gesetzt ist. Dort beginnt die Wahl eines Ordners oder
+/// einer Datei für ein Plugin, wenn es keinen Startordner nennt.
+String? benutzerordner(Map<String, String> umgebung) {
+  final o = umgebung[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+  return o == null || o.isEmpty ? null : o;
+}

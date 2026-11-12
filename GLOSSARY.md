@@ -61,7 +61,7 @@ _Nicht zu verwechseln mit_: MCP-Server.
 Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex CLI und Bionic (LM Studio).
 
 **Freigabe**
-Der Dialog in der App, in dem die Lehrkraft einen Schreibvorgang in Moodle bestätigt. Wie viele Freigaben kommen, stellt die Lehrkraft ein.
+Der Dialog in der App, in dem die Lehrkraft einen Schreibvorgang in Moodle bestätigt. Wie viele Freigaben kommen, stellt die Lehrkraft ein. Auch ein Plugin kann um eine Freigabe bitten; Titel und Beschreibung stammen dann vom Plugin, alle Regeln einer Freigabe gelten.
 _Nicht zu verwechseln mit_: Bestätigungen (die Einstellung, die bestimmt, wie oft der Dialog erscheint).
 
 **Bestätigungen**
@@ -131,9 +131,14 @@ Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatz
 Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu.
 
 **Adresse der App (für Plugins)**
-Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
+Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge und Freigaben. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
 _Nicht zu verwechseln mit_: Zusatzadresse (eine Seite der Moodle-Instanz).
 _Vermeiden_: Host-Schnittstelle, Callback-Server
+
+**Dialog eines Plugins**
+Ein Dialog, den ein Plugin über die Adresse der App beschreibt und die App zeigt, mit dem Plugin als Absender: Auswahl, Eingabe, Ordner- oder Dateiwahl, Hinweis. Er liefert die Antwort oder „abgebrochen“.
+_Nicht zu verwechseln mit_: Freigabe (bestätigt einen Schreibvorgang; ein Dialog eines Plugins tut das nie).
+_Vermeiden_: Fenster des Plugins (ein Plugin öffnet keine Fenster)
 
 **Aufruf-Token**
 Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.

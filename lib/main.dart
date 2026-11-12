@@ -36,6 +36,8 @@ import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
+import 'plattform/plattform.dart' show benutzerordner;
+import 'plugin/dialoge.dart';
 import 'plugin/entscheidung.dart';
 import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
@@ -50,6 +52,8 @@ import 'update/update_dialoge.dart';
 
 export 'anmeldung.dart' show Instanz, AnmeldeAuftrag, gespeicherteAnmeldedatenVerwenden;
 export 'nur_maus.dart' show Sperrzeit;
+
+part 'plugin_dialoge.dart';
 
 Future<void> main(List<String> argumente) async {
   // Keine Ausgabe auf die Konsole, von niemandem: debugPrint schweigt -- auch
@@ -119,7 +123,7 @@ Future<void> main(List<String> argumente) async {
   // Die Plugins laufen einmal je App; ihre Werkzeuge bietet jeder MCP-Server
   // an, in dessen Profil sie eingeschaltet sind. Gestartet werden sie erst
   // nach der Zustimmung (_HauptseiteState._pluginsStarten).
-  final laufendePlugins = LaufendePlugins(protokoll);
+  final laufendePlugins = LaufendePlugins(protokoll, dialoge: PluginDialoge());
   final instanzen = [
     for (final pr in profile)
       _instanzFuer(
@@ -1343,6 +1347,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
             nachVorn: _nachVorn,
             child: const SizedBox.shrink(),
           ),
+        // Die Dialoge der Plugins, für alle Profile zusammen: Ein Plugin
+        // läuft einmal je App.
+        if (widget.laufendePlugins?.dialoge case final dialoge?)
+          PluginDialogAnzeige(dialoge: dialoge, nachVorn: _fensterZeigen, child: const SizedBox.shrink()),
         _seite(context),
       ],
     );
@@ -2336,6 +2344,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
               ? 680
               : gross || knoepfe
               ? 560
+              : anfrage.vomPlugin != null
+              ? 360
               : 264,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2350,6 +2360,26 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                       ),
                       TextSpan(text: anfrage.grund),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              // Bittet ein Plugin um eine Freigabe, stammen Titel und Text von
+              // ihm: als reiner Text gezeigt und als ungeprüft gekennzeichnet,
+              // damit die Lehrkraft sie nicht für eine Übersicht von moocp hält.
+              if (anfrage.vomPlugin case final text?) ...[
+                Text(
+                  'Titel und Beschreibung stammen vom ${anfrage.aufrufer ?? 'Plugin'}; moocp hat sie nicht geprüft:',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Flexible(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(border: Border.all(color: Colors.black26)),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(text),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),

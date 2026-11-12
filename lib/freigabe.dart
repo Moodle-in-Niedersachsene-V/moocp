@@ -105,6 +105,8 @@ class FreigabeAnfrage {
     this.links = const [],
     this.ab = Bestaetigungen.mittel,
     this.bildschirmfoto = false,
+    this.vomPlugin,
+    this.protokolltitel,
   });
 
   final String titel;
@@ -127,6 +129,20 @@ class FreigabeAnfrage {
   /// Karten-Zuordnungen und die Rückfrage vor einer Wiederholung gehen im
   /// Testbetrieb wie sonst an die Lehrkraft.
   final bool bildschirmfoto;
+
+  /// Was ein Plugin zu seiner eigenen Freigabe schreibt (app_adresse.dart):
+  /// reiner Text, bereinigt und begrenzt (klartext.dart). Der Dialog zeigt
+  /// ihn als solchen gekennzeichnet, denn moocp hat ihn nicht geprüft; null
+  /// bei jeder Freigabe der App selbst.
+  final String? vomPlugin;
+
+  /// Wie die Anfrage im Protokoll heißt, wenn nicht wie [titel]: Den Titel
+  /// einer Freigabe, um die ein Plugin bittet, bestimmt das Plugin, und der
+  /// gehört nicht ins Protokoll.
+  final String? protokolltitel;
+
+  /// Der Name im Protokoll.
+  String get _imProtokoll => protokolltitel ?? titel;
 
   /// Wozu Claude das braucht, in Claudes eigenen Worten -- steht oben im
   /// Dialog (Bildschirmfotos).
@@ -203,6 +219,12 @@ class FreigabeAnfrage {
 
   final Completer<bool> _antwort = Completer<bool>();
   bool get offen => !_antwort.isCompleted;
+
+  /// Ob die Anfrage ohne Entscheidung endete: Frist abgelaufen, oder der
+  /// Aufruf wartet nicht mehr ([Freigaben.mitAbbruch]). Dann ist sie nicht
+  /// erteilt, aber auch nicht abgelehnt.
+  bool get verfallen => _verfallen;
+  bool _verfallen = false;
 }
 
 /// Was während eines Werkzeugaufrufs ohne persönliche Freigabe geschah. Der
@@ -281,6 +303,18 @@ class Freigaben extends ChangeNotifier {
           {AufrufZaehler? zaehler, String? aufrufer}) =>
       runZoned(f, zoneValues: {_abbruch: _AbbruchStand(abbruch, zaehler, aufrufer)});
 
+  /// Der Zähler des Werkzeugaufrufs, in dessen Zone das läuft
+  /// ([mitAbbruch]); null außerhalb eines Aufrufs. So zählt eine Freigabe,
+  /// die nicht in dieser Zone gestellt wird (die eines Plugins, über die
+  /// Adresse der App), doch für den Aufruf, zu dem sie gehört.
+  static AufrufZaehler? get zaehlerImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.zaehler;
+
+  /// Führt [f] so aus, dass der Testbetrieb darin nichts automatisch
+  /// freigibt, auch wenn ein Aufrufer weiter außen ihn eingeschaltet hat
+  /// ([imTest]). Für die Freigaben eines Plugins: Für sie gibt es im
+  /// Testbetrieb keine automatische Freigabe.
+  static Future<T> ohneTestfreigabe<T>(Future<T> Function() f) => runZoned(f, zoneValues: {_testfreigabe: null});
+
   /// Ob [a] bei der eingestellten Stufe überhaupt gefragt wird.
   bool fragt(FreigabeAnfrage a) => stufe.index >= a.ab.index;
 
@@ -306,10 +340,11 @@ class Freigaben extends ChangeNotifier {
     final abbruch = Zone.current[_abbruch] as _AbbruchStand?;
     a._aufrufer = abbruch?.aufrufer;
     // Hinter dem Titel im Protokoll: wer gefragt hat, wenn es ein Plugin war.
-    final titel = a._aufrufer == null ? a.titel : '${a.titel} (Aufrufer: ${a._aufrufer})';
+    final titel = a._aufrufer == null ? a._imProtokoll : '${a._imProtokoll} (Aufrufer: ${a._aufrufer})';
     bool abgebrochen() {
       if (abbruch?.abgebrochen != true) return false;
       protokoll.eintrag(Art.info, 'Die KI wartet nicht mehr -- nicht gespeichert');
+      a._verfallen = true;
       a._antwort.complete(false);
       return true;
     }
@@ -365,7 +400,7 @@ class Freigaben extends ChangeNotifier {
     _aktuell = a;
     protokoll.eintrag(
         Art.info,
-        'Freigabe angefragt: ${a.titel} (${a.aufrufer == null ? '' : 'Aufrufer: ${a.aufrufer}, '}'
+        'Freigabe angefragt: ${a._imProtokoll} (${a.aufrufer == null ? '' : 'Aufrufer: ${a.aufrufer}, '}'
         'Frist ${_dauer(a._ablauf!.difference(DateTime.now()))})');
   }
 
@@ -390,7 +425,8 @@ class Freigaben extends ChangeNotifier {
         Art.info,
         identical(a, _aktuell)
             ? '$grund -- nicht gespeichert'
-            : '$grund -- nicht gefragt, nicht gespeichert: ${a.titel}');
+            : '$grund -- nicht gefragt, nicht gespeichert: ${a._imProtokoll}');
+    a._verfallen = true;
     _beantworten(a, false);
   }
 

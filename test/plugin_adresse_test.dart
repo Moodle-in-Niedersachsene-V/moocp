@@ -1,6 +1,7 @@
 // Die Adresse der App für Plugins (E35): Anmeldung mit dem Schlüssel des
-// Plugins, das Token eines laufenden Aufrufs, Host und Origin, und die drei
-// Funktionen Protokollzeile, Arbeitsordner und eingebautes Werkzeug. Auf der
+// Plugins, das Token eines laufenden Aufrufs, Host und Origin, und die
+// Funktionen Protokollzeile, Arbeitsordner, eingebautes Werkzeug, Dialoge und
+// Freigabe. Auf der
 // anderen Seite steht hier ein HTTP-Client im Test an Stelle eines Plugins;
 // das echte Beispiel-Plugin als Prozess prüft test/plugin_start_test.dart.
 // Alles in Temp-Ordnern, nie im Einstellungsordner der App.
@@ -17,6 +18,9 @@ import 'package:moocp/mcp/werkzeug_aufrufe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
+import 'package:moocp/plugin/dialoge.dart';
+import 'package:moocp/plugin/klartext.dart';
+import 'package:moocp/testschalter.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -59,6 +63,20 @@ class _Kontext implements AufrufKontext {
     aufgerufen.add((name: name, args: args, aufrufer: aufrufer));
     final w = werkzeug;
     return w != null ? w(name, abbruch) : Future.value((text: 'Antwort von $name', fehlgeschlagen: false));
+  }
+
+  final freigaben = <({String titel, String zusammenfassung, Bestaetigungen ab, String aufrufer})>[];
+
+  @override
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async {
+    freigaben.add((titel: titel, zusammenfassung: zusammenfassung, ab: ab, aufrufer: aufrufer));
+    return PluginFreigabeAusgang.freigegeben;
   }
 }
 
@@ -106,11 +124,13 @@ void main() {
   late Directory wurzel;
   late Protokoll protokoll;
   late AppAdresse adresse;
+  late PluginDialoge dialoge;
 
   setUp(() async {
     wurzel = Directory.systemTemp.createTempSync('moocp_adresse_');
     protokoll = Protokoll();
-    adresse = await AppAdresse.starten(protokoll);
+    dialoge = PluginDialoge();
+    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge);
     adresse.pluginAnmelden('beispiel', 'Beispiel', _schluessel);
   });
 
@@ -552,6 +572,499 @@ void main() {
       expect(freigaben.aktuell, isNull);
       expect(extern.vorhanden, isFalse);
       expect(zeilen(), contains('[Test] Die KI wartet nicht mehr -- nicht gespeichert'));
+    });
+  });
+
+  /// Wartet, bis [bedingung] gilt, höchstens fünf Sekunden.
+  Future<void> warten(bool Function() bedingung) async {
+    final ende = DateTime.now().add(const Duration(seconds: 5));
+    while (!bedingung()) {
+      if (DateTime.now().isAfter(ende)) fail('Die Bedingung trat nicht binnen fünf Sekunden ein.');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
+  /// Beantwortet jeden Dialog, sobald er offen ist, mit [antwort] (null heißt
+  /// abgebrochen), wie die Lehrkraft in der Oberfläche; liefert die gezeigten.
+  List<PluginDialog> antworten(Map<String, Object?>? Function(PluginDialog d) antwort) {
+    final gezeigt = <PluginDialog>[];
+    dialoge.addListener(() {
+      final d = dialoge.aktuell;
+      if (d != null && d.offen && !gezeigt.contains(d)) {
+        gezeigt.add(d);
+        scheduleMicrotask(() => dialoge.beantworten(d, antwort(d)));
+      }
+    });
+    return gezeigt;
+  }
+
+  group('Dialoge über die Adresse', () {
+    test('jede Art liefert ihre Antwort; ins Protokoll gehen Plugin, Art und Ausgang, nie die Werte', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      final gezeigt = antworten(
+        (d) => switch (d) {
+          AuswahlDialog() => AuswahlDialog.antwort([2, 0]),
+          EingabeDialog() => EingabeDialog.antwort('geheime Eingabe'),
+          PfadDialog() => PfadDialog.antwort(p.join(wurzel.path, 'Erika Mustermann')),
+          HinweisDialog() => const {},
+        },
+      );
+
+      final auswahl = await _post(
+        adresse.adresse,
+        pfadAuswahl,
+        daten: {
+          'titel': 'Kurs wählen',
+          'eintraege': ['Kurs 12', 'Kurs 13', 'Kurs 14'],
+          'mehrfach': true,
+        },
+        token: a.token,
+      );
+      final eingabe = await _post(adresse.adresse, pfadEingabe, daten: {'titel': 'Text', 'vorgabe': 'x'}, token: a.token);
+      final pfad = await _post(adresse.adresse, pfadPfadwahl, daten: {'titel': 'Ordner', 'art': 'ordner'}, token: a.token);
+      final hinweis = await _post(
+        adresse.adresse,
+        pfadHinweis,
+        daten: {'titel': 'Fertig', 'text': 'Alles erledigt.'},
+        token: a.token,
+      );
+
+      expect(auswahl.status, 200);
+      expect(auswahl.json, {
+        'abgebrochen': false,
+        'gewaehlt': [0, 2],
+      });
+      expect(eingabe.json, {'abgebrochen': false, 'text': 'geheime Eingabe'});
+      expect(pfad.json, {'abgebrochen': false, 'pfad': p.join(wurzel.path, 'Erika Mustermann')});
+      expect(hinweis.json, {'abgebrochen': false});
+      expect([for (final d in gezeigt) d.art], PluginDialogArt.values);
+      expect([for (final d in gezeigt) d.absender], everyElement('Plugin „Beispiel“'));
+      expect((gezeigt[0] as AuswahlDialog).mehrfach, isTrue);
+      expect((gezeigt[1] as EingabeDialog).vorgabe, 'x');
+      expect((gezeigt[2] as PfadDialog).ordner, isTrue);
+      expect(gezeigt[3].text, 'Alles erledigt.');
+      expect(
+        zeilen(),
+        containsAllInOrder([
+          '[A] Plugin „Beispiel“: Dialog „Auswahl“ geöffnet',
+          '[A] Plugin „Beispiel“: Dialog „Auswahl“ beantwortet',
+          '[A] Plugin „Beispiel“: Dialog „Eingabe“ geöffnet',
+          '[A] Plugin „Beispiel“: Dialog „Eingabe“ beantwortet',
+          '[A] Plugin „Beispiel“: Dialog „Ordner- oder Dateiwahl“ geöffnet',
+          '[A] Plugin „Beispiel“: Dialog „Ordner- oder Dateiwahl“ beantwortet',
+          '[A] Plugin „Beispiel“: Dialog „Hinweis“ geöffnet',
+          '[A] Plugin „Beispiel“: Dialog „Hinweis“ beantwortet',
+        ]),
+      );
+      final alles = zeilen().join('\n');
+      expect(alles, isNot(contains('geheime Eingabe')));
+      expect(alles, isNot(contains('Mustermann')));
+      expect(alles, isNot(contains('Kurs 12')));
+    });
+
+    test('abgebrochen ist ein Ausgang, kein Fehler', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      antworten((_) => null);
+
+      for (final (pfad, daten) in [
+        (pfadAuswahl, {'titel': 'T', 'eintraege': ['a']}),
+        (pfadEingabe, {'titel': 'T', 'art': 'link'}),
+        (pfadPfadwahl, {'titel': 'T', 'art': 'datei'}),
+        (pfadHinweis, {'titel': 'T'}),
+      ]) {
+        final r = await _post(adresse.adresse, pfad, daten: daten, token: a.token);
+        expect(r.status, 200, reason: pfad);
+        expect(r.json, {'abgebrochen': true}, reason: pfad);
+      }
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Dialog „Eingabe“ abgebrochen'));
+    });
+
+    test('ohne gültiges Token kein Dialog und keine Freigabe: 403', () async {
+      final a = _aufruf(kontext('A'));
+      final ende = adresse.aufrufAnmelden('beispiel', a);
+      ende();
+      for (final pfad in [pfadAuswahl, pfadEingabe, pfadPfadwahl, pfadHinweis, pfadFreigabe]) {
+        expect((await _post(adresse.adresse, pfad, daten: {'titel': 'T'})).status, 403, reason: pfad);
+        expect((await _post(adresse.adresse, pfad, daten: {'titel': 'T'}, token: a.token)).status, 403, reason: pfad);
+      }
+      expect(dialoge.aktuell, isNull);
+    });
+
+    test('je Aufruf nur ein Dialog zugleich: ein zweiter 409, auch eine Freigabe; ein anderer Aufruf wartet', () async {
+      final k = kontext('A');
+      final a = _aufruf(k);
+      final b = _aufruf(kontext('B'));
+      adresse.aufrufAnmelden('beispiel', a);
+      adresse.aufrufAnmelden('beispiel', b);
+
+      final erster = _post(adresse.adresse, pfadHinweis, daten: {'titel': 'Eins'}, token: a.token);
+      await warten(() => dialoge.aktuell != null);
+      final zweiter = await _post(adresse.adresse, pfadEingabe, daten: {'titel': 'Zwei'}, token: a.token);
+      final freigabe = await _post(
+        adresse.adresse,
+        pfadFreigabe,
+        daten: {'titel': 'F', 'zusammenfassung': 'Z', 'ab': 'mittel'},
+        token: a.token,
+      );
+      final andererAufruf = _post(adresse.adresse, pfadHinweis, daten: {'titel': 'Drei'}, token: b.token);
+      await warten(() => dialoge.wartend == 1);
+
+      expect(zweiter.status, 409);
+      expect(zweiter.json['fehler'], contains('nur einer zugleich'));
+      expect(freigabe.status, 409);
+      expect(k.freigaben, isEmpty);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: zweiter Dialog im selben Aufruf abgewiesen'));
+      expect(dialoge.aktuell!.titel, 'Eins');
+
+      dialoge.beantworten(dialoge.aktuell!, const {});
+      expect((await erster).json, {'abgebrochen': false});
+      expect(dialoge.aktuell!.titel, 'Drei');
+      dialoge.beantworten(dialoge.aktuell!, const {});
+      expect((await andererAufruf).json, {'abgebrochen': false});
+
+      // Nach der Antwort geht der nächste Dialog desselben Aufrufs.
+      antworten((_) => const {});
+      expect((await _post(adresse.adresse, pfadHinweis, daten: {'titel': 'Vier'}, token: a.token)).status, 200);
+    });
+
+    for (final wie in ['bricht der Client den äußeren Aufruf ab', 'endet der äußere Aufruf']) {
+      test('$wie, schließt sich der offene Dialog: abgebrochen', () async {
+        final abbruch = Completer<void>();
+        final a = _aufruf(kontext('A'), abbruch: abbruch.future);
+        final ende = adresse.aufrufAnmelden('beispiel', a);
+
+        final antwort = _post(
+          adresse.adresse,
+          pfadAuswahl,
+          daten: {'titel': 'T', 'eintraege': ['a', 'b']},
+          token: a.token,
+        );
+        await warten(() => dialoge.aktuell != null);
+        final d = dialoge.aktuell!;
+        wie.startsWith('bricht') ? abbruch.complete() : ende();
+
+        final r = await antwort.timeout(const Duration(seconds: 5));
+        expect(r.status, 200);
+        expect(r.json, {'abgebrochen': true});
+        expect(d.offen, isFalse);
+        expect(dialoge.aktuell, isNull);
+        expect(zeilen(), contains('[A] Plugin „Beispiel“: Dialog „Auswahl“ abgebrochen'));
+      });
+    }
+
+    test('nach der Frist gilt der Dialog als abgebrochen und schließt sich', () async {
+      final kurz = PluginDialoge(frist: const Duration(milliseconds: 100));
+      final ad = await AppAdresse.starten(protokoll, dialoge: kurz);
+      addTearDown(ad.beenden);
+      ad.pluginAnmelden('beispiel', 'Beispiel', _schluessel);
+      final a = _aufruf(kontext('A'));
+      ad.aufrufAnmelden('beispiel', a);
+
+      final r = await _post(ad.adresse, pfadHinweis, daten: {'titel': 'T'}, token: a.token).timeout(const Duration(seconds: 5));
+
+      expect(r.json, {'abgebrochen': true});
+      expect(kurz.aktuell, isNull);
+      expect(PluginDialoge().frist, Freigaben.fristVorgabe);
+    });
+
+    test('ohne Oberfläche für Dialoge: 503', () async {
+      final ohne = await AppAdresse.starten(protokoll);
+      addTearDown(ohne.beenden);
+      ohne.pluginAnmelden('beispiel', 'Beispiel', _schluessel);
+      final a = _aufruf(kontext('A'));
+      ohne.aufrufAnmelden('beispiel', a);
+
+      final r = await _post(ohne.adresse, pfadHinweis, daten: {'titel': 'T'}, token: a.token);
+
+      expect(r.status, 503);
+    });
+  });
+
+  group('Grenzen der Dialoge', () {
+    test('Titel und Einträge einzeilig und gekürzt, der Text mehrzeilig ohne Steuer- und Richtungszeichen', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      final gezeigt = antworten((_) => null);
+      final rlo = String.fromCharCode(0x202e);
+      final bel = String.fromCharCode(0x07);
+      final lrm = String.fromCharCode(0x200e);
+
+      await _post(
+        adresse.adresse,
+        pfadAuswahl,
+        daten: {
+          'titel': 'Zeile eins\nZeile zwei ${'x' * 300}',
+          'text': 'erste\r\nzweite$bel$rlo dritte\t!\n\n\n\nvierte <b>fett</b> https://moodle.schule.example',
+          'eintraege': ['a${rlo}b', 'y' * 300, '  Kurs$lrm 12  '],
+        },
+        token: a.token,
+      );
+
+      final d = gezeigt.single as AuswahlDialog;
+      expect(d.titel, startsWith('Zeile eins Zeile zwei xxx'));
+      expect(d.titel.length, dialogTitelHoechstens);
+      expect(d.titel, endsWith('…'));
+      expect(d.text, 'erste\nzweite dritte !\n\nvierte <b>fett</b> https://moodle.schule.example');
+      expect(d.eintraege, ['a b', '${'y' * (auswahlEintragHoechstens - 1)}…', 'Kurs 12']);
+    });
+
+    test('mehrzeilig begrenzt die Länge', () {
+      expect(mehrzeilig('z' * 3000, dialogTextHoechstens).length, dialogTextHoechstens);
+      expect(mehrzeilig('z' * 3000, dialogTextHoechstens), endsWith('…'));
+    });
+
+    test('zu viele, leere oder falsche Einträge, fehlender Titel, falsche Art: 400 mit deutschem Satz; nichts gezeigt', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      final gezeigt = antworten((_) => null);
+      Future<({int status, Map json})> post(String pfad, Map<String, Object?> daten) =>
+          _post(adresse.adresse, pfad, daten: daten, token: a.token);
+
+      final zuViele = await post(pfadAuswahl, {
+        'titel': 'T',
+        'eintraege': [for (var i = 0; i <= auswahlEintraegeHoechstens; i++) 'E $i'],
+      });
+      expect(zuViele.status, 400);
+      expect(zuViele.json['fehler'], contains('höchstens $auswahlEintraegeHoechstens'));
+      for (final (pfad, daten) in [
+        (pfadAuswahl, {'titel': 'T', 'eintraege': <String>[]}),
+        (pfadAuswahl, {'titel': 'T', 'eintraege': ['', 'x']}),
+        (pfadAuswahl, {'titel': 'T', 'eintraege': [1]}),
+        (pfadAuswahl, {'titel': 'T', 'eintraege': ['x'], 'mehrfach': 'ja'}),
+        (pfadAuswahl, {'eintraege': ['x']}),
+        (pfadHinweis, {'titel': ' \n '}),
+        (pfadHinweis, {'titel': 'T', 'text': 3}),
+        (pfadEingabe, {'titel': 'T', 'art': 'zahl'}),
+        (pfadEingabe, {'titel': 'T', 'vorgabe': 3}),
+        (pfadPfadwahl, {'titel': 'T'}),
+        (pfadPfadwahl, {'titel': 'T', 'art': 'ordner', 'start': 'C:\\a\nb'}),
+        (pfadPfadwahl, {'titel': 'T', 'art': 'ordner', 'start': 'x' * (pfadHoechstens + 1)}),
+      ]) {
+        final r = await post(pfad, daten);
+        expect(r.status, 400, reason: '$pfad $daten');
+        expect(r.json['fehler'], isA<String>());
+      }
+      expect(gezeigt, isEmpty);
+
+      final genug = await post(pfadAuswahl, {
+        'titel': 'T',
+        'eintraege': [for (var i = 0; i < auswahlEintraegeHoechstens; i++) 'E $i'],
+      });
+      expect(genug.status, 200);
+      expect((gezeigt.single as AuswahlDialog).eintraege, hasLength(auswahlEintraegeHoechstens));
+    });
+  });
+
+  group('Freigabe eines Plugins über die Adresse', () {
+    test('Titel, Zusammenfassung und Stufe gehen bereinigt an das Profil des Aufrufs, mit dem Plugin als Aufrufer', () async {
+      final k = kontext('A');
+      final a = _aufruf(k);
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final r = await _post(
+        adresse.adresse,
+        pfadFreigabe,
+        daten: {
+          'titel': 'Zwei\nZeilen',
+          'zusammenfassung': 'Eins\r\nZwei${String.fromCharCode(0x202e)}',
+          'ab': 'alle',
+        },
+        token: a.token,
+      );
+
+      expect(r.status, 200);
+      expect(r.json, {'ausgang': 'freigegeben', 'ohneFrage': false});
+      expect(k.freigaben.single, (titel: 'Zwei Zeilen', zusammenfassung: 'Eins\nZwei', ab: Bestaetigungen.alle, aufrufer: 'Plugin „Beispiel“'));
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Freigabe ab Stufe „alle“ -- erteilt'));
+    });
+
+    test('ohne Titel, Zusammenfassung oder gültige Stufe: 400', () async {
+      final k = kontext('A');
+      final a = _aufruf(k);
+      adresse.aufrufAnmelden('beispiel', a);
+      for (final daten in [
+        {'zusammenfassung': 'Z', 'ab': 'mittel'},
+        {'titel': 'T', 'ab': 'mittel'},
+        {'titel': 'T', 'zusammenfassung': 'Z'},
+        {'titel': 'T', 'zusammenfassung': 'Z', 'ab': 'hoch'},
+      ]) {
+        expect((await _post(adresse.adresse, pfadFreigabe, daten: daten, token: a.token)).status, 400, reason: '$daten');
+      }
+      expect(k.freigaben, isEmpty);
+    });
+  });
+
+  group('Freigabe eines Plugins über den MCP-Dienst eines Profils', () {
+    late Protokoll ansicht;
+    late Freigaben freigaben;
+    late McpDienst dienst;
+
+    McpDienst dienstMit(Freigaben f) => McpDienst(
+      Einstellungen(schluessel: 'test'),
+      MoodleZugang(ansicht),
+      ansicht,
+      f,
+      (Directory(p.join(wurzel.path, 'A'))..createSync(recursive: true)).path,
+      profil: _profil('a', 'A'),
+    );
+
+    setUp(() {
+      ansicht = protokoll.fuer('A');
+      freigaben = Freigaben(ansicht);
+      dienst = dienstMit(freigaben);
+    });
+
+    Future<({int status, Map json})> bitten(WerkzeugAufruf a, String ab) => _post(
+      adresse.adresse,
+      pfadFreigabe,
+      daten: {'titel': 'Beispiel freigeben?', 'zusammenfassung': 'Das Beispiel ändert nichts.', 'ab': ab},
+      token: a.token,
+    );
+
+    /// Entscheidet jede offene Freigabe mit [ja]; liefert die gezeigten.
+    List<FreigabeAnfrage> entscheiden(bool ja) {
+      final gezeigt = <FreigabeAnfrage>[];
+      freigaben.addListener(() {
+        final f = freigaben.aktuell;
+        if (f != null && f.offen && !gezeigt.contains(f)) {
+          gezeigt.add(f);
+          scheduleMicrotask(() => freigaben.entscheiden(ja));
+        }
+      });
+      return gezeigt;
+    }
+
+    test('Stufe mittel, ab mittel: die Lehrkraft gibt frei; Plugin als Aufrufer, Zusammenfassung als vom Plugin', () async {
+      final gezeigt = entscheiden(true);
+      final a = _aufruf(dienst);
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final r = await bitten(a, 'mittel');
+
+      expect(r.json, {'ausgang': 'freigegeben', 'ohneFrage': false});
+      final f = gezeigt.single;
+      expect(f.titel, 'Beispiel freigeben?');
+      expect(f.vomPlugin, 'Das Beispiel ändert nichts.');
+      expect(f.aufrufer, 'Plugin „Beispiel“');
+      expect(f.knopf, 'Freigeben');
+      expect(f.ab, Bestaetigungen.mittel);
+      expect(
+        zeilen(),
+        containsAllInOrder([
+          '[A] Freigabe angefragt: Freigabe eines Plugins (Aufrufer: Plugin „Beispiel“, Frist 30 min)',
+          '[A] Freigabe erteilt',
+          '[A] Plugin „Beispiel“: Freigabe ab Stufe „mittel“ -- erteilt',
+        ]),
+      );
+      expect(zeilen().join('\n'), isNot(contains('Beispiel freigeben?')));
+      expect(zeilen().join('\n'), isNot(contains('ändert nichts')));
+    });
+
+    test('abgelehnt', () async {
+      entscheiden(false);
+      final a = _aufruf(dienst);
+      adresse.aufrufAnmelden('beispiel', a);
+
+      expect((await bitten(a, 'mittel')).json, {'ausgang': 'abgelehnt', 'ohneFrage': false});
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Freigabe ab Stufe „mittel“ -- abgelehnt'));
+    });
+
+    for (final (stufe, ab) in [(Bestaetigungen.keine, 'mittel'), (Bestaetigungen.mittel, 'alle')]) {
+      test('Stufe „${stufe.text}“, ab „$ab“: ohne Frage freigegeben, im Protokoll und als ohneFrage', () async {
+        final gezeigt = entscheiden(false);
+        freigaben.stufe = stufe;
+        final a = _aufruf(dienst);
+        adresse.aufrufAnmelden('beispiel', a);
+
+        final r = await bitten(a, ab);
+
+        expect(r.json, {'ausgang': 'freigegeben', 'ohneFrage': true});
+        expect(gezeigt, isEmpty);
+        expect(freigaben.ausgelassen, 1);
+        expect(
+          zeilen(),
+          contains('[A] Ohne Freigabe (Bestätigungen: ${stufe.text}): Freigabe eines Plugins (Aufrufer: Plugin „Beispiel“)'),
+        );
+        expect(zeilen(), contains('[A] Plugin „Beispiel“: Freigabe ab Stufe „$ab“ -- ohne Frage erteilt'));
+      });
+    }
+
+    test('ab „keine“ fragt auf jeder Stufe, auch bei „keine“', () async {
+      final gezeigt = entscheiden(true);
+      freigaben.stufe = Bestaetigungen.keine;
+      final a = _aufruf(dienst);
+      adresse.aufrufAnmelden('beispiel', a);
+
+      expect((await bitten(a, 'keine')).json, {'ausgang': 'freigegeben', 'ohneFrage': false});
+      expect(gezeigt.single.ab, Bestaetigungen.keine);
+      expect(freigaben.ausgelassen, 0);
+    });
+
+    test('bricht der Client den äußeren Aufruf ab, schließt sich die offene Freigabe: abgebrochen', () async {
+      final abbruch = Completer<void>();
+      freigaben.addListener(() {
+        if (freigaben.aktuell?.offen == true && !abbruch.isCompleted) abbruch.complete();
+      });
+      final a = _aufruf(dienst, abbruch: abbruch.future);
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final r = await bitten(a, 'mittel');
+
+      expect(r.json, {'ausgang': 'abgebrochen', 'ohneFrage': false});
+      expect(freigaben.aktuell, isNull);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Freigabe ab Stufe „mittel“ -- abgebrochen'));
+    });
+
+    test('endet der äußere Aufruf, schließt sich die offene Freigabe: abgebrochen', () async {
+      final a = _aufruf(dienst);
+      final ende = adresse.aufrufAnmelden('beispiel', a);
+      freigaben.addListener(() {
+        if (freigaben.aktuell?.offen == true) scheduleMicrotask(ende);
+      });
+
+      expect((await bitten(a, 'mittel')).json, {'ausgang': 'abgebrochen', 'ohneFrage': false});
+      expect(freigaben.aktuell, isNull);
+    });
+
+    test('nach der Frist: abgebrochen', () async {
+      final kurz = Freigaben(ansicht, frist: const Duration(milliseconds: 100));
+      final a = _aufruf(dienstMit(kurz));
+      adresse.aufrufAnmelden('beispiel', a);
+
+      expect((await bitten(a, 'mittel')).json, {'ausgang': 'abgebrochen', 'ohneFrage': false});
+      expect(kurz.aktuell, isNull);
+      expect(zeilen(), contains('[A] Frist abgelaufen -- nicht gespeichert'));
+    });
+
+    test('der Testbetrieb gibt eine Freigabe eines Plugins nicht automatisch frei', () async {
+      expect(testbetriebAktiv, isTrue);
+      freigaben.stufe = Bestaetigungen.alle;
+      // Zum Vergleich: In dieser Zone gäbe der Testbetrieb eine Freigabe der
+      // App automatisch frei.
+      final eigene = await freigaben.imTest(
+        () => freigaben.anfragen(FreigabeAnfrage(titel: 'ZZ Probe', punkte: const [], vergleich: const [])),
+        pruefen: () async => true,
+      );
+      expect(eigene, isTrue);
+      expect(freigaben.testfreigaben, 1);
+      final gezeigt = entscheiden(false);
+
+      final ausgang = await freigaben.imTest(
+        () => dienst.pluginFreigabe(
+          titel: 'T',
+          zusammenfassung: 'Z',
+          ab: Bestaetigungen.mittel,
+          abbruch: Completer<void>().future,
+          aufrufer: 'Plugin „Beispiel“',
+        ),
+        pruefen: () async => true,
+      );
+
+      expect(ausgang, PluginFreigabeAusgang.abgelehnt);
+      expect(gezeigt, hasLength(1));
+      expect(freigaben.testfreigaben, 1);
     });
   });
 

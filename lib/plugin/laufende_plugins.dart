@@ -18,6 +18,11 @@
 // eines Prozesses steht in keiner Prozessliste; lesen kann sie nur, wer den
 // Speicher des Prozesses lesen darf.
 //
+// Mit dem Schlüssel eines Starts meldet sich das Plugin auch an der Adresse
+// der App für Plugins an (app_adresse.dart), die vor dem ersten Plugin
+// öffnet; nach einem Neustart gilt dort nur der neue. Solange ein Aufruf beim
+// Plugin läuft, gilt sein Token dort für dieses Plugin.
+//
 // Was das Plugin auf stdout und stderr schreibt, liest die App und verwirft
 // es (E11): weder Konsole noch Protokoll, und ein volles Rohr hält das Plugin
 // nicht an. Die Standardeingabe bleibt offen; endet sie, weil die App fort
@@ -56,6 +61,7 @@ import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import '../plattform/plattform.dart';
 import '../profil.dart';
 import '../protokoll.dart';
+import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'entwicklung.dart';
 import 'plugins.dart';
@@ -97,11 +103,15 @@ String _ausfallText(PluginEintrag e) =>
     'wieder zur Verfügung, wenn moocp neu gestartet wird.';
 
 class _Laufend {
-  _Laufend(this.eintrag, this.prozess, this.verbindung, this.beendet);
+  _Laufend(this.eintrag, this.prozess, this.verbindung, this.beendet, this.schluessel);
   final PluginEintrag eintrag;
   final Process prozess;
   final PluginVerbindung verbindung;
   final Future<int> beendet;
+
+  /// Der Schlüssel dieses Starts, für das Abmelden an der Adresse der App.
+  /// Geheim: in keinem Protokoll.
+  final String schluessel;
 
   /// Erfüllt sich, wenn das Programm unerwartet endet; ein laufender Aufruf
   /// bekommt dann sofort den Fehler, statt auf eine Antwort zu warten, die
@@ -172,6 +182,20 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// Programm ist kein Absturz.
   bool _beendet = false;
 
+  /// Die Adresse der App für Plugins (app_adresse.dart): geöffnet vor dem
+  /// ersten Plugin, geschlossen mit [beenden]. Ohne Plugin gibt es sie nicht.
+  Future<AppAdresse>? _adresse;
+
+  /// Die geöffnete Adresse, sobald [_adresse] sich erfüllt hat.
+  AppAdresse? _offen;
+
+  Future<AppAdresse> _adresseHolen() =>
+      _adresse ??= AppAdresse.starten(_protokoll).then((a) => _offen = a);
+
+  /// Die Adresse der App für Plugins; null, solange kein Plugin gestartet
+  /// oder angehängt ist.
+  Uri? get appAdresse => _offen?.adresse;
+
   /// Warum das Plugin nicht läuft, ein Satz auf Deutsch; null, wenn es läuft
   /// oder nicht gestartet werden sollte.
   String? startfehler(PluginEintrag e) => _fehler[e.ordner];
@@ -205,12 +229,19 @@ class LaufendePlugins implements WerkzeugQuelle {
   Future<void> anhaengen(EntwicklungsPlugin plugin, {required Set<String> eingebaut}) async {
     if (_angehaengt != null || _beendet) return;
     _eingebaut = eingebaut;
+    AppAdresse? adresse;
+    try {
+      adresse = await _adresseHolen();
+    } on SocketException {
+      _protokoll.eintrag(Art.fehler, 'Die Adresse der App für Plugins ließ sich nicht öffnen.');
+    }
     final a = AngehaengtesPlugin(
       plugin,
       _protokoll,
       vergeben: () => _vergeben(ohne: ''),
       intervall: entwicklungsIntervall,
       versuchsfrist: entwicklungsFrist,
+      adresse: adresse,
     );
     _angehaengt = a;
     await a.starten();
@@ -295,9 +326,18 @@ class LaufendePlugins implements WerkzeugQuelle {
       );
     }
     if (_beendet) throw const PluginFehler('moocp wurde während des Starts beendet.');
+    final AppAdresse adresse;
+    try {
+      adresse = await _adresseHolen();
+    } on SocketException {
+      throw const PluginFehler('Die Adresse der App für Plugins ließ sich nicht öffnen.');
+    }
     final port = await _freierPort();
     final schluessel = _schluessel();
     _starts[e.ordner] = (_starts[e.ordner] ?? 0) + 1;
+    // Mit dem Schlüssel dieses Starts meldet sich das Plugin an der Adresse
+    // der App an; der Schlüssel eines früheren Starts gilt dort nicht mehr.
+    adresse.pluginAnmelden(b.kurzname, e.anzeigename, schluessel);
     final Process prozess;
     try {
       prozess = await starter(
@@ -307,6 +347,7 @@ class LaufendePlugins implements WerkzeugQuelle {
         arbeitsordner: e.pfad,
       );
     } on ProcessException {
+      adresse.pluginAbmelden(b.kurzname, schluessel);
       throw const PluginFehler('Das Programm des Plugins ließ sich nicht starten.');
     }
     // E11: lesen und verwerfen.
@@ -323,13 +364,15 @@ class LaufendePlugins implements WerkzeugQuelle {
         vergeben: _vergeben(ohne: e.ordner),
         frist: startfrist,
         weiter: () => lebt && !_beendet,
+        adresse: adresse.adresse,
       );
       if (_beendet) {
         await verbindung.schliessen();
         throw const PluginFehler('moocp wurde während des Starts beendet.');
       }
-      return _Laufend(e, prozess, verbindung, beendet);
+      return _Laufend(e, prozess, verbindung, beendet, schluessel);
     } catch (_) {
+      adresse.pluginAbmelden(b.kurzname, schluessel);
       await _prozessBeenden(prozess, beendet);
       rethrow;
     } finally {
@@ -377,6 +420,7 @@ class LaufendePlugins implements WerkzeugQuelle {
     if (_beendet || !identical(_laufend[e.ordner], l)) return;
     _laufend.remove(e.ordner);
     l.abgestuerzt.complete();
+    _offen?.pluginAbmelden(e.beschreibung!.kurzname, l.schluessel);
     unawaited(l.verbindung.schliessen());
     _protokoll.eintrag(Art.fehler, 'Plugin ${l.name} unerwartet beendet (Exit-Code $code)');
     final werkzeuge = l.verbindung.werkzeuge;
@@ -435,11 +479,14 @@ class LaufendePlugins implements WerkzeugQuelle {
 
   bool _aktiv(PluginEintrag e, Profil profil) => _plugins?.stand(e).aktivIn(profil.kennung) ?? false;
 
+  /// Führt den Aufruf beim Plugin aus. Solange er läuft, gilt sein Token an
+  /// der Adresse der App für genau dieses Plugin (app_adresse.dart); danach
+  /// und nach einem Abbruch nicht mehr.
   @override
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
     final angehaengt = _angehaengt;
     if (angehaengt != null && angehaengt.werkzeuge.any((w) => w.name == aufruf.name)) {
-      return angehaengt.aufrufen(aufruf);
+      return _mitToken(angehaengt.plugin.kurzname, aufruf, () => angehaengt.aufrufen(aufruf));
     }
     while (true) {
       final e = _besitzer(aufruf.name);
@@ -463,7 +510,16 @@ class LaufendePlugins implements WerkzeugQuelle {
       }
       final l = _laufend[e.ordner];
       if (l == null) throw MoodleFehler(_ausfallText(e));
-      return _aufrufenBei(l, aufruf);
+      return _mitToken(e.beschreibung!.kurzname, aufruf, () => _aufrufenBei(l, aufruf));
+    }
+  }
+
+  Future<String> _mitToken(String kurzname, WerkzeugAufruf aufruf, Future<String> Function() f) async {
+    final ende = _offen?.aufrufAnmelden(kurzname, aufruf);
+    try {
+      return await f();
+    } finally {
+      ende?.call();
     }
   }
 
@@ -519,6 +575,14 @@ class LaufendePlugins implements WerkzeugQuelle {
           _protokoll.eintrag(Art.info, 'Plugin ${l.name} beendet');
         }(),
     ]);
+    final adresse = _adresse;
+    if (adresse != null) {
+      try {
+        await (await adresse).beenden();
+      } catch (_) {
+        // Ließ sie sich nicht öffnen, ist nichts zu schließen.
+      }
+    }
   }
 
   static Future<void> _prozessBeenden(Process prozess, Future<int> beendet) async {

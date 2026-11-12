@@ -1,0 +1,431 @@
+// Die Adresse der App für Plugins (E35): ein eigener kleiner HTTP-Server auf
+// 127.0.0.1, getrennt vom MCP-Server der KI-Werkzeuge, ein Server für alle
+// Plugins und alle Instanzprofile. Hier erreicht ein Plugin, was die App ihm
+// bietet; die Adresse geht beim initialize an das Plugin
+// (verbindung.dart, vertragBeimInitialize).
+//
+// Form: JSON über POST, je Funktion ein Pfad unter einem versionierten
+// Präfix; die Antwort ist JSON, ein Fehler hat einen HTTP-Status und das Feld
+// `fehler` mit einem deutschen Satz, den die KI lesen kann. Kein zweiter
+// MCP-Kanal: Was das Plugin hier tut, ist kein Werkzeug, sondern ein Dienst
+// der App für die Dauer eines Aufrufs.
+//
+// Anmeldung: Jede Anfrage trägt `Authorization: Bearer <Schlüssel>`, den
+// Schlüssel, mit dem sich die App beim Plugin anmeldet (laufende_plugins.dart,
+// entwicklung.dart). Er bestimmt das Plugin; nach einem Neustart des Plugins
+// gilt der neue, der alte nicht mehr. Verglichen wird in konstanter Zeit.
+// Ohne gültigen Schlüssel kommt 401, ohne Auskunft, welche Pfade es gibt.
+//
+// Ein Plugin handelt nur, während die KI eines seiner Werkzeuge aufruft: Jede
+// Anfrage außer der Protokollzeile braucht im Kopf `Moocp-Aufruf` das Token
+// eines Aufrufs (`moocp/aufruf` aus `_meta`), der noch läuft, nicht
+// abgebrochen ist und diesem Plugin gilt. Das Token wählt das Instanzprofil:
+// dessen Protokoll, Arbeitsordner und eingebaute Werkzeuge. Ein Token im Kopf,
+// das nicht (mehr) gilt, lehnt auch die Protokollzeile ab.
+//
+// Schlüssel und Token stehen in keinem Protokoll und in keiner Antwort.
+// Zum Schutz gegen DNS-Rebinding gilt dieselbe Prüfung von Host und Origin wie
+// beim MCP-Server (E6): Ein offener Port auf localhost ist auch für jede
+// Webseite im Browser erreichbar, die es darauf anlegt.
+//
+// Moodle erreicht ein Plugin hier nicht, und Dialoge oder Freigaben des
+// Plugins selbst gibt es hier noch nicht; die Pfade dafür kommen unter
+// demselben Präfix dazu ([_funktionen]).
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:path/path.dart' as p;
+
+import '../mcp/werkzeugquelle.dart';
+import '../moodle/moodle_zugang.dart' show MoodleFehler;
+import '../protokoll.dart';
+
+/// Der Kopf, in dem das Token des Aufrufs mitgeht.
+const aufrufKopf = 'Moocp-Aufruf';
+
+/// Die Funktionen der Adresse, je ein Pfad.
+const pfadProtokoll = '/v1/protokoll';
+const pfadArbeitsordner = '/v1/arbeitsordner';
+const pfadWerkzeug = '/v1/werkzeug';
+
+/// So lang darf eine Protokollzeile eines Plugins höchstens werden; was
+/// darüber hinausgeht, schneidet die App ab.
+const protokollzeileHoechstens = 500;
+
+/// Bringt einen Text von außen auf eine Zeile: Steuerzeichen, Zeilen- und
+/// Absatztrenner und Richtungszeichen werden zu Leerzeichen, Leerraum fällt
+/// zusammen, und was über [hoechstens] Zeichen hinausgeht, endet mit „…“. So
+/// fälscht ein Plugin keine Zeile im Protokoll.
+String einzeilig(String text, int hoechstens) {
+  final t = text
+      .replaceAll(RegExp('[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  final zeichen = t.runes.toList();
+  if (zeichen.length <= hoechstens) return t;
+  return '${String.fromCharCodes(zeichen.take(hoechstens - 1))}…';
+}
+
+class _Plugin {
+  _Plugin(this.kurzname, this.name, this.schluessel);
+  final String kurzname;
+  final String name;
+
+  /// Geheim: in keinem Protokoll und keiner Antwort.
+  final List<int> schluessel;
+
+  /// Wie das Plugin in Protokoll und Freigabe als Aufrufer heißt.
+  String get aufrufer => 'Plugin „$name“';
+}
+
+class _Aufruf {
+  _Aufruf(this.kurzname, this.kontext);
+  final String kurzname;
+  final AufrufKontext kontext;
+
+  /// Erfüllt sich, wenn der Aufruf endet oder abgebrochen wird; ab dann gilt
+  /// das Token nicht mehr, und was das Plugin gerade über die Adresse tut,
+  /// endet mit ihm.
+  final _ende = Completer<void>();
+  Future<void> get ende => _ende.future;
+  bool get vorbei => _ende.isCompleted;
+
+  void beenden() {
+    if (!_ende.isCompleted) _ende.complete();
+  }
+}
+
+/// Eine Antwort: Status und JSON.
+typedef _Antwort = ({int status, Map<String, Object?> json});
+
+_Antwort _fehler(int status, String text) => (status: status, json: {'fehler': text});
+
+/// Die Adresse der App für Plugins: der Server, die angemeldeten Plugins mit
+/// ihren Schlüsseln und die laufenden Aufrufe mit ihren Token.
+class AppAdresse {
+  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens);
+
+  /// Öffnet den Server auf 127.0.0.1 mit einem freien Port. [protokoll] ist
+  /// das Protokoll der App ohne Profilbezug: Dorthin geht eine Protokollzeile
+  /// ohne Token. [anfrageHoechstens] begrenzt den Inhalt einer Anfrage in
+  /// Bytes.
+  static Future<AppAdresse> starten(Protokoll protokoll, {int anfrageHoechstens = 1024 * 1024}) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final a = AppAdresse._(server, protokoll, anfrageHoechstens);
+    server.listen(a._bearbeiten, onError: (Object _) {});
+    protokoll.eintrag(Art.info, 'Adresse der App für Plugins: ${a.adresse}');
+    return a;
+  }
+
+  final HttpServer _server;
+  final Protokoll _protokoll;
+  final int anfrageHoechstens;
+
+  /// Die Adresse, wie sie beim initialize an das Plugin geht.
+  Uri get adresse => Uri.parse('http://127.0.0.1:${_server.port}');
+
+  /// Die angemeldeten Plugins nach Kurzname.
+  final _plugins = <String, _Plugin>{};
+
+  /// Die laufenden Aufrufe nach Token.
+  final _aufrufe = <String, _Aufruf>{};
+
+  bool _beendet = false;
+
+  /// Meldet das Plugin [kurzname] mit seinem [schluessel] an, unter [name]
+  /// für Protokoll und Freigabe. Ein früherer Schlüssel desselben Plugins
+  /// gilt danach nicht mehr.
+  void pluginAnmelden(String kurzname, String name, String schluessel) {
+    _plugins[kurzname] = _Plugin(kurzname, name, utf8.encode(schluessel));
+  }
+
+  /// Meldet das Plugin [kurzname] ab, wenn [schluessel] noch der angemeldete
+  /// ist: Sein Programm ist zu Ende. Ein schon neu angemeldeter Schlüssel
+  /// bleibt.
+  void pluginAbmelden(String kurzname, String schluessel) {
+    final pl = _plugins[kurzname];
+    if (pl != null && _gleich(pl.schluessel, utf8.encode(schluessel))) _plugins.remove(kurzname);
+  }
+
+  /// Meldet einen Aufruf des Plugins [kurzname] an: Sein Token gilt von nun
+  /// an für dieses Plugin, bis die zurückgegebene Funktion gerufen wird (der
+  /// Aufruf ist fertig) oder der Client abbricht. Ohne [WerkzeugAufruf.kontext]
+  /// gilt das Token nie.
+  void Function() aufrufAnmelden(String kurzname, WerkzeugAufruf aufruf) {
+    final kontext = aufruf.kontext;
+    if (kontext == null || aufruf.token.isEmpty || _beendet) return () {};
+    final a = _Aufruf(kurzname, kontext);
+    _aufrufe[aufruf.token] = a;
+    void ende() {
+      a.beenden();
+      if (identical(_aufrufe[aufruf.token], a)) _aufrufe.remove(aufruf.token);
+    }
+
+    unawaited(aufruf.abbruch.then((_) => ende()));
+    return ende;
+  }
+
+  /// Schließt den Server; jedes Token und jeder Schlüssel gilt danach nicht
+  /// mehr.
+  Future<void> beenden() async {
+    if (_beendet) return;
+    _beendet = true;
+    for (final a in _aufrufe.values) {
+      a.beenden();
+    }
+    _aufrufe.clear();
+    _plugins.clear();
+    await _server.close(force: true);
+  }
+
+  Future<void> _bearbeiten(HttpRequest r) async {
+    _Antwort antwort;
+    try {
+      antwort = await _antwort(r);
+    } catch (x) {
+      // Nur der Typ (E11): Der Text eines Fehlers könnte Inhalte tragen.
+      _protokoll.eintrag(Art.fehler, 'Adresse der App für Plugins: unerwarteter Fehler (${x.runtimeType})');
+      antwort = _fehler(500, 'Unerwarteter Fehler in moocp.');
+    }
+    try {
+      final res = r.response
+        ..statusCode = antwort.status
+        ..headers.contentType = ContentType.json
+        ..headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+      if (antwort.status == HttpStatus.unauthorized) {
+        res.headers.set(HttpHeaders.wwwAuthenticateHeader, 'Bearer');
+      }
+      res.write(jsonEncode(antwort.json));
+      await res.close();
+    } catch (_) {
+      // Das Plugin wartet nicht mehr auf die Antwort.
+    }
+  }
+
+  Future<_Antwort> _antwort(HttpRequest r) async {
+    if (!_hostErlaubt(r)) {
+      _protokoll.eintrag(Art.gesperrt, 'Anfrage an die Adresse der App für Plugins abgewiesen (Host oder Origin)');
+      r.response.persistentConnection = false;
+      return _fehler(HttpStatus.forbidden, 'Abgewiesen: Host oder Origin ist nicht erlaubt.');
+    }
+    final plugin = _pluginAus(r);
+    if (plugin == null) {
+      _protokoll.eintrag(Art.gesperrt, 'Anfrage an die Adresse der App für Plugins ohne gültigen Schlüssel abgewiesen');
+      r.response.persistentConnection = false;
+      return _fehler(HttpStatus.unauthorized, 'Nicht angemeldet.');
+    }
+    final funktion = _funktionen[r.uri.path];
+    if (funktion == null) {
+      r.response.persistentConnection = false;
+      return _fehler(HttpStatus.notFound, 'Diese Funktion gibt es nicht.');
+    }
+    if (r.method != 'POST') {
+      r.response.persistentConnection = false;
+      return _fehler(HttpStatus.methodNotAllowed, 'Nur POST.');
+    }
+    final daten = await _inhalt(r);
+    if (daten case final _Antwort fehler) return fehler;
+    final (token: token, aufruf: aufruf) = _aufrufAus(r, plugin);
+    if (token != null && aufruf == null || token == null && funktion.mitAufruf) {
+      _protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Anfrage an ${r.uri.path} ohne gültiges Aufruf-Token abgewiesen',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        token == null
+            ? 'Diese Funktion braucht im Kopf $aufrufKopf das Token des Aufrufs (moocp/aufruf aus _meta).'
+            : 'Das Token gehört zu keinem laufenden Aufruf dieses Plugins; es gilt nur, solange der Aufruf '
+                  'läuft und nicht abgebrochen ist.',
+      );
+    }
+    return funktion.ausfuehren(this, plugin, aufruf, daten as Map<String, Object?>);
+  }
+
+  static const _erlaubteHosts = {'127.0.0.1', 'localhost'};
+
+  /// Host und Origin wie beim MCP-Server (mcp_dart, allowedHosts): Der Host
+  /// muss 127.0.0.1 oder localhost heißen; ein Origin, wenn es einen gibt,
+  /// ebenso, und „null“ nie.
+  static bool _hostErlaubt(HttpRequest r) {
+    final host = r.headers.value(HttpHeaders.hostHeader)?.trim().toLowerCase();
+    if (host == null || host.isEmpty) return false;
+    final i = host.indexOf(':');
+    final name = i >= 0 && i == host.lastIndexOf(':') ? host.substring(0, i) : host;
+    if (!_erlaubteHosts.contains(name)) return false;
+    final origin = r.headers.value('origin')?.trim();
+    if (origin == null || origin.isEmpty) return true;
+    if (origin.toLowerCase() == 'null') return false;
+    final u = Uri.tryParse(origin);
+    return u != null && u.host.isNotEmpty && _erlaubteHosts.contains(u.host.toLowerCase());
+  }
+
+  /// Das Plugin zum Schlüssel im Kopf; null ohne Schlüssel oder mit einem,
+  /// den die App nicht kennt. Jeder angemeldete Schlüssel wird ganz
+  /// verglichen, ohne früh abzubrechen.
+  _Plugin? _pluginAus(HttpRequest r) {
+    final kopf = r.headers.value(HttpHeaders.authorizationHeader) ?? '';
+    if (!kopf.startsWith('Bearer ')) return null;
+    final schluessel = utf8.encode(kopf.substring('Bearer '.length));
+    if (schluessel.isEmpty) return null;
+    _Plugin? treffer;
+    for (final pl in _plugins.values) {
+      if (_gleich(pl.schluessel, schluessel)) treffer = pl;
+    }
+    return treffer;
+  }
+
+  /// Das Token im Kopf und der Aufruf, für den es gilt: nur ein laufender,
+  /// nicht abgebrochener Aufruf dieses Plugins.
+  ({String? token, _Aufruf? aufruf}) _aufrufAus(HttpRequest r, _Plugin plugin) {
+    final token = r.headers.value(aufrufKopf)?.trim();
+    if (token == null || token.isEmpty) return (token: null, aufruf: null);
+    final a = _aufrufe[token];
+    return (token: token, aufruf: a != null && !a.vorbei && a.kurzname == plugin.kurzname ? a : null);
+  }
+
+  /// Der Inhalt der Anfrage als JSON-Objekt, höchstens [anfrageHoechstens]
+  /// Bytes; ein leerer Inhalt gilt als `{}`. Sonst die Antwort mit dem Fehler.
+  Future<Object> _inhalt(HttpRequest r) async {
+    if (r.contentLength > anfrageHoechstens) {
+      r.response.persistentConnection = false;
+      return _zuGross();
+    }
+    final bytes = BytesBuilder(copy: false);
+    var zuGross = false;
+    await for (final teil in r) {
+      if (zuGross) continue;
+      if (bytes.length + teil.length > anfrageHoechstens) {
+        zuGross = true;
+        bytes.clear();
+        continue;
+      }
+      bytes.add(teil);
+    }
+    if (zuGross) return _zuGross();
+    if (bytes.isEmpty) return <String, Object?>{};
+    final Object? json;
+    try {
+      json = jsonDecode(utf8.decode(bytes.takeBytes()));
+    } on FormatException {
+      return _fehler(HttpStatus.badRequest, 'Der Inhalt der Anfrage ist kein gültiges JSON in UTF-8.');
+    }
+    if (json is! Map<String, Object?>) {
+      return _fehler(HttpStatus.badRequest, 'Der Inhalt der Anfrage muss ein JSON-Objekt sein.');
+    }
+    return json;
+  }
+
+  _Antwort _zuGross() =>
+      _fehler(HttpStatus.requestEntityTooLarge, 'Die Anfrage ist größer als $anfrageHoechstens Bytes.');
+
+  /// Jede Protokollzeile eines Plugins geht hier durch, mit und ohne Token:
+  /// die eine Stelle, an der die letzte Sperre gegen Namen (E36) jede Zeile
+  /// prüfen kann, bevor sie im Protokoll steht.
+  void _protokollzeile(_Plugin plugin, Protokoll ziel, String zeile) {
+    ziel.eintrag(Art.info, '${plugin.aufrufer}: $zeile');
+  }
+
+  static final _funktionen = <String, _Funktion>{
+    pfadProtokoll: const _Funktion(mitAufruf: false, ausfuehren: _protokollSchreiben),
+    pfadArbeitsordner: const _Funktion(mitAufruf: true, ausfuehren: _arbeitsordnerGeben),
+    pfadWerkzeug: const _Funktion(mitAufruf: true, ausfuehren: _werkzeugAufrufen),
+  };
+
+  /// `POST /v1/protokoll` `{"text": …}`: eine Zeile ins Protokoll der App,
+  /// mit dem Namen des Plugins davor, einzeilig und gekürzt. Mit Token ins
+  /// Protokoll des Profils des Aufrufs, ohne ins Protokoll der App.
+  static Future<_Antwort> _protokollSchreiben(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final text = daten['text'];
+    final zeile = text is String ? einzeilig(text, protokollzeileHoechstens) : '';
+    if (zeile.isEmpty) return _fehler(HttpStatus.badRequest, 'text fehlt: eine Zeile Text für das Protokoll.');
+    a._protokollzeile(plugin, aufruf?.kontext.protokoll ?? a._protokoll, zeile);
+    return (status: HttpStatus.ok, json: <String, Object?>{});
+  }
+
+  /// `POST /v1/arbeitsordner` `{}`: der Pfad des Unterordners dieses Plugins
+  /// im Arbeitsordner des Profils des Aufrufs (`plugin-<Kurzname>`; die App
+  /// legt dort sonst nichts mit diesem Anfang ab). Die App legt ihn an, das
+  /// Plugin schreibt selbst hinein; er wird mit dem Arbeitsordner geleert
+  /// (E5).
+  static Future<_Antwort> _arbeitsordnerGeben(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final pfad = p.normalize(p.absolute(aufruf!.kontext.arbeitsordner, 'plugin-${plugin.kurzname}'));
+    try {
+      await Directory(pfad).create(recursive: true);
+    } on FileSystemException catch (x) {
+      return _fehler(HttpStatus.internalServerError, 'Der Ordner $pfad ließ sich nicht anlegen (${x.runtimeType}).');
+    }
+    return (status: HttpStatus.ok, json: {'pfad': pfad});
+  }
+
+  /// `POST /v1/werkzeug` `{"name": …, "argumente": {…}}`: ein eingebautes
+  /// Werkzeug im Profil des Aufrufs, zu denselben Regeln wie für ein
+  /// KI-Werkzeug (AufrufKontext.eingebautAufrufen), mit dem Plugin als
+  /// Aufrufer. Endet der äußere Aufruf oder bricht der Client ab, endet auch
+  /// dieser: Offene Freigaben verfallen, und die Antwort ist 409.
+  static Future<_Antwort> _werkzeugAufrufen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final name = daten['name'];
+    final args = daten['argumente'] ?? <String, Object?>{};
+    if (name is! String || name.isEmpty) {
+      return _fehler(HttpStatus.badRequest, 'name fehlt: der Name eines eingebauten Werkzeugs.');
+    }
+    if (args is! Map<String, Object?>) {
+      return _fehler(HttpStatus.badRequest, 'argumente muss ein JSON-Objekt sein.');
+    }
+    final abgebrochen = _fehler(
+      HttpStatus.conflict,
+      'Abgebrochen: Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen.',
+    );
+    try {
+      final antwort = await Future.any<_Antwort>([
+        aufruf!.kontext
+            .eingebautAufrufen(name, args, abbruch: aufruf.ende, aufrufer: plugin.aufrufer)
+            .then((e) => (status: HttpStatus.ok, json: {'text': e.text, 'fehlgeschlagen': e.fehlgeschlagen})),
+        aufruf.ende.then((_) => abgebrochen),
+      ]);
+      // Wie bei einem Client, der abbricht: Nach dem Ende geht kein Ergebnis
+      // mehr hinaus, auch wenn das Werkzeug im selben Augenblick fertig wurde.
+      return aufruf.vorbei ? abgebrochen : antwort;
+    } on MoodleFehler catch (x) {
+      return aufruf!.vorbei ? abgebrochen : _fehler(HttpStatus.badRequest, x.meldung);
+    }
+  }
+}
+
+class _Funktion {
+  const _Funktion({required this.mitAufruf, required this.ausfuehren});
+
+  /// Ob die Funktion das Token eines laufenden Aufrufs verlangt.
+  final bool mitAufruf;
+  final Future<_Antwort> Function(AppAdresse a, _Plugin plugin, _Aufruf? aufruf, Map<String, Object?> daten)
+  ausfuehren;
+}
+
+/// Vergleicht zwei Schlüssel in einer Zeit, die nur von der Länge von [a]
+/// abhängt, nicht davon, wo sie sich unterscheiden.
+bool _gleich(List<int> a, List<int> b) {
+  if (a.isEmpty || b.isEmpty) return false;
+  var d = a.length ^ b.length;
+  for (var i = 0; i < a.length; i++) {
+    d |= a[i] ^ b[i < b.length ? i : 0];
+  }
+  return d == 0;
+}

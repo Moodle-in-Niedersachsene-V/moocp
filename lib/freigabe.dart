@@ -194,6 +194,13 @@ class FreigabeAnfrage {
   DateTime? get ablauf => _ablauf;
   DateTime? _ablauf;
 
+  /// Das Plugin, das das Werkzeug aufgerufen hat („Plugin „Name““), wenn
+  /// nicht die KI direkt fragt; gesetzt von [Freigaben.anfragen] aus dem
+  /// Aufruf ([Freigaben.mitAbbruch]). Der Dialog zeigt es, damit die
+  /// Lehrkraft sieht, wer fragt.
+  String? get aufrufer => _aufrufer;
+  String? _aufrufer;
+
   final Completer<bool> _antwort = Completer<bool>();
   bool get offen => !_antwort.isCompleted;
 }
@@ -212,11 +219,12 @@ class AufrufZaehler {
 }
 
 class _AbbruchStand {
-  _AbbruchStand(this.signal, this.zaehler) {
+  _AbbruchStand(this.signal, this.zaehler, this.aufrufer) {
     signal.then((_) => abgebrochen = true);
   }
   final Future<void> signal;
   final AufrufZaehler? zaehler;
+  final String? aufrufer;
   bool abgebrochen = false;
 }
 
@@ -267,9 +275,11 @@ class Freigaben extends ChangeNotifier {
   /// Führt [f] so aus, dass seine Freigaben verfallen, sobald sich [abbruch]
   /// erfüllt: Dann wartet der Client nicht mehr auf das Ergebnis. Mit [zaehler]
   /// zählt [anfragen] mit, was in diesem Aufruf ohne persönliche Freigabe lief.
+  /// [aufrufer] nennt das Plugin, wenn ein Plugin das Werkzeug aufgerufen hat
+  /// ([FreigabeAnfrage.aufrufer]); null bei einem KI-Werkzeug.
   static Future<T> mitAbbruch<T>(Future<void> abbruch, Future<T> Function() f,
-          {AufrufZaehler? zaehler}) =>
-      runZoned(f, zoneValues: {_abbruch: _AbbruchStand(abbruch, zaehler)});
+          {AufrufZaehler? zaehler, String? aufrufer}) =>
+      runZoned(f, zoneValues: {_abbruch: _AbbruchStand(abbruch, zaehler, aufrufer)});
 
   /// Ob [a] bei der eingestellten Stufe überhaupt gefragt wird.
   bool fragt(FreigabeAnfrage a) => stufe.index >= a.ab.index;
@@ -294,6 +304,9 @@ class Freigaben extends ChangeNotifier {
   /// Feld für die Stufe, und ohne offenen Dialog wartet keine Anfrage.
   Future<bool> anfragen(FreigabeAnfrage a) async {
     final abbruch = Zone.current[_abbruch] as _AbbruchStand?;
+    a._aufrufer = abbruch?.aufrufer;
+    // Hinter dem Titel im Protokoll: wer gefragt hat, wenn es ein Plugin war.
+    final titel = a._aufrufer == null ? a.titel : '${a.titel} (Aufrufer: ${a._aufrufer})';
     bool abgebrochen() {
       if (abbruch?.abgebrochen != true) return false;
       protokoll.eintrag(Art.info, 'Die KI wartet nicht mehr -- nicht gespeichert');
@@ -315,7 +328,7 @@ class Freigaben extends ChangeNotifier {
       if (erlaubt) {
         testfreigaben++;
         abbruch?.zaehler?.testfreigaben++;
-        protokoll.eintrag(Art.schreiben, 'Testmodus, automatisch freigegeben: ${a.titel}');
+        protokoll.eintrag(Art.schreiben, 'Testmodus, automatisch freigegeben: $titel');
         a._antwort.complete(true);
         return true;
       }
@@ -323,7 +336,7 @@ class Freigaben extends ChangeNotifier {
     if (!fragt(a)) {
       ausgelassen++;
       abbruch?.zaehler?.ausgelassen++;
-      protokoll.eintrag(Art.schreiben, 'Ohne Freigabe (Bestätigungen: ${stufe.text}): ${a.titel}');
+      protokoll.eintrag(Art.schreiben, 'Ohne Freigabe (Bestätigungen: ${stufe.text}): $titel');
       a._antwort.complete(true);
       return true;
     }
@@ -337,7 +350,7 @@ class Freigaben extends ChangeNotifier {
     } else {
       final davor = 1 + _warteschlange.length;
       protokoll.eintrag(Art.info,
-          'Freigabe wartet hinter ${davor == 1 ? 'einer anderen' : '$davor anderen'}: ${a.titel}');
+          'Freigabe wartet hinter ${davor == 1 ? 'einer anderen' : '$davor anderen'}: $titel');
       _warteschlange.add(a);
     }
     notifyListeners();
@@ -350,7 +363,10 @@ class Freigaben extends ChangeNotifier {
 
   void _oeffnen(FreigabeAnfrage a) {
     _aktuell = a;
-    protokoll.eintrag(Art.info, 'Freigabe angefragt: ${a.titel} (Frist ${_dauer(a._ablauf!.difference(DateTime.now()))})');
+    protokoll.eintrag(
+        Art.info,
+        'Freigabe angefragt: ${a.titel} (${a.aufrufer == null ? '' : 'Aufrufer: ${a.aufrufer}, '}'
+        'Frist ${_dauer(a._ablauf!.difference(DateTime.now()))})');
   }
 
   /// Beantwortet [a], ob offen oder wartend; ist sie die offene, ist die

@@ -24,6 +24,8 @@
 //   gemerkte Zustimmung oder eine Prüfsumme wäre nichts wert: Der Dialog tritt
 //   an ihre Stelle. Der Testbetrieb beantwortet ihn nie.
 // - Verbunden wird nur mit 127.0.0.1 (verbindung.dart).
+// - An der Adresse der App für Plugins (app_adresse.dart) gilt derselbe
+//   Schlüssel, solange das Plugin angehängt ist.
 //
 // Gefragt wird einmal je Start: Wird das Plugin neu gebaut und neu
 // gestartet, verbindet sich die laufende App wieder, ohne neuen Dialog, mit
@@ -46,6 +48,7 @@ import 'package:path/path.dart' as p;
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import '../protokoll.dart';
+import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'plugins.dart';
 import 'verbindung.dart';
@@ -130,10 +133,19 @@ class AngehaengtesPlugin {
     required this.vergeben,
     this.intervall = const Duration(seconds: 3),
     this.versuchsfrist = const Duration(seconds: 2),
-  });
+    this.adresse,
+  }) {
+    // Derselbe Schlüssel wie für die Verbindung, solange die App läuft: Auch
+    // ein neu gestartetes Plugin bekommt ihn von seinem Entwickler wieder.
+    adresse?.pluginAnmelden(plugin.kurzname, plugin.name, plugin._schluessel);
+  }
 
   final EntwicklungsPlugin plugin;
   final Protokoll _protokoll;
+
+  /// Die Adresse der App für Plugins (app_adresse.dart); sie geht bei jeder
+  /// Verbindung an das Plugin.
+  final AppAdresse? adresse;
 
   /// Die Werkzeugnamen, die schon vergeben sind (eingebaute, andere Plugins);
   /// gefragt bei jeder Verbindung, denn die Namensregeln gelten jedes Mal neu.
@@ -221,6 +233,7 @@ class AngehaengtesPlugin {
         vergeben: vergeben(),
         frist: versuchsfrist,
         weiter: () => !_beendet,
+        adresse: adresse?.adresse,
       );
     } on PluginStartFehler {
       // Nicht erreichbar oder keine Antwort in der Frist: Das Plugin läuft
@@ -298,6 +311,7 @@ class AngehaengtesPlugin {
     if (_beendet) return;
     _beendet = true;
     _ende.complete();
+    adresse?.pluginAbmelden(plugin.kurzname, plugin._schluessel);
     final v = _verbindung;
     _verbindung = null;
     if (v != null) {

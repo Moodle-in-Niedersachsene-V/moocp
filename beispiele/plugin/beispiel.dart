@@ -45,13 +45,24 @@
 //
 // Was moocp mitgibt:
 // - beim `initialize` unter `capabilities.experimental.moocp` die Version der
-//   Schnittstelle (`schnittstelle`);
+//   Schnittstelle (`schnittstelle`) und die Adresse der App für Plugins
+//   (`adresse`, etwa `http://127.0.0.1:<Port>`);
 // - bei jedem `tools/call` unter `_meta` das Instanzprofil, über das der
 //   Aufruf kam (`moocp/profil`, der technische Name wie `moodle`), und ein
 //   Token für genau diesen Aufruf (`moocp/aufruf`). Das Token ist geheim wie
 //   der Schlüssel: nie ausgeben, nie ins Protokoll.
 // - Bricht die KI einen Aufruf ab, schickt moocp `notifications/cancelled`;
 //   ein Werkzeug, das länger läuft, hört darauf (`extra.signal`).
+//
+// Die Adresse der App (README, Teil 4, „Die Adresse der App für Plugins“):
+// JSON über POST, angemeldet mit demselben Schlüssel (`Authorization: Bearer
+// <Schlüssel>`) und dem Token des laufenden Aufrufs im Kopf `Moocp-Aufruf`.
+// Sie gilt nur, solange die KI ein Werkzeug des Plugins aufruft; danach lehnt
+// moocp das Token ab. Die Hilfsfunktion [anMoocp] unten lässt sich in ein
+// eigenes Plugin übernehmen. Drei Werkzeuge zeigen je einen Weg:
+// `beispiel_protokoll` (eine Zeile ins Protokoll von moocp),
+// `beispiel_datei` (eine Datei im Arbeitsordner ablegen) und
+// `beispiel_status` (das eingebaute Werkzeug `status` aufrufen).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -60,6 +71,7 @@
 // Sprache geschrieben sein.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
@@ -67,9 +79,12 @@ import 'package:mcp_dart/mcp_dart.dart';
 /// Der Name der Umgebungsvariablen, in der moocp den Schlüssel mitgibt.
 const schluesselVariable = 'MOOCP_PLUGIN_SCHLUESSEL';
 
+/// Der Schlüssel aus der Umgebung; gilt für beide Richtungen.
+late final String _schluessel;
+
 Future<void> main(List<String> argumente) async {
   final port = _port(argumente);
-  final schluessel = Platform.environment[schluesselVariable] ?? '';
+  final schluessel = _schluessel = Platform.environment[schluesselVariable] ?? '';
   // Ohne Port oder Schlüssel gibt es nichts anzubieten: Ein Plugin ohne
   // Schlüssel stünde jedem Programm auf dem Rechner offen.
   if (port == null || schluessel.isEmpty) exit(2);
@@ -165,5 +180,146 @@ McpServer _server() {
     ),
     callback: (args, extra) async => exit(3),
   );
+
+  // Die drei Wege zur Adresse der App. Jeder braucht die Adresse aus dem
+  // initialize dieser Sitzung und das Token des Aufrufs aus `_meta`.
+  Uri? adresse() {
+    final moocp = server.server.getClientCapabilities()?.experimental?['moocp'];
+    final a = moocp is Map ? moocp['adresse'] : null;
+    return a is String ? Uri.tryParse(a) : null;
+  }
+
+  String? token(RequestHandlerExtra extra) {
+    final t = extra.meta?['moocp/aufruf'];
+    return t is String ? t : null;
+  }
+
+  CallToolResult text(String t, {bool fehler = false}) =>
+      CallToolResult(content: [TextContent(text: t)], isError: fehler);
+
+  server.registerTool(
+    'beispiel_protokoll',
+    description:
+        'Schreibt eine Zeile ins Protokoll von moocp. Zeigt nur die Schnittstelle der Plugins.',
+    inputSchema: JsonSchema.object(
+      properties: {'text': JsonSchema.string(description: 'Die Zeile.')},
+      required: ['text'],
+    ),
+    annotations: const ToolAnnotations(
+      title: 'Protokollzeile (Beispiel)',
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    ),
+    callback: (args, extra) async {
+      try {
+        await anMoocp(adresse(), '/v1/protokoll', {'text': args['text']}, aufruf: token(extra));
+        return text('Die Zeile steht im Protokoll von moocp.');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_datei',
+    description:
+        'Legt den Text als Datei beispiel.txt im Arbeitsordner ab und nennt ihren Pfad. '
+        'Zeigt nur die Schnittstelle der Plugins.',
+    inputSchema: JsonSchema.object(
+      properties: {'text': JsonSchema.string(description: 'Der Inhalt der Datei.')},
+      required: ['text'],
+    ),
+    annotations: const ToolAnnotations(
+      title: 'Datei ablegen (Beispiel)',
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    ),
+    callback: (args, extra) async {
+      try {
+        // moocp nennt den eigenen Unterordner im Arbeitsordner des Profils;
+        // hineinschreiben tut das Plugin selbst.
+        final antwort = await anMoocp(adresse(), '/v1/arbeitsordner', {}, aufruf: token(extra));
+        final datei = File('${antwort['pfad']}${Platform.pathSeparator}beispiel.txt');
+        await datei.writeAsString('${args['text']}');
+        return text('Datei abgelegt: ${datei.path}');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'beispiel_status',
+    description:
+        'Ruft das eingebaute Werkzeug status von moocp auf und gibt seine Antwort zurück. '
+        'Zeigt nur die Schnittstelle der Plugins.',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: const ToolAnnotations(
+      title: 'Status über moocp (Beispiel)',
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    ),
+    callback: (args, extra) async {
+      try {
+        // Dieselben Regeln wie für ein KI-Werkzeug: Freigaben, Protokoll,
+        // Rücklesen. In der Freigabe steht das Plugin als Aufrufer.
+        final antwort = await anMoocp(
+          adresse(),
+          '/v1/werkzeug',
+          {'name': 'status', 'argumente': <String, Object?>{}},
+          aufruf: token(extra),
+        );
+        return text('${antwort['text']}', fehler: antwort['fehlgeschlagen'] == true);
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+    },
+  );
   return server;
+}
+
+/// Eine Antwort der Adresse der App mit einem Fehlerstatus: [text] ist der
+/// deutsche Satz aus dem Feld `fehler`.
+class MoocpFehler implements Exception {
+  const MoocpFehler(this.status, this.text);
+  final int status;
+  final String text;
+}
+
+/// Eine Anfrage an die Adresse der App für Plugins: [pfad] ist die Funktion
+/// (`/v1/…`), [daten] der Inhalt als JSON-Objekt, [aufruf] das Token des
+/// laufenden Aufrufs (nur die Protokollzeile geht ohne). Liefert die Antwort
+/// als JSON-Objekt; ein Fehlerstatus wird zu [MoocpFehler]. Zum Übernehmen in
+/// ein eigenes Plugin: Schlüssel und Token sind geheim und gehen nur hierhin.
+Future<Map<String, dynamic>> anMoocp(
+  Uri? adresse,
+  String pfad,
+  Map<String, Object?> daten, {
+  String? aufruf,
+}) async {
+  if (adresse == null) {
+    throw const MoocpFehler(0, 'moocp hat beim Verbinden keine Adresse für Plugins genannt.');
+  }
+  final http = HttpClient();
+  try {
+    final anfrage = await http.postUrl(adresse.resolve(pfad));
+    anfrage.headers
+      ..set(HttpHeaders.authorizationHeader, 'Bearer $_schluessel')
+      ..contentType = ContentType.json;
+    if (aufruf != null) anfrage.headers.set('Moocp-Aufruf', aufruf);
+    anfrage.add(utf8.encode(jsonEncode(daten)));
+    final antwort = await anfrage.close();
+    final json = jsonDecode(await utf8.decoder.bind(antwort).join());
+    if (antwort.statusCode != HttpStatus.ok) {
+      throw MoocpFehler(antwort.statusCode, json is Map ? '${json['fehler']}' : 'Fehler ${antwort.statusCode}');
+    }
+    return (json as Map).cast<String, dynamic>();
+  } on IOException {
+    throw const MoocpFehler(0, 'moocp ist unter seiner Adresse für Plugins nicht erreichbar.');
+  } finally {
+    http.close(force: true);
+  }
 }

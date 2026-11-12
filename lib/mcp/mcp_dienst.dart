@@ -98,7 +98,7 @@ Future<String> _zeitlimit(
   return c.future;
 }
 
-class McpDienst {
+class McpDienst implements AufrufKontext {
   McpDienst(
     this.einstellungen,
     this.moodle,
@@ -119,10 +119,12 @@ class McpDienst {
   /// Das Instanzprofil dieses Servers (E31): Port, Name und Adresse kommen von dort.
   Profil profil;
   final MoodleZugang moodle;
+  @override
   final Protokoll protokoll;
   final Freigaben freigaben;
 
   /// Pfad des Arbeitsordners (arbeitsordner.dart).
+  @override
   final String arbeitsordner;
 
   final _kartenKontexte =
@@ -402,12 +404,45 @@ class McpDienst {
               profil: profil,
               token: aufrufToken(),
               abbruch: abbruch,
+              kontext: this,
             ),
           ),
         );
       }
     }
     return server;
+  }
+
+  /// Ein eingebautes Werkzeug für ein Plugin (plugin/app_adresse.dart): über
+  /// einen eigenen Server mit den eingebauten Werkzeugen allein, wie für eine
+  /// neue Sitzung, und durch dieselbe Hülle wie ein Aufruf über MCP
+  /// (WerkzeugAufrufe.direktAufrufen). So gelten Freigaben, Stufe,
+  /// Namensprüfung, Rücklesen, Protokoll und der Zustand „nicht angemeldet“
+  /// genau wie für ein KI-Werkzeug. Werkzeuge der Plugins stehen in diesem
+  /// Server nicht: Ein Plugin ruft über diesen Weg weder ein fremdes noch ein
+  /// eigenes Werkzeug auf.
+  @override
+  Future<EingebautErgebnis> eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async {
+    final server = _erzeugen(protokollieren: false, mitQuellen: false);
+    final ergebnis = _aufrufe.direktAufrufen(server, name, args, abbruch: abbruch, aufrufer: aufrufer);
+    if (ergebnis == null) {
+      final n = name.length > 60 ? '${name.substring(0, 59)}…' : name;
+      throw MoodleFehler(
+        '„${n.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '?')}“ ist kein eingebautes Werkzeug von moocp. '
+        'Über die Adresse der App lassen sich nur die eingebauten Werkzeuge aufrufen, '
+        'keine Werkzeuge von Plugins, auch nicht die eigenen.',
+      );
+    }
+    final r = await ergebnis;
+    return (
+      text: [for (final c in r.content) if (c is TextContent) c.text].join('\n'),
+      fehlgeschlagen: r.isError == true,
+    );
   }
 
   /// Die Werkzeuge der App selbst, in der Reihenfolge der Werkzeugliste.

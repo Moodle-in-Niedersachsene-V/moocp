@@ -38,10 +38,12 @@ const werkzeugnameHoechstens = 40;
 final _werkzeugnameZeichen = RegExp(r'^[A-Za-z0-9_-]+$');
 
 /// Was beim initialize unter `capabilities.experimental.moocp` mitgeht: die
-/// Version der Schnittstelle. Die Adresse der App für das Plugin kommt hierher
-/// dazu, sobald es sie gibt.
-Map<String, dynamic> vertragBeimInitialize() => {
+/// Version der Schnittstelle und die Adresse der App für Plugins
+/// (app_adresse.dart), unter der das Plugin Protokoll, Arbeitsordner und
+/// eingebaute Werkzeuge erreicht; ohne Adresse nur die Version (Tests).
+Map<String, dynamic> vertragBeimInitialize({Uri? adresse}) => {
   'schnittstelle': schnittstellenVersion,
+  'adresse': ?adresse?.toString(),
 };
 
 /// Das Plugin kam nicht hoch: keine Antwort binnen der Startfrist, oder sein
@@ -103,6 +105,8 @@ class PluginVerbindung {
   /// versucht; ebenso, solange [weiter] nicht false liefert (der Prozess
   /// lebt noch). Danach, bei verletzten Namensregeln ([werkzeugnamenPruefen])
   /// oder bei einer unbrauchbaren Werkzeugliste wirft es [PluginFehler].
+  /// [adresse] ist die Adresse der App für Plugins, die beim initialize
+  /// mitgeht ([vertragBeimInitialize]).
   static Future<PluginVerbindung> verbinden({
     required int port,
     required String schluessel,
@@ -110,6 +114,7 @@ class PluginVerbindung {
     required Set<String> vergeben,
     required Duration frist,
     bool Function()? weiter,
+    Uri? adresse,
   }) async {
     final ende = DateTime.now().add(frist);
     final zeitGrund = PluginStartFehler(
@@ -144,7 +149,7 @@ class PluginVerbindung {
           // denen der Vertrag mitgeht.
           protocol: McpProtocol.legacy,
           capabilities: ClientCapabilities(
-            experimental: {'moocp': vertragBeimInitialize()},
+            experimental: {'moocp': vertragBeimInitialize(adresse: adresse)},
           ),
         ),
       );

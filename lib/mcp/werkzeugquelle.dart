@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../profil.dart';
+import '../protokoll.dart';
 
 /// Ein Werkzeug einer [WerkzeugQuelle], beschrieben wie in der MCP-Werkzeugliste.
 class WerkzeugBeschreibung {
@@ -52,6 +53,7 @@ class WerkzeugAufruf {
     required this.profil,
     required this.token,
     required this.abbruch,
+    this.kontext,
   });
 
   /// Das Werkzeug aus der Liste der Quelle.
@@ -68,6 +70,40 @@ class WerkzeugAufruf {
   /// Erfüllt sich, wenn der Client den Aufruf abbricht (sein Zeitlimit, ein
   /// Abbruch in der Sitzung); sonst nie.
   final Future<void> abbruch;
+
+  /// Was der Server des Profils für diesen Aufruf bereithält, wenn ein Plugin
+  /// während des Aufrufs die App nutzt (plugin/app_adresse.dart); null, wenn
+  /// der Aufruf nicht über einen MCP-Server kam (Tests).
+  final AufrufKontext? kontext;
+}
+
+/// Das Ergebnis eines eingebauten Werkzeugs: der Text, den ein KI-Werkzeug
+/// bekäme, und ob es ein Werkzeugfehler ist (MCP `isError`).
+typedef EingebautErgebnis = ({String text, bool fehlgeschlagen});
+
+/// Was ein Aufruf aus dem MCP-Server seines Instanzprofils mitbringt, damit
+/// ein Plugin während des Aufrufs die App nutzen kann (Adresse der App,
+/// plugin/app_adresse.dart): Protokoll und Arbeitsordner dieses Profils und
+/// seine eingebauten Werkzeuge. Der MCP-Dienst des Profils ist es selbst.
+abstract interface class AufrufKontext {
+  /// Das Protokoll des Profils (die Sicht aus `Protokoll.fuer`).
+  Protokoll get protokoll;
+
+  /// Der Arbeitsordner des Profils.
+  String get arbeitsordner;
+
+  /// Ruft das eingebaute Werkzeug [name] mit [args] auf, durch dieselbe Hülle
+  /// wie ein Aufruf eines KI-Werkzeugs (Protokoll, Freigaben, Abbruch,
+  /// Fehlerantwort), mit [aufrufer] als Aufrufer in Freigabe, Protokoll und
+  /// im Hinweis „ohne Freigabe ausgeführt“. Erfüllt sich [abbruch], verfallen
+  /// seine offenen Freigaben. Wirft `MoodleFehler`, wenn [name] kein
+  /// eingebautes Werkzeug ist; Werkzeuge der Plugins sind es nie.
+  Future<EingebautErgebnis> eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  });
 }
 
 /// Ein frisches Token für einen Aufruf: 32 Bytes aus dem sicheren Zufall,

@@ -130,6 +130,15 @@ Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatz
 **Zusatzadresse**
 Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu.
 
+**Adresse der App (für Plugins)**
+Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
+_Nicht zu verwechseln mit_: Zusatzadresse (eine Seite der Moodle-Instanz).
+_Vermeiden_: Host-Schnittstelle, Callback-Server
+
+**Aufruf-Token**
+Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.
+_Nicht zu verwechseln mit_: Schlüssel (gilt für das Plugin, solange sein Programm läuft).
+
 **Fragensammlung**
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.
 

@@ -15,6 +15,7 @@ import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
+import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
@@ -52,6 +53,33 @@ String _dart() {
     d = d.parent;
   }
   throw StateError('Das dart des Flutter-SDK ist nicht zu finden.');
+}
+
+/// Die Werkzeuge des Beispiel-Plugins in der Reihenfolge seiner Liste.
+const _beispielWerkzeuge = [
+  'beispiel_echo',
+  'beispiel_absturz',
+  'beispiel_protokoll',
+  'beispiel_datei',
+  'beispiel_status',
+];
+
+/// Eine Protokollzeile an die Adresse der App (`/v1/protokoll`), wie von einem Plugin mit
+/// [schluessel]; liefert den HTTP-Status.
+Future<int> _protokollzeile(Uri adresse, String schluessel, String text) async {
+  final http = HttpClient();
+  try {
+    final r = await http.postUrl(adresse.resolve(pfadProtokoll));
+    r.headers
+      ..set(HttpHeaders.authorizationHeader, 'Bearer $schluessel')
+      ..contentType = ContentType.json;
+    r.write(jsonEncode({'text': text}));
+    final antwort = await r.close();
+    await antwort.drain<void>();
+    return antwort.statusCode;
+  } finally {
+    http.close(force: true);
+  }
 }
 
 Profil _profil(String kennung, String mcpName, int port) => Profil(
@@ -193,13 +221,13 @@ void main() {
     return l;
   }
 
-  Future<McpTestClient> verbinden(Profil profil, LaufendePlugins quelle) async {
+  Future<McpTestClient> verbinden(Profil profil, LaufendePlugins quelle, {String arbeitsordner = ''}) async {
     final d = McpDienst(
       einstellungen,
       MoodleZugang(protokoll),
       protokoll,
       Freigaben(protokoll),
-      '',
+      arbeitsordner,
       profil: profil,
       werkzeugquellen: [quelle],
     );
@@ -226,9 +254,31 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (2 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (5 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
+    });
+
+    test('über die Adresse der App: Protokollzeile, Datei im Arbeitsordner und das eingebaute status', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
+      final client = await verbinden(profil, l, arbeitsordner: ordner.path);
+
+      final protokolliert = await client.tool('beispiel_protokoll', {'text': 'Hallo\nmoocp'});
+      final datei = await client.tool('beispiel_datei', {'text': 'Inhalt der Datei'});
+      final status = await client.tool('beispiel_status', {});
+
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(protokolliert, 'Die Zeile steht im Protokoll von moocp.');
+      expect(zeilen, contains('Plugin „Beispiel“: Hallo moocp'));
+      final pfad = p.join(ordner.path, 'plugin-beispiel', 'beispiel.txt');
+      expect(datei, 'Datei abgelegt: $pfad');
+      expect(File(pfad).readAsStringSync(), 'Inhalt der Datei');
+      expect(status, contains('Angemeldet: nein -- bitte in der App anmelden'));
+      expect(status, contains('Profil: moodle (moodle)'));
+      expect(zeilen, contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
+      expect(l.appAdresse?.host, '127.0.0.1');
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
@@ -555,10 +605,29 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (2 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (5 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }
+    });
+
+    test('nach dem Neustart gilt an der Adresse der App nur der neue Schlüssel', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+      final adresse = g.laufende.appAdresse!;
+      final alt = g.starts.single.split(' ').last;
+      expect(await _protokollzeile(adresse, alt, 'vorher'), 200);
+
+      ausfallMeldung(await absturz(g.client));
+      expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
+
+      final neu = g.starts.last.split(' ').last;
+      expect(neu, isNot(alt));
+      expect(await _protokollzeile(adresse, alt, 'mit altem Schlüssel'), 401);
+      expect(await _protokollzeile(adresse, neu, 'mit neuem Schlüssel'), 200);
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen, isNot(contains('Plugin „Beispiel“: mit altem Schlüssel')));
+      expect(zeilen, contains('Plugin „Beispiel“: mit neuem Schlüssel'));
     });
 
     test('ein zweiter Absturz: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
@@ -634,7 +703,7 @@ void main() {
         for (final t in (await client.call('tools/list'))['tools'] as List)
           if ((t as Map)['name'] == 'beispiel_echo') t,
       ].single;
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), _beispielWerkzeuge);
 
       // Die App ist zu und das Plugin mit ihr; die Datei bleibt.
       await l.beenden();
@@ -665,7 +734,7 @@ void main() {
       final neu = await starten(plugins);
 
       expect(neu.laeuft(plugins.eintraege.single), isTrue);
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), _beispielWerkzeuge);
       expect(einstellungen.gespeichert, 0);
     });
 

@@ -100,6 +100,15 @@ Future<void> _bis(bool Function() bedingung, {Duration frist = const Duration(se
 
 const _schluessel = 'entwicklungs-schluessel-0123456789abcdefghijklmnop';
 
+/// Die Werkzeuge des Beispiel-Plugins in der Reihenfolge seiner Liste.
+const _beispielWerkzeuge = [
+  'beispiel_echo',
+  'beispiel_absturz',
+  'beispiel_protokoll',
+  'beispiel_datei',
+  'beispiel_status',
+];
+
 void main() {
   group('Die Kommandozeile', () {
     test('ohne den Schalter: nichts', () {
@@ -355,10 +364,23 @@ void main() {
       expect(await werkzeugnamen(a), containsAll(['beispiel_echo', 'beispiel_absturz']));
       expect(await a.tool('beispiel_echo', {'text': 'a'}), 'Echo: a\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       expect(await b.tool('beispiel_echo', {'text': 'b'}), contains('Profil: moodle-test\n'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (2 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (5 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
       expect(einstellungen.plugins, isEmpty);
+    });
+
+    test('auch ein angehängtes Plugin erreicht die Adresse der App, mit dem Schlüssel aus der Umgebung', () async {
+      await pluginStarten();
+      final l = neueLaufende();
+      await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
+      final client = await verbinden(einstellungen.profile.first, l);
+
+      expect(await client.tool('beispiel_protokoll', {'text': 'aus der Entwicklung'}), 'Die Zeile steht im Protokoll von moocp.');
+      expect(await client.tool('beispiel_status', {}), contains('Angemeldet: nein -- bitte in der App anmelden'));
+      expect(zeilen(), contains('Plugin „Beispiel“: aus der Entwicklung'));
+      expect(zeilen(), contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
+      expect(zeilen().join('\n'), isNot(contains(_schluessel)));
     });
 
     test('mit einem anderen Schlüssel beim Plugin keine Verbindung', () async {
@@ -396,7 +418,7 @@ void main() {
 
       expect(await client.tool('beispiel_echo', {'text': 'nachher'}), startsWith('Echo: nachher'));
       expect(zeilen(), contains(startsWith('Verbindung zum Entwicklungs-Plugin „Beispiel“ verloren')));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (2 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (5 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
     });
@@ -405,7 +427,7 @@ void main() {
       final erster = await pluginStarten();
       final l = neueLaufende();
       await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
+      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), _beispielWerkzeuge);
 
       await pluginBeenden(erster);
       await _bis(() => l.entwicklung?.verbunden == false);
@@ -438,7 +460,7 @@ void main() {
       await pluginStarten();
       await _bis(() => l.entwicklung?.verbunden == true);
       expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), contains('beispiel_echo'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (2 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (5 Werkzeuge)'));
     });
 
     test('ein Absturz ist hier kein Ausfall: kein Neustart durch die App, keine Ausfallanzeige', () async {
@@ -476,7 +498,7 @@ void main() {
       expect(starts, 0);
       expect(l.laeuft(e), isFalse);
       expect(l.startfehler(e), contains('Entwicklungs-Plugin mit demselben Kurznamen'));
-      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), ['beispiel_echo', 'beispiel_absturz']);
+      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), _beispielWerkzeuge);
       expect(jsonEncode(einstellungen.zuJson()), vorher);
       expect(einstellungen.gespeichert, gespeichert);
       expect(einstellungen.plugins['beispiel']!.zugestimmt, isTrue);

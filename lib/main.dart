@@ -2307,6 +2307,21 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                 '$profilname ($mcpName)',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
+            // Ruft ein Plugin ein eingebautes Werkzeug auf, sieht die
+            // Lehrkraft hier, dass nicht die KI direkt fragt (E35).
+            if (anfrage.aufrufer case final aufrufer?)
+              Row(
+                children: [
+                  const Icon(Icons.extension, size: 18),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Aufgerufen vom $aufrufer, nicht direkt von der KI',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
         // Der kleine Dialog braucht Platz für eine volle Liste, den Satz zur

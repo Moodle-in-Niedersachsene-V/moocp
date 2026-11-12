@@ -48,6 +48,32 @@ void main() {
     );
   }
 
+  // Ruft ein Plugin ein eingebautes Werkzeug auf (E35), sieht die Lehrkraft
+  // im Dialog, dass nicht die KI direkt fragt.
+  for (final plugin in [true, false]) {
+    testWidgets('der Dialog nennt ${plugin ? 'das Plugin als Aufrufer' : 'keinen Aufrufer, wenn die KI direkt fragt'}',
+        (tester) async {
+      final freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.mittel);
+      await tester.pumpWidget(_fenster(freigaben));
+      final antwort = Freigaben.mitAbbruch(
+        Completer<void>().future,
+        () => freigaben.anfragen(_anfrage('Änderung speichern?')),
+        aufrufer: plugin ? 'Plugin „Beispiel“' : null,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Änderung speichern?'), findsOneWidget);
+      expect(
+        find.text('Aufgerufen vom Plugin „Beispiel“, nicht direkt von der KI'),
+        plugin ? findsOneWidget : findsNothing,
+      );
+      expect(find.textContaining('Aufgerufen vom'), plugin ? findsOneWidget : findsNothing);
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      expect(await antwort, isFalse);
+    });
+  }
+
   testWidgets('Bild außerhalb des erneut geprüften Testumfangs braucht persönliche Freigabe', (tester) async {
     final freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
     await tester.pumpWidget(_fenster(freigaben));

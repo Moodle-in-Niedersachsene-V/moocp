@@ -13,6 +13,7 @@ import 'package:mcp_dart/mcp_dart.dart';
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import 'beschreibung.dart';
+import 'namenssperre.dart';
 
 /// Die Version der Plugin-Schnittstelle, die diese App bietet.
 const schnittstellenVersion = 1;
@@ -45,6 +46,32 @@ Map<String, dynamic> vertragBeimInitialize({Uri? adresse}) => {
   'schnittstelle': schnittstellenVersion,
   'adresse': ?adresse?.toString(),
 };
+
+/// Ein Werkzeugfehler, dessen Text das Plugin geschrieben hat (`isError`).
+/// Er geht an die KI wie eine Antwort und deshalb, wie sie, erst durch die
+/// letzte Sperre (laufende_plugins.dart); die Fehler, die moocp selbst
+/// meldet, sind [MoodleFehler].
+class PluginErgebnisFehler extends MoodleFehler {
+  PluginErgebnisFehler(super.meldung);
+}
+
+/// Alle Texte einer Werkzeugliste, die an die KI gehen: Beschreibung, Titel
+/// und Eingabeschema jedes Werkzeugs, für die letzte Sperre beim erneuten
+/// Lesen nach einem Neustart oder Wiederverbinden. Die Namen der Werkzeuge
+/// nicht: Für sie gelten die Namensregeln ([werkzeugnamenPruefen]).
+Iterable<String> werkzeuglisteTexte(List<WerkzeugBeschreibung> werkzeuge) sync* {
+  for (final w in werkzeuge) {
+    yield w.beschreibung;
+    if (w.titel case final t?) yield t;
+    yield* texteIn(w.eingabeSchema);
+  }
+}
+
+/// Warum ein Plugin nicht startet oder sich nicht verbindet, wenn seine
+/// Werkzeugliste die letzte Sperre trifft; ohne das Wort.
+const werkzeuglisteGesperrt =
+    'Seine Werkzeugliste enthält ein Wort, das ein Name sein könnte, den das Plugin zum Sperren genannt hat; '
+    'moocp bietet sie der KI nicht an.';
 
 /// Das Plugin kam nicht hoch: keine Antwort binnen der Startfrist, oder sein
 /// Programm endete dabei. Anders als ein Verstoß gegen die Regeln kann hier
@@ -224,7 +251,10 @@ class PluginVerbindung {
   /// nicht an die KI weiter -- was ein KI-Werkzeug zu sehen bekommt, soll die
   /// App lesen können --, und die Antwort sagt, dass etwas fehlt. Meldet das
   /// Plugin einen Fehler (`isError`), wird daraus ein Werkzeugfehler mit
-  /// seinem Text.
+  /// seinem Text ([PluginErgebnisFehler]). Strukturierte Inhalte
+  /// (`structuredContent`) und `_meta` der Antwort gehen nicht weiter. Was
+  /// zurückgeht, prüft die letzte Sperre, bevor es die KI erreicht
+  /// (laufende_plugins.dart).
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
     final steuerung = BasicAbortController();
     unawaited(aufruf.abbruch.then((_) => steuerung.abort('Die KI wartet nicht mehr.')));
@@ -260,7 +290,7 @@ class PluginVerbindung {
         '(Das Plugin hat außer Text noch $andere ${andere == 1 ? 'Inhalt' : 'Inhalte'} geliefert, '
             'etwa ein Bild; moocp gibt nur Text weiter, deshalb fehlt das hier.)',
     ].join('\n');
-    if (ergebnis.isError) throw MoodleFehler(text.isEmpty ? 'Das Plugin meldet einen Fehler.' : text);
+    if (ergebnis.isError) throw PluginErgebnisFehler(text.isEmpty ? 'Das Plugin meldet einen Fehler.' : text);
     return text;
   }
 

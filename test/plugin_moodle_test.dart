@@ -422,6 +422,34 @@ void main() {
       expect(zeilen(), contains('gesperrt: Plugin „Beispiel“: Gesperrt: POST /question/banks.php?courseid=… (nur Lesen)'));
     });
 
+    test('eine Methode, die keine ist, steht nicht im Protokoll', () async {
+      final a = aufruf();
+      expect((await lesen(a.token, '/question/banks.php?courseid=12', methode: 'Erika')).status, 405);
+      expect(zeilen(), contains('gesperrt: Plugin „Beispiel“: Gesperrt: ? /question/banks.php?courseid=… (nur Lesen)'));
+      expect(zeilen().join('\n'), isNot(contains('Erika')));
+    });
+
+    test('ein Pfad oder Parametername mit einem gesperrten Namen: 422, Moodle wird nicht gefragt, kein Name im Protokoll', () async {
+      final a = aufruf();
+      adresse.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      for (final (f, pfad) in [
+        (pfadMoodleLesen, '/pluginfile.php/55/mod_folder/content/0/Erika.pdf'),
+        (pfadMoodleLesen, '/pluginfile.php/55/mod_folder/content/0/M%75stermann.pdf'),
+        (pfadMoodleLesen, '/question/banks.php?courseid=12&mustermann=1'),
+        (pfadMoodleDatei, '/pluginfile.php/55/mod_folder/content/0/erika_mustermann.pdf'),
+      ]) {
+        final r = await _post(adresse.adresse, f, {'pfad': pfad}, token: a.token);
+        expect(r.status, 422, reason: pfad);
+        expect(r.json['fehler'], startsWith('Gesperrt: Der Pfad enthält ein Wort'));
+      }
+      expect(moodle.angefragt, isEmpty);
+      final alle = zeilen();
+      expect(alle, hasLength(4));
+      expect(alle.toSet(), {
+        'gesperrt: Plugin „Beispiel“, Werkzeug beispiel_echo: Anfrage an Moodle gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+      });
+    });
+
     test('mit sesskey, auch kodiert: 403', () async {
       for (final pfad in [
         '/mod/quiz/edit.php?cmid=5&sesskey=abc123',

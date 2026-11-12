@@ -16,6 +16,7 @@ import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/beschreibung.dart';
+import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/entwicklung.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
@@ -114,6 +115,7 @@ const _beispielWerkzeuge = [
   'beispiel_freigabe',
   'beispiel_moodle_lesen',
   'beispiel_moodle_gesperrt',
+  'beispiel_namen',
 ];
 
 void main() {
@@ -371,7 +373,7 @@ void main() {
       expect(await werkzeugnamen(a), containsAll(['beispiel_echo', 'beispiel_absturz']));
       expect(await a.tool('beispiel_echo', {'text': 'a'}), 'Echo: a\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       expect(await b.tool('beispiel_echo', {'text': 'b'}), contains('Profil: moodle-test\n'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (12 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (13 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
       expect(einstellungen.plugins, isEmpty);
@@ -425,7 +427,7 @@ void main() {
 
       expect(await client.tool('beispiel_echo', {'text': 'nachher'}), startsWith('Echo: nachher'));
       expect(zeilen(), contains(startsWith('Verbindung zum Entwicklungs-Plugin „Beispiel“ verloren')));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (12 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (13 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
     });
@@ -457,6 +459,92 @@ void main() {
       expect(await client.tool('beispiel_neu', {}), 'ok');
     });
 
+    test('letzte Sperre: Antwort, Fehlertext und andere Inhalte eines angehängten Plugins gehen nur ohne Namen an die KI', () async {
+      final server = await _sperrServer(port);
+      stopps.add(server);
+      final hinweise = SperrHinweise();
+      final l = LaufendePlugins(
+        protokoll,
+        entwicklungsIntervall: const Duration(milliseconds: 200),
+        sperrHinweise: hinweise,
+      );
+      laufende.add(l);
+      await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
+      l.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      final client = await verbinden(einstellungen.profile.first, l);
+
+      final mitName = await aufruf(client, 'beispiel_probe', {'fall': 'text', 'text': 'Abgabe von Erika'});
+      final fehler = await aufruf(client, 'beispiel_probe', {'fall': 'fehler', 'text': 'Keine Abgabe von Mustermann'});
+      final struktur = await aufruf(client, 'beispiel_probe', {'fall': 'struktur'});
+      final andere = await aufruf(client, 'beispiel_probe', {'fall': 'andere'});
+      final frei = await aufruf(client, 'beispiel_probe', {'fall': 'text', 'text': 'Abgabe vollständig'});
+
+      for (final r in [mitName, fehler]) {
+        expect(r['isError'], true);
+        expect(text(r), gesperrtText('Beispiel', 'beispiel_probe'));
+      }
+      // Strukturierte Inhalte und alles außer Text gibt moocp ohnehin nicht
+      // weiter; der Text daneben geht durch, wenn er keinen Namen trägt.
+      expect(struktur['isError'], isNot(true));
+      expect(text(struktur), 'Ohne Namen.');
+      expect(andere['isError'], isNot(true));
+      expect(text(andere), startsWith('Ohne Namen.\n'));
+      expect(text(andere), contains('2 Inhalte'));
+      expect(text(frei), 'Abgabe vollständig');
+      for (final r in [mitName, fehler, struktur, andere]) {
+        expect(jsonEncode(r).toLowerCase(), isNot(contains('erika')));
+        expect(jsonEncode(r).toLowerCase(), isNot(contains('mustermann')));
+      }
+      final ohneArgumente = zeilen().where((z) => !z.startsWith('beispiel_probe({'));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('mustermann')));
+      expect(
+        zeilen().where(
+          (z) => z == 'Plugin „Beispiel“, Werkzeug beispiel_probe: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+        ),
+        hasLength(2),
+      );
+      expect([for (final t in hinweise.offen) t.wort], ['Erika', 'Mustermann']);
+    });
+
+    test('letzte Sperre beim Wiederverbinden: die Namen bleiben, eine Werkzeugliste mit einem Namen nimmt die App nicht', () async {
+      final erster = await _sperrServer(port);
+      final hinweise = SperrHinweise();
+      final l = LaufendePlugins(
+        protokoll,
+        entwicklungsIntervall: const Duration(milliseconds: 200),
+        sperrHinweise: hinweise,
+      );
+      laufende.add(l);
+      await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
+      l.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      await erster();
+      await _bis(() => l.entwicklung?.verbunden == false);
+
+      // Neu gebaut, jetzt mit dem Namen in der Beschreibung eines Werkzeugs.
+      final mitName = await _sperrServer(port, beschreibung: 'Probe für Erika');
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      expect(l.entwicklung?.verbunden, isFalse);
+      await mitName();
+      final gesperrt = zeilen().where((z) => z.contains('Werkzeugliste gesperrt')).toList();
+      expect(
+        gesperrt,
+        ['Entwicklungs-Plugin „Beispiel“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)'],
+        reason: 'einmal, nicht bei jedem Versuch',
+      );
+      expect([for (final t in hinweise.offen) (t.stelle, t.wort)], [(SperrStelle.werkzeugliste, 'Erika')]);
+
+      final ohneName = await _sperrServer(port);
+      stopps.add(ohneName);
+      await _bis(() => l.entwicklung?.verbunden == true);
+      final client = await verbinden(einstellungen.profile.first, l);
+      final r = await aufruf(client, 'beispiel_probe', {'fall': 'text', 'text': 'Erika'});
+
+      expect(r['isError'], true);
+      expect(text(r), gesperrtText('Beispiel', 'beispiel_probe'));
+      expect(zeilen().where((z) => !z.startsWith('beispiel_probe({')).join('\n'), isNot(contains('Erika')));
+    });
+
     test('noch nicht erreichbar beim Start: Die App verbindet sich später, Werkzeuge ab der ersten Verbindung', () async {
       final l = neueLaufende();
 
@@ -467,7 +555,7 @@ void main() {
       await pluginStarten();
       await _bis(() => l.entwicklung?.verbunden == true);
       expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), contains('beispiel_echo'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (12 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (13 Werkzeuge)'));
     });
 
     test('ein Absturz ist hier kein Ausfall: kein Neustart durch die App, keine Ausfallanzeige', () async {
@@ -523,6 +611,47 @@ void main() {
       expect(l.entwicklung, (name: 'Beispiel', verbunden: false));
     });
   });
+}
+
+/// Ein kleiner MCP-Server an Stelle des Plugins auf [port] mit dem Werkzeug
+/// `beispiel_probe`: Je nach `fall` gibt es `text` zurück, als Antwort oder
+/// als Fehler, oder Text ohne Namen neben strukturierten oder anderen
+/// Inhalten, die einen Namen tragen. [beschreibung] ist die Beschreibung des
+/// Werkzeugs in der Liste.
+Future<Future<void> Function()> _sperrServer(int port, {String beschreibung = 'Probe'}) async {
+  final server = StreamableMcpServer(
+    serverFactory: (_) {
+      final s = McpServer(const Implementation(name: 'sperre', version: '1'));
+      s.registerTool(
+        'beispiel_probe',
+        description: beschreibung,
+        inputSchema: JsonSchema.object(properties: {'fall': JsonSchema.string(), 'text': JsonSchema.string()}),
+        callback: (args, extra) async => switch (args['fall']) {
+          'fehler' => CallToolResult(content: [TextContent(text: '${args['text']}')], isError: true),
+          'struktur' => CallToolResult(
+            content: [const TextContent(text: 'Ohne Namen.')],
+            structuredContent: const {'wer': 'Erika Mustermann'},
+          ),
+          'andere' => CallToolResult.fromContent([
+            const TextContent(text: 'Ohne Namen.'),
+            const ImageContent(data: 'iVBORw0KGgo=', mimeType: 'image/png'),
+            const EmbeddedResource(
+              resource: TextResourceContents(uri: 'file:///abgabe.txt', text: 'Abgabe von Erika Mustermann'),
+            ),
+          ]),
+          _ => CallToolResult.fromContent([TextContent(text: '${args['text']}')]),
+        },
+      );
+      return s;
+    },
+    host: '127.0.0.1',
+    port: port,
+    path: '/mcp',
+    enableJsonResponse: true,
+    authenticator: (r) => r.headers.value(HttpHeaders.authorizationHeader) == 'Bearer $_schluessel',
+  );
+  await server.start();
+  return server.stop;
 }
 
 /// Ein kleiner MCP-Server an Stelle des Plugins auf [port], mit dem Schlüssel

@@ -9,7 +9,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/main.dart'
-    show FreigabeDialog, FreigabeDialoge, PluginDialogAnzeige, PluginDialogFenster, Sperrzeit;
+    show
+        FreigabeDialog,
+        FreigabeDialoge,
+        PluginDialogAnzeige,
+        PluginDialogFenster,
+        SperrHinweisAnzeige,
+        Sperrzeit;
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
@@ -641,6 +647,67 @@ void main() {
       await tester.tap(find.text('Ablehnen'));
       await tester.pumpAndSettle();
       expect(await ausgang, PluginFreigabeAusgang.abgelehnt);
+    });
+  });
+
+  group('Warnung der letzten Sperre', () {
+    SperrTreffer treffer(String wort, {String? werkzeug = 'beispiel_namen', SperrStelle stelle = SperrStelle.ergebnis}) =>
+        SperrTreffer(plugin: 'Beispiel', werkzeug: werkzeug, stelle: stelle, wort: wort, zeit: DateTime(2026, 1, 2, 9, 5, 7));
+
+    Widget fenster(SperrHinweise h) => MaterialApp(
+      home: SperrHinweisAnzeige(
+        hinweise: h,
+        nachVorn: () async {},
+        child: const Scaffold(body: Text('Hauptfenster')),
+      ),
+    );
+
+    testWidgets('zeigt Plugin, Werkzeug, Stelle und Wort; der einzige Knopf schließt, keiner sendet', (tester) async {
+      final h = SperrHinweise();
+      await tester.pumpWidget(fenster(h));
+
+      h.melden(treffer('Erika'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Gesperrt: möglicher Name aus einem Plugin'), findsOneWidget);
+      expect(find.text('09:05:07  Plugin „Beispiel“, Werkzeug beispiel_namen, Antwort an die KI: Wort „Erika“'), findsOneWidget);
+      expect(find.textContaining('lässt sich nicht doch senden'), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is ButtonStyleButton), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Schließen'), findsOneWidget);
+      for (final wort in ['Senden', 'Freigeben', 'Trotzdem', 'Übernehmen']) {
+        expect(find.textContaining(wort), findsNothing, reason: wort);
+      }
+    });
+
+    testWidgets('mehrere Treffer kurz hintereinander: ein Fenster, das mitwächst; danach ein neues', (tester) async {
+      final h = SperrHinweise(hoechstens: 3);
+      await tester.pumpWidget(fenster(h));
+
+      h.melden(treffer('Erika'));
+      await tester.pump();
+      h.melden(treffer('Mustermann', werkzeug: null, stelle: SperrStelle.protokollzeile));
+      for (var i = 0; i < 4; i++) {
+        h.melden(treffer('Max$i'));
+      }
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('09:05:07  Plugin „Beispiel“, Protokollzeile: Wort „Mustermann“'), findsOneWidget);
+      expect(find.textContaining('Wort „Max0“'), findsOneWidget);
+      expect(find.textContaining('Wort „Max1“'), findsNothing);
+      expect(find.text('… und 3 weitere.'), findsOneWidget);
+
+      await tester.tap(find.text('Schließen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(h.offen, isEmpty);
+      expect(h.weitere, 0);
+
+      h.melden(treffer('Jo'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.textContaining('Wort „Jo“'), findsOneWidget);
+      expect(find.textContaining('Wort „Erika“'), findsNothing);
     });
   });
 }

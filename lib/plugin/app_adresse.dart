@@ -41,6 +41,18 @@
 // der Positivliste (moodle_lesen.dart). Schreiben geht nur über die
 // eingebauten Werkzeuge. Die Antwort trägt nie Cookies oder Kopfzeilen von
 // Moodle, nur Status, Inhaltstyp, den Pfad nach Umleitungen und den Inhalt.
+//
+// Letzte Sperre (namenssperre.dart, E36): Ein Plugin nennt der App Namen zum
+// Sperren (/v1/namen); von da an prüft sie bis zum Ende der App alles, was
+// von diesem Plugin ins Protokoll ginge, gegen sie: seine Protokollzeilen,
+// den Namen und die Argumente eines eingebauten Werkzeugs, das es aufruft
+// (beide stehen im Protokoll der Hülle), und Pfad und Parameternamen einer
+// Anfrage an Moodle. Bei einem Treffer geht nichts davon ins Protokoll; dort
+// steht nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort in der
+// Warnung der App. Was die App selbst schreibt (Dialog geöffnet, Ausgang
+// einer Freigabe), prüft sie nicht: Darin steht kein Text des Plugins.
+// Antworten an das Plugin prüft sie nicht, denn sie gehen nicht an die KI;
+// was das Plugin daraus an die KI gibt, prüft laufende_plugins.dart.
 
 import 'dart:async';
 import 'dart:convert';
@@ -57,6 +69,7 @@ import '../protokoll.dart';
 import 'dialoge.dart';
 import 'klartext.dart';
 import 'moodle_lesen.dart';
+import 'namenssperre.dart';
 
 export 'klartext.dart' show einzeilig;
 
@@ -74,6 +87,19 @@ const pfadHinweis = '/v1/dialog/hinweis';
 const pfadFreigabe = '/v1/freigabe';
 const pfadMoodleLesen = '/v1/moodle/lesen';
 const pfadMoodleDatei = '/v1/moodle/datei';
+const pfadNamen = '/v1/namen';
+
+/// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
+/// Teilnehmenden einer großen Schule auf einmal.
+const namenJeAnfrageHoechstens = 5000;
+
+/// Höchstlänge eines Namens in Zeichen: Ein Name ist kein Text.
+const nameHoechstens = 200;
+
+/// Höchstens so viele verschiedene Namen hält die App je Plugin, bis sie
+/// endet. Sie liegen im Arbeitsspeicher; die Grenze hält ein Plugin davon ab,
+/// ihn zu füllen, und reicht für viele Kurse.
+const namenJePluginHoechstens = 100000;
 
 /// So lang darf eine Protokollzeile eines Plugins höchstens werden; was
 /// darüber hinausgeht, schneidet die App ab.
@@ -92,8 +118,12 @@ class _Plugin {
 }
 
 class _Aufruf {
-  _Aufruf(this.kurzname, this.kontext);
+  _Aufruf(this.kurzname, this.werkzeug, this.kontext);
   final String kurzname;
+
+  /// Das Werkzeug des Plugins, das die KI aufgerufen hat; für die Warnung
+  /// der letzten Sperre.
+  final String werkzeug;
   final AufrufKontext kontext;
 
   /// Erfüllt sich, wenn der Aufruf endet oder abgebrochen wird; ab dann gilt
@@ -119,20 +149,22 @@ _Antwort _fehler(int status, String text) => (status: status, json: {'fehler': t
 /// Die Adresse der App für Plugins: der Server, die angemeldeten Plugins mit
 /// ihren Schlüsseln und die laufenden Aufrufe mit ihren Token.
 class AppAdresse {
-  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens, this._dialoge);
+  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens, this._dialoge, this.sperre);
 
   /// Öffnet den Server auf 127.0.0.1 mit einem freien Port. [protokoll] ist
   /// das Protokoll der App ohne Profilbezug: Dorthin geht eine Protokollzeile
   /// ohne Token. [anfrageHoechstens] begrenzt den Inhalt einer Anfrage in
   /// Bytes. [dialoge] zeigt die Dialoge der Plugins; ohne sie lehnt die
-  /// Adresse jeden Dialog ab.
+  /// Adresse jeden Dialog ab. [sperre] hält die Namen der letzten Sperre für
+  /// die ganze App (laufende_plugins.dart); ohne Angabe eine eigene.
   static Future<AppAdresse> starten(
     Protokoll protokoll, {
     int anfrageHoechstens = 1024 * 1024,
     PluginDialoge? dialoge,
+    LetzteSperre? sperre,
   }) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final a = AppAdresse._(server, protokoll, anfrageHoechstens, dialoge);
+    final a = AppAdresse._(server, protokoll, anfrageHoechstens, dialoge, sperre ?? LetzteSperre());
     server.listen(a._bearbeiten, onError: (Object _) {});
     protokoll.eintrag(Art.info, 'Adresse der App für Plugins: ${a.adresse}');
     return a;
@@ -142,6 +174,10 @@ class AppAdresse {
   final Protokoll _protokoll;
   final int anfrageHoechstens;
   final PluginDialoge? _dialoge;
+
+  /// Die Namen der letzten Sperre, je Plugin; sie bleiben, auch wenn sich ein
+  /// Plugin mit neuem Schlüssel anmeldet.
+  final LetzteSperre sperre;
 
   /// Die Adresse, wie sie beim initialize an das Plugin geht.
   Uri get adresse => Uri.parse('http://127.0.0.1:${_server.port}');
@@ -176,7 +212,7 @@ class AppAdresse {
   void Function() aufrufAnmelden(String kurzname, WerkzeugAufruf aufruf) {
     final kontext = aufruf.kontext;
     if (kontext == null || aufruf.token.isEmpty || _beendet) return () {};
-    final a = _Aufruf(kurzname, kontext);
+    final a = _Aufruf(kurzname, aufruf.name, kontext);
     _aufrufe[aufruf.token] = a;
     void ende() {
       a.beenden();
@@ -341,11 +377,28 @@ class AppAdresse {
   _Antwort _zuGross() =>
       _fehler(HttpStatus.requestEntityTooLarge, 'Die Anfrage ist größer als $anfrageHoechstens Bytes.');
 
-  /// Jede Protokollzeile eines Plugins geht hier durch, mit und ohne Token:
-  /// die eine Stelle, an der die letzte Sperre gegen Namen (E36) jede Zeile
-  /// prüfen kann, bevor sie im Protokoll steht.
+  /// Jede Protokollzeile, die mit dem Namen eines Plugins beginnt, geht hier
+  /// durch, mit und ohne Token. Den Text, den das Plugin selbst schreibt,
+  /// prüft [_protokollSchreiben] vorher gegen die letzte Sperre; was die App
+  /// hier selbst schreibt, trägt keinen Text des Plugins.
   void _protokollzeile(_Plugin plugin, Protokoll ziel, String zeile) {
     ziel.eintrag(Art.info, '${plugin.aufrufer}: $zeile');
+  }
+
+  /// Prüft [texte] des Plugins gegen seine Namen (E36). Bei einem Treffer
+  /// steht im Protokoll [ziel], was gesperrt ist, mit Plugin und Werkzeug,
+  /// nie das Wort oder ein Auszug; die Lehrkraft bekommt die Warnung
+  /// (LetzteSperre.melden). Liefert true, wenn gesperrt ist.
+  bool _gesperrt(_Plugin plugin, _Aufruf? aufruf, Iterable<String> texte, SperrStelle stelle, Protokoll ziel) {
+    if (!sperre.gesperrt(plugin.kurzname, texte, plugin: plugin.name, werkzeug: aufruf?.werkzeug, stelle: stelle)) {
+      return false;
+    }
+    ziel.eintrag(
+      Art.gesperrt,
+      '${plugin.aufrufer}${aufruf == null ? '' : ', Werkzeug ${aufruf.werkzeug}'}: '
+      '${stelle.text} gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+    );
+    return true;
   }
 
   static final _funktionen = <String, _Funktion>{
@@ -362,7 +415,76 @@ class AppAdresse {
     pfadFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _freigabeAnfragen),
     pfadMoodleLesen: const _Funktion(mitAufruf: true, ausfuehren: _moodleLesen),
     pfadMoodleDatei: const _Funktion(mitAufruf: true, ausfuehren: _moodleDatei),
+    pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
   };
+
+  /// Die Antwort, wenn die letzte Sperre etwas angehalten hat: ohne das
+  /// Wort. Das Plugin kennt seine Namen; die Lehrkraft sieht das Wort in der
+  /// Warnung der App.
+  static _Antwort _sperrAntwort(String was) => _fehler(
+    HttpStatus.unprocessableEntity,
+    'Gesperrt: $was enthält ein Wort, das ein Name sein könnte, den dieses Plugin zum Sperren genannt hat. '
+    'Nichts davon steht im Protokoll; die Lehrkraft sieht in moocp, welches Wort es war.',
+  );
+
+  /// `POST /v1/namen` `{"namen": ["…", …]}`: Namen, die die App von nun an
+  /// für dieses Plugin sperrt, bis sie endet (namenssperre.dart): in jeder
+  /// Antwort an die KI und jeder Protokollzeile dieses Plugins, über alle
+  /// Instanzprofile. Für ein Plugin, das ohne Moodle mit Personen arbeitet.
+  /// Namen lassen sich nur hinzufügen, nie entfernen oder abfragen. Grenzen:
+  /// [namenJeAnfrageHoechstens] je Anfrage, [nameHoechstens] Zeichen je Name,
+  /// [namenJePluginHoechstens] verschiedene Namen je Plugin; darüber lehnt die
+  /// App die ganze Anfrage ab und nimmt keinen davon auf. Ein Name ohne
+  /// Buchstaben und Ziffern sperrt nichts und ist ein Fehler. Antwort `{}`;
+  /// ins Protokoll geht nur die Zahl, keine Fehlermeldung nennt einen Namen.
+  static Future<_Antwort> _namenSperren(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final liste = daten['namen'];
+    if (liste is! List || liste.isEmpty) {
+      return _fehler(HttpStatus.badRequest, 'namen fehlt: eine Liste mit mindestens einem Namen als Text.');
+    }
+    if (liste.length > namenJeAnfrageHoechstens) {
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        'Zu viele Namen: höchstens $namenJeAnfrageHoechstens je Anfrage; nichts aufgenommen.',
+      );
+    }
+    final namen = <String>[];
+    for (final (i, n) in liste.indexed) {
+      final nr = i + 1;
+      if (n is! String) return _fehler(HttpStatus.badRequest, 'Name Nr. $nr ist kein Text; nichts aufgenommen.');
+      if (n.length > nameHoechstens) {
+        return _fehler(
+          HttpStatus.badRequest,
+          'Name Nr. $nr ist länger als $nameHoechstens Zeichen; nichts aufgenommen.',
+        );
+      }
+      if (!Namenssperre.hatTeile(n)) {
+        return _fehler(
+          HttpStatus.badRequest,
+          'Name Nr. $nr enthält keinen Buchstaben und keine Ziffer; nichts aufgenommen.',
+        );
+      }
+      namen.add(n);
+    }
+    final neu = Namenssperre()..hinzufuegen(namen);
+    if (a.sperre.anzahl(plugin.kurzname) + neu.anzahl > namenJePluginHoechstens) {
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        'Zu viele Namen: Je Plugin hält moocp höchstens $namenJePluginHoechstens verschiedene; nichts aufgenommen.',
+      );
+    }
+    a.sperre.namenHinzufuegen(plugin.kurzname, namen);
+    aufruf!.kontext.protokoll.eintrag(
+      Art.info,
+      '${plugin.aufrufer}: ${namen.length} ${namen.length == 1 ? 'Name' : 'Namen'} zum Sperren genannt',
+    );
+    return (status: HttpStatus.ok, json: <String, Object?>{});
+  }
 
   static _Antwort _abgebrochen() => _fehler(
     HttpStatus.conflict,
@@ -387,7 +509,7 @@ class AppAdresse {
   /// Adresse an der Instanz; sonst die Antwort mit dem Fehler. Eine andere
   /// Methode als GET lehnt die App ab, bevor sie etwas fragt: Ein Plugin liest
   /// hier nur.
-  static Object _moodleAdresse(_Plugin plugin, _Aufruf aufruf, Map<String, Object?> daten) {
+  static Object _moodleAdresse(AppAdresse a, _Plugin plugin, _Aufruf aufruf, Map<String, Object?> daten) {
     final moodle = aufruf.kontext.moodle;
     final basis = moodle.basis;
     if (!moodle.angemeldet || basis == null) return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
@@ -398,9 +520,22 @@ class AppAdresse {
       aufruf.kontext.protokoll.eintrag(Art.gesperrt, '${plugin.aufrufer}: Anfrage an Moodle abgewiesen (Pfad ungültig)');
       return _fehler(HttpStatus.badRequest, x.message);
     }
+    // Pfad und Parameternamen stehen gleich im Protokoll: Sie kommen vom
+    // Plugin und gehen durch die letzte Sperre, roh und dekodiert.
+    final namen = uri.hasQuery ? uri.query.split('&').map((t) => t.split('=').first) : const <String>[];
+    if (a._gesperrt(
+      plugin,
+      aufruf,
+      [uri.path, _dekodiert(uri.path), for (final n in namen) ...[n, _dekodiert(n)]],
+      SperrStelle.moodle,
+      aufruf.kontext.protokoll,
+    )) {
+      return _sperrAntwort('Der Pfad');
+    }
     final methode = daten['methode'] ?? 'GET';
     if (methode != 'GET') {
-      final m = methode is String ? einzeilig(methode, 10) : '?';
+      // Nur bekannte Methoden ins Protokoll: Der Text kommt vom Plugin.
+      final m = _methoden.contains(methode) ? methode as String : '?';
       aufruf.kontext.protokoll.eintrag(
         Art.gesperrt,
         '${plugin.aufrufer}: Gesperrt: $m ${adresseOhneWerte(uri)} (nur Lesen)',
@@ -412,6 +547,19 @@ class AppAdresse {
       );
     }
     return uri;
+  }
+
+  static const _methoden = {'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'};
+
+  /// Prozentkodierung aufgelöst; was sich nicht auflösen lässt, bleibt roh.
+  static String _dekodiert(String s) {
+    try {
+      return Uri.decodeComponent(s.replaceAll('+', ' '));
+    } on ArgumentError {
+      return s;
+    } on FormatException {
+      return s;
+    }
   }
 
   /// `POST /v1/moodle/lesen` `{"pfad": "/…?…"}`: liest eine Seite oder Datei
@@ -427,7 +575,7 @@ class AppAdresse {
     _Aufruf? aufruf,
     Map<String, Object?> daten,
   ) async {
-    final adresse = _moodleAdresse(plugin, aufruf!, daten);
+    final adresse = _moodleAdresse(a, plugin, aufruf!, daten);
     if (adresse case final _Antwort fehler) return fehler;
     final moodle = aufruf.kontext.moodle;
     try {
@@ -468,7 +616,7 @@ class AppAdresse {
     _Aufruf? aufruf,
     Map<String, Object?> daten,
   ) async {
-    final adresse = _moodleAdresse(plugin, aufruf!, daten);
+    final adresse = _moodleAdresse(a, plugin, aufruf!, daten);
     if (adresse case final _Antwort fehler) return fehler;
     final uri = adresse as Uri;
     final name = _dateiname(daten['dateiname'], uri);
@@ -641,7 +789,13 @@ class AppAdresse {
     final text = daten['text'];
     final zeile = text is String ? einzeilig(text, protokollzeileHoechstens) : '';
     if (zeile.isEmpty) return _fehler(HttpStatus.badRequest, 'text fehlt: eine Zeile Text für das Protokoll.');
-    a._protokollzeile(plugin, aufruf?.kontext.protokoll ?? a._protokoll, zeile);
+    final ziel = aufruf?.kontext.protokoll ?? a._protokoll;
+    // Geprüft wird die Zeile, wie sie kam, nicht nur, was nach dem Kürzen
+    // bliebe. Gesperrt erscheint sie gar nicht.
+    if (a._gesperrt(plugin, aufruf, [text as String], SperrStelle.protokollzeile, ziel)) {
+      return _sperrAntwort('Die Zeile');
+    }
+    a._protokollzeile(plugin, ziel, zeile);
     return (status: HttpStatus.ok, json: <String, Object?>{});
   }
 
@@ -684,13 +838,18 @@ class AppAdresse {
     if (args is! Map<String, Object?>) {
       return _fehler(HttpStatus.badRequest, 'argumente muss ein JSON-Objekt sein.');
     }
+    // Name und Argumente stehen im Protokoll der Hülle: nur, was die letzte
+    // Sperre durchlässt.
+    if (a._gesperrt(plugin, aufruf, [name, ...texteIn(args)], SperrStelle.werkzeugaufruf, aufruf!.kontext.protokoll)) {
+      return _sperrAntwort('Der Aufruf');
+    }
     final abgebrochen = _fehler(
       HttpStatus.conflict,
       'Abgebrochen: Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen.',
     );
     try {
       final antwort = await Future.any<_Antwort>([
-        aufruf!.kontext
+        aufruf.kontext
             .eingebautAufrufen(name, args, abbruch: aufruf.ende, aufrufer: plugin.aufrufer)
             .then((e) => (status: HttpStatus.ok, json: {'text': e.text, 'fehlgeschlagen': e.fehlgeschlagen})),
         aufruf.ende.then((_) => abgebrochen),
@@ -699,7 +858,7 @@ class AppAdresse {
       // mehr hinaus, auch wenn das Werkzeug im selben Augenblick fertig wurde.
       return aufruf.vorbei ? abgebrochen : antwort;
     } on MoodleFehler catch (x) {
-      return aufruf!.vorbei ? abgebrochen : _fehler(HttpStatus.badRequest, x.meldung);
+      return aufruf.vorbei ? abgebrochen : _fehler(HttpStatus.badRequest, x.meldung);
     }
   }
 }

@@ -123,7 +123,7 @@ Future<void> main(List<String> argumente) async {
   // Die Plugins laufen einmal je App; ihre Werkzeuge bietet jeder MCP-Server
   // an, in dessen Profil sie eingeschaltet sind. Gestartet werden sie erst
   // nach der Zustimmung (_HauptseiteState._pluginsStarten).
-  final laufendePlugins = LaufendePlugins(protokoll, dialoge: PluginDialoge());
+  final laufendePlugins = LaufendePlugins(protokoll, dialoge: PluginDialoge(), sperrHinweise: SperrHinweise());
   final instanzen = [
     for (final pr in profile)
       _instanzFuer(
@@ -1351,6 +1351,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         // läuft einmal je App.
         if (widget.laufendePlugins?.dialoge case final dialoge?)
           PluginDialogAnzeige(dialoge: dialoge, nachVorn: _fensterZeigen, child: const SizedBox.shrink()),
+        // Die Warnungen der letzten Sperre gegen Namen, ebenso für alle
+        // Profile zusammen.
+        if (widget.laufendePlugins?.sperrHinweise case final hinweise?)
+          SperrHinweisAnzeige(hinweise: hinweise, nachVorn: _fensterZeigen, child: const SizedBox.shrink()),
         _seite(context),
       ],
     );

@@ -71,6 +71,7 @@ const _beispielWerkzeuge = [
   'beispiel_freigabe',
   'beispiel_moodle_lesen',
   'beispiel_moodle_gesperrt',
+  'beispiel_namen',
 ];
 
 /// Eine Protokollzeile an die Adresse der App (`/v1/protokoll`), wie von einem Plugin mit
@@ -269,7 +270,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (12 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (13 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -370,6 +371,52 @@ void main() {
       expect(zeilen, contains('Plugin „Beispiel“: GET /question/banks.php?courseid=… → 200'));
       expect(zeilen, contains('Plugin „Beispiel“: Gesperrt für Plugins: GET /admin/index.php (Bereich Adminbereich)'));
       expect(zeilen.join('\n'), isNot(contains(sitzungsCookie)));
+    });
+
+    test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
+      final eins = _profil('standard', 'moodle', await _freierPort());
+      final zwei = _profil('k2', 'moodle-test', await _freierPort());
+      final hinweise = SperrHinweise();
+      final l = await starten(await beispielAngenommen([eins, zwei]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final a = await verbinden(eins, l);
+      final b = await verbinden(zwei, l);
+
+      final r = await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+
+      expect(r['isError'], true);
+      expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_namen'));
+      expect(jsonEncode(r), isNot(contains('Erika')));
+      expect(jsonEncode(r), isNot(contains('Mustermann')));
+      // Die Sperre gilt nach dem Ende des Aufrufs weiter, in jedem Profil, für
+      // jeden Teil des Namens; was keinen Namen trägt, geht durch.
+      for (final (client, text) in [(a, 'Erika'), (b, 'MUSTERMANN'), (b, 'Frau Mustermann')]) {
+        final g = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
+        expect(g['isError'], true, reason: text);
+        expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
+      }
+      expect(await b.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
+      expect(await a.tool('beispiel_protokoll', {'text': 'Aufgabe 3 fertig'}), 'Die Zeile steht im Protokoll von moocp.');
+
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: 1 Name zum Sperren genannt'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_namen: Protokollzeile gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_namen: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
+      expect(zeilen, contains('beispiel_namen: ${gesperrtText('Beispiel', 'beispiel_namen')}'));
+      expect(zeilen, contains('Plugin „Beispiel“: Aufgabe 3 fertig'));
+      // Die Namen stehen in keiner Zeile, außer in den Argumenten, die die KI
+      // selbst geschickt hat.
+      final ohneArgumente = zeilen.where((z) => !z.startsWith('beispiel_echo({'));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('mustermann')));
+      // Die Lehrkraft sieht jedes Wort, gesammelt.
+      expect([for (final t in hinweise.offen) (t.werkzeug, t.stelle, t.wort)], [
+        ('beispiel_namen', SperrStelle.protokollzeile, 'Erika'),
+        ('beispiel_namen', SperrStelle.ergebnis, 'Erika'),
+        ('beispiel_echo', SperrStelle.ergebnis, 'Erika'),
+        ('beispiel_echo', SperrStelle.ergebnis, 'MUSTERMANN'),
+        ('beispiel_echo', SperrStelle.ergebnis, 'Mustermann'),
+      ]);
+      expect(hinweise.offen.map((t) => t.plugin).toSet(), {'Beispiel'});
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
@@ -696,7 +743,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (12 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (13 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }
@@ -762,6 +809,93 @@ void main() {
         [for (final z in protokoll.eintraege) z.text],
         contains(allOf(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: '), contains('geändert'))),
       );
+    });
+
+    test('die Namen überstehen einen Neustart: Auch das neu gestartete Plugin bleibt gesperrt', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final g = await gestartet(profil);
+      final r = await g.client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      expect(r['isError'], true);
+
+      ausfallMeldung(await absturz(g.client));
+      final danach = await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Erika'}});
+
+      expect(g.starts, hasLength(2), reason: 'neu gestartet');
+      expect(danach['isError'], true);
+      expect(text(danach), gesperrtText('Beispiel', 'beispiel_echo'));
+      expect(await g.client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
+    });
+
+    test('nennt das Plugin nach einem Neustart eine Werkzeugliste mit einem gesperrten Namen, startet es nicht und ist ausgefallen', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      // Der Neustart ist ein anderes Programm: ein kleiner MCP-Server, dessen
+      // Werkzeugbeschreibung den Namen trägt.
+      // Außerhalb des Plugin-Ordners und mit eigenem Aufräumen: Das dart des
+      // SDK startet die VM als eigenen Prozess, der die Datei noch einen
+      // Augenblick offen hält, nachdem dart selbst geendet hat.
+      final skriptOrdner = Directory.systemTemp.createTempSync('moocp_liste_');
+      addTearDown(() async {
+        for (var i = 0; i < 50 && skriptOrdner.existsSync(); i++) {
+          try {
+            skriptOrdner.deleteSync(recursive: true);
+          } on FileSystemException {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+          }
+        }
+      });
+      final skript = File(p.join(skriptOrdner.path, 'liste.dart'))
+        ..writeAsStringSync('''
+import 'dart:io';
+import 'package:mcp_dart/mcp_dart.dart';
+Future<void> main(List<String> a) async {
+  final port = int.parse(a[a.indexOf('--port') + 1]);
+  final key = Platform.environment['$schluesselVariable']!;
+  final server = StreamableMcpServer(
+    serverFactory: (_) => McpServer(const Implementation(name: 'liste', version: '1'))
+      ..registerTool('beispiel_echo', description: 'Nur für Erika.', inputSchema: JsonSchema.object(properties: {}),
+          callback: (args, extra) async => CallToolResult.fromContent([const TextContent(text: 'ok')])),
+    host: '127.0.0.1', port: port, path: '/mcp', enableJsonResponse: true,
+    authenticator: (r) => r.headers.value(HttpHeaders.authorizationHeader) == 'Bearer \$key');
+  await server.start();
+  stdin.listen((_) {}, onDone: () async { await server.stop(); exit(0); });
+}
+''');
+      final pakete = File(p.join('.dart_tool', 'package_config.json')).absolute.path;
+      final prozesse = <Process>[];
+      final hinweise = SperrHinweise();
+      final l = LaufendePlugins(
+        protokoll,
+        sperrHinweise: hinweise,
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          final prozess = prozesse.isEmpty
+              ? await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner)
+              : await Process.start(_dart(), ['--packages=$pakete', skript.path, ...argumente], environment: umgebung);
+          prozesse.add(prozess);
+          return prozess;
+        },
+      );
+      final plugins = await beispielAngenommen([profil]);
+      await starten(plugins, mit: l);
+      final client = await verbinden(profil, l);
+      expect((await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}}))['isError'], true);
+
+      ausfallMeldung(await absturz(client));
+      ausfallMeldung(await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+
+      final e = plugins.eintraege.single;
+      expect(prozesse, hasLength(2));
+      expect(l.ausgefallen(e), isTrue);
+      expect(l.startfehler(e), werkzeuglisteGesperrt);
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen, contains('Plugin „Beispiel“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
+      expect(zeilen.join('\n'), isNot(contains('Erika')));
+      expect(hinweise.offen.last.stelle, SperrStelle.werkzeugliste);
+      expect(hinweise.offen.last.wort, 'Erika');
+      expect(hinweise.offen.last.werkzeug, isNull);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.beschreibung).join(), isNot(contains('Erika')));
+      for (final prozess in prozesse) {
+        expect(await _laeuft(prozess.pid), isFalse);
+      }
     });
 
     test('das reguläre Beenden ist kein Absturz: kein Neustart, keine Anzeige', () async {
@@ -970,7 +1104,7 @@ void main() {
       expect(text, isNot(contains('iVBORw0KGgo')));
       await expectLater(
         v.aufrufen(aufruf('beispiel_fehler', const {'fehler': true})),
-        throwsA(isA<MoodleFehler>().having((f) => f.meldung, 'meldung', 'Geht nicht.')),
+        throwsA(isA<PluginErgebnisFehler>().having((f) => f.meldung, 'meldung', 'Geht nicht.')),
       );
     });
   });

@@ -36,6 +36,21 @@
 // wie sie sind. Neustart und Ausfall unten gelten für ein angehängtes Plugin
 // nicht.
 //
+// Letzte Sperre (namenssperre.dart, E36): Was aus einem Aufruf eines
+// Werkzeugs eines Plugins an die KI zurückgeht -- jeder Text der Antwort und
+// der Text eines Werkzeugfehlers des Plugins --, prüft [aufrufen] gegen alle
+// Namen, die die App seit ihrem Start für dieses Plugin geladen hat, bevor es
+// die Hülle erreicht, die die erste Zeile ins Protokoll schreibt. Bei einem
+// Treffer geht nichts davon hinaus, auch nicht in Teilen: Die KI bekommt
+// [gesperrtText], das Protokoll eine Zeile mit Plugin und Werkzeug, die
+// Lehrkraft die Warnung mit dem Wort. Andere Inhalte als Text gibt die
+// Verbindung ohnehin nicht weiter (verbindung.dart). Die Namen gelten je
+// Plugin für alle Profile; sie liegen in [sperre], die so lange lebt wie die
+// App, und überstehen so das Ende eines Aufrufs, einen Neustart nach einem
+// Absturz und das Wiederverbinden eines Entwicklungs-Plugins. Auch eine
+// Werkzeugliste, die nach einem Neustart neu gelesen wird, geht erst durch
+// die Sperre: Ihre Beschreibungen gehen an die KI und in die Einstellungen.
+//
 // Ausfall: Je Lauf der App bekommt jedes Plugin genau einen zweiten Start,
 // gleich wofür -- weil es beim Start nicht binnen der Startfrist antwortete
 // oder sich dabei beendete, oder weil sein Programm später unerwartet endete.
@@ -65,6 +80,7 @@ import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'dialoge.dart';
 import 'entwicklung.dart';
+import 'namenssperre.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
 import 'verbindung.dart';
@@ -103,6 +119,14 @@ String _ausfallText(PluginEintrag e) =>
     'Das Plugin „${e.anzeigename}“ ist ausgefallen. Seine Werkzeuge stehen erst '
     'wieder zur Verfügung, wenn moocp neu gestartet wird.';
 
+/// Was die KI bekommt, wenn die letzte Sperre die Antwort eines Plugins
+/// angehalten hat: ein fester Text mit Plugin und Werkzeug, nie das Wort und
+/// nie ein Auszug.
+String gesperrtText(String plugin, String werkzeug) =>
+    'Gesperrt: Die Antwort des Werkzeugs „$werkzeug“ (Plugin „$plugin“) könnte einen Namen enthalten '
+    'und geht deshalb nicht an die KI, auch nicht in Teilen. Die Lehrkraft sieht in moocp, welches Wort '
+    'getroffen hat. Hol das Ergebnis nicht auf anderem Weg, sondern sag der Lehrkraft, dass es gesperrt wurde.';
+
 class _Laufend {
   _Laufend(this.eintrag, this.prozess, this.verbindung, this.beendet, this.schluessel);
   final PluginEintrag eintrag;
@@ -132,9 +156,19 @@ class LaufendePlugins implements WerkzeugQuelle {
     this.entwicklungsIntervall = const Duration(seconds: 3),
     this.entwicklungsFrist = const Duration(seconds: 2),
     this.dialoge,
-  });
+    this.sperrHinweise,
+  }) : sperre = LetzteSperre(melden: sperrHinweise?.melden);
 
   final Protokoll _protokoll;
+
+  /// Die Warnungen der letzten Sperre, die die Oberfläche zeigt; null, wenn
+  /// niemand sie zeigt (Tests). Gesperrt wird auch ohne.
+  final SperrHinweise? sperrHinweise;
+
+  /// Die Namen der letzten Sperre, je Plugin, für die ganze App: geteilt mit
+  /// der Adresse der App, an der ein Plugin Namen nennt, und mit einem
+  /// angehängten Entwicklungs-Plugin. Nur im Arbeitsspeicher.
+  final LetzteSperre sperre;
 
   /// Die Dialoge der Plugins, die die Oberfläche zeigt (dialoge.dart); null,
   /// wenn niemand sie zeigt (Tests): Dann lehnt die Adresse der App jeden
@@ -197,7 +231,7 @@ class LaufendePlugins implements WerkzeugQuelle {
   AppAdresse? _offen;
 
   Future<AppAdresse> _adresseHolen() =>
-      _adresse ??= AppAdresse.starten(_protokoll, dialoge: dialoge).then((a) => _offen = a);
+      _adresse ??= AppAdresse.starten(_protokoll, dialoge: dialoge, sperre: sperre).then((a) => _offen = a);
 
   /// Die Adresse der App für Plugins; null, solange kein Plugin gestartet
   /// oder angehängt ist.
@@ -249,6 +283,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       intervall: entwicklungsIntervall,
       versuchsfrist: entwicklungsFrist,
       adresse: adresse,
+      sperre: sperre,
     );
     _angehaengt = a;
     await a.starten();
@@ -377,6 +412,22 @@ class LaufendePlugins implements WerkzeugQuelle {
         await verbindung.schliessen();
         throw const PluginFehler('moocp wurde während des Starts beendet.');
       }
+      // Nach einem Neustart kann es schon Namen geben: Die Beschreibungen
+      // gingen an die KI und in die Einstellungen.
+      if (sperre.gesperrt(
+        b.kurzname,
+        werkzeuglisteTexte(verbindung.werkzeuge),
+        plugin: e.anzeigename,
+        werkzeug: null,
+        stelle: SperrStelle.werkzeugliste,
+      )) {
+        await verbindung.schliessen();
+        _protokoll.eintrag(
+          Art.gesperrt,
+          'Plugin „${e.anzeigename}“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+        );
+        throw const PluginFehler(werkzeuglisteGesperrt);
+      }
       return _Laufend(e, prozess, verbindung, beendet, schluessel);
     } catch (_) {
       adresse.pluginAbmelden(b.kurzname, schluessel);
@@ -493,7 +544,8 @@ class LaufendePlugins implements WerkzeugQuelle {
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
     final angehaengt = _angehaengt;
     if (angehaengt != null && angehaengt.werkzeuge.any((w) => w.name == aufruf.name)) {
-      return _mitToken(angehaengt.plugin.kurzname, aufruf, () => angehaengt.aufrufen(aufruf));
+      final pl = angehaengt.plugin;
+      return _mitToken(pl.kurzname, pl.name, aufruf, () => angehaengt.aufrufen(aufruf));
     }
     while (true) {
       final e = _besitzer(aufruf.name);
@@ -517,17 +569,47 @@ class LaufendePlugins implements WerkzeugQuelle {
       }
       final l = _laufend[e.ordner];
       if (l == null) throw MoodleFehler(_ausfallText(e));
-      return _mitToken(e.beschreibung!.kurzname, aufruf, () => _aufrufenBei(l, aufruf));
+      return _mitToken(e.beschreibung!.kurzname, e.anzeigename, aufruf, () => _aufrufenBei(l, aufruf));
     }
   }
 
-  Future<String> _mitToken(String kurzname, WerkzeugAufruf aufruf, Future<String> Function() f) async {
+  /// Der Aufruf mit seinem Token an der Adresse der App, und was zurückkommt,
+  /// durch die letzte Sperre: die Antwort und der Text eines Werkzeugfehlers
+  /// des Plugins. Fehler, die moocp selbst meldet, tragen keinen Text des
+  /// Plugins und gehen ungeprüft weiter.
+  Future<String> _mitToken(
+    String kurzname,
+    String plugin,
+    WerkzeugAufruf aufruf,
+    Future<String> Function() f,
+  ) async {
     final ende = _offen?.aufrufAnmelden(kurzname, aufruf);
     try {
-      return await f();
+      final String text;
+      try {
+        text = await f();
+      } on PluginErgebnisFehler catch (x) {
+        _pruefen(kurzname, plugin, aufruf, x.meldung);
+        rethrow;
+      }
+      _pruefen(kurzname, plugin, aufruf, text);
+      return text;
     } finally {
       ende?.call();
     }
+  }
+
+  /// Wirft den Fehler mit [gesperrtText], wenn [text] einen Namen des Plugins
+  /// trifft; vorher eine Zeile ins Protokoll des Profils, ohne das Wort.
+  void _pruefen(String kurzname, String plugin, WerkzeugAufruf aufruf, String text) {
+    if (!sperre.gesperrt(kurzname, [text], plugin: plugin, werkzeug: aufruf.name, stelle: SperrStelle.ergebnis)) {
+      return;
+    }
+    (aufruf.kontext?.protokoll ?? _protokoll).eintrag(
+      Art.gesperrt,
+      'Plugin „$plugin“, Werkzeug ${aufruf.name}: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+    );
+    throw MoodleFehler(gesperrtText(plugin, aufruf.name));
   }
 
   PluginEintrag? _besitzer(String werkzeug) {

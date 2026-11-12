@@ -21,7 +21,9 @@
 //    Ziffern, „_“ und „-“. Die Werkzeugliste liest moocp einmal beim
 //    Start; spätere Änderungen beachtet es nicht.
 // 5. Als Antwort Text liefern. Bilder und andere Inhalte gibt moocp nicht
-//    an die KI weiter.
+//    an die KI weiter. Keine Namen von Personen in Antworten und
+//    Protokollzeilen: Was einen Namen trifft, den das Plugin zum Sperren
+//    genannt hat, hält moocp ganz an (`beispiel_namen`).
 // 6. Sich beenden, wenn die Standardeingabe endet: Dann ist moocp fort, auch
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
@@ -66,7 +68,9 @@
 // `beispiel_auswahl`, `beispiel_eingabe`, `beispiel_pfad` und
 // `beispiel_hinweis` (je eine Art Dialog), `beispiel_freigabe` (um eine
 // Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
-// lesen) und `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt).
+// lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt) und
+// `beispiel_namen` (Namen zum Sperren nennen; die letzte Sperre hält danach
+// eine Antwort mit einem davon an).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -482,6 +486,47 @@ McpServer _server() {
         // Die Ablehnung ist hier das erwartete Ergebnis.
         return text('Abgelehnt (HTTP ${f.status}): ${f.text}');
       }
+    },
+  );
+
+  // Die letzte Sperre: Arbeitet ein Plugin mit Personen, nennt es moocp die
+  // Namen (`/v1/namen`, `{"namen": [...]}`). Von da an prüft moocp, bis es
+  // endet, jede Antwort dieses Plugins an die KI und jede Protokollzeile
+  // gegen sie: Jeder Teil eines Namens sperrt für sich, als ganzes Wort, ohne
+  // Rücksicht auf Groß- und Kleinschreibung und auf die Schreibweise von
+  // Umlauten und Akzenten. Bei einem Treffer geht nichts hinaus; die KI
+  // erfährt nur, dass gesperrt wurde, die Lehrkraft sieht das Wort. Namen
+  // lassen sich nicht wieder entfernen und nicht abfragen.
+  //
+  // Dieses Werkzeug tut absichtlich, was ein Plugin nie tun soll: Es nennt
+  // den erfundenen Namen „Erika Mustermann“ und gibt ihn dann in einer
+  // Protokollzeile (moocp lehnt sie mit 422 ab) und in seiner Antwort
+  // zurück (moocp sperrt sie). Ein echtes Plugin baut seine Antworten so,
+  // dass keine Namen darin stehen, und nennt die Namen nur, damit moocp sie
+  // abfängt, falls doch einer durchrutscht.
+  server.registerTool(
+    'beispiel_namen',
+    description:
+        'Nennt moocp einen erfundenen Namen zum Sperren und gibt ihn dann zurück; moocp sperrt die Antwort. '
+        '$nurSchnittstelle',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: hinweise('Letzte Sperre (Beispiel)'),
+    callback: (args, extra) async {
+      const name = 'Erika Mustermann';
+      try {
+        await anMoocp(adresse(), '/v1/namen', {
+          'namen': [name],
+        }, aufruf: token(extra));
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+      try {
+        await anMoocp(adresse(), '/v1/protokoll', {'text': 'Bearbeitet: $name'}, aufruf: token(extra));
+      } on MoocpFehler catch (f) {
+        // Erwartet: 422, die Zeile steht nicht im Protokoll.
+        if (f.status != 422) return text(f.text, fehler: true);
+      }
+      return text('Ergebnis für $name: 3 von 4 Punkten.');
     },
   );
   return server;

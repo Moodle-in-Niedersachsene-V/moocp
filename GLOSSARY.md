@@ -148,6 +148,11 @@ _Vermeiden_: Fenster des Plugins (ein Plugin öffnet keine Fenster)
 Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.
 _Nicht zu verwechseln mit_: Schlüssel (gilt für das Plugin, solange sein Programm läuft).
 
+**Letzte Sperre**
+Die Prüfung der App, die jede Antwort eines Plugins an die KI und jede Zeile, die es ins Protokoll schreibt, gegen alle Namen prüft, die sie seit ihrem Start für dieses Plugin geladen hat. Jeder Teil eines Namens sperrt für sich, als ganzes Wort; bei einem Treffer geht nichts hinaus, die KI erfährt nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort. Gesperrtes lässt sich nicht doch senden.
+_Nicht zu verwechseln mit_: Sperrliste (sperrt Adressen in Moodle, nicht Wörter in Antworten).
+_Vermeiden_: Namensfilter, Schwärzen (geschwärzt wird nichts, die Antwort geht gar nicht hinaus)
+
 **Fragensammlung**
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.
 

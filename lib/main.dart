@@ -184,21 +184,27 @@ Instanz _instanzFuer(
 Future<int> _claudeEntfernen() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
-    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-    final skills = [
-      for (final a in manifest.listAssets().where(
-        (a) => a.startsWith(skillAssets) && a.endsWith('.skill'),
-      ))
-        p.basenameWithoutExtension(a),
-    ];
     return (await einrichtungEntfernen(
       umgebung: Platform.environment,
-      skills: skills,
+      skills: [for (final s in await _skillPakete()) s.name],
       mcpNamen: await _gespeicherteMcpNamen(),
     )).code;
   } catch (_) {
     return 3; // unbekannt, was geblieben ist: beides melden
   }
+}
+
+/// Alle Skill-Pakete, die die Einrichtung kennt, für die Einrichtung beim
+/// Start wie für das Entfernen bei der Deinstallation ([skillPaketeFinden]).
+/// Die der App liegen als Assets im Bundle; das AssetManifest und der
+/// rootBundle gehören zu Flutter, deshalb steht ihr Zugriff hier und nicht in
+/// einrichtung.dart.
+Future<List<SkillPaket>> _skillPakete() async {
+  final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+  return skillPaketeFinden(
+    appAssets: manifest.listAssets(),
+    laden: (a) async => (await rootBundle.load(a)).buffer.asUint8List(),
+  );
 }
 
 /// Die MCP-Namen aller gespeicherten Profile, immer mit `moodle`. Liest die
@@ -789,26 +795,17 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
 
   Future<Einrichtungsstand> _einrichtungsstand() async {
     if (widget.einrichtungsstand != null) return widget.einrichtungsstand!();
-    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-    final pakete = <SkillPaket>[
-      for (final a in manifest.listAssets().where(
-        (a) => a.startsWith(skillAssets) && a.endsWith('.skill'),
-      ))
-        SkillPaket.ausZip(
-          p.basenameWithoutExtension(a),
-          (await rootBundle.load(a)).buffer.asUint8List(),
-        ),
-    ];
     return einrichtungPruefen(
       umgebung: Platform.environment,
       port: _dienst.profil.port,
       name: _dienst.profil.mcpName,
       schluessel: widget.einstellungen.schluesselFuer(_dienst.profil),
-      skills: pakete,
+      skills: await _skillPakete(),
+      wahlSkills: appWahlSkills,
       abgewaehlt: widget.einstellungen.werkzeugeAbgewaehlt,
       gewaehlt:
           widget.einstellungen.wahlSkills ??
-          gewaehltVorgabe(Platform.environment),
+          gewaehltVorgabe(Platform.environment, appWahlSkills.keys),
     );
   }
 

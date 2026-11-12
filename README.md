@@ -665,7 +665,7 @@ flutter test tool/bilder_test.dart --update-goldens
 |---|---|
 | `skills/moodle/` | Kurse: Struktur, Aktivitäten, Abschnitte, Bücher, Wiki, Board, Kanban, Bewertungsraster |
 | `skills/moodle-fragen/` | Fragensammlungen, Fragetypen, STACK, CodeRunner, Tests |
-| `skills/lernsituation/` | Lernsituationen im Arbeitsordner entwerfen und prüfen, bevor `moodle` sie in den Kurs bringt; Kursabschnitte beurteilen; wählbar, für berufsbildende Schulen (`wahlSkills` in `lib/einrichtung.dart`) |
+| `skills/lernsituation/` | Lernsituationen im Arbeitsordner entwerfen und prüfen, bevor `moodle` sie in den Kurs bringt; Kursabschnitte beurteilen; wählbar, für berufsbildende Schulen (`appWahlSkills` in `lib/einrichtung.dart`) |
 | `skills/gemeinsam/` | Gleichanteile: Abschnitte, die in mehreren Skills gleich stehen (Plan, Lücken, Datenschutzbefund, erfundene Namen, Urheberrecht, HTML-Regeln, Hausstil für Zeichnungen, Anregungen zum Einsatz der Aktivitäten …) |
 | `skills/build.py` | setzt die Gleichanteile ein, schnürt die Pakete einer Version nach `skills/dist/`, prüft sie aus dem fertigen Paket |
 | `skills/dist/` | die fertigen Pakete (`*.skill`), Bauergebnis und nicht versioniert; die App bringt sie als Assets mit und installiert sie nach Rückfrage (`lib/einrichtung.dart`) |

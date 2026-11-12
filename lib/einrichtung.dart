@@ -38,12 +38,16 @@ const skillAssets = 'skills/dist/';
 /// Der Name des MCP-Eintrags in jedem KI-Werkzeug.
 const mcpName = 'moodle';
 
-/// Skills, die die Lehrkraft im Dialog „KI-Werkzeuge einrichten" wählt, mit
-/// dem Satz, der dort dabeisteht. Alle anderen Skills der App sind immer
-/// dabei. lernsituation ist für berufsbildende Schulen gebaut; anderswo
+/// Skills der App, die die Lehrkraft im Dialog „KI-Werkzeuge einrichten"
+/// wählt, mit dem Satz, der dort dabeisteht. Alle anderen Skills der App sind
+/// immer dabei. lernsituation ist für berufsbildende Schulen gebaut; anderswo
 /// stünde er nur im Weg, denn seine Beschreibung zieht bei jedem
 /// „Arbeitsblatt".
-const wahlSkills = {
+///
+/// Die Einrichtung liest diese Liste nicht selbst, sondern bekommt die
+/// wählbaren Skills als Daten (`wahlSkills`) von ihrem Aufrufer (main.dart);
+/// so muss sie nicht wissen, woher ein Skill kommt.
+const appWahlSkills = {
   'lernsituation': 'Für berufsbildende Schulen: Lernsituationen mit SchuCu-Tabelle, Ablaufplan, Arbeits- '
       'und Informationsblättern entwerfen.',
 };
@@ -921,8 +925,8 @@ List<KiWerkzeug> gefundeneWerkzeuge(Map<String, String> umgebung) =>
 /// wählbaren, die in einem der Werkzeuge schon installiert sind. So entfernt
 /// ein Update nichts, was jemand bisher benutzt hat; wer neu anfängt, hat
 /// keinen.
-Set<String> gewaehltVorgabe(Map<String, String> umgebung) => {
-      for (final n in wahlSkills.keys)
+Set<String> gewaehltVorgabe(Map<String, String> umgebung, Iterable<String> wahlNamen) => {
+      for (final n in wahlNamen)
         if (gefundeneWerkzeuge(umgebung).any((w) => skillInstalliert(w, n))) n,
     };
 
@@ -934,23 +938,51 @@ bool skillInstalliert(KiWerkzeug w, String name) => File(p.join(w.skillOrdner.pa
 // Die Skills
 // ---------------------------------------------------------------------------
 
-/// Ein Skill, wie ihn die App mitbringt: Name und Dateien (Pfad mit „/"
-/// relativ zum Skill-Ordner, Inhalt).
+/// Woher ein Skill-Paket kommt. Die Herkunft muss jedes Paket angeben, damit
+/// kein Paket stillschweigend als das der App gilt.
+enum SkillHerkunft {
+  /// Die App selbst: die Pakete von skills/build.py unter [skillAssets].
+  app,
+}
+
+/// Ein Skill, wie ihn die Einrichtung installiert: Name, Herkunft und Dateien
+/// (Pfad mit „/" relativ zum Skill-Ordner, Inhalt).
 class SkillPaket {
-  SkillPaket(this.name, this.dateien);
+  SkillPaket(this.name, this.dateien, {required this.herkunft});
   final String name;
   final Map<String, List<int>> dateien;
+  final SkillHerkunft herkunft;
 
   /// Liest ein Paket von skills/build.py: ein ZIP mit dem Ordner `<name>/`.
-  factory SkillPaket.ausZip(String name, List<int> zip) {
+  factory SkillPaket.ausZip(String name, List<int> zip, {required SkillHerkunft herkunft}) {
     final dateien = <String, List<int>>{};
     for (final f in ZipDecoder().decodeBytes(zip)) {
       if (!f.isFile || !f.name.startsWith('$name/')) continue;
       dateien[f.name.substring(name.length + 1)] = f.content;
     }
-    return SkillPaket(name, dateien);
+    return SkillPaket(name, dateien, herkunft: herkunft);
   }
 }
+
+/// Alle Skill-Pakete, die die Einrichtung kennt, aus jeder Herkunft: die
+/// Einrichtung beim Start wie das Entfernen bei der Deinstallation
+/// (`--claude-entfernen`) fragen hier und nirgends sonst, damit beide
+/// dieselben Skills meinen.
+///
+/// Die Pakete der App sind die `*.skill` unter [skillAssets], der Name ist der
+/// Dateiname ohne Endung. [appAssets] sind die Pfade aller Assets der App und
+/// [laden] liest eines; beides reicht der Aufrufer herein (main.dart: das
+/// AssetManifest und der rootBundle), weil dieser Code ohne Flutter laufen
+/// muss -- die Brücke (mcp/bruecke.dart) bindet ihn ein.
+Future<List<SkillPaket>> skillPaketeFinden({
+  required Iterable<String> appAssets,
+  required Future<List<int>> Function(String asset) laden,
+}) async =>
+    [
+      for (final a in appAssets)
+        if (a.startsWith(skillAssets) && a.endsWith('.skill'))
+          SkillPaket.ausZip(p.basenameWithoutExtension(a), await laden(a), herkunft: SkillHerkunft.app),
+    ];
 
 class SkillStand {
   SkillStand({this.fehlend = 0, this.abweichend = 0, this.ueberzaehlig = 0, this.ordnerFehlt = false});
@@ -1245,24 +1277,28 @@ class Einrichtungsstand {
     required this.werkzeuge,
     required this.skills,
     required this.python,
+    this.wahlSkills = const {},
     this.gewaehlt = const {},
   });
 
   /// Je gefundenes KI-Werkzeug ein Stand; leer, wenn keines gefunden wurde.
   final List<Werkzeugstand> werkzeuge;
 
-  /// Alle Skills, die die App mitbringt.
+  /// Alle Skills, die die Einrichtung kennt ([skillPaketeFinden]).
   final List<SkillPaket> skills;
 
   final bool python;
+
+  /// Die wählbaren Skills mit dem Satz, der im Dialog dabeisteht; alle anderen
+  /// in [skills] sind immer dabei.
+  final Map<String, String> wahlSkills;
 
   /// Die gewählten unter den [wahlSkills].
   final Set<String> gewaehlt;
 
   /// Was installiert sein soll: jeder Skill, der nicht wählbar ist, und die
   /// gewählten.
-  List<SkillPaket> get gewollt =>
-      [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+  List<SkillPaket> get gewollt => _gewollt(skills, wahlSkills, gewaehlt);
 
   /// Ob mindestens ein Werkzeug fertig eingerichtet ist. Nur dann läuft die
   /// App (einrichtung_dialog.dart): Für Claude, Codex und LM Studio
@@ -1279,18 +1315,28 @@ class Einrichtungsstand {
   bool get einrichtbar => werkzeuge.any((w) => w.brauchtEtwas && w.machbar);
 }
 
+/// Was installiert sein soll: jeder Skill, der nicht in [wahlSkills] steht, und
+/// die gewählten.
+List<SkillPaket> _gewollt(List<SkillPaket> skills, Map<String, String> wahlSkills, Set<String> gewaehlt) =>
+    [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+
+/// Prüft jedes gefundene KI-Werkzeug. [skills] sind alle Skills, die es gibt
+/// ([skillPaketeFinden]); [wahlSkills] die darunter wählbaren mit dem Satz für
+/// den Dialog, [gewaehlt] die davon gewählten. Ein Skill, der nicht in
+/// [wahlSkills] steht, ist immer gewollt.
 Future<Einrichtungsstand> einrichtungPruefen({
   required Map<String, String> umgebung,
   required int port,
   required String schluessel,
   String name = mcpName,
   required List<SkillPaket> skills,
+  required Map<String, String> wahlSkills,
   Set<String> abgewaehlt = const {},
   Set<String> gewaehlt = const {},
   Future<bool> Function() python = pythonVorhanden,
   List<KiWerkzeug>? gefunden,
 }) async {
-  final gewollt = [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+  final gewollt = _gewollt(skills, wahlSkills, gewaehlt);
   final liste = gefunden ?? gefundeneWerkzeuge(umgebung);
   // Gewählt ist jedes gefundene Werkzeug, das die Lehrkraft nicht abgewählt
   // hat. Wer ein KI-Werkzeug auf dem Rechner hat, soll damit auch in Moodle
@@ -1315,6 +1361,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
     ],
     skills: skills,
     python: await python(),
+    wahlSkills: wahlSkills,
     gewaehlt: gewaehlt,
   );
 }

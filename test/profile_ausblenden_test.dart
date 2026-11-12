@@ -8,6 +8,7 @@
 // Die Einstellungen schreiben hier nichts: Eine Unterklasse ersetzt `speichern`,
 // denn sonst überschriebe der Test die echte Einstellungsdatei der App.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -381,6 +382,7 @@ void main() {
             schluessel: 'eigener',
             name: 'moodle-test',
             skills: const [],
+            wahlSkills: const {},
             gefunden: [codex],
             python: () async => true,
           );
@@ -409,6 +411,108 @@ void main() {
       expect(toml, contains('Bearer eigener'));
       expect(toml, isNot(contains('Bearer global')));
       expect((await pruefen()).werkzeuge.single.verbindung, Verbindung.aktuell);
+    });
+  });
+
+  // Die wählbaren Skills im Dialog: Haken nur für sie, mit ihrer Beschreibung;
+  // „Installieren" richtet nur das Gewählte ein und entfernt das Abgewählte.
+  group('Der Dialog „KI-Werkzeuge einrichten": wählbare Skills', () {
+    const beschreibung = 'Für berufsbildende Schulen: Lernsituationen mit SchuCu-Tabelle, Ablaufplan, Arbeits- '
+        'und Informationsblättern entwerfen.';
+    late Directory heim;
+    late Map<String, String> env;
+    late CodexCli codex;
+    late _EinstellungenOhneDatei einstellungen;
+    final moodle = SkillPaket('moodle', {'SKILL.md': utf8.encode('Kurs')}, herkunft: SkillHerkunft.app);
+    final lernsituation =
+        SkillPaket('lernsituation', {'SKILL.md': utf8.encode('Lernsituation')}, herkunft: SkillHerkunft.app);
+    Directory skillOrdner(String name) => Directory(p.join(codex.skillOrdner.path, name));
+    final haken = find.widgetWithText(CheckboxListTile, 'Skill lernsituation');
+
+    // Codex mit Verbindung und dem festen Skill moodle: Es fehlt nichts außer dem, was gewählt wird.
+    Future<void> aufbauen(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 1600);
+      addTearDown(tester.view.reset);
+      heim = Directory.systemTemp.createTempSync('moocp_wahlskills_');
+      addTearDown(() => heim.deleteSync(recursive: true));
+      env = {'USERPROFILE': heim.path, 'HOME': heim.path};
+      codex = CodexCli(env);
+      expect(await codex.eintragen(47811, 'abc'), isNull);
+      expect(skillInstallieren(moodle, skillOrdner('moodle')), isEmpty);
+      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+    }
+
+    // Wie die App prüft: die gespeicherte Wahl, solange es eine gibt.
+    Future<Einrichtungsstand> pruefen() => einrichtungPruefen(
+          umgebung: env,
+          port: 47811,
+          schluessel: 'abc',
+          skills: [moodle, lernsituation],
+          wahlSkills: appWahlSkills,
+          gewaehlt: einstellungen.wahlSkills ?? const {},
+          gefunden: [codex],
+          python: () async => true,
+        );
+
+    Future<void> zeigen(WidgetTester tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: EinrichtungDialog(
+          stand: await pruefen(),
+          pruefen: pruefen,
+          einstellungen: einstellungen,
+          protokoll: Protokoll(),
+          port: 47811,
+          schluessel: 'abc',
+        ),
+      ));
+    }
+
+    Future<void> abwarten(WidgetTester tester) async {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('nur der wählbare Skill hat einen Haken mit seiner Beschreibung, vorgegeben aus', (tester) async {
+      await aufbauen(tester);
+      await zeigen(tester);
+
+      expect(find.text('Wählbare Skills'), findsOneWidget);
+      expect(find.text(beschreibung), findsOneWidget);
+      expect(find.widgetWithText(CheckboxListTile, 'Skill moodle'), findsNothing);
+      expect(tester.widget<CheckboxListTile>(haken).value, isFalse);
+      expect(find.text('Skills (moodle)'), findsOneWidget, reason: 'gewollt ist nur der feste Skill');
+      expect(find.text('Verbindung und Skills sind aktuell.'), findsOneWidget);
+    });
+
+    testWidgets('Wählen speichert die Wahl, „Installieren" richtet ihn ein; Abwählen und „Installieren" entfernt ihn',
+        (tester) async {
+      await aufbauen(tester);
+      await zeigen(tester);
+
+      await tester.tap(haken);
+      await abwarten(tester);
+      expect(einstellungen.wahlSkills, {'lernsituation'});
+      expect(einstellungen.gespeichert, 1);
+      expect(find.text('Skills (moodle, lernsituation)'), findsOneWidget);
+      expect(find.text('nicht installiert: lernsituation'), findsOneWidget);
+
+      await tester.tap(find.text('Installieren'));
+      await abwarten(tester);
+      expect(File(p.join(skillOrdner('lernsituation').path, 'SKILL.md')).existsSync(), isTrue);
+      expect(find.text('Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'),
+          findsOneWidget);
+
+      await tester.tap(haken);
+      await abwarten(tester);
+      expect(einstellungen.wahlSkills, isEmpty);
+      expect(einstellungen.gespeichert, 2);
+      expect(find.text('werden entfernt: lernsituation'), findsOneWidget);
+
+      await tester.tap(find.text('Installieren'));
+      await abwarten(tester);
+      expect(skillOrdner('lernsituation').existsSync(), isFalse);
+      expect(File(p.join(skillOrdner('moodle').path, 'SKILL.md')).existsSync(), isTrue, reason: 'der feste bleibt');
     });
   });
 

@@ -7,7 +7,7 @@
 // kein KI-Werkzeug kann mit ihr arbeiten" gibt es nicht. Darum kein
 // „Abbrechen", und nach einem Fehler „Nochmal versuchen" statt weiter. Ein
 // Skill, der nicht zur App passt, ruft Werkzeuge falsch auf. Haken gibt es
-// bei den Werkzeugen und bei den wählbaren Skills (wahlSkills in
+// bei den Werkzeugen und bei den wählbaren Skills (Einrichtungsstand.wahlSkills,
 // einrichtung.dart); was gewählt ist, wird streng geprüft, was abgewählt
 // ist, entfernt „Installieren".
 //
@@ -317,7 +317,7 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
       value: s.gewaehlt.contains(name),
       onChanged: _laeuft ? null : (v) => _skillWaehlen(name, v ?? false),
       title: Text('Skill $name'),
-      subtitle: Text(wahlSkills[name]!),
+      subtitle: Text(s.wahlSkills[name]!),
     );
   }
 
@@ -387,11 +387,11 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
                 _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex CLI und LM Studio. '
                     'Eines davon installieren und einmal starten, danach „Nochmal prüfen".'),
               // Das Wählbare für sich, damit es nicht wie ein Pflichtteil aussieht.
-              if (s.werkzeuge.isNotEmpty && s.skills.any((x) => wahlSkills.containsKey(x.name))) ...[
+              if (s.werkzeuge.isNotEmpty && s.skills.any((x) => s.wahlSkills.containsKey(x.name))) ...[
                 const Divider(height: 24),
                 Text('Wählbare Skills', style: Theme.of(context).textTheme.titleSmall),
                 for (final paket in s.skills)
-                  if (wahlSkills.containsKey(paket.name)) _wahlZeile(s, paket),
+                  if (s.wahlSkills.containsKey(paket.name)) _wahlZeile(s, paket),
               ],
             ],
             if (s == null) _hinweis('Die Prüfung ist fehlgeschlagen; Einzelheiten stehen im Protokoll.'),

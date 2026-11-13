@@ -11,6 +11,11 @@
       "muster": "/mod/beispiel/speichern.php",
       "art": "schreiben",
       "grund": "Speichert die Notiz, mit der das Werkzeug beispiel_moodle_schreiben zeigt, wie ein Plugin über eine Zusatzadresse schreibt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    },
+    {
+      "muster": "/mod/beispiel/bericht.php",
+      "art": "lesen",
+      "grund": "Liest den Bericht einer Aktivität, mit dem das Werkzeug beispiel_lauf zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse liest. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
     }
   ],
   "wahlSkills": {},

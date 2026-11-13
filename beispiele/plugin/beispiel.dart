@@ -70,8 +70,9 @@
 // Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
 // lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt),
 // `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
-// Freigabe, und selbst prüfen) und `beispiel_namen` (Namen zum Sperren
-// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
+// Freigabe, und selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
+// Zusatzadresse lesen) und `beispiel_namen` (Namen zum Sperren nennen; die
+// letzte Sperre hält danach eine Antwort mit einem davon an).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -442,7 +443,8 @@ McpServer _server() {
   // Aufrufs, nur GET und nur, was der lesende Teil seiner Positivliste
   // erlaubt; jedes Umleitungsziel prüft es genauso. Die Antwort hat `status`,
   // `inhaltstyp`, `pfad` (nach Umleitungen, ohne Rechner) und `text`, nie
-  // Cookies. Was nicht erlaubt ist, lehnt moocp ohne Dialog ab und nennt den
+  // Cookies; von einer Seite nur ihren Hauptbereich (`#region-main`), ohne
+  // Kopf, Nutzermenü und Blöcke, und nie den sesskey. Was nicht erlaubt ist, lehnt moocp ohne Dialog ab und nennt den
   // Grund im Feld `fehler`. Schreiben geht nicht hier: Was die Positivliste
   // erlaubt, über die eingebauten Werkzeuge (`/v1/werkzeug`), mit Freigabe und
   // Rücklesen; was darüber hinausgeht, über eine Zusatzadresse
@@ -462,8 +464,8 @@ McpServer _server() {
         final antwort = await anMoocp(adresse(), '/v1/moodle/lesen', {
           'pfad': '/question/banks.php?courseid=${(args['kurs'] as num).toInt()}',
         }, aufruf: token(extra));
-        // Den Inhalt gibt das Beispiel nicht an die KI weiter: Jede Seite von
-        // Moodle nennt im Kopf den Namen der angemeldeten Lehrkraft.
+        // Den Inhalt gibt das Beispiel nicht an die KI weiter: Auch im
+        // Hauptbereich einer Seite können Namen stehen.
         return text(
           'Moodle antwortet mit Status ${antwort['status']} (${antwort['inhaltstyp']}, '
           '${(antwort['text'] as String).length} Zeichen).',
@@ -566,6 +568,70 @@ McpServer _server() {
             : text('Gesendet, aber die Prüfung des Plugins hat die Notiz auf der Seite nicht gefunden.', fehler: true);
       } on MoocpFehler catch (f) {
         return text(f.text, fehler: true);
+      }
+    },
+  );
+
+  // Ein Lauf: Über eine Zusatzadresse mit der Art „lesen“ liest ein Plugin nur
+  // in einem Lauf, den es mit der Nummer der Aktivität beginnt, um die es
+  // geht. Hinter einer solchen Adresse ist mit Namen zu rechnen. Deshalb
+  // ermittelt moocp beim Beginn selbst den Kurs der Aktivität, lädt die Namen
+  // seiner Teilnehmenden in die letzte Sperre (das Plugin bekommt sie nicht)
+  // und lehnt jede Anfrage des Laufs ab, deren Adresse eine andere Kurs- oder
+  // Aktivitätsnummer trägt oder gar keine. Alle Schritte mit dem Token des
+  // Aufrufs:
+  //
+  // 1. `/v1/moodle/lauf/beginnen` mit `cmid`; die Antwort nennt den Kurs.
+  // 2. `/v1/moodle/zusatz/lesen` mit `pfad`; die Antwort hat `status`,
+  //    `inhaltstyp`, `pfad` und `text`, von einer ganzen Seite nur ihren
+  //    Hauptbereich, nie den sesskey.
+  // 3. `/v1/moodle/lauf/beenden`. Endet der Aufruf, endet der Lauf mit ihm.
+  //
+  // Was das Plugin liest, kann Namen enthalten; es gibt nur Unbedenkliches an
+  // die KI weiter. Tut es das doch, sperrt moocp die Antwort, auch nach dem
+  // Ende des Laufs.
+  server.registerTool(
+    'beispiel_lauf',
+    description:
+        'Liest über moocp in einem Lauf den Bericht einer Aktivität auf einer erfundenen Seite '
+        '(/mod/beispiel/bericht.php) und nennt nur, ob moocp vorher und nachher ablehnt, Status und Länge, nicht den '
+        'Inhalt. Zeigt das Lesen über eine Zusatzadresse; in einem echten Moodle gibt es die Seite nicht. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'cmid': JsonSchema.integer(description: 'Die Nummer der Aktivität, die Zahl hinter view.php?id=.')},
+      required: ['cmid'],
+    ),
+    annotations: hinweise('Lauf (Beispiel)'),
+    callback: (args, extra) async {
+      final cmid = (args['cmid'] as num).toInt();
+      final bericht = {'pfad': '/mod/beispiel/bericht.php?id=$cmid'};
+      final zeilen = <String>[];
+      try {
+        // Ohne Lauf lehnt moocp ab.
+        try {
+          await anMoocp(adresse(), '/v1/moodle/zusatz/lesen', bericht, aufruf: token(extra));
+          zeilen.add('Ohne Lauf: unerwartet gelesen.');
+        } on MoocpFehler catch (f) {
+          zeilen.add('Ohne Lauf: abgelehnt (HTTP ${f.status}).');
+        }
+        final lauf = await anMoocp(adresse(), '/v1/moodle/lauf/beginnen', {'cmid': cmid}, aufruf: token(extra));
+        zeilen.add('Lauf begonnen für Kurs ${lauf['kurs']}.');
+        final antwort = await anMoocp(adresse(), '/v1/moodle/zusatz/lesen', bericht, aufruf: token(extra));
+        // Den Inhalt gibt das Beispiel nicht weiter: Er kann Namen enthalten.
+        zeilen.add(
+          'Im Lauf: Moodle antwortet mit Status ${antwort['status']} (${antwort['inhaltstyp']}, '
+          '${(antwort['text'] as String).length} Zeichen).',
+        );
+        await anMoocp(adresse(), '/v1/moodle/lauf/beenden', {}, aufruf: token(extra));
+        zeilen.add('Lauf beendet.');
+        try {
+          await anMoocp(adresse(), '/v1/moodle/zusatz/lesen', bericht, aufruf: token(extra));
+          zeilen.add('Nach dem Lauf: unerwartet gelesen.');
+        } on MoocpFehler catch (f) {
+          zeilen.add('Nach dem Lauf: abgelehnt (HTTP ${f.status}).');
+        }
+        return text(zeilen.join('\n'));
+      } on MoocpFehler catch (f) {
+        return text([...zeilen, f.text].join('\n'), fehler: true);
       }
     },
   );

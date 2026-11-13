@@ -40,12 +40,19 @@
 // der Positivliste, moodle_lesen.dart). Eine Zusatzadresse mit der Art
 // „schreiben“ genügt, weil die Lehrkraft dem Plugin diese Seite als Teil
 // seines Schreibvorgangs zugestimmt hat und Moodle nach dem Speichern meist
-// genau dorthin zurückführt. Eine mit der Art „lesen“ genügt nicht: Lesen
-// über eine Zusatzadresse gibt es nur in einem Lauf, in dem moocp den Kurs
-// kennt und die Namen seiner Teilnehmenden für die letzte Sperre geladen hat
-// (E36); außerhalb eines Laufs wird solch einem Ziel nicht gefolgt. Wird
-// einer Umleitung nicht gefolgt, sagt die Antwort, dass der Schreibvorgang
-// schon gesendet ist.
+// genau dorthin zurückführt. Eine mit der Art „lesen“ genügt nur in einem
+// Lauf (lauf.dart), in dem moocp den Kurs kennt und die Namen seiner
+// Teilnehmenden für die letzte Sperre geladen hat (E36), und nur, wenn das
+// Ziel zu Kurs und Aktivität des Laufs passt; außerhalb eines Laufs wird
+// solch einem Ziel nicht gefolgt. Wird einer Umleitung nicht gefolgt, sagt
+// die Antwort, dass der Schreibvorgang schon gesendet ist.
+//
+// Lesen über eine Zusatzadresse mit der Art „lesen“ ([ZusatzLeser]) gibt es
+// nur in einem Lauf: mit GET, ohne sesskey, mit denselben Prüfungen wie oben
+// und dazu der Bindung an Kurs und Aktivität des Laufs (laufBindungVerletzt)
+// für die Adresse und jedes Umleitungsziel. Gefolgt wird einer Umleitung zu
+// einer Zusatzadresse „lesen“ dieses Plugins oder zu einer Seite, die ein
+// Plugin ohnehin lesen darf, beides nur, wenn sie zum Lauf passt.
 //
 // Der sesskey: moocp setzt ihn als Formularfeld ein. Ein Plugin schickt ihn
 // nie selbst mit, weder als Feld noch als Parameter ([istSesskey]); es
@@ -68,6 +75,7 @@ import '../moodle/moodle_zugang.dart';
 import 'adressmuster.dart';
 import 'beschreibung.dart';
 import 'klartext.dart';
+import 'lauf.dart';
 import 'moodle_lesen.dart';
 
 /// Höchstens so viele Formularfelder je Schreibvorgang; ein Formular von
@@ -191,18 +199,39 @@ String zusatzKennzeichnung(String plugin, int anzahl) =>
 /// Moodle-Zugangs: der freigegebene POST ([umleitung] false) oder das GET auf
 /// ein Umleitungsziel danach ([umleitung] true). Regeln oben.
 class ZusatzAufrufer extends PluginAufrufer {
-  ZusatzAufrufer(super.zugang, super.name, this.zusatzadressen, {required this.umleitung});
+  ZusatzAufrufer(super.zugang, super.name, this.zusatzadressen, {required this.umleitung, this.lauf});
 
   /// Alle Zusatzadressen des Plugins aus seinem zugestimmten Stand; wirksam
-  /// sind hier nur die mit der Art „schreiben“.
+  /// sind hier die mit der Art „schreiben“ und, nur bei einer Umleitung in
+  /// einem Lauf, die mit der Art „lesen“.
   final List<Zusatzadresse> zusatzadressen;
   final bool umleitung;
+
+  /// Der Lauf des Aufrufs, in dem geschrieben wird; null ohne Lauf.
+  final Lauf? lauf;
 
   /// Die Zusatzadresse mit der Art „schreiben“, zu der [uri] passt.
   Zusatzadresse? zusatzadresse(Uri uri) => zusatzadresseFuer(zusatzadressen, uri, ZugriffsArt.schreiben);
 
+  /// Die Zusatzadresse mit der Art „lesen“, zu der ein Umleitungsziel [uri]
+  /// passt, nur in einem Lauf, der noch läuft; sonst null.
+  Zusatzadresse? leseadresse(Uri uri) {
+    final l = lauf;
+    if (!umleitung || l == null || l.vorbei || zusatzadresse(uri) != null) return null;
+    return zusatzadresseFuer(zusatzadressen, uri, ZugriffsArt.lesen);
+  }
+
   @override
-  bool sperrlisteAufgehoben(Uri uri) => zusatzadresse(uri) != null;
+  bool sperrlisteAufgehoben(Uri uri) => zusatzadresse(uri) != null || leseadresse(uri) != null;
+
+  /// Ein Umleitungsziel, das nur als Zusatzadresse „lesen“ erreichbar ist,
+  /// muss zu Kurs und Aktivität des Laufs passen.
+  @override
+  String? zusatzpruefung(Uri uri) {
+    if (leseadresse(uri) == null) return null;
+    final grund = laufBindungVerletzt(lauf!, uri);
+    return grund == null ? null : '${PluginAufrufer.regelLauf}$grund';
+  }
 
   static bool _sesskeyInAdresse(Uri uri) => parameterNamen(uri).any(istSesskey);
 
@@ -212,7 +241,7 @@ class ZusatzAufrufer extends PluginAufrufer {
     if (!umleitung) return methode == 'POST' && formular != null && zusatzadresse(uri) != null;
     return methode == 'GET' &&
         formular == null &&
-        (zusatzadresse(uri) != null || super.erlaubt(methode, uri, null, null, null));
+        (zusatzadresse(uri) != null || leseadresse(uri) != null || super.erlaubt(methode, uri, null, null, null));
   }
 
   /// Die Adresse, auf den Skriptnamen gekürzt: Damit nennen auch die Zeilen
@@ -223,7 +252,8 @@ class ZusatzAufrufer extends PluginAufrufer {
   String pfadImProtokoll(Uri uri) => skriptPfad(uri);
 
   @override
-  String anfragezeile(String methode, Uri uri, Anhang? anhang) => zusatzadresse(uri) != null
+  String anfragezeile(String methode, Uri uri, Anhang? anhang) =>
+      zusatzadresse(uri) != null || leseadresse(uri) != null
       ? '$name, Zusatzadresse: $methode ${skriptAdresse(uri)}'
       : super.anfragezeile(methode, uri, anhang);
 
@@ -248,5 +278,71 @@ class ZusatzAufrufer extends PluginAufrufer {
     return 'Abgelehnt: ${uri.path} ist keine Zusatzadresse dieses Plugins mit der Art „schreiben“. Über die '
         'Adresse der App schreibt ein Plugin nur dorthin, mit Freigabe der Lehrkraft; was die Positivliste von '
         'moocp erlaubt, ändert es über die eingebauten Werkzeuge (/v1/werkzeug).';
+  }
+}
+
+/// Ein Plugin, das in einem Lauf über eine Zusatzadresse mit der Art „lesen“
+/// liest (lauf.dart), als Aufrufer des Moodle-Zugangs: nur GET, ohne
+/// sesskey; die Adresse und jedes Umleitungsziel müssen zu Kurs und Aktivität
+/// des Laufs passen ([laufBindungVerletzt]) und eine Zusatzadresse „lesen“
+/// dieses Plugins sein, für die die Sperrliste nicht gilt, oder nach den
+/// Regeln für das Lesen über die Adresse der App lesbar sein. Dass die erste
+/// Adresse eine Zusatzadresse „lesen“ ist, prüft app_adresse.dart vorher.
+/// Endet der Lauf, lehnt der Aufrufer jede weitere Anfrage ab.
+class ZusatzLeser extends PluginAufrufer {
+  ZusatzLeser(super.zugang, super.name, this.zusatzadressen, this.lauf);
+
+  final List<Zusatzadresse> zusatzadressen;
+  final Lauf lauf;
+
+  /// Die Zusatzadresse mit der Art „lesen“, zu der [uri] passt.
+  Zusatzadresse? leseadresse(Uri uri) => zusatzadresseFuer(zusatzadressen, uri, ZugriffsArt.lesen);
+
+  @override
+  bool sperrlisteAufgehoben(Uri uri) => leseadresse(uri) != null;
+
+  @override
+  String? zusatzpruefung(Uri uri) {
+    if (lauf.vorbei) return '${PluginAufrufer.regelLauf}Der Lauf ist beendet.';
+    final grund = laufBindungVerletzt(lauf, uri);
+    return grund == null ? null : '${PluginAufrufer.regelLauf}$grund';
+  }
+
+  @override
+  bool erlaubt(String methode, Uri uri, Felder? formular, String? rumpf, Anhang? anhang) =>
+      methode == 'GET' &&
+      formular == null &&
+      rumpf == null &&
+      anhang == null &&
+      !parameterNamen(uri).any(istSesskey) &&
+      (leseadresse(uri) != null || super.erlaubt(methode, uri, null, null, null));
+
+  static Uri _gekuerzt(Uri uri) => uri.replace(path: skriptPfad(uri));
+
+  @override
+  String pfadImProtokoll(Uri uri) => skriptPfad(uri);
+
+  @override
+  String anfragezeile(String methode, Uri uri, Anhang? anhang) => leseadresse(uri) != null
+      ? '$name, Zusatzadresse: $methode ${skriptAdresse(uri)}'
+      : super.anfragezeile(methode, uri, anhang);
+
+  @override
+  String sperrzeile(String methode, Uri uri, String regel) => regel.startsWith(PluginAufrufer.regelLauf)
+      ? '$name: Im Lauf abgewiesen: $methode ${skriptAdresse(uri)} (passt nicht zum Lauf)'
+      : super.sperrzeile(methode, _gekuerzt(uri), regel);
+
+  @override
+  String ablehnzeile(String methode, Uri uri, Felder? formular) =>
+      super.ablehnzeile(methode, _gekuerzt(uri), formular);
+
+  @override
+  String ablehnmeldung(String methode, Uri uri) {
+    if (methode != 'GET') return 'Abgelehnt: $methode. In einem Lauf liest ein Plugin über eine Zusatzadresse nur.';
+    if (parameterNamen(uri).any(istSesskey)) {
+      return 'Abgelehnt: Die Adresse trägt den Parameter sesskey; mit ihm löst eine Adresse in Moodle eine Aktion '
+          'aus. Lesen geht ohne ihn.';
+    }
+    return super.ablehnmeldung(methode, uri);
   }
 }

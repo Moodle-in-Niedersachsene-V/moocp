@@ -30,6 +30,79 @@ const _schluessel = 'schluessel-des-beispiels-0123456789abcdefghijkl';
 /// Antwort an das Plugin oder im Protokoll stehen.
 const sitzungsCookie = 'sitzungswert-geheim-4711';
 
+/// Der erfundene Name der angemeldeten Lehrkraft im Doppel: Er steht im
+/// Nutzermenü und in der Anmeldezeile jeder ganzen Seite.
+const lehrkraftImDoppel = 'Paula Musterlehrerin';
+
+/// Eine ganze Seite, wie Moodle sie mit Standardlayout liefert (Theme Boost,
+/// vereinfacht): `M.cfg` mit sesskey, Kurs und Kontext im Kopf, Nutzermenü
+/// mit dem Namen der Lehrkraft, ein Block mit einem Namen, der Hauptbereich
+/// mit [inhalt], im Fuß die Anmeldezeile und ein Skript mit dem sesskey.
+String moodleSeite(String inhalt, {int kurs = 12, int kontext = 900}) =>
+    '<!DOCTYPE html><html><head><title>Seite</title><script>M.cfg = {"wwwroot":"http://x","sesskey":"abc123",'
+    '"courseId":$kurs,"contextid":$kontext,"userId":3};</script></head><body>'
+    '<nav class="navbar"><div class="usermenu"><span class="userinitials" title="$lehrkraftImDoppel">PM</span>'
+    '<span class="usertext">$lehrkraftImDoppel</span></div></nav>'
+    '<aside class="block_online_users"><a href="/user/view.php?id=7&amp;course=$kurs">Erika Mustermann</a></aside>'
+    '<div id="page"><div id="region-main-box"><section id="region-main" aria-label="Inhalt">$inhalt</section></div></div>'
+    '<footer id="page-footer"><div class="logininfo">Sie sind angemeldet als <a href="http://x/user/profile.php?id=3" '
+    'title="Profil anzeigen">$lehrkraftImDoppel</a> (<a href="http://x/login/logout.php?sesskey=abc123">Logout</a>)'
+    '</div></footer><script>M.util.js_complete("abc123");</script></body></html>';
+
+/// Eine Person auf der Teilnehmendenseite des Doppels: Nummer, voller Name
+/// und wie das Bild aussieht (Kürzel aus Initialen, Bild oder nichts).
+typedef TeilnehmendeImDoppel = ({int id, String name, String bild});
+
+/// Die Teilnehmendenseite eines Kurses (`/user/index.php`), nach Moodles
+/// Standardseite (vereinfacht, nicht an einer Instanz gemessen). [gesamt]
+/// ersetzt die Gesamtzahl, [zusatz] steht vor der Tabelle, [zeilen] nach den
+/// Personen in `tbody`; ohne [tabelle] steht statt ihr ein Hinweis.
+String teilnehmendenseiteImDoppel(
+  int kurs,
+  List<TeilnehmendeImDoppel> personen, {
+  String? gesamt,
+  String zusatz = '',
+  String zeilen = '',
+  bool tabelle = true,
+  String initialen = '<li class="initialbarall page-item active"><a class="page-link">Alle</a></li>'
+      '<li class="page-item"><a class="page-link">A</a></li>',
+}) {
+  String zeile(TeilnehmendeImDoppel t) {
+    final bild = switch (t.bild) {
+      'kuerzel' =>
+        '<span class="userinitials size-35" title="${t.name}" aria-label="${t.name}" role="img">'
+            '${t.name.split(' ').map((w) => w[0]).join()}</span>',
+      'bild' => '<img src="/pluginfile.php/5/user/icon/boost/f2" class="userpicture" width="35" height="35" alt="">',
+      _ => '',
+    };
+    return '<tr><td class="cell c0"><input type="checkbox" class="usercheckbox" name="user${t.id}">'
+        '<label for="user${t.id}" class="accesshide">${t.name} auswählen</label></td>'
+        '<th class="cell c1"><a href="http://x/user/view.php?id=${t.id}&amp;course=$kurs" class="d-inline-block aabtn">'
+        '$bild${t.name}</a></th><td class="cell c2">Teilnehmer/in</td><td class="cell c3">Aktiv</td></tr>';
+  }
+
+  final liste = tabelle
+      ? '<table id="participants" class="generaltable"><thead><tr><th>Vorname / Nachname</th></tr></thead>'
+            '<tbody>${personen.map(zeile).join()}$zeilen<tr class="emptyrow"><td></td></tr></tbody></table>'
+      : '<div class="alert">Nichts anzuzeigen</div>';
+  return moodleSeite(
+    '<div class="initialbar firstinitial"><nav><ul class="pagination">$initialen</ul></nav></div>$zusatz'
+    '<p data-region="participant-count" class="mb-1">${gesamt ?? '${personen.length}'} Teilnehmer/innen gefunden</p>'
+    '$liste',
+    kurs: kurs,
+    kontext: 800 + kurs,
+  );
+}
+
+/// Die Teilnehmenden in Kurs 12 im Doppel: drei Personen und die Lehrkraft,
+/// mit Kürzel, mit Bild und ohne beides.
+const teilnehmendeKurs12 = <TeilnehmendeImDoppel>[
+  (id: 7, name: 'Erika Mustermann', bild: 'kuerzel'),
+  (id: 8, name: 'Max Mustermann', bild: 'bild'),
+  (id: 9, name: 'Lieschen Müller', bild: ''),
+  (id: 3, name: lehrkraftImDoppel, bild: 'kuerzel'),
+];
+
 /// Ein Moodle, das die Anmeldung kann, ein paar Seiten und Dateien liefert,
 /// Umleitungen auf Erlaubtes und Unerlaubtes macht und alles Angefragte
 /// mitschreibt. Auch für den Ende-zu-Ende-Test mit dem Beispiel-Plugin.
@@ -53,6 +126,30 @@ class PluginTestMoodle {
   /// Was zuletzt an die erfundene Seite `/mod/beispiel/speichern.php`
   /// gesendet wurde (Feld `notiz`); ihre Ansicht zeigt es.
   String? notiz;
+
+  /// Die Aktivitäten, deren Bearbeitungsformular das Doppel kennt, mit Kurs
+  /// und Kontext; [formular] ersetzt das Formular einer Aktivität.
+  final aktivitaeten = <int, ({int kurs, int kontext})>{
+    501: (kurs: 12, kontext: 950),
+    502: (kurs: 12, kontext: 951),
+    601: (kurs: 13, kontext: 960),
+    701: (kurs: 14, kontext: 970),
+  };
+  final formular = <int, String>{};
+
+  /// Die Teilnehmendenseite je Kurs, wenn sie von der aus [teilnehmende]
+  /// abweichen soll; `umleitung` und `fehler` stehen für eine Umleitung und
+  /// einen Serverfehler.
+  final teilnehmendenseite = <int, String>{};
+  final teilnehmende = <int, List<TeilnehmendeImDoppel>>{
+    12: teilnehmendeKurs12,
+    13: const [],
+    14: const [(id: 3, name: lehrkraftImDoppel, bild: 'kuerzel')],
+  };
+
+  /// Hält die Antwort auf `/mod/beispiel/bericht.php?…&warten=1` an, bis sie
+  /// sich erfüllt.
+  Completer<void>? haltenBericht;
 
   Future<void> starten() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -117,6 +214,10 @@ class PluginTestMoodle {
           return weiter('/course/view.php?id=2');
         case '19':
           return weiter('/mod/beispiel/lesen.php?id=1');
+        case '40':
+          return weiter('/mod/beispiel/bericht.php?id=501');
+        case '41':
+          return weiter('/mod/beispiel/bericht.php?id=777');
         case '20':
           return weiter('/mod/beispiel/speichern.php?id=20&sesskey=abc123');
         case '21':
@@ -130,17 +231,69 @@ class PluginTestMoodle {
       return weiter('/mod/beispiel/speichern.php?id=${q['id']}&gespeichert=1');
     }
     if (req.uri.path == '/mod/beispiel/report.php' && req.method == 'POST') return html('<html>Bericht</html>');
+    if (req.uri.path == '/course/modedit.php' && q.containsKey('update')) {
+      final cmid = int.parse(q['update']!);
+      final a = aktivitaeten[cmid];
+      if (a == null) return html(moodleSeite('<div class="errorbox">Ungültige Kursmodul-ID</div>', kurs: 1), status: 404);
+      return html(
+        moodleSeite(
+          formular[cmid] ??
+              '<form action="modedit.php" method="post"><input type="hidden" name="course" value="${a.kurs}">'
+                  '<input type="hidden" name="coursemodule" value="$cmid"><input name="name" value="Bericht"></form>',
+          kurs: a.kurs,
+          kontext: a.kontext,
+        ),
+      );
+    }
+    if (req.uri.path == '/user/index.php') {
+      final kurs = int.parse(q['id']!);
+      final seite = teilnehmendenseite[kurs];
+      if (seite == 'umleitung') return weiter('/user/index.php?id=$kurs');
+      if (seite == 'fehler') return html(moodleSeite('Fehler'), status: 500);
+      return html(seite ?? teilnehmendenseiteImDoppel(kurs, teilnehmende[kurs] ?? const []));
+    }
+    // Erfundene Seiten eines Plugins, das in einem Lauf über Zusatzadressen
+    // liest (test/plugin_lauf_test.dart, Beispiel-Plugin).
+    if (req.uri.path == '/mod/beispiel/bericht.php') {
+      if (q['warten'] == '1') await haltenBericht?.future;
+      switch (q['umleitung']) {
+        case '1':
+          return weiter('/mod/beispiel/bericht.php?id=999');
+        case '2':
+          return weiter('/user/profile.php?id=5');
+        case '3':
+          return weiter('/mod/beispiel/bericht.php?id=501&seite=2');
+        case '4':
+          return weiter('/admin/index.php');
+      }
+      return html(
+        moodleSeite('<h3>Bericht</h3><p>Erika Mustermann: 3 Punkte</p><a href="?id=501&amp;sesskey=abc123">x</a>'),
+      );
+    }
+    if (req.uri.path == '/mod/beispiel/fragment.php') return html('<div class="teil">Teil</div>');
+    if (req.uri.path == '/mod/beispiel/ohnehaupt.php') return html('<html><body><div>Kein Hauptbereich</div></body></html>');
+    if (req.uri.path == '/mod/beispiel/daten.php') {
+      r.headers.contentType = ContentType.json;
+      r.write('{"sesskey":"abc123","werte":[1,2]}');
+      return r.close();
+    }
+    // Eine Seite ohne Hauptbereich und ein Stück HTML ohne Seite, beide auf
+    // einer Adresse, die ein Plugin roh lesen darf.
+    if (req.uri.path == '/mod/learningmap/view.php' && q['id'] == '21') {
+      return html('<html><body><div>ohne Hauptbereich</div></body></html>');
+    }
+    if (req.uri.path == '/mod/learningmap/view.php' && q['id'] == '22') return html('<div>Teil</div>');
     switch ((req.uri.path, q['id'] ?? q['pageid'] ?? q['courseid'])) {
       case ('/question/banks.php', _):
         r.cookies.add(Cookie('weiterer', 'keks-aus-moodle'));
         r.headers.set('X-Moodle-Intern', 'kopf-aus-moodle');
-        return html('<html><script>M.cfg = {"sesskey":"abc123"};</script>Fragensammlungen</html>');
+        return html(moodleSeite('Fragensammlungen'));
       case ('/mod/wiki/view.php', '5'):
         return weiter('/mod/wiki/view.php?pageid=9');
       case ('/mod/wiki/view.php', '9'):
-        return html('<html>Wikiseite</html>');
+        return html(moodleSeite('Wikiseite'));
       case ('/mod/learningmap/view.php', _):
-        return html('<html>Lernlandkarte</html>');
+        return html(moodleSeite('Lernlandkarte'));
       case ('/mod/board/view.php', '13'):
         return weiter('/admin/index.php');
       case ('/mod/board/view.php', '14'):
@@ -321,7 +474,7 @@ void main() {
       final r = await lesen(a.token, '/mod/wiki/view.php?id=5');
       expect(r.status, 200);
       expect(r.json['pfad'], '/mod/wiki/view.php?pageid=9');
-      expect(r.json['text'], '<html>Wikiseite</html>');
+      expect(r.json['text'], '<section id="region-main" aria-label="Inhalt">Wikiseite</section>');
       expect(zeilen(), [
         'moodle: Plugin „Beispiel“: GET /mod/wiki/view.php?id=… → 303',
         'moodle: Plugin „Beispiel“: GET /mod/wiki/view.php?pageid=… → 200',
@@ -341,7 +494,7 @@ void main() {
       moodle.sitzungAbgelaufen = true;
       final r = await lesen(a.token, '/mod/learningmap/view.php?id=20');
       expect(r.status, 200);
-      expect(r.json['text'], '<html>Lernlandkarte</html>');
+      expect(r.json['text'], '<section id="region-main" aria-label="Inhalt">Lernlandkarte</section>');
       final z = zeilen();
       expect(z.where((l) => l.contains('Sitzung abgelaufen -- melde neu an')), hasLength(1));
       // Die Anmeldung stellt die App, nicht das Plugin.

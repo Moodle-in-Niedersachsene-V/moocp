@@ -630,6 +630,11 @@ class LaufendePlugins implements WerkzeugQuelle {
     String text,
     String Function(String) kennzeichnen,
   ) {
+    // Der Name der angemeldeten Lehrkraft des Profils sperrt für jedes
+    // Plugin, das in diesem Profil arbeitet (E36); die App kennt ihn, sobald
+    // sie eine Seite mit der Anmeldezeile gelesen hat.
+    final lehrkraft = aufruf.kontext?.moodle.lehrkraftNamen ?? const <String>[];
+    if (lehrkraft.isNotEmpty) sperre.namenHinzufuegen(kurzname, lehrkraft);
     if (!sperre.gesperrt(kurzname, [text], plugin: plugin, werkzeug: aufruf.name, stelle: SperrStelle.ergebnis)) {
       return;
     }

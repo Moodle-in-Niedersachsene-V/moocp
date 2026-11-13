@@ -42,12 +42,19 @@
 // es nur über die eingebauten Werkzeuge. Darüber hinaus schreibt es nur über
 // eine seiner Zusatzadressen mit der Art „schreiben“, und nur mit einer
 // Freigabe der Lehrkraft auf jeder Stufe (moodle_schreiben.dart, zwei
-// Schritte: Freigabe, dann Schreiben mit der Kennung). Die Antwort trägt nie
-// Cookies oder Kopfzeilen von Moodle, nur Status, Inhaltstyp, den Pfad nach
-// Umleitungen und den Inhalt.
+// Schritte: Freigabe, dann Schreiben mit der Kennung). Über eine
+// Zusatzadresse mit der Art „lesen“ liest es nur in einem Lauf (lauf.dart):
+// Es beginnt ihn mit der Nummer einer Aktivität, die App ermittelt den Kurs,
+// lädt die Namen seiner Teilnehmenden in die letzte Sperre und bindet jede
+// Anfrage des Laufs an Kurs und Aktivität. Die Antwort trägt nie Cookies oder
+// Kopfzeilen von Moodle, nur Status, Inhaltstyp, den Pfad nach Umleitungen und
+// den Inhalt, von einer Seite nur den Hauptbereich und nie den sesskey
+// (moodle_lesen.dart, textFuerPlugin).
 //
 // Letzte Sperre (namenssperre.dart, E36): Ein Plugin nennt der App Namen zum
-// Sperren (/v1/namen); von da an prüft sie bis zum Ende der App alles, was
+// Sperren (/v1/namen), die App lädt beim Beginn eines Laufs die Namen der
+// Teilnehmenden und, sobald sie ihn kennt, den Namen der angemeldeten
+// Lehrkraft des Profils; von da an prüft sie bis zum Ende der App alles, was
 // von diesem Plugin ins Protokoll ginge, gegen sie: seine Protokollzeilen,
 // den Namen und die Argumente eines eingebauten Werkzeugs, das es aufruft
 // (beide stehen im Protokoll der Hülle), und Pfad, Parameternamen und
@@ -70,9 +77,10 @@ import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
 import '../protokoll.dart';
-import 'beschreibung.dart' show Zusatzadresse;
+import 'beschreibung.dart' show Zusatzadresse, ZugriffsArt;
 import 'dialoge.dart';
 import 'klartext.dart';
+import 'lauf.dart';
 import 'moodle_lesen.dart';
 import 'moodle_schreiben.dart';
 import 'namenssperre.dart';
@@ -95,6 +103,9 @@ const pfadMoodleLesen = '/v1/moodle/lesen';
 const pfadMoodleDatei = '/v1/moodle/datei';
 const pfadZusatzFreigabe = '/v1/moodle/zusatz/freigabe';
 const pfadZusatzSchreiben = '/v1/moodle/zusatz/schreiben';
+const pfadLaufBeginnen = '/v1/moodle/lauf/beginnen';
+const pfadLaufBeenden = '/v1/moodle/lauf/beenden';
+const pfadZusatzLesen = '/v1/moodle/zusatz/lesen';
 const pfadNamen = '/v1/namen';
 
 /// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
@@ -163,6 +174,20 @@ class _Aufruf {
   /// Moodle gesendet sind (auch solche, bei denen unklar ist, ob sie
   /// ankamen); für die Kennzeichnung der Antwort an die KI.
   int zusatzSchreibvorgaenge = 0;
+
+  /// Der Lauf dieses Aufrufs (lauf.dart); null ohne. Höchstens einer
+  /// zugleich; er endet spätestens mit dem Aufruf.
+  Lauf? lauf;
+
+  /// Ob gerade ein Lauf beginnt; ein zweiter Beginn wartet nicht, sondern
+  /// wird abgewiesen.
+  bool laufBeginnt = false;
+
+  /// Der Lauf, wenn einer läuft; sonst null.
+  Lauf? get laufend => switch (lauf) {
+    final l? when !l.vorbei => l,
+    _ => null,
+  };
 }
 
 /// Ein angemeldeter Aufruf ([AppAdresse.aufrufAnmelden]): [ende] beendet
@@ -262,8 +287,10 @@ class AppAdresse {
     if (kontext == null || aufruf.token.isEmpty || _beendet) return AngemeldeterAufruf._(() {}, null);
     final a = _Aufruf(kurzname, aufruf.name, kontext);
     _aufrufe[aufruf.token] = a;
+    _lehrkraftSperren(kurzname, a);
     void ende() {
       a.beenden();
+      a.lauf?.beenden();
       a.kennungen.clear();
       if (identical(_aufrufe[aufruf.token], a)) _aufrufe.remove(aufruf.token);
     }
@@ -279,6 +306,7 @@ class AppAdresse {
     _beendet = true;
     for (final a in _aufrufe.values) {
       a.beenden();
+      a.lauf?.beenden();
       a.kennungen.clear();
     }
     _aufrufe.clear();
@@ -435,11 +463,23 @@ class AppAdresse {
     ziel.eintrag(Art.info, '${plugin.aufrufer}: $zeile');
   }
 
+  /// Der Name der angemeldeten Lehrkraft des Profils des Aufrufs kommt in die
+  /// Namen der letzten Sperre dieses Plugins (E36), sobald die App ihn kennt
+  /// (MoodleZugang.lehrkraftNamen): beim Anmelden eines Aufrufs, vor jeder
+  /// Prüfung und nach jeder Anfrage an Moodle. Nur im Arbeitsspeicher, wie
+  /// alle Namen der Sperre. Kennt die App ihn nicht, bleibt es dabei, dass ein
+  /// Plugin von einer Seite nur den Hauptbereich bekommt.
+  void _lehrkraftSperren(String kurzname, _Aufruf aufruf) {
+    final namen = aufruf.kontext.moodle.lehrkraftNamen;
+    if (namen.isNotEmpty) sperre.namenHinzufuegen(kurzname, namen);
+  }
+
   /// Prüft [texte] des Plugins gegen seine Namen (E36). Bei einem Treffer
   /// steht im Protokoll [ziel], was gesperrt ist, mit Plugin und Werkzeug,
   /// nie das Wort oder ein Auszug; die Lehrkraft bekommt die Warnung
   /// (LetzteSperre.melden). Liefert true, wenn gesperrt ist.
   bool _gesperrt(_Plugin plugin, _Aufruf? aufruf, Iterable<String> texte, SperrStelle stelle, Protokoll ziel) {
+    if (aufruf != null) _lehrkraftSperren(plugin.kurzname, aufruf);
     if (!sperre.gesperrt(plugin.kurzname, texte, plugin: plugin.name, werkzeug: aufruf?.werkzeug, stelle: stelle)) {
       return false;
     }
@@ -467,6 +507,9 @@ class AppAdresse {
     pfadMoodleDatei: const _Funktion(mitAufruf: true, ausfuehren: _moodleDatei),
     pfadZusatzFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _zusatzFreigabeAnfragen),
     pfadZusatzSchreiben: const _Funktion(mitAufruf: true, ausfuehren: _zusatzSchreiben),
+    pfadLaufBeginnen: const _Funktion(mitAufruf: true, ausfuehren: _laufBeginnen),
+    pfadLaufBeenden: const _Funktion(mitAufruf: true, ausfuehren: _laufBeenden),
+    pfadZusatzLesen: const _Funktion(mitAufruf: true, ausfuehren: _zusatzLesen),
     pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
   };
 
@@ -619,8 +662,11 @@ class AppAdresse {
   /// Umleitungen, jede geprüft wie die Adresse selbst. Antwort `{"status": …,
   /// "inhaltstyp": …, "pfad": …, "text": …}`: der Status von Moodle, der
   /// Inhaltstyp, der Pfad nach den Umleitungen (ohne Rechner) und der Inhalt
-  /// als Text, höchstens [textHoechstens] Bytes. Nie Cookies oder andere
-  /// Kopfzeilen von Moodle. Endet der äußere Aufruf, geht nichts mehr hinaus.
+  /// als Text, höchstens [textHoechstens] Bytes: von einer HTML-Seite nur
+  /// ihr Hauptbereich, aus jedem Text der sesskey entfernt
+  /// (moodle_lesen.dart, [textFuerPlugin]); eine HTML-Seite ohne Hauptbereich
+  /// gibt es nicht (502). Nie Cookies oder andere Kopfzeilen von Moodle.
+  /// Endet der äußere Aufruf, geht nichts mehr hinaus.
   static Future<_Antwort> _moodleLesen(
     AppAdresse a,
     _Plugin plugin,
@@ -631,26 +677,48 @@ class AppAdresse {
     if (adresse case final _Antwort fehler) return fehler;
     final moodle = aufruf.kontext.moodle;
     try {
-      final antwort = await Future.any<_Antwort?>([
-        moodle
-            .lesenAls(PluginAufrufer(moodle, plugin.aufrufer), adresse as Uri, hoechstens: textHoechstens)
-            .then(
-              (r) => (
-                status: HttpStatus.ok,
-                json: {
-                  'status': r.status,
-                  'inhaltstyp': r.inhaltstyp,
-                  'pfad': '${r.adresse.path}${MoodleZugang.querySicher(r.adresse)}',
-                  'text': r.text,
-                },
-              ),
-            ),
+      final r = await Future.any<Antwort?>([
+        moodle.lesenAls(PluginAufrufer(moodle, plugin.aufrufer), adresse as Uri, hoechstens: textHoechstens),
         aufruf.ende.then((_) => null),
       ]);
-      return aufruf.vorbei || antwort == null ? _abgebrochen() : antwort;
+      if (aufruf.vorbei || r == null) return _abgebrochen();
+      return _seiteFuerPlugin(a, plugin, aufruf, r, zusatzadresse: false);
     } on MoodleFehler catch (x) {
       return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
     }
+  }
+
+  /// Die Antwort mit einer gelesenen Seite: Status, Inhaltstyp, Pfad nach den
+  /// Umleitungen und der Text, wie ihn ein Plugin bekommt ([textFuerPlugin]).
+  /// Vorher kommt der Name der Lehrkraft in die letzte Sperre, falls die App
+  /// ihn gerade auf dieser Seite erst gefunden hat.
+  static _Antwort _seiteFuerPlugin(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf aufruf,
+    Antwort r, {
+    required bool zusatzadresse,
+  }) {
+    a._lehrkraftSperren(plugin.kurzname, aufruf);
+    final String text;
+    try {
+      text = textFuerPlugin(r, zusatzadresse: zusatzadresse, sesskeys: [aufruf.kontext.moodle.sesskeyBekannt]);
+    } on KeinHauptbereich {
+      aufruf.kontext.protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Seite nicht geliefert (kein Hauptbereich): GET ${skriptPfad(r.adresse)}',
+      );
+      return _fehler(HttpStatus.badGateway, KeinHauptbereich.meldung);
+    }
+    return (
+      status: HttpStatus.ok,
+      json: {
+        'status': r.status,
+        'inhaltstyp': r.inhaltstyp,
+        'pfad': '${r.adresse.path}${MoodleZugang.querySicher(r.adresse)}',
+        'text': text,
+      },
+    );
   }
 
   /// `POST /v1/moodle/datei` `{"pfad": "/…", "dateiname": …}`: lädt eine
@@ -932,7 +1000,7 @@ class AppAdresse {
     if (ziel != null && !aufruf.vorbei) {
       try {
         ende = await moodle.lesenAls(
-          ZusatzAufrufer(moodle, plugin.aufrufer, plugin.zusatzadressen, umleitung: true),
+          ZusatzAufrufer(moodle, plugin.aufrufer, plugin.zusatzadressen, umleitung: true, lauf: aufruf.laufend),
           ziel,
           hoechstens: textHoechstens,
         );
@@ -946,13 +1014,17 @@ class AppAdresse {
             'Deren Ziel ließ sich nicht lesen. ${x.meldung}';
       }
     }
-    return _geschrieben(aufruf, {
-      'status': ende.status,
-      'inhaltstyp': ende.inhaltstyp,
-      'pfad': '${ende.adresse.path}${MoodleZugang.querySicher(ende.adresse)}',
-      'text': ende.text,
-      'umleitungNichtGelesen': ?nichtGelesen,
-    });
+    // Was das Plugin von der Seite bekommt, wie beim Lesen über eine
+    // Zusatzadresse: von einer ganzen Seite nur der Hauptbereich, nie der
+    // sesskey (moodle_lesen.dart).
+    final seite = _seiteFuerPlugin(a, plugin, aufruf, ende, zusatzadresse: true);
+    if (seite.status != HttpStatus.ok) {
+      return _geschrieben(aufruf, {
+        'hinweis': 'Geschrieben ist schon: Der Schreibvorgang ist gesendet, Moodle hat geantwortet. '
+            '${KeinHauptbereich.meldung}',
+      });
+    }
+    return _geschrieben(aufruf, {...seite.json, 'umleitungNichtGelesen': ?nichtGelesen});
   }
 
   /// Die Antwort nach einem gesendeten Schreibvorgang. Ist der Aufruf
@@ -963,6 +1035,161 @@ class AppAdresse {
           'Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen. Der Schreibvorgang war da schon gesendet.',
         )
       : (status: HttpStatus.ok, json: {'geschrieben': true, ...json});
+
+  /// `POST /v1/moodle/lauf/beginnen` `{"cmid": …}`: beginnt einen Lauf für
+  /// die Aktivität `cmid` (lauf.dart). Die App ermittelt mit der Sitzung des
+  /// Profils des Aufrufs selbst den Kurs der Aktivität und liest die Namen
+  /// seiner Teilnehmenden in die letzte Sperre dieses Plugins; ins Protokoll
+  /// geht nur ihre Zahl, an das Plugin weder Namen noch Zahl. Antwort
+  /// `{"kurs": …}`, die Nummer des Kurses. Der Lauf hängt am Aufruf-Token und
+  /// braucht keine eigene Kennung; je Aufruf läuft höchstens einer (sonst
+  /// 409). Gelingt etwas davon nicht sicher, beginnt kein Lauf (502 mit dem
+  /// Grund), und lesende Zusatzadressen bleiben gesperrt.
+  static Future<_Antwort> _laufBeginnen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final protokoll = aufruf!.kontext.protokoll;
+    final cmid = daten['cmid'];
+    if (cmid is! int || cmid <= 0 || cmid > 9999999999) {
+      return _fehler(
+        HttpStatus.badRequest,
+        'cmid fehlt: die Nummer der Aktivität als Zahl, etwa die Zahl hinter /mod/…/view.php?id=.',
+      );
+    }
+    if (aufruf.laufend != null || aufruf.laufBeginnt) {
+      return _fehler(
+        HttpStatus.conflict,
+        'In diesem Aufruf läuft schon ein Lauf; je Aufruf geht nur einer zugleich. Erst $pfadLaufBeenden.',
+      );
+    }
+    final moodle = aufruf.kontext.moodle;
+    if (!moodle.angemeldet || moodle.basis == null) {
+      return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
+    }
+    aufruf.laufBeginnt = true;
+    const ohne = 'Kein Lauf begonnen; lesende Zusatzadressen bleiben gesperrt.';
+    try {
+      final LaufBeginn? beginn;
+      try {
+        beginn = await Future.any<LaufBeginn?>([laufVorbereiten(moodle, cmid), aufruf.ende.then((_) => null)]);
+      } on LaufFehler catch (x) {
+        protokoll.eintrag(Art.info, '${plugin.aufrufer}: Kein Lauf begonnen (${x.grund})');
+        return _fehler(HttpStatus.badGateway, '${x.grund} $ohne');
+      } on AntwortZuGross {
+        protokoll.eintrag(Art.info, '${plugin.aufrufer}: Kein Lauf begonnen (Teilnehmendenseite zu groß)');
+        return _fehler(HttpStatus.badGateway, 'Die Teilnehmendenseite des Kurses ist zu groß. $ohne');
+      } on AnfrageGesperrt {
+        // Eine Umleitung auf eine andere Adresse: Die Sperre steht schon mit
+        // ihrer Zeile im Protokoll; ihre Meldung ist für die KI geschrieben.
+        if (aufruf.vorbei) return _abgebrochen();
+        protokoll.eintrag(Art.info, '${plugin.aufrufer}: Kein Lauf begonnen (Umleitung auf eine gesperrte Adresse)');
+        return _fehler(
+          HttpStatus.badGateway,
+          'Moodle hat beim Beginn auf eine Adresse umgeleitet, die moocp dafür nicht liest. $ohne',
+        );
+      } on MoodleFehler catch (x) {
+        if (aufruf.vorbei) return _abgebrochen();
+        final f = _moodleFehler(x);
+        return _fehler(f.status, '${f.json['fehler']} $ohne');
+      }
+      if (beginn == null || aufruf.vorbei) return _abgebrochen();
+      // Die Namen kommen in die Sperre, bevor das Plugin irgendetwas über den
+      // Lauf liest; sie bleiben dort, bis die App endet.
+      a.sperre.namenHinzufuegen(plugin.kurzname, beginn.namen);
+      a._lehrkraftSperren(plugin.kurzname, aufruf);
+      aufruf.lauf = beginn.lauf;
+      final n = beginn.namen.length;
+      a._protokollzeile(plugin, protokoll, 'Lauf begonnen, $n ${n == 1 ? 'Name' : 'Namen'} zum Sperren geladen');
+      return (status: HttpStatus.ok, json: <String, Object?>{'kurs': beginn.lauf.kurs});
+    } finally {
+      aufruf.laufBeginnt = false;
+    }
+  }
+
+  /// `POST /v1/moodle/lauf/beenden` `{}`: beendet den Lauf dieses Aufrufs.
+  /// Danach liest das Plugin keine Zusatzadresse mit der Art „lesen“ mehr;
+  /// die Namen bleiben für die letzte Sperre geladen. Ohne Lauf 409.
+  static Future<_Antwort> _laufBeenden(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final lauf = aufruf!.laufend;
+    if (lauf == null) return _fehler(HttpStatus.conflict, 'In diesem Aufruf läuft kein Lauf.');
+    lauf.beenden();
+    a._protokollzeile(plugin, aufruf.kontext.protokoll, 'Lauf beendet');
+    return (status: HttpStatus.ok, json: <String, Object?>{});
+  }
+
+  /// `POST /v1/moodle/zusatz/lesen` `{"pfad": "/…?…"}`: liest in einem Lauf
+  /// eine Zusatzadresse dieses Plugins mit der Art „lesen“, mit GET und der
+  /// Sitzung des Profils des Aufrufs (moodle_schreiben.dart, [ZusatzLeser]).
+  /// Die Adresse und jedes Umleitungsziel müssen zu Kurs und Aktivität des
+  /// Laufs passen. Außerhalb eines Laufs lehnt die App jede solche Anfrage ab
+  /// (403). Antwort wie bei /v1/moodle/lesen; von einer ganzen HTML-Seite nur
+  /// der Hauptbereich, nie der sesskey. Herunterladen über eine Zusatzadresse
+  /// gibt es nicht: Größer als [textHoechstens] Bytes ist 413. Endet der Lauf
+  /// oder der Aufruf, geht nichts mehr hinaus (409).
+  static Future<_Antwort> _zusatzLesen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final adresse = _moodleAdresse(a, plugin, aufruf!, daten);
+    if (adresse case final _Antwort fehler) return fehler;
+    final uri = adresse as Uri;
+    final protokoll = aufruf.kontext.protokoll;
+    final lauf = aufruf.laufend;
+    if (lauf == null) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Lesen über eine Zusatzadresse außerhalb eines Laufs abgewiesen: GET ${skriptAdresse(uri)}',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: Über eine Zusatzadresse liest ein Plugin nur in einem Lauf ($pfadLaufBeginnen mit der Nummer '
+        'der Aktivität). Erst dann kennt moocp den Kurs und hat die Namen seiner Teilnehmenden für die letzte '
+        'Sperre geladen.',
+      );
+    }
+    if (zusatzadresseFuer(plugin.zusatzadressen, uri, ZugriffsArt.lesen) == null) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Gesperrt: GET ${skriptAdresse(uri)} (keine Zusatzadresse „lesen“ dieses Plugins)',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: ${uri.path} ist keine Zusatzadresse dieses Plugins mit der Art „lesen“. Seiten, die die '
+        'Positivliste von moocp erlaubt, liest ein Plugin über $pfadMoodleLesen.',
+      );
+    }
+    final moodle = aufruf.kontext.moodle;
+    try {
+      final r = await Future.any<Antwort?>([
+        moodle.lesenAls(ZusatzLeser(moodle, plugin.aufrufer, plugin.zusatzadressen, lauf), uri, hoechstens: textHoechstens),
+        aufruf.ende.then((_) => null),
+        lauf.ende.then((_) => null),
+      ]);
+      if (aufruf.vorbei) return _abgebrochen();
+      if (lauf.vorbei || r == null) {
+        return _fehler(HttpStatus.conflict, 'Abgebrochen: Der Lauf ist beendet; was danach kam, geht nicht hinaus.');
+      }
+      return _seiteFuerPlugin(a, plugin, aufruf, r, zusatzadresse: true);
+    } on AntwortZuGross catch (x) {
+      if (aufruf.vorbei) return _abgebrochen();
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        '${x.meldung} Über eine Zusatzadresse gibt es nur Text; Herunterladen über eine Zusatzadresse gibt es nicht.',
+      );
+    } on MoodleFehler catch (x) {
+      return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
+    }
+  }
 
   /// Der Dateiname für einen Download: der genannte, wenn er gültig ist,
   /// sonst null; ohne Angabe der letzte Teil des Pfads, mit „_“ statt

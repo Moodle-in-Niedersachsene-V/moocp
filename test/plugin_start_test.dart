@@ -27,7 +27,7 @@ import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
 import 'mcp_client.dart';
-import 'plugin_moodle_test.dart' show PluginTestMoodle, sitzungsCookie;
+import 'plugin_moodle_test.dart' show PluginTestMoodle, lehrkraftImDoppel, sitzungsCookie;
 
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
@@ -73,6 +73,7 @@ const _beispielWerkzeuge = [
   'beispiel_moodle_lesen',
   'beispiel_moodle_gesperrt',
   'beispiel_moodle_schreiben',
+  'beispiel_lauf',
   'beispiel_namen',
 ];
 
@@ -272,7 +273,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (14 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (15 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -373,6 +374,11 @@ void main() {
       expect(zeilen, contains('Plugin „Beispiel“: GET /question/banks.php?courseid=… → 200'));
       expect(zeilen, contains('Plugin „Beispiel“: Gesperrt für Plugins: GET /admin/index.php (Bereich Adminbereich)'));
       expect(zeilen.join('\n'), isNot(contains(sitzungsCookie)));
+      // Die Seite trug in der Anmeldezeile den Namen der Lehrkraft: Er sperrt
+      // von nun an jede Antwort dieses Plugins an die KI.
+      final g = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Frau Musterlehrerin'}});
+      expect(g['isError'], true);
+      expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
     });
 
     test('Schreiben über eine Zusatzadresse: Freigabe auf jeder Stufe, ein POST, Antwort an die KI gekennzeichnet', () async {
@@ -438,6 +444,55 @@ void main() {
       final abgelehnt = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Nein'});
       expect(abgelehnt, 'Nicht geschrieben: Die Lehrkraft hat nicht freigegeben (abgelehnt).');
       expect(moodle.angefragt, isEmpty);
+    });
+
+    test('ein Lauf: ohne abgelehnt, im Lauf gelesen, danach abgelehnt; die Namen des Kurses sperren jede Antwort', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      moodle.angefragt.clear();
+      final hinweise = SperrHinweise();
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final client = await verbinden(profil, l, moodle: zugang);
+
+      final lauf = await client.tool('beispiel_lauf', {'cmid': 501});
+
+      expect(
+        lauf,
+        matches(
+          RegExp(
+            r'^Ohne Lauf: abgelehnt \(HTTP 403\)\.\nLauf begonnen für Kurs 12\.\n'
+            r'Im Lauf: Moodle antwortet mit Status 200 \(text/html, \d+ Zeichen\)\.\nLauf beendet\.\n'
+            r'Nach dem Lauf: abgelehnt \(HTTP 403\)\.$',
+          ),
+        ),
+      );
+      expect(moodle.angefragt, [
+        'GET /course/modedit.php?update=501',
+        'GET /user/index.php?id=12&perpage=5000&tifirst=&tilast=',
+        'GET /mod/beispiel/bericht.php?id=501',
+      ]);
+      // Nach dem Lauf sperrt jeder Name des Kurses, auch der Lehrkraft, jede
+      // Antwort dieses Plugins an die KI; was keinen Namen trägt, geht durch.
+      for (final name in ['Erika', 'Lieschen Mueller', 'Max', lehrkraftImDoppel]) {
+        final g = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': name}});
+        expect(g['isError'], true, reason: name);
+        expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'), reason: name);
+      }
+      expect(await client.tool('beispiel_echo', {'text': 'Aufgabe 3'}), startsWith('Echo: Aufgabe 3'));
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: Lauf begonnen, 4 Namen zum Sperren geladen'));
+      expect(zeilen, contains('Plugin „Beispiel“, Zusatzadresse: GET /mod/beispiel/bericht.php?id=… → 200'));
+      expect(zeilen, contains('Plugin „Beispiel“: Lauf beendet'));
+      // Kein Name in einer Zeile, außer in den Argumenten, die die KI selbst
+      // geschickt hat.
+      final ohneArgumente = zeilen.where((z) => !z.startsWith('beispiel_echo({')).join('\n').toLowerCase();
+      for (final n in ['erika', 'mustermann', 'lieschen', 'müller', 'paula', 'musterlehrerin']) {
+        expect(ohneArgumente, isNot(contains(n)), reason: n);
+      }
+      expect(ohneArgumente, isNot(contains('abc123')));
     });
 
     test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
@@ -810,7 +865,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (14 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (15 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }

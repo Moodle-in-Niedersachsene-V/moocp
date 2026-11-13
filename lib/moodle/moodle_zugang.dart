@@ -194,10 +194,18 @@ class Erlaubt {
     this.inhalt,
     this.anhang,
     this.lesend = false,
+    this.nurNamenssperre = false,
   });
   final String methode;
   final String pfad;
   final String zweck;
+
+  /// Ob die Regel nur für den einen Aufrufer gilt, mit dem die App selbst die
+  /// Namen der Teilnehmenden eines Kurses für die letzte Sperre liest (E36,
+  /// [MoodleZugang.teilnehmendenseiteLesen]). Für die eingebauten Werkzeuge
+  /// ([MoodleZugang.erlaubt]) und für Plugins ([MoodleZugang.erlaubtZumLesen])
+  /// gibt es eine solche Regel nicht.
+  final bool nurNamenssperre;
 
   /// Ob die Regel eine Seite oder Datei nur liest: ein GET, das Inhalt oder
   /// Einstellungen zeigt, ohne in Moodle etwas zu ändern, und nicht nur als
@@ -250,6 +258,32 @@ String? themeStylesheetIn(dom.Document doc) {
   return null;
 }
 
+/// Die Namen der angemeldeten Person aus der Anmeldezeile einer Seite: der
+/// Text jedes Links auf `/user/profile.php` im Element mit der Klasse
+/// `logininfo` („Sie sind angemeldet als …“; bei „Anmelden als“ beide
+/// Namen). Die Zeile setzt `core_renderer::login_info` in jede Seite mit
+/// Standardlayout; im Theme Boost steht sie im Fuß. Der Text der Anmeldezeile
+/// selbst hängt an der Sprache, der Link nicht; deshalb nur er. Ohne
+/// Anmeldezeile leer. Gemessen ist der Aufbau nicht an einer Instanz: Findet
+/// sich der Name nicht, bleibt die Liste leer, und für ein Plugin gilt dann nur,
+/// dass es von einer Seite nur den Hauptbereich bekommt (E36).
+List<String> lehrkraftNamenIn(String html) {
+  if (!html.contains('logininfo')) return const [];
+  final namen = <String>[];
+  for (final m in RegExp(r'''<div\b[^>]*\bclass\s*=\s*["'][^"']*\blogininfo\b[^"']*["'][^>]*>''', caseSensitive: false)
+      .allMatches(html)) {
+    final ende = html.indexOf(RegExp('</div', caseSensitive: false), m.end);
+    if (ende < 0) continue;
+    for (final a in html_parser.parseFragment(html.substring(m.end, ende)).querySelectorAll('a[href]')) {
+      final u = Uri.tryParse(a.attributes['href'] ?? '');
+      if (u == null || !u.path.endsWith('/user/profile.php')) continue;
+      final n = a.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (n.isNotEmpty && !namen.contains(n)) namen.add(n);
+    }
+  }
+  return namen;
+}
+
 /// Wer eine Anfrage an Moodle stellt. Vom Aufrufer hängen ab, gegen welche
 /// Listen die Adresse geprüft wird und in welcher Form das Protokoll die
 /// Anfrage nennt; alles Übrige -- der Rechner der Instanz, die Sitzung, das
@@ -257,11 +291,14 @@ String? themeStylesheetIn(dom.Document doc) {
 ///
 /// Jede Anfrage fragt ihren Aufrufer an denselben Stellen, auch ein Download:
 /// die Prüfung vor dem Senden (`_pruefePositivliste`), die Zeile danach
-/// (`_protokolliere`). Es gibt zwei Aufrufer: die eingebauten Werkzeuge der
-/// App, für die Sperrliste und Positivliste wie in E3 gelten, und ein Plugin,
-/// das über die Adresse der App liest (plugin/moodle_lesen.dart). Im
-/// Protokoll steht bei beiden nie ein Wert (A4). Die Anmeldung stellt immer
-/// die App selbst, nie ein Plugin.
+/// (`_protokolliere`). Aufrufer sind die eingebauten Werkzeuge der App, für
+/// die Sperrliste und Positivliste wie in E3 gelten, ein Plugin, das über die
+/// Adresse der App liest oder schreibt (plugin/moodle_lesen.dart,
+/// plugin/moodle_schreiben.dart), und die App selbst, wenn sie für die letzte
+/// Sperre die Namen der Teilnehmenden eines Kurses liest
+/// ([MoodleZugang.teilnehmendenseiteLesen]). Im Protokoll eines Plugins und
+/// der letzten Sperre steht nie ein Wert (A4). Die Anmeldung stellt immer die
+/// App selbst, nie ein Plugin.
 abstract class Aufrufer {
   /// Die Regel der Sperrliste, die [uri] sperrt, sonst null. Sie wird vor
   /// [erlaubt] gefragt: Was sie sperrt, geht nie hinaus.
@@ -342,6 +379,43 @@ class _EingebauteWerkzeuge extends Aufrufer {
   String anfragezeile(String methode, Uri uri, Anhang? anhang) =>
       '$methode ${uri.path}${MoodleZugang.querySicher(uri)}'
       '${anhang != null ? " (${anhang.dateiname})" : ""}';
+}
+
+/// Die App selbst, wenn sie für die letzte Sperre die Namen der Teilnehmenden
+/// eines Kurses liest (E36, [MoodleZugang.teilnehmendenseiteLesen]). Nur
+/// dieser Aufrufer kommt an der Sperrliste vorbei zur Teilnehmendenseite, und
+/// nur in der einen Form, die [sperrregelFuerNamenssperre] durchlässt; die
+/// Positivliste hat dafür eine eigene Regel ([Erlaubt.nurNamenssperre]), die
+/// für keinen anderen Aufrufer gilt. Privat, damit niemand sonst ihn benutzt.
+/// Im Protokoll nur Methode, Pfad und die Namen der Parameter.
+class _Namenssperre extends Aufrufer {
+  _Namenssperre(this._zugang);
+
+  final MoodleZugang _zugang;
+
+  static const _wer = 'Letzte Sperre, Namen der Teilnehmenden';
+
+  @override
+  String? gesperrtDurch(Uri uri) => sperrregelFuerNamenssperre(uri);
+
+  @override
+  bool erlaubt(String methode, Uri uri, Felder? formular, String? rumpf, Anhang? anhang) =>
+      methode == 'GET' &&
+      formular == null &&
+      rumpf == null &&
+      anhang == null &&
+      _zugang.erlaubtFuerNamenssperre(uri);
+
+  @override
+  String sperrzeile(String methode, Uri uri, String regel) =>
+      '$_wer: Datenschutz-Sperre: $methode ${adresseOhneWerte(uri)} (Regel $regel)';
+
+  @override
+  String ablehnzeile(String methode, Uri uri, Felder? formular) =>
+      '$_wer: Gesperrt: $methode ${adresseOhneWerte(uri)}';
+
+  @override
+  String anfragezeile(String methode, Uri uri, Anhang? anhang) => '$_wer: $methode ${adresseOhneWerte(uri)}';
 }
 
 class MoodleZugang {
@@ -631,6 +705,23 @@ class MoodleZugang {
   /// Umleitungsziel. Eine neue Funktion braucht hier einen Eintrag, und das
   /// soll auffallen.
   List<Erlaubt> get positivliste => [
+    // ---- Letzte Sperre (E36): die Namen der Teilnehmenden eines Kurses, nur
+    // für die App selbst, wenn ein Plugin einen Lauf beginnt
+    // (plugin/lauf.dart). Genau diese vier Parameter: die Kursnummer, die
+    // Seitengröße, mit der Moodle alle zeigt, und der Filter nach
+    // Anfangsbuchstaben leer. Kein anderer Aufrufer bekommt diese Regel.
+    Erlaubt(
+      'GET',
+      r'^/user/index\.php$',
+      'Namen der Teilnehmenden eines Kurses für die letzte Sperre',
+      parameter: (q) =>
+          q.length == 4 &&
+          _zahl(q['id']) &&
+          q['perpage'] == '$teilnehmendeHoechstens' &&
+          q['tifirst'] == '' &&
+          q['tilast'] == '',
+      nurNamenssperre: true,
+    ),
     // ---- Anmelden
     Erlaubt(
       'GET',
@@ -1553,6 +1644,7 @@ class MoodleZugang {
     Anhang? anhang,
   ]) {
     for (final e in positivliste) {
+      if (e.nurNamenssperre) continue;
       if (e.methode != methode || !RegExp(e.pfad).hasMatch(uri.path)) continue;
       if (e.parameter != null && !e.parameter!(uri.queryParameters)) continue;
       if (e.formular != null && (formular == null || !e.formular!(formular))) {
@@ -1573,12 +1665,55 @@ class MoodleZugang {
   /// Schreibvorgängen.
   bool erlaubtZumLesen(Uri uri) {
     for (final e in positivliste) {
-      if (!e.lesend || e.methode != 'GET' || !RegExp(e.pfad).hasMatch(uri.path)) continue;
+      if (e.nurNamenssperre || !e.lesend || e.methode != 'GET' || !RegExp(e.pfad).hasMatch(uri.path)) continue;
       if (e.formular != null || e.anhang != null || e.inhalt != null) continue;
       if (e.parameter != null && !e.parameter!(uri.queryParameters)) continue;
       return true;
     }
     return false;
+  }
+
+  /// Ob die Regel für die letzte Sperre ([Erlaubt.nurNamenssperre]) ein GET
+  /// auf [uri] erlaubt. Nur der Aufrufer der letzten Sperre fragt das.
+  bool erlaubtFuerNamenssperre(Uri uri) {
+    for (final e in positivliste) {
+      if (!e.nurNamenssperre || e.methode != 'GET' || !RegExp(e.pfad).hasMatch(uri.path)) continue;
+      // Die Parameter genau so, wie sie gesendet werden: Ein Name, der
+      // doppelt vorkommt, fiele in queryParameters zusammen.
+      if (uri.query.split('&').length != uri.queryParameters.length) continue;
+      if (e.parameter != null && !e.parameter!(uri.queryParameters)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  /// So viele Teilnehmende zeigt die Teilnehmendenseite auf einmal: der Wert,
+  /// den Moodle selbst für „alle zeigen“ benutzt. Ein Kurs mit mehr
+  /// Teilnehmenden lässt sich für einen Lauf nicht vollständig lesen; dann
+  /// beginnt der Lauf nicht (plugin/lauf.dart).
+  static const teilnehmendeHoechstens = 5000;
+
+  /// Höchstens so viele Bytes liest die App von der Teilnehmendenseite; bei
+  /// [teilnehmendeHoechstens] Zeilen ist sie weit kleiner.
+  static const teilnehmendenseiteHoechstens = 64 * 1024 * 1024;
+
+  late final Aufrufer _namenssperre = _Namenssperre(this);
+
+  /// Liest die Teilnehmendenseite des Kurses [kurs] für die letzte Sperre
+  /// (E36), mit der Sitzung dieses Zugangs: `/user/index.php` mit der
+  /// Kursnummer, der Seitengröße [teilnehmendeHoechstens] und leerem Filter
+  /// nach Anfangsbuchstaben. Nur diese eine Adresse; jedes Umleitungsziel
+  /// prüft derselbe Aufrufer, und was nicht genau diese Adresse ist, sperrt
+  /// er. Der Inhalt trägt die Namen von Personen: Er geht nur an die Auswertung
+  /// in plugin/lauf.dart, die daraus die Namen der letzten Sperre macht, und in
+  /// kein Protokoll, keine Datei, keine Antwort.
+  Future<Antwort> teilnehmendenseiteLesen(int kurs) async {
+    _pruefeAngemeldet();
+    return _lesen(
+      _adresse('/user/index.php?id=$kurs&perpage=$teilnehmendeHoechstens&tifirst=&tilast='),
+      _namenssperre,
+      hoechstens: teilnehmendenseiteHoechstens,
+    );
   }
 
   Uri? _basis;
@@ -1625,6 +1760,22 @@ class MoodleZugang {
 
   /// Der sesskey der Sitzung, mitgelesen aus jeder HTML-Antwort (M.cfg).
   String? _sesskey;
+
+  /// Der sesskey, soweit er schon bekannt ist, ohne eine Anfrage; null sonst.
+  /// Nur, um ihn aus einer Antwort an ein Plugin zu entfernen
+  /// (plugin/moodle_lesen.dart): Ein Plugin bekommt ihn auf keinem Weg.
+  String? get sesskeyBekannt => _sesskey;
+
+  /// Der Name der angemeldeten Lehrkraft, mitgelesen aus der ersten Seite mit
+  /// der Anmeldezeile ([lehrkraftNamenIn]); bei „Anmelden als“ beide Namen.
+  /// Nur im Arbeitsspeicher, bis zum Abmelden, und nur für die letzte Sperre
+  /// der Plugins (E36, plugin/app_adresse.dart): nie in Protokoll, Datei,
+  /// `status` oder einer Antwort.
+  final Set<String> _lehrkraft = {};
+
+  /// Siehe [_lehrkraft]; leer, solange keine Seite mit der Anmeldezeile
+  /// gelesen ist.
+  List<String> get lehrkraftNamen => List.unmodifiable(_lehrkraft);
 
   bool get angemeldet => _angemeldet;
   Uri? get basis => _basis;
@@ -1678,6 +1829,7 @@ class MoodleZugang {
     _cookies.clear();
     _sesskey = null;
     _eigeneId = null;
+    _lehrkraft.clear();
     selbstAngelegt.clear();
     ohneLinkVorherVerborgen.clear();
     _benutzer = null;
@@ -2405,6 +2557,7 @@ class MoodleZugang {
           RegExp(r'"userId":(\d+)').firstMatch(a.text)?.group(1) ?? '',
         );
         if (id != null && id > 1) _eigeneId = id;
+        if (_lehrkraft.isEmpty) _lehrkraft.addAll(lehrkraftNamenIn(a.text));
       }
       // Ins Protokoll: Methode, Pfad, Status. Keine Formularwerte, keine
       // Cookies, keine Parameterwerte der Anmeldung.

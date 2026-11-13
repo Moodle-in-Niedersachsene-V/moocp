@@ -29,6 +29,19 @@
 // Positivliste und Sperrliste werden für kein Plugin geweitet. Was nicht
 // erlaubt ist, lehnt die App ohne Dialog ab; die Meldung nennt den Grund, nie
 // Parameterwerte.
+//
+// Was das Plugin von einer Seite bekommt ([textFuerPlugin]): von einer
+// HTML-Seite nur den Hauptbereich (`#region-main`), ohne Kopf, Nutzermenü,
+// Navigation, Blöcke, Fuß und die Skripte außerhalb. Dort stehen der Name der
+// angemeldeten Lehrkraft, Namen in Blöcken (etwa „Personen online“) und der
+// sesskey in `M.cfg`; im Hauptbereich steht, wofür ein Plugin eine Seite
+// liest. Findet sich kein Hauptbereich, liefert die App die Seite nicht,
+// statt sie ersatzweise ganz zu liefern. Und aus jedem Text, gleich welcher
+// Art, nimmt sie den sesskey der Sitzung heraus: Er steht auch im
+// Hauptbereich, in versteckten Feldern von Formularen und in Links für
+// Aktionen, und mit ihm hätte ein Plugin jede Aktion der Sitzung in der Hand.
+
+import 'package:html/parser.dart' as html_parser;
 
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart';
@@ -60,11 +73,21 @@ class PluginAufrufer extends Aufrufer {
   static const _normalform = 'Normalform';
   static const _nutzer = 'Dateien unter user/';
 
+  /// Der Anfang der Regel, wenn eine Anfrage nicht zum Kurs oder zur
+  /// Aktivität eines Laufs passt ([zusatzpruefung]); dahinter steht der Grund.
+  static const regelLauf = 'Lauf: ';
+
   /// Ob die Sperrliste der App für [uri] nicht gilt. Hier nie: Ein Plugin
   /// liest über die Adresse der App nur, was die Sperrliste durchlässt. Nur
   /// eine Zusatzadresse dieses Plugins hebt sie auf (moodle_schreiben.dart);
   /// die Schritte 1 bis 3 oben gelten auch dann.
   bool sperrlisteAufgehoben(Uri uri) => false;
+
+  /// Eine weitere Prüfung nach den Schritten 1 bis 3 und vor der Sperrliste:
+  /// in einem Lauf die Bindung an seinen Kurs und seine Aktivität
+  /// (lauf.dart). Liefert die Regel ([regelLauf] und der Grund) oder null.
+  /// Hier keine.
+  String? zusatzpruefung(Uri uri) => null;
 
   @override
   String? gesperrtDurch(Uri uri) {
@@ -73,6 +96,7 @@ class PluginAufrufer extends Aufrufer {
     final klar = prozentAufgeloest(uri.path);
     if (pfadNormalisieren(uri.path) != klar) return _normalform;
     if (_nutzerdateien.hasMatch(klar)) return _nutzer;
+    if (zusatzpruefung(uri) case final regel?) return regel;
     if (sperrlisteAufgehoben(uri)) return null;
     return sperrregel(uri) ??
         sperrregel(Uri(path: klar, query: uri.hasQuery ? prozentAufgeloest(uri.query) : null));
@@ -90,7 +114,8 @@ class PluginAufrufer extends Aufrufer {
   static bool _mitSesskey(Uri uri) =>
       uri.queryParametersAll.keys.any((k) => prozentAufgeloest(k).toLowerCase() == 'sesskey');
 
-  bool _eigeneRegel(String regel) => regel.startsWith(_bereich) || regel == _normalform || regel == _nutzer;
+  bool _eigeneRegel(String regel) =>
+      regel.startsWith(_bereich) || regel == _normalform || regel == _nutzer || regel.startsWith(regelLauf);
 
   @override
   String sperrzeile(String methode, Uri uri, String regel) => _eigeneRegel(regel)
@@ -122,6 +147,10 @@ class PluginAufrufer extends Aufrufer {
           'Sicherungen) liest kein Plugin. Eine Sicherung kann Nutzerdaten enthalten; nur der Ablauf der '
           'eingebauten Werkzeuge lädt sie, nachdem er das ausgeschlossen hat.';
     }
+    if (regel.startsWith(regelLauf)) {
+      return 'Abgelehnt: ${regel.substring(regelLauf.length)} In einem Lauf liest ein Plugin nur, was zu Kurs und '
+          'Aktivität des Laufs gehört.';
+    }
     return super.sperrmeldung(uri, regel);
   }
 
@@ -144,6 +173,50 @@ class PluginAufrufer extends Aufrufer {
         'nicht zu dem, was dort erlaubt ist. Für Plugins gilt der lesende Teil der Positivliste der '
         'eingebauten Werkzeuge, ohne Erweiterung.';
   }
+}
+
+/// Eine Seite ohne Hauptbereich: Die App liefert sie dem Plugin nicht, auch
+/// nicht ersatzweise ganz.
+class KeinHauptbereich implements Exception {
+  const KeinHauptbereich();
+
+  static const meldung =
+      'Die Seite hat keinen Hauptbereich (#region-main). moocp liefert einem Plugin von einer Seite nur ihn, '
+      'ohne Kopf, Nutzermenü, Navigation und Blöcke, und deshalb diese Seite gar nicht.';
+}
+
+/// Was ein Plugin als `text` einer Antwort von Moodle bekommt (Regeln oben).
+///
+/// Eine HTML-Seite (`text/html`) gibt es nur als ihren Hauptbereich
+/// (`#region-main`, äußeres HTML), sonst [KeinHauptbereich]. Bei einer
+/// Zusatzadresse ([zusatzadresse]) gilt das für jede ganze Seite (mit
+/// `<body`); ein Stück HTML ohne `<body`, wie es Skripte von Plugins für
+/// Aufrufe aus dem Browser liefern, hat weder Nutzermenü noch Blöcke noch
+/// `M.cfg` und bleibt, wie es ist. Über die Adresse der App gilt die Regel für
+/// jede HTML-Antwort: Die Seiten der Positivliste sind ganze Seiten.
+///
+/// Aus jedem Text, auch JSON und reinem Text, nimmt die App den sesskey der
+/// Sitzung heraus: jedes Vorkommen der [sesskeys] (der bekannte der Sitzung
+/// und der aus `M.cfg` dieser Seite) und jeden Wert hinter `sesskey=` oder
+/// `"sesskey":`. An seiner Stelle steht „…“.
+String textFuerPlugin(Antwort r, {required bool zusatzadresse, Iterable<String?> sesskeys = const []}) {
+  var text = r.text;
+  final schluessel = {
+    for (final s in [...sesskeys, RegExp(r'"sesskey"\s*:\s*"(\w+)"').firstMatch(text)?[1]])
+      if (s != null && s.length >= 6) s,
+  };
+  if (r.inhaltstyp == 'text/html' && (!zusatzadresse || text.toLowerCase().contains('<body'))) {
+    final haupt = html_parser.parse(text).querySelector('#region-main');
+    if (haupt == null) throw const KeinHauptbereich();
+    text = haupt.outerHtml;
+  }
+  for (final s in schluessel) {
+    text = text.replaceAll(s, '…');
+  }
+  return text.replaceAllMapped(
+    RegExp(r'''(sesskey(?:%3D|=|["']?\s*:\s*["']?|["']?\s+value\s*=\s*["']?))[^&"'\s<>]+''', caseSensitive: false),
+    (m) => '${m[1]}…',
+  );
 }
 
 /// Die Adresse an der Instanz [basis] zu dem Pfad, den ein Plugin nennt: ein

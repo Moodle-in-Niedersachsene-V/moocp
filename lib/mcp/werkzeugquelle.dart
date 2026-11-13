@@ -113,6 +113,11 @@ enum PluginFreigabeAusgang {
   /// und die KI erfährt es wie bei jeder ausgelassenen Freigabe.
   ohneFrage,
 
+  /// Der Testbetrieb hat automatisch freigegeben: nur beim Schreiben über
+  /// eine Zusatzadresse in einem Lauf, dessen Kurs ein gebundener Testkurs
+  /// ist ([AufrufKontext.pluginFreigabe] mit `laufKurs`).
+  automatisch,
+
   /// Die Lehrkraft hat abgelehnt.
   abgelehnt,
 
@@ -154,12 +159,18 @@ abstract interface class AufrufKontext {
   /// Freigaben dieses Profils (Freigaben.anfragen): mit [titel] und
   /// [zusammenfassung] des Plugins (schon bereinigt), gefragt ab der Stufe
   /// [ab], mit allen Regeln einer Freigabe (nur Maus, Wartezeit, Frist,
-  /// Protokoll). Der Testbetrieb gibt sie nie automatisch frei. Lässt die
-  /// Stufe der Lehrkraft die Frage aus, zählt das für den Aufruf des Plugins
-  /// wie jede ausgelassene Freigabe. Erfüllt sich [abbruch], verfällt sie.
-  /// [punkte] sind Zeilen, die moocp selbst dazusetzt (beim Schreiben über
-  /// eine Zusatzadresse: Adresse, Feldnamen, Grund); [protokolltitel] ersetzt
-  /// den Namen der Anfrage im Protokoll.
+  /// Protokoll). Lässt die Stufe der Lehrkraft die Frage aus, zählt das für
+  /// den Aufruf des Plugins wie jede ausgelassene Freigabe. Erfüllt sich
+  /// [abbruch], verfällt sie. [punkte] sind Zeilen, die moocp selbst dazusetzt
+  /// (beim Schreiben über eine Zusatzadresse: Adresse, Feldnamen, Grund);
+  /// [protokolltitel] ersetzt den Namen der Anfrage im Protokoll.
+  ///
+  /// Der Testbetrieb gibt sie nie automatisch frei, mit einer Ausnahme (E35):
+  /// [laufKurs] ist der Kurs, den die App beim Beginn des Laufs selbst
+  /// ermittelt hat, und nur beim Schreiben über eine Zusatzadresse in diesem
+  /// Lauf gesetzt. Ist er ein gebundener Testkurs des Profils, gibt der
+  /// Testbetrieb frei ([PluginFreigabeAusgang.automatisch]); sonst kommt der
+  /// Dialog.
   Future<PluginFreigabeAusgang> pluginFreigabe({
     required String titel,
     required String zusammenfassung,
@@ -168,7 +179,13 @@ abstract interface class AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
+    int? laufKurs,
   });
+
+  /// Im Testbetrieb mit gebundenem Testprofil der Pfad der Datei mit
+  /// vorbereiteten Antworten auf Dialoge eines Plugins
+  /// (plugin/testantworten.dart); sonst null, und jeder Dialog erscheint.
+  String? get testDialogantworten;
 }
 
 /// Ein frisches Token für einen Aufruf: 32 Bytes aus dem sicheren Zufall,

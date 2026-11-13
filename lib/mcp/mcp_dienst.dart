@@ -484,9 +484,20 @@ class McpDienst implements AufrufKontext {
     Map<String, dynamic> args, {
     required Future<void> abbruch,
     required String aufrufer,
+  }) => _eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer);
+
+  /// [aussen] ist der Zähler des Werkzeugaufrufs des Plugins
+  /// (_KontextImAufruf): Gibt der Testbetrieb im eingebauten Werkzeug
+  /// automatisch frei, erfährt das auch die KI in der Antwort des Plugins.
+  Future<EingebautErgebnis> _eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+    AufrufZaehler? aussen,
   }) async {
     final server = _erzeugen(protokollieren: false, mitQuellen: false);
-    final ergebnis = _aufrufe.direktAufrufen(server, name, args, abbruch: abbruch, aufrufer: aufrufer);
+    final ergebnis = _aufrufe.direktAufrufen(server, name, args, abbruch: abbruch, aufrufer: aufrufer, aussen: aussen);
     if (ergebnis == null) {
       final n = name.length > 60 ? '${name.substring(0, 59)}…' : name;
       throw MoodleFehler(
@@ -511,13 +522,24 @@ class McpDienst implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
-  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel);
+    int? laufKurs,
+  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel, laufKurs);
+
+  @override
+  String? get testDialogantworten => _testbetrieb.dialogantworten(profil, testzugang ?? Testzugang.fuer(profil));
 
   /// [zaehler] ist der des Werkzeugaufrufs, zu dem die Freigabe gehört
-  /// (_KontextImAufruf); er bekommt eine ausgelassene Freigabe mitgezählt.
-  /// Titel und Zusammenfassung stammen vom Plugin: Der Dialog kennzeichnet
-  /// sie so (FreigabeAnfrage.vomPlugin), und ins Protokoll geht statt des
-  /// Titels nur, dass ein Plugin fragt.
+  /// (_KontextImAufruf); er bekommt eine ausgelassene Freigabe mitgezählt,
+  /// ebenso eine des Testbetriebs. Titel und Zusammenfassung stammen vom
+  /// Plugin: Der Dialog kennzeichnet sie so (FreigabeAnfrage.vomPlugin), und
+  /// ins Protokoll geht statt des Titels nur, dass ein Plugin fragt.
+  ///
+  /// Testbetrieb (E35): Nur mit [laufKurs] (Schreiben über eine Zusatzadresse
+  /// in einem Lauf, AufrufKontext.pluginFreigabe) und nur, wenn dieser Kurs
+  /// ein gebundener Testkurs des Profils ist, öffnet sich hier die Zone, in
+  /// der Freigaben.anfragen automatisch freigibt; geprüft wird an derselben
+  /// Stelle wie bei den eingebauten Werkzeugen (Testbetrieb, Testzugang).
+  /// Jede andere Freigabe eines Plugins läuft ohne Testfreigabe.
   Future<PluginFreigabeAusgang> _pluginFreigabe(
     String titel,
     String zusammenfassung,
@@ -527,6 +549,7 @@ class McpDienst implements AufrufKontext {
     AufrufZaehler? zaehler,
     List<String> punkte,
     String? protokolltitel,
+    int? laufKurs,
   ) async {
     final a = FreigabeAnfrage(
       titel: titel,
@@ -536,13 +559,22 @@ class McpDienst implements AufrufKontext {
       ablehnen: 'Ablehnen',
       ohneEntscheidung: 'wird nichts freigegeben',
       ab: ab,
+      zusatzSchreiben: laufKurs != null,
       vomPlugin: zusammenfassung,
       protokolltitel: protokolltitel ?? 'Freigabe eines Plugins',
     );
     final eigener = AufrufZaehler();
-    final ja = await Freigaben.ohneTestfreigabe(
-      () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), zaehler: eigener, aufrufer: aufrufer),
-    );
+    Future<bool> fragen() =>
+        Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), zaehler: eigener, aufrufer: aufrufer);
+    bool testkurs() =>
+        laufKurs != null && _testbetrieb.gebundenerTestkurs(profil, testzugang ?? Testzugang.fuer(profil), laufKurs);
+    final ja = testkurs()
+        ? await freigaben.imTest(fragen, pruefen: () async => testkurs())
+        : await Freigaben.ohneTestfreigabe(fragen);
+    if (eigener.testfreigaben > 0) {
+      zaehler?.testfreigaben += eigener.testfreigaben;
+      return PluginFreigabeAusgang.automatisch;
+    }
     if (eigener.ausgelassen > 0) {
       zaehler?.ausgelassen += eigener.ausgelassen;
       return PluginFreigabeAusgang.ohneFrage;
@@ -2579,7 +2611,7 @@ class _KontextImAufruf implements AufrufKontext {
     Map<String, dynamic> args, {
     required Future<void> abbruch,
     required String aufrufer,
-  }) => _dienst.eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer);
+  }) => _dienst._eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer, aussen: _zaehler);
 
   @override
   Future<PluginFreigabeAusgang> pluginFreigabe({
@@ -2590,5 +2622,9 @@ class _KontextImAufruf implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
-  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel);
+    int? laufKurs,
+  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel, laufKurs);
+
+  @override
+  String? get testDialogantworten => _dienst.testDialogantworten;
 }

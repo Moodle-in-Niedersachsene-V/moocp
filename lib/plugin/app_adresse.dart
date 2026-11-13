@@ -34,7 +34,8 @@
 // abgewiesen, bis der erste beantwortet ist. Beide schließen sich, wenn der
 // Aufruf endet oder der Client abbricht, und haben die Frist einer Freigabe.
 // Ins Protokoll gehen Plugin, Art und Ausgang, nie die Werte, die die
-// Lehrkraft eingibt oder wählt (A4, E11).
+// Lehrkraft eingibt oder wählt (A4, E11). Im Testbetrieb kann eine
+// vorbereitete Antwort an die Stelle des Dialogs treten (testantworten.dart).
 //
 // Moodle: Ein Plugin liest Seiten und lädt Dateien über die App, mit der
 // Sitzung des Profils des Aufrufs und nur in den Grenzen des lesenden Teils
@@ -75,7 +76,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
-import '../freigabe.dart' show Bestaetigungen;
+import '../freigabe.dart' show Bestaetigungen, testfreigabeHinweis;
 import '../mcp/vor_anmeldung.dart';
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
@@ -90,6 +91,7 @@ import 'lauf.dart';
 import 'moodle_lesen.dart';
 import 'moodle_schreiben.dart';
 import 'namenssperre.dart';
+import 'testantworten.dart';
 
 export 'klartext.dart' show einzeilig;
 
@@ -178,13 +180,22 @@ class _Aufruf {
   /// Die Freigaben zum Schreiben über eine Zusatzadresse, die die Lehrkraft
   /// in diesem Aufruf erteilt hat und die noch nicht benutzt sind, nach ihrer
   /// Kennung: woran sie gebunden sind (moodle_schreiben.dart). Sie verfallen
-  /// mit dem Aufruf. Die Kennungen sind geheim wie das Token.
-  final kennungen = <String, ({String pfad, String summe})>{};
+  /// mit dem Aufruf. Die Kennungen sind geheim wie das Token. [testlauf] ist
+  /// bei einer automatischen Freigabe des Testbetriebs der Lauf, in dem sie
+  /// erteilt wurde: Nur in ihm gilt sie.
+  final kennungen = <String, ({String pfad, String summe, Lauf? testlauf})>{};
 
   /// Wie viele Schreibvorgänge über eine Zusatzadresse in diesem Aufruf an
   /// Moodle gesendet sind (auch solche, bei denen unklar ist, ob sie
   /// ankamen); für die Kennzeichnung der Antwort an die KI.
   int zusatzSchreibvorgaenge = 0;
+
+  /// Wie viele davon der Testbetrieb automatisch freigegeben hat.
+  int zusatzTestSchreibvorgaenge = 0;
+
+  /// Wie viele Dialoge der Testbetrieb in diesem Aufruf aus vorbereiteten
+  /// Antworten beantwortet hat (testantworten.dart).
+  int testDialogantworten = 0;
 
   /// Der Lauf dieses Aufrufs (lauf.dart); null ohne. Höchstens einer
   /// zugleich; er endet spätestens mit dem Aufruf.
@@ -214,6 +225,13 @@ class AngemeldeterAufruf {
   /// Wie viele Schreibvorgänge das Plugin in diesem Aufruf über eine
   /// Zusatzadresse an Moodle gesendet hat.
   int get zusatzSchreibvorgaenge => _aufruf?.zusatzSchreibvorgaenge ?? 0;
+
+  /// Wie viele davon der Testbetrieb automatisch freigegeben hat.
+  int get zusatzTestSchreibvorgaenge => _aufruf?.zusatzTestSchreibvorgaenge ?? 0;
+
+  /// Wie viele Dialoge des Plugins der Testbetrieb in diesem Aufruf aus
+  /// vorbereiteten Antworten beantwortet hat.
+  int get testDialogantworten => _aufruf?.testDialogantworten ?? 0;
 }
 
 /// Eine Antwort: Status und JSON.
@@ -869,9 +887,16 @@ class AppAdresse {
   /// …}`: Schritt 1 eines Schreibvorgangs über eine Zusatzadresse
   /// (moodle_schreiben.dart). Was nicht erlaubt ist, lehnt die App ohne Dialog
   /// ab. Sonst fragt sie die Lehrkraft, auf jeder Stufe, mit dem Plugin als
-  /// Aufrufer, und der Testbetrieb gibt nichts frei. Antwort `{"ausgang":
-  /// "freigegeben", "kennung": …}` oder `{"ausgang": "abgelehnt" |
-  /// "abgebrochen"}`. Die Kennung gilt einmal, nur in diesem Aufruf.
+  /// Aufrufer. Antwort `{"ausgang": "freigegeben", "kennung": …}` oder
+  /// `{"ausgang": "abgelehnt" | "abgebrochen"}`. Die Kennung gilt einmal, nur
+  /// in diesem Aufruf.
+  ///
+  /// Testbetrieb (E35): Läuft ein Lauf und passt die Adresse zu seinem Kurs
+  /// und seiner Aktivität (laufBindungVerletzt), geht der Kurs des Laufs mit
+  /// an die Freigabe; ist er ein gebundener Testkurs, gibt der Testbetrieb
+  /// frei (McpDienst). Dann trägt die Antwort `"testbetrieb": true` und einen
+  /// Hinweis, und die Kennung gilt nur in diesem Lauf. Außerhalb eines Laufs
+  /// kennt die App den Kurs nicht, und es kommt der Dialog.
   static Future<_Antwort> _zusatzFreigabeAnfragen(
     AppAdresse a,
     _Plugin plugin,
@@ -890,6 +915,12 @@ class AppAdresse {
       return _fehler(HttpStatus.badRequest, 'zusammenfassung fehlt: was geschrieben werden soll, als Text.');
     }
     return _einzeln(a, plugin, aufruf, () async {
+      // Nur ein Lauf, zu dem die Adresse passt, bringt den Kurs mit, den die
+      // App selbst ermittelt hat; nur dann kann der Testbetrieb freigeben.
+      final lauf = switch (aufruf.laufend) {
+        final l? when laufBindungVerletzt(l, uri) == null => l,
+        _ => null,
+      };
       final ausgang = await aufruf.kontext.pluginFreigabe(
         titel: titel,
         zusammenfassung: zusammenfassung,
@@ -900,11 +931,15 @@ class AppAdresse {
         aufrufer: plugin.aufrufer,
         punkte: zusatzFreigabePunkte(uri, felder, zusatzadresse),
         protokolltitel: 'Schreiben über eine Zusatzadresse eines Plugins',
+        laufKurs: lauf?.kurs,
       );
       // Mit „ab: keine“ lässt keine Stufe die Frage aus. Käme doch
-      // `ohneFrage`, gälte das nicht als Freigabe.
-      final erteilt = ausgang == PluginFreigabeAusgang.freigegeben && !aufruf.vorbei;
+      // `ohneFrage`, gälte das nicht als Freigabe. Die automatische Freigabe
+      // des Testbetriebs gilt nur, solange der Lauf läuft, in dem sie kam.
+      final automatisch = ausgang == PluginFreigabeAusgang.automatisch && lauf != null && !lauf.vorbei;
+      final erteilt = (ausgang == PluginFreigabeAusgang.freigegeben || automatisch) && !aufruf.vorbei;
       final (wort, ausgangText) = switch (ausgang) {
+        _ when erteilt && automatisch => ('im Testbetrieb automatisch erteilt', 'freigegeben'),
         _ when erteilt => ('erteilt', 'freigegeben'),
         PluginFreigabeAusgang.abgelehnt => ('abgelehnt', 'abgelehnt'),
         _ => ('abgebrochen', 'abgebrochen'),
@@ -916,8 +951,19 @@ class AppAdresse {
       );
       if (!erteilt) return (status: HttpStatus.ok, json: <String, Object?>{'ausgang': ausgangText});
       final kennung = aufrufToken();
-      aufruf.kennungen[kennung] = (pfad: daten['pfad'] as String, summe: felderSumme(felder));
-      return (status: HttpStatus.ok, json: <String, Object?>{'ausgang': ausgangText, 'kennung': kennung});
+      aufruf.kennungen[kennung] = (
+        pfad: daten['pfad'] as String,
+        summe: felderSumme(felder),
+        testlauf: automatisch ? lauf : null,
+      );
+      return (
+        status: HttpStatus.ok,
+        json: <String, Object?>{
+          'ausgang': ausgangText,
+          'kennung': kennung,
+          if (automatisch) ...{'testbetrieb': true, 'hinweis': testfreigabeHinweis},
+        },
+      );
     });
   }
 
@@ -972,6 +1018,19 @@ class AppAdresse {
         'Die Kennung ist verbraucht. Nichts gesendet.',
       );
     }
+    final testlauf = freigabe.testlauf;
+    if (testlauf != null && !identical(aufruf.laufend, testlauf)) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Schreiben über eine Zusatzadresse abgewiesen: Der Lauf der automatischen Freigabe '
+        'des Testbetriebs ist zu Ende',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: Die automatische Freigabe des Testbetriebs galt nur in dem Lauf, in dem sie erteilt wurde, und '
+        'der ist zu Ende. Die Kennung ist verbraucht. Nichts gesendet.',
+      );
+    }
     if (aufruf.vorbei) return _abgebrochen();
     final moodle = aufruf.kontext.moodle;
     final String sesskey;
@@ -985,9 +1044,11 @@ class AppAdresse {
     // Ab hier gilt der Schreibvorgang als gesendet, bis feststeht, dass er
     // Moodle nicht erreicht hat.
     aufruf.zusatzSchreibvorgaenge++;
+    if (testlauf != null) aufruf.zusatzTestSchreibvorgaenge++;
     const verbraucht = 'Die Freigabe ist verbraucht; ein neuer Versuch braucht eine neue.';
     _Antwort nichtGeschrieben(int status, String text) {
       aufruf.zusatzSchreibvorgaenge--;
+      if (testlauf != null) aufruf.zusatzTestSchreibvorgaenge--;
       return _fehler(status, text);
     }
 
@@ -1365,6 +1426,12 @@ class AppAdresse {
   /// mit den Feldern der Art, oder `{"abgebrochen": true}`, wenn die
   /// Lehrkraft abbricht, die Frist abläuft oder der Aufruf endet -- ein
   /// Ausgang, kein Fehler. Ins Protokoll gehen nur Plugin, Art und Ausgang.
+  ///
+  /// Testbetrieb (E35): Nennt der Kontext eine Datei mit vorbereiteten
+  /// Antworten (AufrufKontext.testDialogantworten) und passt darin eine
+  /// geprüfte Antwort (testantworten.dart), erscheint kein Dialog; die
+  /// Antwort trägt `"testbetrieb": true`, das Protokoll sagt es, und die KI
+  /// erfährt es (laufende_plugins.dart). Sonst erscheint er wie immer.
   static Future<_Antwort> _dialogZeigen(
     PluginDialogArt art,
     AppAdresse a,
@@ -1382,6 +1449,21 @@ class AppAdresse {
     }
     return _einzeln(a, plugin, aufruf!, () async {
       final protokoll = aufruf.kontext.protokoll;
+      final datei = aufruf.kontext.testDialogantworten;
+      switch (datei == null ? null : testantwortSuchen(datei, plugin.kurzname, dialog)) {
+        case TestantwortGegeben(:final antwort):
+          aufruf.testDialogantworten++;
+          a._protokollzeile(
+            plugin,
+            protokoll,
+            'Dialog „${art.name}“ im Testbetrieb aus einer vorbereiteten Antwort '
+            '${antwort == null ? 'abgebrochen' : 'beantwortet'}, ohne Lehrkraft',
+          );
+          return (status: HttpStatus.ok, json: {'abgebrochen': antwort == null, ...?antwort, 'testbetrieb': true});
+        case TestantwortUngueltig(:final grund):
+          a._protokollzeile(plugin, protokoll, 'Testbetrieb: $grund; der Dialog „${art.name}“ erscheint');
+        case null:
+      }
       a._protokollzeile(plugin, protokoll, 'Dialog „${art.name}“ geöffnet');
       final antwort = await dialoge.zeigen(dialog, ende: aufruf.ende);
       a._protokollzeile(plugin, protokoll, 'Dialog „${art.name}“ ${antwort == null ? 'abgebrochen' : 'beantwortet'}');
@@ -1426,7 +1508,9 @@ class AppAdresse {
         PluginFreigabeAusgang.freigegeben => ('erteilt', 'freigegeben'),
         PluginFreigabeAusgang.ohneFrage => ('ohne Frage erteilt', 'freigegeben'),
         PluginFreigabeAusgang.abgelehnt => ('abgelehnt', 'abgelehnt'),
-        PluginFreigabeAusgang.abgebrochen => ('abgebrochen', 'abgebrochen'),
+        // Ohne laufKurs gibt der Testbetrieb eine Freigabe eines Plugins nie
+        // frei (AufrufKontext.pluginFreigabe); käme es doch, gälte es nicht.
+        PluginFreigabeAusgang.automatisch || PluginFreigabeAusgang.abgebrochen => ('abgebrochen', 'abgebrochen'),
       };
       a._protokollzeile(plugin, aufruf.kontext.protokoll, 'Freigabe ab Stufe „${ab.text}“ -- $wort');
       return (

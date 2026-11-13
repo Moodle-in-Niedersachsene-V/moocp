@@ -372,7 +372,11 @@ class _Kontext implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
+    int? laufKurs,
   }) => throw StateError('Ein Plugin, das Moodle liest, bekommt nie einen Dialog.');
+
+  @override
+  String? get testDialogantworten => null;
 }
 
 typedef _Antwort = ({int status, Map json, HttpHeaders kopf, String roh});

@@ -77,6 +77,7 @@ class _Kontext implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
+    int? laufKurs,
   }) async {
     gefragt.add((
       titel: titel,
@@ -93,6 +94,9 @@ class _Kontext implements AufrufKontext {
     }
     return ausgang;
   }
+
+  @override
+  String? get testDialogantworten => null;
 }
 
 typedef _Antwort = ({int status, Map json, HttpHeaders kopf, String roh});

@@ -89,7 +89,7 @@ import 'beschreibung.dart';
 import 'dialoge.dart';
 import 'downloads.dart';
 import 'entwicklung.dart';
-import 'moodle_schreiben.dart' show zusatzKennzeichnung;
+import 'moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
 import 'namenssperre.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
@@ -629,22 +629,32 @@ class LaufendePlugins implements WerkzeugQuelle {
     // steht das vor allem, was die KI daraus bekommt, auch vor einem Fehler
     // und einer gesperrten Antwort (moodle_schreiben.dart). Der Satz kommt
     // von moocp, nach der letzten Sperre, die nur den Text des Plugins prüft.
-    String gekennzeichnet(String text) => switch (angemeldet?.zusatzSchreibvorgaenge ?? 0) {
-      0 => text,
-      final n => '${zusatzKennzeichnung(plugin, n)}\n\n$text',
-    };
+    // Ebenso, wenn der Testbetrieb Dialoge des Plugins aus vorbereiteten
+    // Antworten beantwortet hat (testantworten.dart).
+    bool kennzeichnen() =>
+        (angemeldet?.zusatzSchreibvorgaenge ?? 0) > 0 || (angemeldet?.testDialogantworten ?? 0) > 0;
+    String gekennzeichnet(String text) {
+      final n = angemeldet?.zusatzSchreibvorgaenge ?? 0;
+      final d = angemeldet?.testDialogantworten ?? 0;
+      return [
+        if (n > 0) zusatzKennzeichnung(plugin, n, automatisch: angemeldet!.zusatzTestSchreibvorgaenge),
+        if (d > 0) testantwortenKennzeichnung(plugin, d),
+        text,
+      ].join('\n\n');
+    }
+
     try {
       final String text;
       try {
         text = await f();
       } on PluginErgebnisFehler catch (x) {
         _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet);
-        if ((angemeldet?.zusatzSchreibvorgaenge ?? 0) == 0) rethrow;
+        if (!kennzeichnen()) rethrow;
         throw PluginErgebnisFehler(gekennzeichnet(x.meldung));
       } on MoodleFehler catch (x) {
         // Ein Ausfall des Plugins während des Aufrufs: Was moocp dazu sagt,
         // trägt keinen Text des Plugins.
-        if ((angemeldet?.zusatzSchreibvorgaenge ?? 0) == 0) rethrow;
+        if (!kennzeichnen()) rethrow;
         throw MoodleFehler(gekennzeichnet(x.meldung));
       }
       _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet);

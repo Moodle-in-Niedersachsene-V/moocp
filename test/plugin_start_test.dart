@@ -13,18 +13,20 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
+import 'package:moocp/mcp/testbetrieb.dart' show pluginDialogantwortenDatei;
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
-import 'package:moocp/plugin/moodle_schreiben.dart' show zusatzKennzeichnung;
+import 'package:moocp/plugin/moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
 import 'package:moocp/plugin/werkzeugliste.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
+import 'package:moocp/testzugang.dart';
 import 'package:path/path.dart' as p;
 
 import 'mcp_client.dart';
@@ -264,6 +266,7 @@ void main() {
     Freigaben? freigaben,
     MoodleZugang? moodle,
     bool vorAnmeldung = false,
+    Testzugang? testzugang,
   }) async {
     final d = McpDienst(
       einstellungen,
@@ -272,6 +275,7 @@ void main() {
       freigaben ?? Freigaben(protokoll),
       arbeitsordner,
       profil: profil,
+      testzugang: testzugang,
       werkzeugquellen: [quelle],
     );
     dienste.add(d);
@@ -523,6 +527,55 @@ void main() {
       final abgelehnt = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Nein'});
       expect(abgelehnt, 'Nicht geschrieben: Die Lehrkraft hat nicht freigegeben (abgelehnt).');
       expect(moodle.angefragt, isEmpty);
+    });
+
+    test('Testbetrieb: ein Dialog des Beispiels aus der vorbereiteten Antwort, und die Antwort an die KI sagt es', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      final dialoge = PluginDialoge();
+      var gezeigt = 0;
+      dialoge.addListener(() {
+        final d = dialoge.aktuell;
+        if (d != null && d.offen) {
+          gezeigt++;
+          scheduleMicrotask(() => dialoge.beantworten(d, null));
+        }
+      });
+      final profil = Profil(
+        kennung: 'standard',
+        name: 'moodle',
+        adresse: moodle.basis.toString(),
+        port: await _freierPort(),
+        mcpName: 'moodle',
+        schluessel: 'test',
+      );
+      // Erfunden: Die Zugangsdatei selbst liest hier niemand, nur ihr Ordner zählt.
+      final testzugang = Testzugang(
+        kennung: 'standard',
+        datei: p.join(wurzel.path, 'testzugang.env'),
+        adresse: profil.adresse,
+        kurse: const {12},
+      );
+      File(p.join(wurzel.path, pluginDialogantwortenDatei)).writeAsStringSync(
+        jsonEncode({
+          'antworten': [
+            {'plugin': 'beispiel', 'art': 'hinweis', 'titel': 'Hinweis des Beispiels', 'antwort': <String, Object?>{}},
+          ],
+        }),
+      );
+      final l = await starten(await beispielAngenommen([profil]), mit: LaufendePlugins(protokoll, dialoge: dialoge));
+      final client = await verbinden(profil, l, moodle: zugang, testzugang: testzugang);
+
+      expect(
+        await client.tool('beispiel_hinweis', {'text': 'Fertig.'}),
+        '${testantwortenKennzeichnung('Beispiel', 1)}\n\nBestätigt.',
+      );
+      expect(gezeigt, 0);
+      // Ohne passende Antwort erscheint der Dialog, und die Antwort bleibt, wie sie ist.
+      expect(await client.tool('beispiel_auswahl', {}), isNot(contains('Hinweis von moocp')));
+      expect(gezeigt, 1);
     });
 
     test('ein Lauf: ohne abgelehnt, im Lauf gelesen, danach abgelehnt; die Namen des Kurses sperren jede Antwort', () async {

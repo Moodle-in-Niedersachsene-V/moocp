@@ -11,7 +11,13 @@ import '../protokoll.dart';
 import 'vor_anmeldung.dart';
 import 'werkzeugquelle.dart';
 
-typedef _Huelle = Future<CallToolResult> Function(Map<String, dynamic> args, Future<void> abbruch, String? aufrufer);
+typedef _Huelle =
+    Future<CallToolResult> Function(
+      Map<String, dynamic> args,
+      Future<void> abbruch,
+      String? aufrufer, {
+      AufrufZaehler? aussen,
+    });
 
 class WerkzeugAufrufe {
   WerkzeugAufrufe(this.protokoll, this.freigaben, {required this.ausfuehren, this.anmeldungFehlt});
@@ -105,14 +111,16 @@ class WerkzeugAufrufe {
   /// Argumente gegen das Eingabeschema. So ruft ein Plugin ein eingebautes
   /// Werkzeug auf (McpDienst.eingebautAufrufen): [aufrufer] steht im
   /// Protokoll, in der Freigabe und im Hinweis „ohne Freigabe ausgeführt“,
-  /// und [abbruch] wirkt wie der Abbruch durch einen Client. Null, wenn
-  /// [server] kein Werkzeug [name] hat.
+  /// und [abbruch] wirkt wie der Abbruch durch einen Client. Automatische
+  /// Freigaben des Testbetriebs zählen auch für [aussen], den Zähler des
+  /// Werkzeugaufrufs des Plugins. Null, wenn [server] kein Werkzeug [name] hat.
   Future<CallToolResult>? direktAufrufen(
     McpServer server,
     String name,
     Map<String, dynamic> args, {
     required Future<void> abbruch,
     required String aufrufer,
+    AufrufZaehler? aussen,
   }) {
     final w = _huellen[server]?[name];
     if (w == null) return null;
@@ -121,7 +129,7 @@ class WerkzeugAufrufe {
     } on JsonSchemaValidationException catch (x) {
       return Future.value(_fehler('Ungültige Argumente für „$name“: ${x.message}'));
     }
-    return w.huelle(args, abbruch, aufrufer);
+    return w.huelle(args, abbruch, aufrufer, aussen: aussen);
   }
 
   /// Die eine Hülle für alle Werkzeuge: Aufruf ins Protokoll, Abbruch,
@@ -148,7 +156,12 @@ class WerkzeugAufrufe {
     // [aufrufer] ist null bei einem Aufruf eines KI-Werkzeugs über MCP und
     // der Name des Plugins, wenn ein Plugin über die Adresse der App aufruft
     // (direktAufrufen).
-    Future<CallToolResult> huelle(Map<String, dynamic> args, Future<void> abbruch, String? aufrufer) async {
+    Future<CallToolResult> huelle(
+      Map<String, dynamic> args,
+      Future<void> abbruch,
+      String? aufrufer, {
+      AufrufZaehler? aussen,
+    }) async {
       final aufruf = jsonEncode(args);
       protokoll.eintrag(
         Art.werkzeug,
@@ -178,18 +191,23 @@ class WerkzeugAufrufe {
       // gemeldet.
       final zaehler = AufrufZaehler();
       try {
-        final text = await Freigaben.mitAbbruch(
-          abbruch,
-          () => this.ausfuehren(name, args, () => ausfuehren(args, abbruch)),
-          zaehler: zaehler,
-          aufrufer: aufrufer,
-        );
+        final String text;
+        try {
+          text = await Freigaben.mitAbbruch(
+            abbruch,
+            () => this.ausfuehren(name, args, () => ausfuehren(args, abbruch)),
+            zaehler: zaehler,
+            aufrufer: aufrufer,
+          );
+        } finally {
+          aussen?.testfreigaben += zaehler.testfreigaben;
+        }
         protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');
         return CallToolResult.fromContent([
           TextContent(
             text:
                 '$text${_ohneFreigabe(zaehler.ausgelassen, aufrufer)}'
-                '${zaehler.testfreigaben > 0 ? '\nDebug-Testbetrieb: automatisch freigegeben, ohne persönliche Freigabe.' : ''}',
+                '${zaehler.testfreigaben > 0 ? '\n$testfreigabeHinweis' : ''}',
           ),
         ]);
       } on MoodleFehler catch (x) {

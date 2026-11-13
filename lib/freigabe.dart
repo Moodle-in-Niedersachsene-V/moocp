@@ -105,6 +105,7 @@ class FreigabeAnfrage {
     this.links = const [],
     this.ab = Bestaetigungen.mittel,
     this.bildschirmfoto = false,
+    this.zusatzSchreiben = false,
     this.vomPlugin,
     this.protokolltitel,
   });
@@ -129,6 +130,14 @@ class FreigabeAnfrage {
   /// Karten-Zuordnungen und die Rückfrage vor einer Wiederholung gehen im
   /// Testbetrieb wie sonst an die Lehrkraft.
   final bool bildschirmfoto;
+
+  /// Ob dies die Freigabe zum Schreiben über eine Zusatzadresse eines Plugins
+  /// ist (E36). Sie fragt auf jeder Stufe; im Testbetrieb ist sie die zweite
+  /// benannte Ausnahme neben dem Bildschirmfoto. Automatisch freigegeben wird
+  /// sie trotzdem nur, wenn der Aufrufer die Zone des Testbetriebs dafür
+  /// öffnet ([Freigaben.imTest]): McpDienst tut das nur in einem Lauf, dessen
+  /// Kurs ein gebundener Testkurs ist (E35).
+  final bool zusatzSchreiben;
 
   /// Was ein Plugin zu seiner eigenen Freigabe schreibt (app_adresse.dart):
   /// reiner Text, bereinigt und begrenzt (klartext.dart). Der Dialog zeigt
@@ -227,6 +236,11 @@ class FreigabeAnfrage {
   bool _verfallen = false;
 }
 
+/// Der Satz, mit dem eine Antwort sagt, dass der Testbetrieb freigegeben hat:
+/// in der Antwort eines Werkzeugs (werkzeug_aufrufe.dart) und in der Antwort
+/// der Adresse der App an ein Plugin (plugin/app_adresse.dart).
+const testfreigabeHinweis = 'Debug-Testbetrieb: automatisch freigegeben, ohne persönliche Freigabe.';
+
 /// Was während eines Werkzeugaufrufs ohne persönliche Freigabe geschah. Der
 /// MCP-Dienst legt einen an ([Freigaben.mitAbbruch]) und sagt Claude danach,
 /// dass ohne Freigabe geschrieben wurde. Je Aufruf statt über die Zähler der
@@ -312,7 +326,8 @@ class Freigaben extends ChangeNotifier {
   /// Führt [f] so aus, dass der Testbetrieb darin nichts automatisch
   /// freigibt, auch wenn ein Aufrufer weiter außen ihn eingeschaltet hat
   /// ([imTest]). Für die Freigaben eines Plugins: Für sie gibt es im
-  /// Testbetrieb keine automatische Freigabe.
+  /// Testbetrieb keine automatische Freigabe, außer beim Schreiben über eine
+  /// Zusatzadresse in einem Lauf im gebundenen Testkurs (McpDienst).
   static Future<T> ohneTestfreigabe<T>(Future<T> Function() f) => runZoned(f, zoneValues: {_testfreigabe: null});
 
   /// Ob [a] bei der eingestellten Stufe überhaupt gefragt wird.
@@ -351,13 +366,15 @@ class Freigaben extends ChangeNotifier {
     if (abgebrochen()) return false;
     // Testbetrieb: Automatisch freigegeben wird nur, was nicht „immer fragen"
     // ist. Eine Anfrage mit `ab: keine` (Übergabe-Bitte, fachliche Zuordnung,
-    // Wiederholung) geht wie im Normalbetrieb an die Lehrkraft; einzige
-    // Ausnahme ist das Bildschirmfoto (FreigabeAnfrage.bildschirmfoto).
+    // Wiederholung) geht wie im Normalbetrieb an die Lehrkraft; Ausnahmen
+    // sind das Bildschirmfoto (FreigabeAnfrage.bildschirmfoto) und das
+    // Schreiben eines Plugins über eine Zusatzadresse in einem Lauf im
+    // gebundenen Testkurs (FreigabeAnfrage.zusatzSchreiben).
     final test = Zone.current[_testfreigabe] as ({Freigaben freigaben, Future<bool> Function() pruefen})?;
     if (testbetriebAktiv &&
         test != null &&
         identical(test.freigaben, this) &&
-        (a.ab != Bestaetigungen.keine || a.bildschirmfoto)) {
+        (a.ab != Bestaetigungen.keine || a.bildschirmfoto || a.zusatzSchreiben)) {
       final erlaubt = await test.pruefen();
       if (abgebrochen()) return false;
       if (erlaubt) {

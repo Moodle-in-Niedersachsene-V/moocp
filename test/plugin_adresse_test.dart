@@ -82,10 +82,15 @@ class _Kontext implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
+    int? laufKurs,
   }) async {
     freigaben.add((titel: titel, zusammenfassung: zusammenfassung, ab: ab, aufrufer: aufrufer));
     return PluginFreigabeAusgang.freigegeben;
   }
+
+  /// Ohne Testbetrieb: keine vorbereiteten Antworten.
+  @override
+  String? testDialogantworten;
 }
 
 /// Eine Anfrage wie von einem Plugin; liefert Status und JSON der Antwort.

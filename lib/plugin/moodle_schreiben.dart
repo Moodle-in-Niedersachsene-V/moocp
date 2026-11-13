@@ -11,7 +11,9 @@
 //     die Formularfelder, Titel und Zusammenfassung. moocp prüft alles, was
 //     sich ohne Dialog prüfen lässt, und lehnt ohne Dialog ab, was nicht
 //     erlaubt ist. Dann fragt es die Lehrkraft, auf jeder Stufe (`ab: keine`),
-//     und gibt bei Freigabe eine Kennung zurück.
+//     und gibt bei Freigabe eine Kennung zurück. Einzige Ausnahme ist der
+//     Testbetrieb (E35): in einem Lauf, dessen Kurs ein gebundener Testkurs
+//     ist und zu dem die Adresse passt (app_adresse.dart, McpDienst).
 //  2. Schreiben: Das Plugin nennt die Kennung und noch einmal Methode, Pfad
 //     und Formularfelder; moocp sendet genau das, mit seiner Sitzung und dem
 //     sesskey, den es selbst einsetzt.
@@ -189,11 +191,27 @@ List<String> zusatzFreigabePunkte(Uri uri, Felder felder, Zusatzadresse zusatzad
 /// Zusatzadresse gesendet hat (laufende_plugins.dart). Ein fester Satz ohne
 /// Text des Plugins; er sagt, dass moocp nichts geprüft hat, und sieht nie wie
 /// das `verified` der eingebauten Werkzeuge aus.
-String zusatzKennzeichnung(String plugin, int anzahl) =>
-    'Hinweis von moocp: Über eine Zusatzadresse des Plugins „$plugin“ hat moocp in diesem Aufruf '
-    '${anzahl == 1 ? 'einen Schreibvorgang' : '$anzahl Schreibvorgänge'} an Moodle gesendet, mit Freigabe '
-    'der Lehrkraft. Geprüft vom Plugin, nicht von moocp: Ob und was Moodle gespeichert hat, hat moocp nicht '
-    'zurückgelesen. Es folgt die Antwort des Plugins.';
+/// [automatisch] davon hat der Testbetrieb freigegeben (E35); dann sagt der
+/// Satz das statt „mit Freigabe der Lehrkraft“.
+String zusatzKennzeichnung(String plugin, int anzahl, {int automatisch = 0}) {
+  final freigabe = switch (automatisch) {
+    <= 0 => 'mit Freigabe der Lehrkraft',
+    _ when automatisch >= anzahl => 'im Debug-Testbetrieb automatisch freigegeben, ohne persönliche Freigabe der Lehrkraft',
+    _ => 'davon $automatisch im Debug-Testbetrieb automatisch freigegeben, ohne persönliche Freigabe, die übrigen mit '
+        'Freigabe der Lehrkraft',
+  };
+  return 'Hinweis von moocp: Über eine Zusatzadresse des Plugins „$plugin“ hat moocp in diesem Aufruf '
+      '${anzahl == 1 ? 'einen Schreibvorgang' : '$anzahl Schreibvorgänge'} an Moodle gesendet, $freigabe. '
+      'Geprüft vom Plugin, nicht von moocp: Ob und was Moodle gespeichert hat, hat moocp nicht zurückgelesen. '
+      'Es folgt die Antwort des Plugins.';
+}
+
+/// Was moocp vor die Antwort eines Werkzeugs eines Plugins an die KI setzt,
+/// wenn der Testbetrieb in diesem Aufruf [anzahl] Dialoge des Plugins aus
+/// vorbereiteten Antworten beantwortet hat (testantworten.dart).
+String testantwortenKennzeichnung(String plugin, int anzahl) =>
+    'Hinweis von moocp: Debug-Testbetrieb: ${anzahl == 1 ? 'Einen Dialog' : '$anzahl Dialoge'} des Plugins „$plugin“ '
+    'hat moocp in diesem Aufruf aus vorbereiteten Antworten beantwortet, ohne die Lehrkraft.';
 
 /// Ein Plugin, das über eine seiner Zusatzadressen schreibt, als Aufrufer des
 /// Moodle-Zugangs: der freigegebene POST ([umleitung] false) oder das GET auf

@@ -151,19 +151,15 @@ class _PluginDialogFensterState extends State<PluginDialogFenster> {
     super.dispose();
   }
 
-  /// Ob die Antwort so gilt: Erst dann geht „Übernehmen“.
+  /// Ob die Antwort so gilt: Erst dann geht „Übernehmen“. Dieselben Regeln
+  /// gelten für vorbereitete Antworten des Testbetriebs
+  /// (PluginDialog.antwortPruefen).
   bool get _gueltig => switch (dialog) {
     AuswahlDialog() => _gewaehlt.isNotEmpty,
-    final EingabeDialog e => e.link ? EingabeDialog.istLink(_eingabe.text) : _eingabe.text.trim().isNotEmpty,
-    final PfadDialog d => _pfadGueltig(d),
+    final EingabeDialog e => e.gueltig(_eingabe.text),
+    final PfadDialog d => d.gueltig(_eingabe.text),
     HinweisDialog() => true,
   };
-
-  bool _pfadGueltig(PfadDialog d) {
-    final t = _eingabe.text.trim();
-    if (t.isEmpty || !p.isAbsolute(t)) return false;
-    return d.ordner ? Directory(t).existsSync() : File(t).existsSync();
-  }
 
   Map<String, Object?> get _antwort => switch (dialog) {
     AuswahlDialog() => AuswahlDialog.antwort(_gewaehlt),
@@ -365,7 +361,7 @@ class _PluginDialogFensterState extends State<PluginDialogFenster> {
         decoration: InputDecoration(
           labelText: d.ordner ? 'Ordner' : 'Datei',
           isDense: true,
-          helperText: _eingabe.text.trim().isEmpty || _pfadGueltig(d)
+          helperText: _eingabe.text.trim().isEmpty || d.gueltig(_eingabe.text)
               ? null
               : d.ordner
               ? 'Diesen Ordner gibt es nicht.'

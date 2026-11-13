@@ -71,7 +71,11 @@ class _Kontext implements AufrufKontext {
     required String aufrufer,
     List<String> punkte = const [],
     String? protokolltitel,
+    int? laufKurs,
   }) async => PluginFreigabeAusgang.freigegeben;
+
+  @override
+  String? get testDialogantworten => null;
 }
 
 typedef _Antwort = ({int status, Map json, String roh});

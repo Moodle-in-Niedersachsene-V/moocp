@@ -22,8 +22,10 @@
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../freigabe.dart' show Freigaben;
 import 'klartext.dart';
@@ -51,6 +53,10 @@ const eingabeHoechstens = 2000;
 
 /// Höchstlänge eines Pfads, den das Plugin als Startordner vorschlägt.
 const pfadHoechstens = 1000;
+
+/// Ob [t] etwas enthält, das ein einzeiliges Feld der Oberfläche nicht
+/// annimmt: Zeilenwechsel und andere Steuerzeichen.
+bool _mitSteuerzeichen(String t) => RegExp('[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]').hasMatch(t);
 
 /// Die Arten der Dialoge, mit dem Namen im Protokoll.
 enum PluginDialogArt {
@@ -82,6 +88,13 @@ sealed class PluginDialog {
   final String text;
 
   PluginDialogArt get art;
+
+  /// Prüft eine Antwort, die nicht aus der Oberfläche kommt (vorbereitete
+  /// Antwort des Testbetriebs, testantworten.dart), wie die Oberfläche eine
+  /// Eingabe der Lehrkraft (plugin_dialoge.dart): Liefert die Antwort so, wie
+  /// die Oberfläche sie gäbe, oder null, wenn die Lehrkraft sie dort nicht
+  /// übernehmen könnte.
+  Map<String, Object?>? antwortPruefen(Map<String, Object?> roh);
 
   /// Wann die Frist endet; gesetzt von [PluginDialoge.zeigen].
   DateTime? get ablauf => _ablauf;
@@ -137,6 +150,19 @@ final class AuswahlDialog extends PluginDialog {
   /// Die Antwort mit den gewählten Nummern.
   static Map<String, Object?> antwort(Iterable<int> gewaehlt) => {'gewaehlt': gewaehlt.toList()..sort()};
 
+  /// Mindestens ein Eintrag, jeder nur einmal und aus der Liste, ohne
+  /// [mehrfach] genau einer.
+  @override
+  Map<String, Object?>? antwortPruefen(Map<String, Object?> roh) {
+    final g = roh['gewaehlt'];
+    if (g is! List || g.isEmpty || (!mehrfach && g.length != 1)) return null;
+    final nummern = <int>{};
+    for (final n in g) {
+      if (n is! int || n < 0 || n >= eintraege.length || !nummern.add(n)) return null;
+    }
+    return antwort(nummern);
+  }
+
   static List<String> _eintraege(Map<String, Object?> json) {
     final e = json['eintraege'];
     if (e is! List || e.isEmpty) {
@@ -185,6 +211,18 @@ final class EingabeDialog extends PluginDialog {
     return u != null && (u.scheme == 'https' || u.scheme == 'http') && u.host.isNotEmpty;
   }
 
+  /// Ob die Oberfläche [text] übernähme: nicht leer, bei [link] ein Link.
+  bool gueltig(String text) => link ? istLink(text) : text.trim().isNotEmpty;
+
+  /// Wie in der Oberfläche: eine Zeile, höchstens [eingabeHoechstens]
+  /// Zeichen (das Feld nimmt nicht mehr an), getrimmt.
+  @override
+  Map<String, Object?>? antwortPruefen(Map<String, Object?> roh) {
+    final t = roh['text'];
+    if (t is! String || t.length > eingabeHoechstens || _mitSteuerzeichen(t)) return null;
+    return gueltig(t) ? antwort(t.trim()) : null;
+  }
+
   static bool _link(Map<String, Object?> json) => switch (json['art']) {
     null || 'text' => false,
     'link' => true,
@@ -215,6 +253,21 @@ final class PfadDialog extends PluginDialog {
 
   static Map<String, Object?> antwort(String pfad) => {'pfad': pfad};
 
+  /// Ob die Oberfläche [text] übernähme: ein absoluter Pfad eines Ordners
+  /// (bei [ordner]) oder einer Datei, die es gibt.
+  bool gueltig(String text) {
+    final t = text.trim();
+    if (t.isEmpty || !p.isAbsolute(t)) return false;
+    return ordner ? Directory(t).existsSync() : File(t).existsSync();
+  }
+
+  @override
+  Map<String, Object?>? antwortPruefen(Map<String, Object?> roh) {
+    final t = roh['pfad'];
+    if (t is! String || t.length > pfadHoechstens || _mitSteuerzeichen(t) || !gueltig(t)) return null;
+    return antwort(p.normalize(t.trim()));
+  }
+
   static String? _start(Map<String, Object?> json) {
     final s = json['start'];
     if (s == null) return null;
@@ -234,6 +287,10 @@ final class HinweisDialog extends PluginDialog {
 
   @override
   PluginDialogArt get art => PluginDialogArt.hinweis;
+
+  /// Nur „OK“: ein leeres Objekt.
+  @override
+  Map<String, Object?>? antwortPruefen(Map<String, Object?> roh) => roh.isEmpty ? const {} : null;
 }
 
 /// Die Warnungen der letzten Sperre (namenssperre.dart), die die Lehrkraft

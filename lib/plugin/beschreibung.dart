@@ -149,12 +149,12 @@ class PluginBeschreibung {
       throw const PluginFehler('Ein Skill steht in „skills“ und in „wahlSkills“; er ist entweder immer dabei oder wählbar.');
     }
     return PluginBeschreibung(
-      name: _pflichtText(json, 'name'),
+      name: _pflichtText(json, 'name', hoechstens: nameHoechstens),
       kurzname: kurzname,
-      version: _pflichtText(json, 'version'),
+      version: _pflichtText(json, 'version', hoechstens: versionHoechstens),
       schnittstelle: _schnittstelle(json['schnittstelle']),
       programm: _programm(_pflichtText(json, 'programm')),
-      herkunft: _pflichtText(json, 'herkunft'),
+      herkunft: _pflichtText(json, 'herkunft', hoechstens: herkunftHoechstens),
       updateQuellen: _updateQuellen(json['updateQuellen']),
       zusatzadressen: _zusatzadressen(json['zusatzadressen']),
       skills: skills,
@@ -165,16 +165,46 @@ class PluginBeschreibung {
   }
 }
 
-bool _hatSteuerzeichen(String s) => s.codeUnits.any((c) => c < 0x20 || c == 0x7f);
+/// Höchstlängen der Texte, die die Lehrkraft im Dialog der Zustimmung liest:
+/// Ein überlanger Text schöbe dort den Satz zur Verantwortung oder eine
+/// Zusatzadresse aus dem Blick.
+const int nameHoechstens = 60;
+const int versionHoechstens = 30;
+const int herkunftHoechstens = 100;
 
-/// Ein Text, der da sein muss, nicht leer ist und keine Steuerzeichen hat.
-String _pflichtText(Map j, String feld) {
+/// Für den Grund einer Zusatzadresse und die Beschreibung eines wählbaren
+/// Skills.
+const int beschreibungHoechstens = 300;
+
+/// Steuerzeichen (C0, DEL, C1), Zeilen- und Absatztrenner (U+2028, U+2029),
+/// Richtungszeichen (U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) und
+/// Nullbreitenzeichen (U+200B–U+200D, U+2060, U+FEFF). Sie fälschten Zeilen
+/// im Protokoll oder stellten im Dialog der Zustimmung Text unsichtbar um.
+bool _hatSteuerzeichen(String s) => s.codeUnits.any(
+  (c) =>
+      c < 0x20 ||
+      (c >= 0x7f && c <= 0x9f) ||
+      (c >= 0x200B && c <= 0x200F) ||
+      (c >= 0x2028 && c <= 0x202E) ||
+      c == 0x2060 ||
+      (c >= 0x2066 && c <= 0x2069) ||
+      c == 0xFEFF,
+);
+
+const _unsichtbar = 'ein Steuerzeichen oder ein unsichtbares Zeichen (Umbruch-, Richtungs- oder Nullbreitenzeichen)';
+
+/// Ein Text, der da sein muss, nicht leer ist, keine Steuerzeichen hat und,
+/// mit [hoechstens], nicht länger ist.
+String _pflichtText(Map j, String feld, {int? hoechstens}) {
   final w = j[feld];
   if (w == null) throw PluginFehler('Das Feld „$feld“ fehlt.');
   if (w is! String) throw PluginFehler('Das Feld „$feld“ muss ein Text sein.');
   final t = w.trim();
   if (t.isEmpty) throw PluginFehler('Das Feld „$feld“ ist leer.');
-  if (_hatSteuerzeichen(t)) throw PluginFehler('Das Feld „$feld“ enthält ein Steuerzeichen.');
+  if (_hatSteuerzeichen(t)) throw PluginFehler('Das Feld „$feld“ enthält $_unsichtbar.');
+  if (hoechstens != null && t.length > hoechstens) {
+    throw PluginFehler('Das Feld „$feld“ ist zu lang: höchstens $hoechstens Zeichen.');
+  }
   return t;
 }
 
@@ -242,7 +272,7 @@ Zusatzadresse _zusatzadresse(Object? w) {
   }
   final art = ZugriffsArt.ausText(_pflichtText(w, 'art'));
   if (art == null) throw const PluginFehler('Das Feld „art“ ist „lesen“ oder „schreiben“.');
-  return Zusatzadresse(muster, art, _pflichtText(w, 'grund'));
+  return Zusatzadresse(muster, art, _pflichtText(w, 'grund', hoechstens: beschreibungHoechstens));
 }
 
 List<String> _skills(Object? w) {
@@ -265,7 +295,14 @@ Map<String, String> _wahlSkills(Object? w) {
   final ergebnis = <String, String>{};
   for (final MapEntry(:key, :value) in w.entries) {
     if (key is! String || key.isEmpty || value is! String || value.trim().isEmpty) throw const PluginFehler(regel);
-    if (_hatSteuerzeichen(key) || _hatSteuerzeichen(value)) throw const PluginFehler(regel);
+    if (_hatSteuerzeichen(key) || _hatSteuerzeichen(value)) {
+      throw const PluginFehler('Das Feld „wahlSkills“ enthält $_unsichtbar.');
+    }
+    if (value.trim().length > beschreibungHoechstens) {
+      throw const PluginFehler(
+        'Das Feld „wahlSkills“ enthält eine zu lange Beschreibung: höchstens $beschreibungHoechstens Zeichen.',
+      );
+    }
     ergebnis[key] = value.trim();
   }
   return ergebnis;

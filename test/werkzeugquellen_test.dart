@@ -15,6 +15,7 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 
+import 'hilfen/zugang.dart';
 import 'mcp_client.dart';
 
 /// Die eingebauten Werkzeuge in der Reihenfolge der Werkzeugliste. Ein neues
@@ -527,13 +528,13 @@ void main() {
   });
 
   group('Server vor der Anmeldung', () {
-    late _Zugang zugang;
+    late SchaltbarerZugang zugang;
     late _Quelle quelle;
     late McpDienst dienst;
     late McpTestClient client;
 
     setUp(() async {
-      zugang = _Zugang(protokoll);
+      zugang = SchaltbarerZugang(protokoll);
       quelle = _Quelle([
         _werkzeug('probe_ohne').mitOhneAnmeldung(true),
         _werkzeug('probe_mit'),
@@ -625,19 +626,4 @@ void main() {
       expect(d.wartetAufAnmeldung, isFalse);
     });
   });
-}
-
-/// Ein Zugang, dessen Anmeldung der Test schaltet; er zählt, ob jemand sich
-/// anzumelden versucht.
-class _Zugang extends MoodleZugang {
-  _Zugang(super.protokoll);
-
-  var an = false;
-  var anmeldeversuche = 0;
-
-  @override
-  bool get angemeldet => an;
-
-  @override
-  Future<void> anmelden(String adresse, String benutzer, String passwort) async => anmeldeversuche++;
 }

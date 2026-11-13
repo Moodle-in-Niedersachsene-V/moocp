@@ -5,11 +5,15 @@
 // Länge ist begrenzt. Angezeigt wird das Ergebnis als schlichter Text, nie
 // als Markdown, HTML oder Link.
 
-/// Steuerzeichen außer Zeilenwechseln, und die unsichtbaren Zeichen, die die
-/// Schreibrichtung umstellen: Mit ihnen ließe sich ein Text anders anzeigen,
-/// als er im Protokoll steht.
+/// Steuerzeichen außer Zeilenwechseln, die unsichtbaren Zeichen, die die
+/// Schreibrichtung umstellen, und die Nullbreitenzeichen (U+200B–U+200D,
+/// U+2060, U+FEFF): Mit ihnen ließe sich ein Text anders anzeigen, als er im
+/// Protokoll steht, oder ein Wort unsichtbar teilen.
 const _unsichtbar =
-    '\\x00-\\x09\\x0b-\\x1f\\x7f-\\x9f\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069';
+    '\\x00-\\x09\\x0b-\\x1f\\x7f-\\x9f\\u061c\\u200b-\\u200f\\u202a-\\u202e\\u2060\\u2066-\\u2069\\ufeff';
+
+/// Die Nullbreitenzeichen aus [_unsichtbar].
+const _nullbreite = '\\u200b-\\u200d\\u2060\\ufeff';
 
 /// Zeilenwechsel in allen Schreibweisen außer `\n`.
 final _zeilenwechsel = RegExp('\\r\\n|[\\r\\x0b\\x0c\\x85\\u2028\\u2029]');
@@ -28,6 +32,8 @@ String _gekuerzt(String t, int hoechstens) {
 /// fälscht ein Plugin keine Zeile im Protokoll.
 String einzeilig(String text, int hoechstens) => _gekuerzt(
   text
+      // Nullbreitenzeichen fallen ganz weg, statt ein Wort zu trennen.
+      .replaceAll(RegExp('[$_nullbreite]'), '')
       .replaceAll(RegExp('[$_unsichtbar\\n\\u2028\\u2029]'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim(),

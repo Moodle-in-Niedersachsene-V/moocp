@@ -395,7 +395,9 @@ class _PluginZustimmungDialogState extends State<PluginZustimmungDialog> {
                 children: [
                   Text(b.name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                   Text('Version ${b.version}'),
-                  Text('Herkunft: ${b.herkunft}'),
+                  // „laut Plugin“: Die Angabe steht in der Beschreibungsdatei,
+                  // geprüft ist sie nicht.
+                  Text('Herkunft laut Plugin: ${b.herkunft}'),
                   const SizedBox(height: 16),
                   if (b.zusatzadressen.isEmpty)
                     const Text('Zusatzadressen: keine.')
@@ -790,7 +792,7 @@ class _PluginsDialogState extends State<PluginsDialog> {
             ),
             if (e.beschreibung != null) ...[
               Text('Version ${e.beschreibung!.version}', style: klein),
-              Text('Herkunft: ${e.beschreibung!.herkunft}', style: klein),
+              Text('Herkunft laut Plugin: ${e.beschreibung!.herkunft}', style: klein),
             ],
             Text('Ordner: ${e.ordner}', style: klein),
             const SizedBox(height: 4),

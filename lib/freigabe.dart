@@ -252,6 +252,12 @@ class AufrufZaehler {
 
   /// Freigaben, die der Testbetrieb automatisch erteilt hat.
   int testfreigaben = 0;
+
+  /// Das Plugin, in dessen Auftrag eine Freigabe ausgelassen wurde: bei einem
+  /// eingebauten Werkzeug, das ein Plugin aufgerufen hat, oder einer Freigabe,
+  /// um die ein Plugin selbst gebeten hat. Der Hinweis „ohne Freigabe
+  /// ausgeführt“ in der Antwort an die KI nennt es (werkzeug_aufrufe.dart).
+  String? aufrufer;
 }
 
 class _AbbruchStand {

@@ -6,7 +6,6 @@
 // das echte Beispiel-Plugin prüft test/plugin_start_test.dart, den Dialog
 // test/freigabe_dialoge_test.dart. Alles in Temp-Ordnern.
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -25,9 +24,10 @@ import 'package:moocp/protokoll.dart';
 import 'package:moocp/testschalter.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/plugin_adresse.dart';
 import 'plugin_moodle_test.dart' show PluginTestMoodle, sitzungsCookie;
 
-const _schluessel = 'schluessel-des-beispiels-0123456789abcdefghijkl';
+const _schluessel = beispielSchluessel;
 const _zweiterSchluessel = 'schluessel-des-zweiten-plugins-0123456789abcd';
 const _freierSchluessel = 'schluessel-des-freien-plugins-0123456789abcdef';
 
@@ -97,24 +97,6 @@ class _Kontext implements AufrufKontext {
 
   @override
   String? get testDialogantworten => null;
-}
-
-typedef _Antwort = ({int status, Map json, HttpHeaders kopf, String roh});
-
-Future<_Antwort> _post(Uri adresse, String pfad, Map<String, Object?> daten, {String? token, String schluessel = _schluessel}) async {
-  final http = HttpClient();
-  try {
-    final r = await http.postUrl(adresse.resolve(pfad));
-    r.headers.set(HttpHeaders.authorizationHeader, 'Bearer $schluessel');
-    if (token != null) r.headers.set(aufrufKopf, token);
-    r.headers.contentType = ContentType.json;
-    r.add(utf8.encode(jsonEncode(daten)));
-    final antwort = await r.close();
-    final text = await utf8.decoder.bind(antwort).join();
-    return (status: antwort.statusCode, json: jsonDecode(text) as Map, kopf: antwort.headers, roh: text);
-  } finally {
-    http.close(force: true);
-  }
 }
 
 List<Map<String, String>> _felder(Map<String, String> f) => [
@@ -193,7 +175,7 @@ void main() {
     'felder': _felder(felder),
   };
 
-  Future<_Antwort> freigabe(String token, Map<String, Object?> daten, {String kurzname = 'beispiel'}) => _post(
+  Future<AdresseAntwort> freigabe(String token, Map<String, Object?> daten, {String kurzname = 'beispiel'}) => anAdresse(
     adresse.adresse,
     pfadZusatzFreigabe,
     {'titel': 'Notiz speichern?', 'zusammenfassung': 'Speichert die Notiz „Hallo“.', ...daten},
@@ -201,11 +183,11 @@ void main() {
     schluessel: schluesselVon(kurzname),
   );
 
-  Future<_Antwort> schreiben(String token, Map<String, Object?> daten, {String kurzname = 'beispiel'}) =>
-      _post(adresse.adresse, pfadZusatzSchreiben, daten, token: token, schluessel: schluesselVon(kurzname));
+  Future<AdresseAntwort> schreiben(String token, Map<String, Object?> daten, {String kurzname = 'beispiel'}) =>
+      anAdresse(adresse.adresse, pfadZusatzSchreiben, daten, token: token, schluessel: schluesselVon(kurzname));
 
   /// Freigabe und Schreiben mit denselben Angaben.
-  Future<_Antwort> freigebenUndSchreiben(String token, Map<String, Object?> daten) async {
+  Future<AdresseAntwort> freigebenUndSchreiben(String token, Map<String, Object?> daten) async {
     final f = await freigabe(token, daten);
     expect(f.status, 200);
     expect(f.json['ausgang'], 'freigegeben');
@@ -513,7 +495,7 @@ void main() {
     test('POST mit den Feldern des Plugins und dem sesskey von moocp; Antwort ohne Cookies und Kopfzeilen', () async {
       final a = aufruf();
       // Den Inhalt der Antwort gibt es nur in einem Lauf, zu dem sie passt.
-      expect((await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token)).status, 200);
+      expect((await anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token)).status, 200);
       moodle.angefragt.clear();
       moodle.rumpfe.clear();
       final r = await freigebenUndSchreiben(
@@ -639,7 +621,7 @@ void main() {
 
   group('Den Inhalt der Antwort gibt es nur in einem Lauf', () {
     Future<void> laufBeginnen(String token, int cmid) async {
-      final r = await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token);
+      final r = await anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token);
       expect(r.status, 200, reason: '${r.json}');
       moodle.angefragt.clear();
       moodle.rumpfe.clear();
@@ -647,7 +629,7 @@ void main() {
 
     /// Geschrieben, aber ohne Inhalt: nur Status, Pfad bis zum Skriptnamen
     /// und der feste Hinweis.
-    void ohneInhalt(_Antwort r, {required String pfad, int status = 200}) {
+    void ohneInhalt(AdresseAntwort r, {required String pfad, int status = 200}) {
       expect(r.status, 200, reason: '${r.json}');
       expect(r.json['geschrieben'], true);
       expect(r.json['status'], status);
@@ -701,7 +683,7 @@ void main() {
     test('nach dem Ende des Laufs: ohne Inhalt', () async {
       final a = aufruf();
       await laufBeginnen(a.token, 501);
-      await _post(adresse.adresse, pfadLaufBeenden, const {}, token: a.token);
+      await anAdresse(adresse.adresse, pfadLaufBeenden, const {}, token: a.token);
       final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=501'));
 
       ohneInhalt(r, pfad: '/mod/beispiel/speichern.php');
@@ -712,7 +694,7 @@ void main() {
     test('eine Zusatzadresse, ob „lesen“ oder „schreiben“, liest ein Plugin über /v1/moodle/lesen nicht', () async {
       final a = aufruf();
       for (final pfad in ['/mod/beispiel/lesen.php?id=1', '/mod/beispiel/speichern.php?id=7', '/mod/beispiel/report.php']) {
-        final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': pfad}, token: a.token);
+        final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': pfad}, token: a.token);
         expect(r.status, 403, reason: pfad);
       }
       expect(moodle.angefragt, isEmpty);

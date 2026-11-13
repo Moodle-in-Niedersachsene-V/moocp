@@ -19,8 +19,10 @@
 # Läuft moocp schon, holt der Start nur das Fenster nach vorn und hängt
 # nichts an: moocp vorher beenden. Ein neu gebautes und neu gestartetes
 # Plugin braucht keinen neuen Start von moocp, solange es denselben Schlüssel
-# bekommt -- deshalb hier im selben Fenster neu starten. Strg+C beendet das
-# Plugin; moocp läuft weiter und verbindet sich wieder, sobald es zurück ist.
+# bekommt. Deshalb behält das Skript den Schlüssel, bis es selbst endet: Endet
+# das Plugin, startet Enter es mit demselben Schlüssel neu (etwa nach einer
+# Änderung am Quelltext), und moocp verbindet sich wieder, sobald es zurück
+# ist. Strg+C beendet das Plugin und das Skript; moocp läuft weiter.
 #
 # Gespeichert als UTF-8 mit BOM: Windows PowerShell 5.1 liest eine Datei
 # ohne BOM in der Codepage des Systems und zeigte die Umlaute falsch an.
@@ -65,11 +67,22 @@ try {
     # Start-Process setzt die Argumente nur mit Leerzeichen zusammen; Pfade
     # mit Leerzeichen brauchen deshalb eigene Anführungszeichen.
     $quelle = Join-Path $ordner 'beispiel.dart'
-    $plugin = Start-Process -FilePath $Dart -ArgumentList @('run', "`"$quelle`"", '--port', "$port", '--entwicklung') `
-        -WorkingDirectory $wurzel -NoNewWindow -PassThru
-    Write-Host "Beispiel-Plugin läuft auf 127.0.0.1:$port. moocp startet und fragt, ob es das Plugin anhängen soll."
-    Start-Process -FilePath $Moocp -ArgumentList @('--plugin-entwicklung', "`"$ordner`"")
-    $plugin.WaitForExit()
+    $moocpGestartet = $false
+    while ($true) {
+        $plugin = Start-Process -FilePath $Dart -ArgumentList @('run', "`"$quelle`"", '--port', "$port", '--entwicklung') `
+            -WorkingDirectory $wurzel -NoNewWindow -PassThru
+        if (-not $moocpGestartet) {
+            Write-Host "Beispiel-Plugin läuft auf 127.0.0.1:$port. moocp startet und fragt, ob es das Plugin anhängen soll."
+            Start-Process -FilePath $Moocp -ArgumentList @('--plugin-entwicklung', "`"$ordner`"")
+            $moocpGestartet = $true
+        }
+        else {
+            Write-Host "Beispiel-Plugin läuft wieder auf 127.0.0.1:$port, mit demselben Schlüssel; moocp verbindet sich von selbst."
+        }
+        $plugin.WaitForExit()
+        # Nur Enter startet neu; Strg+C hier beendet das Skript.
+        $null = Read-Host 'Das Plugin ist beendet. Enter startet es mit demselben Schlüssel neu, Strg+C beendet'
+    }
 }
 finally {
     Remove-Item Env:MOOCP_PLUGIN_SCHLUESSEL -ErrorAction SilentlyContinue

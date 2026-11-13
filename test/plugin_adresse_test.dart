@@ -855,6 +855,15 @@ void main() {
       expect(d.eintraege, ['a b', '${'y' * (auswahlEintragHoechstens - 1)}…', 'Kurs 12']);
     });
 
+    test('Nullbreitenzeichen fallen aus Titel, Einträgen und Text weg', () {
+      for (final c in [0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF]) {
+        final z = String.fromCharCode(c);
+        expect(mehrzeilig('Kur${z}s 12\nzwei$z', dialogTextHoechstens), 'Kurs 12\nzwei', reason: c.toRadixString(16));
+        final e = einzeilig('Kur${z}s$z 12$z', dialogTitelHoechstens);
+        expect(e, 'Kurs 12', reason: c.toRadixString(16));
+      }
+    });
+
     test('mehrzeilig begrenzt die Länge', () {
       expect(mehrzeilig('z' * 3000, dialogTextHoechstens).length, dialogTextHoechstens);
       expect(mehrzeilig('z' * 3000, dialogTextHoechstens), endsWith('…'));

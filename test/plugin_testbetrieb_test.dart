@@ -529,6 +529,38 @@ void main() {
       expect(text, startsWith('Angelegt.'));
       expect(text, contains(testfreigabeHinweis));
     });
+
+    test('über MCP: lässt die Stufe die Freigabe im eingebauten Werkzeug aus, erfährt es die KI mit dem Plugin als Aufrufer', () async {
+      freigaben.stufe = Bestaetigungen.keine;
+      final frei = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = frei.port;
+      await frei.close();
+      final d = dienst(
+        zugang,
+        kurse: {34},
+        port: port,
+        quellen: [
+          _Quelle(adresse, (token, _) async {
+            final r = await anlegen(token);
+            return (r.json['text'] as String).contains('verified: true') ? 'Angelegt.' : 'Fehlgeschlagen.';
+          }),
+        ],
+      );
+      await d.starten();
+      final client = McpTestClient(port);
+      addTearDown(() async {
+        client.http.close(force: true);
+        await d.stoppen();
+      });
+      await client.initialize();
+
+      final text = await client.tool('beispiel_test', const {});
+
+      expect(text, startsWith('Angelegt.'));
+      expect(text, contains('Ohne Freigabe ausgeführt (1 Vorgang, Aufrufer: Plugin „Beispiel“)'));
+      expect(text, isNot(contains(testfreigabeHinweis)));
+      expect(gezeigt, isEmpty);
+    });
   });
 
   group('Vorbereitete Dialogantworten', () {

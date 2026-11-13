@@ -25,9 +25,10 @@ import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/plugin_adresse.dart';
 import 'plugin_moodle_test.dart';
 
-const _schluessel = 'schluessel-des-beispiels-0123456789abcdefghijkl';
+const _schluessel = beispielSchluessel;
 const _zweiterSchluessel = 'schluessel-des-zweiten-plugins-0123456789abcd';
 
 /// Jeder Teil jedes erfundenen Namens im Doppel, klein geschrieben: Keiner
@@ -77,24 +78,6 @@ class _Kontext implements AufrufKontext {
 
   @override
   String? get testDialogantworten => null;
-}
-
-typedef _Antwort = ({int status, Map json, String roh});
-
-Future<_Antwort> _post(Uri adresse, String pfad, Map<String, Object?> daten, {String? token, String schluessel = _schluessel}) async {
-  final http = HttpClient();
-  try {
-    final r = await http.postUrl(adresse.resolve(pfad));
-    r.headers.set(HttpHeaders.authorizationHeader, 'Bearer $schluessel');
-    if (token != null) r.headers.set(aufrufKopf, token);
-    r.headers.contentType = ContentType.json;
-    r.add(utf8.encode(jsonEncode(daten)));
-    final antwort = await r.close();
-    final text = await utf8.decoder.bind(antwort).join();
-    return (status: antwort.statusCode, json: jsonDecode(text) as Map, roh: text);
-  } finally {
-    http.close(force: true);
-  }
 }
 
 /// Eine Antwort von Moodle für die Auswertung, ohne Netz.
@@ -154,16 +137,16 @@ void main() {
 
   String schluesselVon(String kurzname) => kurzname == 'zweites' ? _zweiterSchluessel : _schluessel;
 
-  Future<_Antwort> beginnen(String token, Object? cmid, {String kurzname = 'beispiel'}) =>
-      _post(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token, schluessel: schluesselVon(kurzname));
+  Future<AdresseAntwort> beginnen(String token, Object? cmid, {String kurzname = 'beispiel'}) =>
+      anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token, schluessel: schluesselVon(kurzname));
 
-  Future<_Antwort> beenden(String token) => _post(adresse.adresse, pfadLaufBeenden, {}, token: token);
+  Future<AdresseAntwort> beenden(String token) => anAdresse(adresse.adresse, pfadLaufBeenden, {}, token: token);
 
-  Future<_Antwort> lesen(String token, String pfad, {String kurzname = 'beispiel'}) =>
-      _post(adresse.adresse, pfadZusatzLesen, {'pfad': pfad}, token: token, schluessel: schluesselVon(kurzname));
+  Future<AdresseAntwort> lesen(String token, String pfad, {String kurzname = 'beispiel'}) =>
+      anAdresse(adresse.adresse, pfadZusatzLesen, {'pfad': pfad}, token: token, schluessel: schluesselVon(kurzname));
 
-  Future<_Antwort> protokollzeile(String token, String text) =>
-      _post(adresse.adresse, pfadProtokoll, {'text': text}, token: token);
+  Future<AdresseAntwort> protokollzeile(String token, String text) =>
+      anAdresse(adresse.adresse, pfadProtokoll, {'text': text}, token: token);
 
   /// Beginnt einen Lauf für Aktivität 501 in Kurs 12 und erwartet, dass er
   /// beginnt.
@@ -206,7 +189,7 @@ void main() {
     test('über /v1/moodle/lesen liest ein Plugin eine Zusatzadresse auch im Lauf nicht', () async {
       final a = await imLauf();
       moodle.angefragt.clear();
-      final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': '/mod/beispiel/report.php?id=501'}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/mod/beispiel/report.php?id=501'}, token: a.token);
       expect(r.status, 403);
       expect(moodle.angefragt, isEmpty);
     });
@@ -265,7 +248,7 @@ void main() {
       }
       final ohne = aufruf(z: MoodleZugang(protokoll));
       expect((await beginnen(ohne.token, 501)).status, 503);
-      expect((await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': 501})).status, 403);
+      expect((await anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': 501})).status, 403);
       expect(moodle.angefragt, isEmpty);
     });
 
@@ -520,7 +503,7 @@ void main() {
     });
 
     test('nach einem Schreibvorgang folgt moocp im Lauf einer Umleitung auf eine Zusatzadresse „lesen“, die passt', () async {
-      Future<_Antwort> schreiben(String token, String pfad) async {
+      Future<AdresseAntwort> schreiben(String token, String pfad) async {
         final daten = {
           'methode': 'POST',
           'pfad': pfad,
@@ -528,8 +511,8 @@ void main() {
             {'name': 'notiz', 'wert': 'Hallo'},
           ],
         };
-        final f = await _post(adresse.adresse, pfadZusatzFreigabe, {...daten, 'titel': 'T', 'zusammenfassung': 'Z'}, token: token);
-        return _post(adresse.adresse, pfadZusatzSchreiben, {...daten, 'kennung': f.json['kennung']}, token: token);
+        final f = await anAdresse(adresse.adresse, pfadZusatzFreigabe, {...daten, 'titel': 'T', 'zusammenfassung': 'Z'}, token: token);
+        return anAdresse(adresse.adresse, pfadZusatzSchreiben, {...daten, 'kennung': f.json['kennung']}, token: token);
       }
 
       final ohne = aufruf();
@@ -562,21 +545,21 @@ void main() {
       expect((await protokollzeile(b.token, 'mustermann')).status, 422);
       expect((await protokollzeile(b.token, 'Aufgabe 3 fertig')).status, 200);
       // Ohne Token gilt die Sperre ebenso.
-      expect((await _post(adresse.adresse, pfadProtokoll, {'text': 'Erika'})).status, 422);
+      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Erika'})).status, 422);
       ohneNamen(zeilen().join('\n'));
     });
 
     test('der Name der Lehrkraft sperrt, sobald moocp eine Seite mit der Anmeldezeile gelesen hat', () async {
       final a = aufruf();
       expect((await protokollzeile(a.token, 'Paula')).status, 200, reason: 'noch nicht bekannt');
-      final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
       expect(r.status, 200);
       expect(zugang.lehrkraftNamen, [lehrkraftImDoppel]);
       expect((await protokollzeile(a.token, 'Frau Musterlehrerin')).status, 422);
       // Für jedes Plugin, das in diesem Profil arbeitet.
       final b = aufruf(kurzname: 'zweites');
       expect(
-        (await _post(adresse.adresse, pfadProtokoll, {'text': 'Paula'}, token: b.token, schluessel: _zweiterSchluessel)).status,
+        (await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Paula'}, token: b.token, schluessel: _zweiterSchluessel)).status,
         422,
       );
       ohneNamen(zeilen().where((z) => !z.contains('Paula')).join('\n'));
@@ -587,7 +570,7 @@ void main() {
   group('Rohes Lesen: nur der Hauptbereich', () {
     test('ohne Kopf, Nutzermenü, Blöcke, Fuß und sesskey', () async {
       final a = aufruf();
-      final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
       expect(r.status, 200);
       expect(r.json['text'], '<section id="region-main" aria-label="Inhalt">Fragensammlungen</section>');
       for (final weg in ['abc123', lehrkraftImDoppel, 'Erika', 'M.cfg', 'logininfo', 'usermenu']) {
@@ -598,7 +581,7 @@ void main() {
     test('ohne Hauptbereich keine Seite, auch kein Stück HTML; das Protokoll sagt es ohne Werte', () async {
       final a = aufruf();
       for (final id in ['21', '22']) {
-        final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': '/mod/learningmap/view.php?id=$id'}, token: a.token);
+        final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/mod/learningmap/view.php?id=$id'}, token: a.token);
         expect(r.status, 502, reason: id);
         expect(r.json, {'fehler': KeinHauptbereich.meldung}, reason: id);
       }
@@ -607,7 +590,7 @@ void main() {
 
     test('eine Datei bleibt, wie sie ist', () async {
       final a = aufruf();
-      final r = await _post(adresse.adresse, pfadMoodleLesen, {'pfad': '/pluginfile.php/55/mod_folder/content/0/blatt.pdf'}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/pluginfile.php/55/mod_folder/content/0/blatt.pdf'}, token: a.token);
       expect(r.status, 200);
       expect((r.json['text'] as String).length, 2048);
     });

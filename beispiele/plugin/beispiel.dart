@@ -12,8 +12,9 @@
 //    einer anderen Adresse.
 // 2. Den Schlüssel aus der Umgebungsvariablen MOOCP_PLUGIN_SCHLUESSEL lesen
 //    und jede Anfrage ohne den Kopf `Authorization: Bearer <Schlüssel>`
-//    abweisen. Der Schlüssel kommt nicht über die Kommandozeile, weil er dort
-//    in jeder Prozessliste stünde; das Plugin schreibt ihn nirgends hin.
+//    abweisen, verglichen in konstanter Zeit (`gleichInKonstanterZeit`). Der
+//    Schlüssel kommt nicht über die Kommandozeile, weil er dort in jeder
+//    Prozessliste stünde; das Plugin schreibt ihn nirgends hin.
 // 3. Spätestens 20 Sekunden nach dem Start auf `initialize` antworten, sonst
 //    beendet moocp das Programm und versucht es noch einmal (Punkt 7).
 // 4. Jedes Werkzeug mit dem Kurznamen aus plugin.json und einem Unterstrich
@@ -69,7 +70,8 @@
 // `beispiel_hinweis` (je eine Art Dialog), `beispiel_freigabe` (um eine
 // Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
 // lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt),
-// `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
+// `beispiel_moodle_datei` (eine erlaubte Datei von Moodle in den
+// Arbeitsordner laden), `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
 // Freigabe; in einem Lauf auch selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
 // Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
 // Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
@@ -117,9 +119,10 @@ Future<void> main(List<String> argumente) async {
     path: '/mcp',
     enableJsonResponse: true,
     allowedHosts: const {'127.0.0.1', 'localhost'},
-    authenticator: (anfrage) =>
-        anfrage.headers.value(HttpHeaders.authorizationHeader) ==
-        'Bearer $schluessel',
+    authenticator: (anfrage) => gleichInKonstanterZeit(
+      anfrage.headers.value(HttpHeaders.authorizationHeader),
+      'Bearer $schluessel',
+    ),
   );
   await server.start();
 
@@ -135,6 +138,21 @@ Future<void> main(List<String> argumente) async {
       exit(0);
     },
   );
+}
+
+/// Vergleicht den Kopf einer Anfrage mit dem erwarteten Wert, ohne früher
+/// aufzuhören, wenn ein Byte abweicht: Ein Vergleich mit `==` endet beim
+/// ersten Unterschied, und an der Zeit ließe sich der Schlüssel Zeichen für
+/// Zeichen erraten. Zum Übernehmen in ein eigenes Plugin.
+bool gleichInKonstanterZeit(String? kopf, String erwartet) {
+  if (kopf == null) return false;
+  final a = utf8.encode(kopf);
+  final b = utf8.encode(erwartet);
+  var unterschied = a.length ^ b.length;
+  for (var i = 0; i < b.length; i++) {
+    unterschied |= (i < a.length ? a[i] : 0) ^ b[i];
+  }
+  return unterschied == 0;
 }
 
 int? _port(List<String> argumente) {
@@ -501,6 +519,42 @@ McpServer _server() {
       } on MoocpFehler catch (f) {
         // Die Ablehnung ist hier das erwartete Ergebnis.
         return text('Abgelehnt (HTTP ${f.status}): ${f.text}');
+      }
+    },
+  );
+
+  // Eine Datei von Moodle laden (`/v1/moodle/datei`): Was die Positivliste
+  // von moocp erlaubt, etwa eine Datei aus einem Verzeichnis
+  // (`/pluginfile.php/…`), lädt moocp mit der Sitzung der Lehrkraft in den
+  // Unterordner `plugin-<Kurzname>` im Arbeitsordner und nennt den Pfad und
+  // die Größe. Dieselben Grenzen wie beim Download der eingebauten Werkzeuge:
+  // höchstens 200 MB, Moodle muss die Größe nennen, eine Seite statt einer
+  // Datei ist ein Fehler, nichts wird überschrieben (mit `dateiname` lässt
+  // sich ein anderer Name wählen). Was dort liegt, kann die KI lesen; die
+  // letzte Sperre prüft Dateien nicht. Für Dateien hinter einer Zusatzadresse
+  // gibt es den eigenen Weg in einem Lauf (`beispiel_download`).
+  server.registerTool(
+    'beispiel_moodle_datei',
+    description:
+        'Lädt über moocp eine Datei von Moodle, die moocp erlaubt (etwa /pluginfile.php/… aus einem Verzeichnis), '
+        'in den Arbeitsordner und nennt Pfad und Größe. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'pfad': JsonSchema.string(description: 'Der Pfad an der Moodle-Instanz, mit „/“ am Anfang.'),
+        'dateiname': JsonSchema.string(description: 'Freiwillig: der Name der Datei im Arbeitsordner.'),
+      },
+      required: ['pfad'],
+    ),
+    annotations: hinweise('Moodle-Datei laden (Beispiel)'),
+    callback: (args, extra) async {
+      try {
+        final antwort = await anMoocp(adresse(), '/v1/moodle/datei', {
+          'pfad': args['pfad'],
+          if (args['dateiname'] != null) 'dateiname': args['dateiname'],
+        }, aufruf: token(extra));
+        return text('Datei geladen: ${antwort['datei']} (${antwort['bytes']} Bytes)');
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
       }
     },
   );

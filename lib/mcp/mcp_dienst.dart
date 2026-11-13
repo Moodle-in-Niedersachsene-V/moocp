@@ -577,6 +577,7 @@ class McpDienst implements AufrufKontext {
     }
     if (eigener.ausgelassen > 0) {
       zaehler?.ausgelassen += eigener.ausgelassen;
+      zaehler?.aufrufer ??= aufrufer;
       return PluginFreigabeAusgang.ohneFrage;
     }
     if (ja) return PluginFreigabeAusgang.freigegeben;

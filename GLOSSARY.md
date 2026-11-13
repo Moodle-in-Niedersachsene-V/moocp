@@ -92,7 +92,7 @@ Die Liste im Code, die festlegt, welche Moodle-Adressen die App überhaupt anfra
 _Nicht zu verwechseln mit_: Sperrliste.
 
 **Lesender Teil der Positivliste**
-Die Regeln der Positivliste, die eine Seite oder Datei zeigen, ohne in Moodle etwas zu ändern, und kein Schritt eines Schreibvorgangs sind. Nur sie gelten für ein Plugin, das Moodle über die Adresse der App liest; schreiben kann ein Plugin nur über die eingebauten Werkzeuge.
+Die Regeln der Positivliste, die eine Seite oder Datei zeigen, ohne in Moodle etwas zu ändern, und kein Schritt eines Schreibvorgangs sind. Nur sie gelten für ein Plugin, das Moodle über die Adresse der App liest. Schreiben kann ein Plugin, was die Positivliste erlaubt, nur über die eingebauten Werkzeuge; was darüber hinausgeht, nur über eine Zusatzadresse der Art „schreiben“, mit einer Freigabe auf jeder Stufe.
 _Nicht zu verwechseln mit_: Zusatzadresse (geht über die Positivliste hinaus und braucht die Zustimmung der Lehrkraft).
 
 **Protokoll**

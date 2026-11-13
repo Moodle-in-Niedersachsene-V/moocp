@@ -127,6 +127,55 @@ void main() {
       }
     });
 
+    // Umbruch-, Richtungs- und Nullbreitenzeichen: unsichtbar im Dialog der
+    // Zustimmung, aber geeignet, dort Text umzustellen oder vorzutäuschen.
+    final unsichtbar = <String, int>{
+      'Wagenrücklauf': 0x0D,
+      'NEL': 0x85,
+      'Zeilentrenner': 0x2028,
+      'Absatztrenner': 0x2029,
+      'Links-rechts-Marke': 0x200E,
+      'Rechts-links-Marke': 0x200F,
+      'Rechts-links-Einbettung': 0x202B,
+      'Richtungsüberschreibung': 0x202E,
+      'Richtungsisolierung': 0x2066,
+      'Ende der Isolierung': 0x2069,
+      'Nullbreitenleerzeichen': 0x200B,
+      'Nullbreitenverbinder': 0x200D,
+      'Wortverbinder': 0x2060,
+      'BOM im Text': 0xFEFF,
+    };
+
+    test('Umbruch-, Richtungs- und Nullbreitenzeichen in den angezeigten Texten werden abgewiesen', () {
+      unsichtbar.forEach((art, c) {
+        final z = 'Bei${String.fromCharCode(c)}spiel';
+        for (final feld in ['name', 'version', 'herkunft']) {
+          final g = _grund(_mit(_minimal(), feld, z));
+          expect(g, contains('„$feld“'), reason: '$art in $feld');
+          expect(g, isNot(contains('Bei')), reason: 'der Grund nennt keine Inhalte');
+        }
+        final adresse = {'muster': '/mod/beispiel/*', 'art': 'lesen', 'grund': z};
+        expect(_grund(_mit(_minimal(), 'zusatzadressen', [adresse])), contains('„grund“'), reason: art);
+        expect(_grund(_mit(_minimal(), 'wahlSkills', {'beispiel-x': z})), contains('„wahlSkills“'), reason: art);
+      });
+    });
+
+    test('Höchstlängen: Name 60, Version 30, Herkunft 100, Grund und Skill-Beschreibung je 300 Zeichen', () {
+      const grenzen = {'name': 60, 'version': 30, 'herkunft': 100};
+      grenzen.forEach((feld, n) {
+        expect(_grund(_mit(_minimal(), feld, 'x' * n)), isNull, reason: feld);
+        final g = _grund(_mit(_minimal(), feld, 'x' * (n + 1)));
+        expect(g, contains('„$feld“'), reason: feld);
+        expect(g, contains('$n'), reason: feld);
+      });
+      Map<String, Object?> mitGrund(String grund) =>
+          _mit(_minimal(), 'zusatzadressen', [{'muster': '/mod/beispiel/*', 'art': 'lesen', 'grund': grund}]);
+      expect(_grund(mitGrund('x' * 300)), isNull);
+      expect(_grund(mitGrund('x' * 301)), allOf(contains('Zusatzadresse 1'), contains('„grund“'), contains('300')));
+      expect(_grund(_mit(_minimal(), 'wahlSkills', {'beispiel-x': 'x' * 300})), isNull);
+      expect(_grund(_mit(_minimal(), 'wahlSkills', {'beispiel-x': 'x' * 301})), allOf(contains('„wahlSkills“'), contains('300')));
+    });
+
     test('die Schnittstellenversion ist eine ganze Zahl ab 1', () {
       expect(_grund(_mit(_minimal(), 'schnittstelle', 1)), isNull);
       expect(_grund(_mit(_minimal(), 'schnittstelle', 0)), contains('„schnittstelle“'));

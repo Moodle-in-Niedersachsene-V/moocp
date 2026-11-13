@@ -26,9 +26,10 @@ import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/plugin_adresse.dart';
 import 'plugin_moodle_test.dart';
 
-const _schluessel = 'schluessel-des-beispiels-0123456789abcdefghijkl';
+const _schluessel = beispielSchluessel;
 const _zweiterSchluessel = 'schluessel-des-zweiten-plugins-0123456789abcd';
 
 final _zusatzadressen = [
@@ -78,29 +79,6 @@ class _Kontext implements AufrufKontext {
   String? get testDialogantworten => null;
 }
 
-typedef _Antwort = ({int status, Map json, String roh});
-
-Future<_Antwort> _post(
-  Uri adresse,
-  String pfad,
-  Map<String, Object?> daten, {
-  String? token,
-  String schluessel = _schluessel,
-}) async {
-  final http = HttpClient();
-  try {
-    final r = await http.postUrl(adresse.resolve(pfad));
-    r.headers.set(HttpHeaders.authorizationHeader, 'Bearer $schluessel');
-    if (token != null) r.headers.set(aufrufKopf, token);
-    r.headers.contentType = ContentType.json;
-    r.add(utf8.encode(jsonEncode(daten)));
-    final antwort = await r.close();
-    final text = await utf8.decoder.bind(antwort).join();
-    return (status: antwort.statusCode, json: jsonDecode(text) as Map, roh: text);
-  } finally {
-    http.close(force: true);
-  }
-}
 
 /// Alle Dateien unter [ordner], als Pfade relativ zu ihm, mit `/`.
 List<String> _dateien(Directory ordner) => [
@@ -171,13 +149,13 @@ void main() {
 
   String schluesselVon(String kurzname) => kurzname == 'zweites' ? _zweiterSchluessel : _schluessel;
 
-  Future<_Antwort> beginnen(String token, int cmid, {String kurzname = 'beispiel'}) =>
-      _post(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token, schluessel: schluesselVon(kurzname));
+  Future<AdresseAntwort> beginnen(String token, int cmid, {String kurzname = 'beispiel'}) =>
+      anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token, schluessel: schluesselVon(kurzname));
 
-  Future<_Antwort> beenden(String token) => _post(adresse.adresse, pfadLaufBeenden, {}, token: token);
+  Future<AdresseAntwort> beenden(String token) => anAdresse(adresse.adresse, pfadLaufBeenden, {}, token: token);
 
-  Future<_Antwort> laden(String token, String pfad, {String kurzname = 'beispiel'}) =>
-      _post(adresse.adresse, pfadZusatzDatei, {'pfad': pfad}, token: token, schluessel: schluesselVon(kurzname));
+  Future<AdresseAntwort> laden(String token, String pfad, {String kurzname = 'beispiel'}) =>
+      anAdresse(adresse.adresse, pfadZusatzDatei, {'pfad': pfad}, token: token, schluessel: schluesselVon(kurzname));
 
   Future<({String token, void Function() ende})> imLauf({String kurzname = 'beispiel', String profil = 'A'}) async {
     final a = aufruf(kurzname: kurzname, profil: profil);
@@ -336,9 +314,9 @@ void main() {
         kontext: _Kontext(zugang, wurzel.path),
       );
       ohne.aufrufAnmelden('beispiel', a);
-      expect((await _post(ohne.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token)).status, 200);
+      expect((await anAdresse(ohne.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token)).status, 200);
       moodle.angefragt.clear();
-      final r = await _post(ohne.adresse, pfadZusatzDatei, {'pfad': '/mod/beispiel/export.php?id=501'}, token: a.token);
+      final r = await anAdresse(ohne.adresse, pfadZusatzDatei, {'pfad': '/mod/beispiel/export.php?id=501'}, token: a.token);
       expect(r.status, 503);
       expect(moodle.angefragt, isEmpty);
     });
@@ -457,22 +435,22 @@ void main() {
         },
       );
       for (final t in schreibweisen(downloads.wurzel)) {
-        final r = await _post(adresse.adresse, pfadProtokoll, {'text': 'Datei liegt in $t'}, token: a.token);
+        final r = await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Datei liegt in $t'}, token: a.token);
         expect(r.status, 422, reason: t);
       }
-      final w = await _post(adresse.adresse, pfadWerkzeug, {
+      final w = await anAdresse(adresse.adresse, pfadWerkzeug, {
         'name': 'status',
         'argumente': {'datei': p.join(downloads.wurzel, 'beispiel', 'A', '1.bin')},
       }, token: a.token);
       expect(w.status, 422);
       expect(aufgerufen, isFalse);
       // Ohne Token ebenso, und für ein anderes Plugin.
-      expect((await _post(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel})).status, 422);
+      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel})).status, 422);
       expect(
-        (await _post(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel}, schluessel: _zweiterSchluessel)).status,
+        (await anAdresse(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel}, schluessel: _zweiterSchluessel)).status,
         422,
       );
-      expect((await _post(adresse.adresse, pfadProtokoll, {'text': 'Aufgabe 3 fertig'}, token: a.token)).status, 200);
+      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Aufgabe 3 fertig'}, token: a.token)).status, 200);
       ohnePfad(zeilen().join('\n'));
       expect(zeilen(), contains('info: Plugin „Beispiel“: Aufgabe 3 fertig'));
     });

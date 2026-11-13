@@ -38,6 +38,18 @@ class NurMaus extends StatelessWidget {
 /// [dauer] etwas an: Ein Klick, der gerade einem anderen Fenster galt, träfe
 /// sonst den Dialog, der darüber aufgeht. Ausgegraut, damit die Lehrkraft
 /// sieht, dass es kurz dauert.
+///
+/// Die Wartezeit beginnt neu, sobald der Dialog wieder der oberste ist: Die
+/// Dialoge der App liegen als eigene Routen übereinander (Freigaben je
+/// Profil, Dialoge der Plugins, die Warnung der letzten Sperre). Geht einer
+/// über einer offenen Freigabe auf und wieder zu, ist deren Wartezeit längst
+/// um, und der zweite Klick eines Doppelklicks, der dem oberen galt, träfe
+/// sonst sie (E4).
+///
+/// Die Knöpfe sind außerdem nicht über die Tastatur zu erreichen
+/// ([ExcludeFocus]): Entschieden wird nur mit der Maus (E4), und ein Knopf
+/// mit Fokus wartete nur auf eine Taste, die gerade unterwegs ist. Felder im
+/// Dialog bleiben fokussierbar; nur was [builder] baut, ist ausgenommen.
 class Sperrzeit extends StatefulWidget {
   const Sperrzeit({
     super.key,
@@ -55,22 +67,35 @@ class Sperrzeit extends StatefulWidget {
 
 class _SperrzeitState extends State<Sperrzeit> {
   bool _bereit = false;
-  late final Timer _uhr;
+  Timer? _uhr;
 
+  /// Ob der Dialog zuletzt der oberste war; null vor dem ersten Blick.
+  bool? _oben;
+
+  // Ohne Route (etwa im Test) gilt der Dialog als oberster. ModalRoute.isCurrentOf
+  // meldet jede Änderung als neue Abhängigkeit; so kommt sie hierher.
   @override
-  void initState() {
-    super.initState();
-    _uhr = Timer(widget.dauer, () {
-      if (mounted) setState(() => _bereit = true);
-    });
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final oben = ModalRoute.isCurrentOf(context) ?? true;
+    if (oben == _oben) return;
+    _oben = oben;
+    _uhr?.cancel();
+    _uhr = null;
+    _bereit = false;
+    if (oben) {
+      _uhr = Timer(widget.dauer, () {
+        if (mounted) setState(() => _bereit = true);
+      });
+    }
   }
 
   @override
   void dispose() {
-    _uhr.cancel();
+    _uhr?.cancel();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => widget.builder(_bereit);
+  Widget build(BuildContext context) => ExcludeFocus(child: widget.builder(_bereit));
 }

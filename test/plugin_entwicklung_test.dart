@@ -11,7 +11,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mcp_dart/mcp_dart.dart';
-import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
@@ -25,70 +24,8 @@ import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/beispiel_plugin.dart';
 import 'mcp_client.dart';
-
-class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
-
-  /// Wie oft die App ihre Einstellungen geschrieben hätte.
-  int gespeichert = 0;
-
-  @override
-  Future<void> speichern() async => gespeichert++;
-}
-
-/// Das `dart` des Flutter-SDK (wie in test/plugin_start_test.dart).
-String _dart() {
-  final exe = Platform.isWindows ? 'dart.exe' : 'dart';
-  final wurzel = Platform.environment['FLUTTER_ROOT'];
-  if (wurzel != null) {
-    final f = File(p.join(wurzel, 'bin', 'cache', 'dart-sdk', 'bin', exe));
-    if (f.existsSync()) return f.path;
-  }
-  var d = File(Platform.resolvedExecutable).parent;
-  while (d.parent.path != d.path) {
-    final f = File(p.join(d.path, 'dart-sdk', 'bin', exe));
-    if (f.existsSync()) return f.path;
-    d = d.parent;
-  }
-  throw StateError('Das dart des Flutter-SDK ist nicht zu finden.');
-}
-
-Profil _profil(String kennung, String mcpName, int port) => Profil(
-  kennung: kennung,
-  name: mcpName,
-  adresse: 'https://$kennung.moodle.schule.example',
-  port: port,
-  mcpName: mcpName,
-  schluessel: 'test',
-);
-
-Future<int> _freierPort() async {
-  final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  final port = s.port;
-  await s.close();
-  return port;
-}
-
-Future<Set<String>> _eingebaut() {
-  final protokoll = Protokoll();
-  return McpDienst(
-    Einstellungen(schluessel: ''),
-    MoodleZugang(protokoll),
-    protokoll,
-    Freigaben(protokoll),
-    '',
-    profil: Profil.migriert(''),
-  ).eingebauteWerkzeugnamen();
-}
-
-Future<bool> _laeuft(int pid) async {
-  if (Platform.isWindows) {
-    final r = await Process.run('tasklist', ['/FI', 'PID eq $pid', '/NH']);
-    return '${r.stdout}'.contains(' $pid ');
-  }
-  return (await Process.run('kill', ['-0', '$pid'])).exitCode == 0;
-}
 
 /// Wartet, bis [bedingung] gilt, höchstens [frist].
 Future<void> _bis(bool Function() bedingung, {Duration frist = const Duration(seconds: 15)}) async {
@@ -100,26 +37,6 @@ Future<void> _bis(bool Function() bedingung, {Duration frist = const Duration(se
 }
 
 const _schluessel = 'entwicklungs-schluessel-0123456789abcdefghijklmnop';
-
-/// Die Werkzeuge des Beispiel-Plugins in der Reihenfolge seiner Liste.
-const _beispielWerkzeuge = [
-  'beispiel_echo',
-  'beispiel_absturz',
-  'beispiel_protokoll',
-  'beispiel_datei',
-  'beispiel_status',
-  'beispiel_auswahl',
-  'beispiel_eingabe',
-  'beispiel_pfad',
-  'beispiel_hinweis',
-  'beispiel_freigabe',
-  'beispiel_moodle_lesen',
-  'beispiel_moodle_gesperrt',
-  'beispiel_moodle_schreiben',
-  'beispiel_lauf',
-  'beispiel_download',
-  'beispiel_namen',
-];
 
 void main() {
   group('Die Kommandozeile', () {
@@ -226,15 +143,15 @@ void main() {
     setUpAll(() async {
       vorlage = Directory.systemTemp.createTempSync('moocp_beispiel_');
       exe = p.join(vorlage.path, 'beispiel.exe');
-      final r = await Process.run(_dart(), ['compile', 'exe', p.join('beispiele', 'plugin', 'beispiel.dart'), '-o', exe]);
+      final r = await Process.run(dartDesSdk(), ['compile', 'exe', p.join('beispiele', 'plugin', 'beispiel.dart'), '-o', exe]);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
-      eingebaut = await _eingebaut();
+      eingebaut = await eingebauteWerkzeuge();
     });
     tearDownAll(() => vorlage.deleteSync(recursive: true));
 
     late Directory wurzel;
     late Protokoll protokoll;
-    late _EinstellungenOhneDatei einstellungen;
+    late EinstellungenOhneDatei einstellungen;
     late int port;
     late String ordner;
     final prozesse = <Process>[];
@@ -246,7 +163,7 @@ void main() {
     setUp(() async {
       wurzel = Directory.systemTemp.createTempSync('moocp_entwicklung_');
       protokoll = Protokoll();
-      port = await _freierPort();
+      port = await freierPort();
       // Der Ordner des Entwicklers: Beschreibungsdatei mit freiem
       // Entwicklungsport, kein Programm darin -- es läuft schon.
       ordner = (Directory(p.join(wurzel.path, 'entwicklung'))..createSync()).path;
@@ -258,9 +175,9 @@ void main() {
       // (ohneAnmeldungSetzen).
       m['ohneAnmeldung'] = <String>[];
       File(p.join(ordner, 'plugin.json')).writeAsStringSync(jsonEncode(m));
-      einstellungen = _EinstellungenOhneDatei(profile: [
-        _profil('standard', 'moodle', await _freierPort()),
-        _profil('k2', 'moodle-test', await _freierPort()),
+      einstellungen = EinstellungenOhneDatei(profile: [
+        beispielProfil('standard', 'moodle', await freierPort()),
+        beispielProfil('k2', 'moodle-test', await freierPort()),
       ]);
     });
 
@@ -381,7 +298,7 @@ void main() {
       expect(await werkzeugnamen(a), containsAll(['beispiel_echo', 'beispiel_absturz']));
       expect(await a.tool('beispiel_echo', {'text': 'a'}), 'Echo: a\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       expect(await b.tool('beispiel_echo', {'text': 'b'}), contains('Profil: moodle-test\n'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (16 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (17 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
       expect(einstellungen.plugins, isEmpty);
@@ -476,7 +393,7 @@ void main() {
 
       expect(await client.tool('beispiel_echo', {'text': 'nachher'}), startsWith('Echo: nachher'));
       expect(zeilen(), contains(startsWith('Verbindung zum Entwicklungs-Plugin „Beispiel“ verloren')));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (16 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (17 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
     });
@@ -485,7 +402,7 @@ void main() {
       final erster = await pluginStarten();
       final l = neueLaufende();
       await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), _beispielWerkzeuge);
+      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), beispielWerkzeuge);
 
       await pluginBeenden(erster);
       await _bis(() => l.entwicklung?.verbunden == false);
@@ -606,7 +523,7 @@ void main() {
       await pluginStarten();
       await _bis(() => l.entwicklung?.verbunden == true);
       expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), contains('beispiel_echo'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (16 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (17 Werkzeuge)'));
     });
 
     test('ein Absturz ist hier kein Ausfall: kein Neustart durch die App, keine Ausfallanzeige', () async {
@@ -644,7 +561,7 @@ void main() {
       expect(starts, 0);
       expect(l.laeuft(e), isFalse);
       expect(l.startfehler(e), contains('Entwicklungs-Plugin mit demselben Kurznamen'));
-      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), _beispielWerkzeuge);
+      expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), beispielWerkzeuge);
       expect(jsonEncode(einstellungen.zuJson()), vorher);
       expect(einstellungen.gespeichert, gespeichert);
       expect(einstellungen.plugins['beispiel']!.zugestimmt, isTrue);
@@ -657,7 +574,7 @@ void main() {
 
       await l.beenden();
 
-      expect(await _laeuft(pr.pid), isTrue);
+      expect(await prozessLaeuft(pr.pid), isTrue);
       expect(zeilen(), contains('Verbindung zum Entwicklungs-Plugin „Beispiel“ getrennt'));
       expect(l.entwicklung, (name: 'Beispiel', verbunden: false));
     });

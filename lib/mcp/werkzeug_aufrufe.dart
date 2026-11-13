@@ -200,13 +200,22 @@ class WerkzeugAufrufe {
             aufrufer: aufrufer,
           );
         } finally {
+          // Ruft ein Plugin ein eingebautes Werkzeug auf, steht der Hinweis
+          // „ohne Freigabe ausgeführt“ nicht nur in der Antwort an das Plugin:
+          // Der Werkzeugaufruf des Plugins ([aussen]) zählt die Auslassung mit,
+          // und moocp selbst sagt es der KI, mit dem Plugin als Aufrufer (A3,
+          // E20, E35) -- gleich, was das Plugin daraus macht.
           aussen?.testfreigaben += zaehler.testfreigaben;
+          if (aussen != null && zaehler.ausgelassen > 0) {
+            aussen.ausgelassen += zaehler.ausgelassen;
+            aussen.aufrufer ??= aufrufer ?? zaehler.aufrufer;
+          }
         }
         protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');
         return CallToolResult.fromContent([
           TextContent(
             text:
-                '$text${_ohneFreigabe(zaehler.ausgelassen, aufrufer)}'
+                '$text${_ohneFreigabe(zaehler.ausgelassen, aufrufer ?? zaehler.aufrufer)}'
                 '${zaehler.testfreigaben > 0 ? '\n$testfreigabeHinweis' : ''}',
           ),
         ]);

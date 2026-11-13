@@ -22,9 +22,10 @@ import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/plugin_adresse.dart';
 import 'sperrliste_test.dart' show mussDurchlassen, mussSperren, werkzeugGet;
 
-const _schluessel = 'schluessel-des-beispiels-0123456789abcdefghijkl';
+const _schluessel = beispielSchluessel;
 
 /// Der Wert des Sitzungscookies, den das Doppel setzt: Er darf nie in einer
 /// Antwort an das Plugin oder im Protokoll stehen.
@@ -379,23 +380,6 @@ class _Kontext implements AufrufKontext {
   String? get testDialogantworten => null;
 }
 
-typedef _Antwort = ({int status, Map json, HttpHeaders kopf, String roh});
-
-Future<_Antwort> _post(Uri adresse, String pfad, Map<String, Object?> daten, {String? token}) async {
-  final http = HttpClient();
-  try {
-    final r = await http.postUrl(adresse.resolve(pfad));
-    r.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_schluessel');
-    if (token != null) r.headers.set(aufrufKopf, token);
-    r.headers.contentType = ContentType.json;
-    r.add(utf8.encode(jsonEncode(daten)));
-    final antwort = await r.close();
-    final text = await utf8.decoder.bind(antwort).join();
-    return (status: antwort.statusCode, json: jsonDecode(text) as Map, kopf: antwort.headers, roh: text);
-  } finally {
-    http.close(force: true);
-  }
-}
 
 void main() {
   late PluginTestMoodle moodle;
@@ -442,7 +426,7 @@ void main() {
     return (token: a.token, ende: adresse.aufrufAnmelden('beispiel', a).ende);
   }
 
-  Future<_Antwort> lesen(String token, Object? pfad, {String? methode}) => _post(adresse.adresse, pfadMoodleLesen, {
+  Future<AdresseAntwort> lesen(String token, Object? pfad, {String? methode}) => anAdresse(adresse.adresse, pfadMoodleLesen, {
     'pfad': pfad,
     'methode': ?methode,
   }, token: token);
@@ -452,8 +436,8 @@ void main() {
       final a = aufruf();
       a.ende();
       for (final f in [pfadMoodleLesen, pfadMoodleDatei]) {
-        expect((await _post(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'})).status, 403);
-        expect((await _post(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'}, token: a.token)).status, 403);
+        expect((await anAdresse(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'})).status, 403);
+        expect((await anAdresse(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'}, token: a.token)).status, 403);
       }
       expect(moodle.angefragt, isEmpty);
     });
@@ -461,11 +445,11 @@ void main() {
     test('nicht angemeldet: 503 mit dem Satz für Werkzeuge vor der Anmeldung, nichts gesendet', () async {
       final a = aufruf(z: MoodleZugang(protokoll));
       for (final f in [pfadMoodleLesen, pfadMoodleDatei, pfadZusatzLesen, pfadZusatzDatei]) {
-        final r = await _post(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
+        final r = await anAdresse(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
         expect(r.status, 503);
         expect(r.json, {'fehler': 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.'});
       }
-      final lauf = await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token);
+      final lauf = await anAdresse(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token);
       expect(lauf.status, 503);
       expect(lauf.json, {'fehler': 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.'});
       expect(moodle.angefragt, isEmpty);
@@ -654,7 +638,7 @@ void main() {
         (pfadMoodleLesen, '/question/banks.php?courseid=12&mustermann=1'),
         (pfadMoodleDatei, '/pluginfile.php/55/mod_folder/content/0/erika_mustermann.pdf'),
       ]) {
-        final r = await _post(adresse.adresse, f, {'pfad': pfad}, token: a.token);
+        final r = await anAdresse(adresse.adresse, f, {'pfad': pfad}, token: a.token);
         expect(r.status, 422, reason: pfad);
         expect(r.json['fehler'], startsWith('Gesperrt: Der Pfad enthält ein Wort'));
       }
@@ -697,7 +681,7 @@ void main() {
       const pfad = '/pluginfile.php/55/user/backup/1/kurs.mbz?forcedownload=1';
       await abgelehnt(pfad, grund: 'user/');
       final a = aufruf();
-      final r = await _post(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
       expect(r.status, 403);
       final plugin = Directory(p.join(wurzel.path, 'A', 'plugin-beispiel'));
       expect(plugin.existsSync() ? plugin.listSync() : const [], isEmpty);
@@ -804,7 +788,7 @@ void main() {
       final b = aufruf(profil: 'B');
       final a = aufruf();
       const pfad = '/pluginfile.php/55/mod_folder/content/0/blatt.pdf';
-      final r = await _post(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
+      final r = await anAdresse(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
 
       final ziel = p.join(wurzel.path, 'A', 'plugin-beispiel', 'blatt.pdf');
       expect(r.status, 200);
@@ -813,9 +797,9 @@ void main() {
       expect(Directory(p.join(wurzel.path, 'B', 'plugin-beispiel')).existsSync(), isFalse);
       expect(zeilen(), ['moodle: Plugin „Beispiel“: GET /pluginfile.php/55/mod_folder/content/0/blatt.pdf → 200']);
 
-      final nochmal = await _post(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
+      final nochmal = await anAdresse(adresse.adresse, pfadMoodleDatei, {'pfad': pfad}, token: a.token);
       expect(nochmal.status, 409);
-      final mitName = await _post(adresse.adresse, pfadMoodleDatei, {'pfad': pfad, 'dateiname': 'zwei.pdf'}, token: a.token);
+      final mitName = await anAdresse(adresse.adresse, pfadMoodleDatei, {'pfad': pfad, 'dateiname': 'zwei.pdf'}, token: a.token);
       expect(mitName.json['datei'], p.join(wurzel.path, 'A', 'plugin-beispiel', 'zwei.pdf'));
       b.ende();
     });
@@ -823,20 +807,20 @@ void main() {
     test('ein ungültiger Dateiname, eine Seite statt einer Datei, eine abgelehnte Adresse: nichts bleibt liegen', () async {
       final a = aufruf();
       for (final name in ['../x.pdf', r'a\b.pdf', '.versteckt', 'a/b.pdf', '', 7]) {
-        final r = await _post(adresse.adresse, pfadMoodleDatei, {
+        final r = await anAdresse(adresse.adresse, pfadMoodleDatei, {
           'pfad': '/pluginfile.php/55/mod_folder/content/0/blatt.pdf',
           'dateiname': name,
         }, token: a.token);
         expect(r.status, 400, reason: '$name');
       }
-      final seite = await _post(adresse.adresse, pfadMoodleDatei, {
+      final seite = await anAdresse(adresse.adresse, pfadMoodleDatei, {
         'pfad': '/pluginfile.php/55/mod_folder/content/0/seite.html',
       }, token: a.token);
       expect(seite.status, 502);
       expect(seite.json['fehler'], contains('Seite statt einer Datei'));
-      final admin = await _post(adresse.adresse, pfadMoodleDatei, {'pfad': '/admin/tool/x/datei.pdf'}, token: a.token);
+      final admin = await anAdresse(adresse.adresse, pfadMoodleDatei, {'pfad': '/admin/tool/x/datei.pdf'}, token: a.token);
       expect(admin.status, 403);
-      final post = await _post(adresse.adresse, pfadMoodleDatei, {
+      final post = await anAdresse(adresse.adresse, pfadMoodleDatei, {
         'pfad': '/pluginfile.php/55/mod_folder/content/0/blatt.pdf',
         'methode': 'POST',
       }, token: a.token);

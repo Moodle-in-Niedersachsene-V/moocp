@@ -27,6 +27,8 @@ import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/nur_maus.dart';
+
 FreigabeAnfrage _anfrage(String titel) =>
     FreigabeAnfrage(titel: titel, punkte: const [], vergleich: const []);
 
@@ -164,6 +166,61 @@ void main() {
       expect(freigaben.testfreigaben, 0);
     });
   }
+
+  testWidgets('nur Maus: Tabulator erreicht keinen Knopf, Return, Enter und Leertaste entscheiden nichts', (tester) async {
+    final freigaben = Freigaben(Protokoll());
+    await tester.pumpWidget(_fenster(freigaben));
+    final antwort = freigaben.anfragen(_anfrage('ZZ Änderung?'));
+    await tester.pumpAndSettle();
+    await tester.pump(Sperrzeit.dauerVorgabe);
+
+    await tabUndTasten(tester, ['Speichern', 'Abbrechen']);
+    expect(freigaben.aktuell, isNotNull, reason: 'nichts entschieden');
+
+    await tester.tap(find.text('Speichern'));
+    await tester.pumpAndSettle();
+    expect(await antwort, isTrue, reason: 'mit der Maus geht es');
+  });
+
+  // Ein zweiter Dialog über einer offenen Freigabe (ein Dialog eines Plugins,
+  // die Warnung der letzten Sperre, die Freigabe eines anderen Profils): Ist
+  // er zu, liegt die Freigabe wieder oben, und ihre Wartezeit beginnt neu --
+  // sonst träfe ein Doppelklick, dessen erster Klick dem oberen Dialog galt,
+  // die Freigabe darunter.
+  testWidgets('liegt die Freigabe wieder oben, beginnt ihre Wartezeit neu', (tester) async {
+    final freigaben = Freigaben(Protokoll());
+    await tester.pumpWidget(_fenster(freigaben));
+    final antwort = freigaben.anfragen(_anfrage('ZZ Änderung?'));
+    await tester.pumpAndSettle();
+    await tester.pump(Sperrzeit.dauerVorgabe);
+    expect(_knopfFrei(tester, 'Speichern'), isTrue);
+
+    final navigator = Navigator.of(tester.element(find.text('Hauptfenster')), rootNavigator: true);
+    final oben = DialogRoute<void>(
+      context: tester.element(find.text('Hauptfenster')),
+      builder: (context) => AlertDialog(
+        title: const Text('Darüber'),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Schließen'))],
+      ),
+    );
+    unawaited(navigator.push(oben));
+    await tester.pumpAndSettle();
+    await tester.pump(Sperrzeit.dauerVorgabe * 2);
+    await tester.tap(find.text('Schließen'));
+    await tester.pump();
+
+    expect(_knopfFrei(tester, 'Speichern'), isFalse, reason: 'die Wartezeit beginnt neu');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Speichern'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(freigaben.aktuell, isNotNull, reason: 'ein Klick gleich danach entscheidet nichts');
+
+    await tester.pump(Sperrzeit.dauerVorgabe);
+    expect(_knopfFrei(tester, 'Speichern'), isTrue);
+    await tester.tap(find.text('Speichern'));
+    await tester.pumpAndSettle();
+    expect(await antwort, isTrue);
+  });
 
   testWidgets(
     'wechselt den Listener bei Profilwechsel auch mit offenem Dialog',
@@ -632,10 +689,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(freigaben.aktuell, isNotNull, reason: 'vor der Wartezeit nimmt der Knopf nichts an');
       await tester.pump(Sperrzeit.dauerVorgabe);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.sendKeyEvent(LogicalKeyboardKey.space);
-      await tester.pumpAndSettle();
-      expect(freigaben.aktuell, isNotNull, reason: 'Return und Leertaste entscheiden nichts');
+      await tabUndTasten(tester, ['Freigeben', 'Ablehnen']);
+      expect(freigaben.aktuell, isNotNull, reason: 'Tabulator, Return und Leertaste entscheiden nichts');
 
       await tester.tap(find.text('Freigeben'));
       await tester.pumpAndSettle();

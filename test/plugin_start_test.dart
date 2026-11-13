@@ -30,72 +30,10 @@ import 'package:moocp/protokoll.dart';
 import 'package:moocp/testzugang.dart';
 import 'package:path/path.dart' as p;
 
+import 'hilfen/beispiel_plugin.dart';
+import 'hilfen/zugang.dart';
 import 'mcp_client.dart';
 import 'plugin_moodle_test.dart' show PluginTestMoodle, exportGroesse, lehrkraftImDoppel, sitzungsCookie;
-
-/// Ein Zugang, dessen Anmeldung der Test schaltet, ohne Moodle; er zählt,
-/// ob jemand sich anzumelden versucht.
-class _Zugang extends MoodleZugang {
-  _Zugang(super.protokoll);
-
-  var an = false;
-  var anmeldeversuche = 0;
-
-  @override
-  bool get angemeldet => an;
-
-  @override
-  Future<void> anmelden(String adresse, String benutzer, String passwort) async => anmeldeversuche++;
-}
-
-class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
-
-  /// Wie oft die App ihre Einstellungen geschrieben hätte.
-  int gespeichert = 0;
-
-  @override
-  Future<void> speichern() async => gespeichert++;
-}
-
-/// Das `dart` des Flutter-SDK, mit dem die Tests laufen: `flutter test`
-/// führt die Tests im flutter_tester aus, nicht in dart; das SDK liegt
-/// darüber in `bin/cache/dart-sdk`.
-String _dart() {
-  final exe = Platform.isWindows ? 'dart.exe' : 'dart';
-  final wurzel = Platform.environment['FLUTTER_ROOT'];
-  if (wurzel != null) {
-    final f = File(p.join(wurzel, 'bin', 'cache', 'dart-sdk', 'bin', exe));
-    if (f.existsSync()) return f.path;
-  }
-  var d = File(Platform.resolvedExecutable).parent;
-  while (d.parent.path != d.path) {
-    final f = File(p.join(d.path, 'dart-sdk', 'bin', exe));
-    if (f.existsSync()) return f.path;
-    d = d.parent;
-  }
-  throw StateError('Das dart des Flutter-SDK ist nicht zu finden.');
-}
-
-/// Die Werkzeuge des Beispiel-Plugins in der Reihenfolge seiner Liste.
-const _beispielWerkzeuge = [
-  'beispiel_echo',
-  'beispiel_absturz',
-  'beispiel_protokoll',
-  'beispiel_datei',
-  'beispiel_status',
-  'beispiel_auswahl',
-  'beispiel_eingabe',
-  'beispiel_pfad',
-  'beispiel_hinweis',
-  'beispiel_freigabe',
-  'beispiel_moodle_lesen',
-  'beispiel_moodle_gesperrt',
-  'beispiel_moodle_schreiben',
-  'beispiel_lauf',
-  'beispiel_download',
-  'beispiel_namen',
-];
 
 /// Eine Protokollzeile an die Adresse der App (`/v1/protokoll`), wie von einem Plugin mit
 /// [schluessel]; liefert den HTTP-Status.
@@ -113,44 +51,6 @@ Future<int> _protokollzeile(Uri adresse, String schluessel, String text) async {
   } finally {
     http.close(force: true);
   }
-}
-
-Profil _profil(String kennung, String mcpName, int port) => Profil(
-  kennung: kennung,
-  name: mcpName,
-  adresse: 'https://$kennung.moodle.schule.example',
-  port: port,
-  mcpName: mcpName,
-  schluessel: 'test',
-);
-
-Future<int> _freierPort() async {
-  final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  final port = s.port;
-  await s.close();
-  return port;
-}
-
-/// Die Namen der eingebauten Werkzeuge, wie die App sie beim Start ermittelt.
-Future<Set<String>> _eingebaut() {
-  final protokoll = Protokoll();
-  return McpDienst(
-    Einstellungen(schluessel: ''),
-    MoodleZugang(protokoll),
-    protokoll,
-    Freigaben(protokoll),
-    '',
-    profil: Profil.migriert(''),
-  ).eingebauteWerkzeugnamen();
-}
-
-/// Ob ein Prozess mit dieser Nummer noch läuft.
-Future<bool> _laeuft(int pid) async {
-  if (Platform.isWindows) {
-    final r = await Process.run('tasklist', ['/FI', 'PID eq $pid', '/NH']);
-    return '${r.stdout}'.contains(' $pid ');
-  }
-  return (await Process.run('kill', ['-0', '$pid'])).exitCode == 0;
 }
 
 /// Alle Nachkommen von [pid] (nur Windows), sobald einer davon [name] heißt;
@@ -188,7 +88,7 @@ void main() {
   setUpAll(() async {
     vorlage = Directory.systemTemp.createTempSync('moocp_beispiel_');
     final ziel = p.join(vorlage.path, 'beispiel.exe');
-    final r = await Process.run(_dart(), [
+    final r = await Process.run(dartDesSdk(), [
       'compile',
       'exe',
       p.join('beispiele', 'plugin', 'beispiel.dart'),
@@ -197,13 +97,13 @@ void main() {
     ]);
     expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
     File(p.join('beispiele', 'plugin', 'plugin.json')).copySync(p.join(vorlage.path, 'plugin.json'));
-    eingebaut = await _eingebaut();
+    eingebaut = await eingebauteWerkzeuge();
   });
   tearDownAll(() => vorlage.deleteSync(recursive: true));
 
   late Directory wurzel;
   late Protokoll protokoll;
-  late _EinstellungenOhneDatei einstellungen;
+  late EinstellungenOhneDatei einstellungen;
   final laufende = <LaufendePlugins>[];
   final dienste = <McpDienst>[];
   final clients = <McpTestClient>[];
@@ -242,7 +142,7 @@ void main() {
       final j = jsonDecode(datei.readAsStringSync()) as Map<String, dynamic>;
       datei.writeAsStringSync(jsonEncode({...j, 'ohneAnmeldung': ohneAnmeldung}));
     }
-    einstellungen = _EinstellungenOhneDatei(profile: profile);
+    einstellungen = EinstellungenOhneDatei(profile: profile);
     final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
     expect(plugins.eintraege.single.fehler, isNull);
     await plugins.entscheiden(
@@ -293,7 +193,7 @@ void main() {
 
   group('Das Beispiel-Plugin als Kindprozess', () {
     test('sein Werkzeug steht in der Werkzeugliste und läuft mit Profil, Token und Schnittstelle', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l);
 
@@ -302,13 +202,13 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (16 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (17 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
 
     test('über die Adresse der App: Protokollzeile, Datei im Arbeitsordner und das eingebaute status', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
       final client = await verbinden(profil, l, arbeitsordner: ordner.path);
@@ -330,12 +230,12 @@ void main() {
     });
 
     test('vor der Anmeldung: die Werkzeuge ohne Anmeldung gehen, die übrigen und die eingebauten erst danach, in derselben Sitzung', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
-      final ohne = _profil('weiteres', 'moodle-weiteres', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      final ohne = beispielProfil('weiteres', 'moodle-weiteres', await freierPort());
       final l = await starten(await beispielAngenommen([profil, ohne], aktiv: {'standard'}));
       expect(l.ohneAnmeldungIn(profil), isTrue);
       expect(l.ohneAnmeldungIn(ohne), isFalse, reason: 'dort ist das Plugin nicht eingeschaltet');
-      final zugang = _Zugang(protokoll);
+      final zugang = SchaltbarerZugang(protokoll);
       final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
       final client = await verbinden(profil, l, arbeitsordner: ordner.path, moodle: zugang, vorAnmeldung: true);
       const hinweis = 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.';
@@ -343,7 +243,7 @@ void main() {
           client.call('tools/call', {'name': name, 'arguments': args});
       String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
 
-      expect(await werkzeugnamen(client), containsAll([..._beispielWerkzeuge, 'status', 'meine_kurse']));
+      expect(await werkzeugnamen(client), containsAll([...beispielWerkzeuge, 'status', 'meine_kurse']));
       expect(await client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
       expect(await client.tool('beispiel_protokoll', {'text': 'vorher'}), 'Die Zeile steht im Protokoll von moocp.');
       expect(await client.tool('beispiel_datei', {'text': 'vorher'}), startsWith('Datei abgelegt: '));
@@ -368,7 +268,7 @@ void main() {
     });
 
     test('nennt ohneAnmeldung ein Werkzeug, das das Plugin nicht hat, lädt es nicht', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil], ohneAnmeldung: ['beispiel_echo', 'beispiel_gibtesnicht']);
       final l = await starten(plugins);
       final e = plugins.eintraege.single;
@@ -385,7 +285,7 @@ void main() {
     });
 
     test('Dialoge und Freigabe: jede Art über die Adresse der App, die Antwort kommt beim Plugin an', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final gewaehlt = Directory(p.join(wurzel.path, 'gewaehlt'))..createSync();
       File(p.join(gewaehlt.path, 'eins.txt')).writeAsStringSync('1');
       File(p.join(gewaehlt.path, 'zwei.txt')).writeAsStringSync('22');
@@ -425,7 +325,7 @@ void main() {
       freigaben.stufe = Bestaetigungen.keine;
       final ohne = await client.tool('beispiel_freigabe', {'ab': 'mittel'});
       expect(ohne, startsWith('Ausgang: freigegeben (ohne Frage, wegen der Stufe)'));
-      expect(ohne, contains('Ohne Freigabe ausgeführt (1 Vorgang)'));
+      expect(ohne, contains('Ohne Freigabe ausgeführt (1 Vorgang, Aufrufer: Plugin „Beispiel“)'));
       expect(await client.tool('beispiel_freigabe', {'ab': 'keine'}), 'Ausgang: abgelehnt');
 
       final zeilen = [for (final e in protokoll.eintraege) e.text];
@@ -444,7 +344,7 @@ void main() {
       addTearDown(() => moodle.server.close(force: true));
       final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
       moodle.angefragt.clear();
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l, moodle: zugang);
 
@@ -465,6 +365,32 @@ void main() {
       expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
     });
 
+    test('eine Datei über die Positivliste: landet im Unterordner des Plugins im Arbeitsordner', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      moodle.angefragt.clear();
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
+      final client = await verbinden(profil, l, arbeitsordner: ordner.path, moodle: zugang);
+
+      final geladen = await client.tool('beispiel_moodle_datei', {'pfad': '/pluginfile.php/55/mod_folder/content/0/blatt.pdf'});
+      final gesperrt = await client.call('tools/call', {
+        'name': 'beispiel_moodle_datei',
+        'arguments': {'pfad': '/admin/tool/x/datei.pdf'},
+      });
+
+      final ziel = p.join(ordner.path, 'plugin-beispiel', 'blatt.pdf');
+      expect(geladen, 'Datei geladen: $ziel (2048 Bytes)');
+      expect(File(ziel).lengthSync(), 2048);
+      expect(gesperrt['isError'], true);
+      expect(moodle.angefragt, ['GET /pluginfile.php/55/mod_folder/content/0/blatt.pdf']);
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: GET /pluginfile.php/55/mod_folder/content/0/blatt.pdf → 200'));
+    });
+
     test('Schreiben über eine Zusatzadresse: Freigabe auf jeder Stufe, ein POST, Antwort an die KI gekennzeichnet', () async {
       final moodle = PluginTestMoodle();
       await moodle.starten();
@@ -482,7 +408,7 @@ void main() {
           scheduleMicrotask(() => freigaben.entscheiden(ja));
         }
       });
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l, moodle: zugang, freigaben: freigaben);
 
@@ -565,7 +491,7 @@ void main() {
         kennung: 'standard',
         name: 'moodle',
         adresse: moodle.basis.toString(),
-        port: await _freierPort(),
+        port: await freierPort(),
         mcpName: 'moodle',
         schluessel: 'test',
       );
@@ -616,7 +542,7 @@ void main() {
         kennung: 'standard',
         name: 'moodle',
         adresse: moodle.basis.toString(),
-        port: await _freierPort(),
+        port: await freierPort(),
         mcpName: 'moodle',
         schluessel: 'test',
       );
@@ -657,7 +583,7 @@ void main() {
       final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
       moodle.angefragt.clear();
       final hinweise = SperrHinweise();
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
       final client = await verbinden(profil, l, moodle: zugang);
 
@@ -707,7 +633,7 @@ void main() {
       moodle.angefragt.clear();
       final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
       final hinweise = SperrHinweise();
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final arbeitsordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
       final l = await starten(
         await beispielAngenommen([profil]),
@@ -745,8 +671,8 @@ void main() {
     });
 
     test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
-      final eins = _profil('standard', 'moodle', await _freierPort());
-      final zwei = _profil('k2', 'moodle-test', await _freierPort());
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
       final hinweise = SperrHinweise();
       final l = await starten(await beispielAngenommen([eins, zwei]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
       final a = await verbinden(eins, l);
@@ -791,8 +717,8 @@ void main() {
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
-      final eins = _profil('standard', 'moodle', await _freierPort());
-      final zwei = _profil('k2', 'moodle-test', await _freierPort());
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
       final plugins = await beispielAngenommen([eins, zwei]);
       final l = await starten(plugins);
       await l.starten(plugins, eingebaut: eingebaut);
@@ -806,8 +732,8 @@ void main() {
     });
 
     test('ausgeschaltet in einem Profil: dort nicht in der Liste und nicht aufrufbar, im anderen schon', () async {
-      final eins = _profil('standard', 'moodle', await _freierPort());
-      final zwei = _profil('k2', 'moodle-test', await _freierPort());
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
       final plugins = await beispielAngenommen([eins, zwei], aktiv: {'standard'});
       final l = await starten(plugins);
 
@@ -819,7 +745,7 @@ void main() {
     });
 
     test('ausschalten wirkt für Aufrufe sofort, in der Werkzeugliste ab der nächsten Sitzung', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       final l = await starten(plugins);
       final client = await verbinden(profil, l);
@@ -840,7 +766,7 @@ void main() {
     });
 
     test('es nimmt keine Anfrage ohne seinen Schlüssel an', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       int? port;
       final l = LaufendePlugins(
         protokoll,
@@ -881,7 +807,7 @@ void main() {
     });
 
     test('der Schlüssel steht nicht auf der Kommandozeile des Plugin-Prozesses, der Port schon', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       late Process prozess;
       late String schluessel;
       final l = LaufendePlugins(
@@ -909,7 +835,7 @@ void main() {
     }, skip: Platform.isWindows ? false : 'misst die Prozessliste von Windows');
 
     test('nach dem Beenden läuft kein Plugin-Prozess mehr', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       late Process prozess;
       final l = LaufendePlugins(
         protokoll,
@@ -917,16 +843,16 @@ void main() {
             prozess = await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner),
       );
       await starten(await beispielAngenommen([profil]), mit: l);
-      expect(await _laeuft(prozess.pid), isTrue);
+      expect(await prozessLaeuft(prozess.pid), isTrue);
 
       await l.beenden();
 
-      expect(await _laeuft(prozess.pid), isFalse);
+      expect(await prozessLaeuft(prozess.pid), isFalse);
       expect([for (final e in protokoll.eintraege) e.text], contains('Plugin „Beispiel“ 1.0.0 beendet'));
     });
 
     test('endet die App, während ein Plugin noch startet, bleibt auch dessen Prozess nicht zurück', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       final gestartet = Completer<Process>();
       // Ein Plugin, das nie lauscht und selbst ein Programm startet. Unter
@@ -943,7 +869,7 @@ void main() {
       final l = LaufendePlugins(
         protokoll,
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
-          final prozess = await Process.start(_dart(), [warten.path]);
+          final prozess = await Process.start(dartDesSdk(), [warten.path]);
           gestartet.complete(prozess);
           return prozess;
         },
@@ -957,15 +883,15 @@ void main() {
       await l.beenden();
       await start.timeout(const Duration(seconds: 10));
 
-      expect(await _laeuft(prozess.pid), isFalse);
+      expect(await prozessLaeuft(prozess.pid), isFalse);
       for (final k in kinder) {
-        expect(await _laeuft(k), isFalse, reason: 'Kindprozess $k');
+        expect(await prozessLaeuft(k), isFalse, reason: 'Kindprozess $k');
       }
       expect(l.laeuft(plugins.eintraege.single), isFalse);
     });
 
     test('haben sich seine Dateien seit der Suche geändert, startet es nicht', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       var gestartet = false;
       File(p.join(plugins.eintraege.single.pfad, 'beispiel.exe')).writeAsBytesSync([1, 2, 3], mode: FileMode.append);
@@ -986,7 +912,7 @@ void main() {
     });
 
     test('antwortet es zweimal nicht binnen der Frist, ist es ausgefallen, und beide Prozesse enden', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       final prozesse = <Process>[];
       // Ein Programm, das läuft, aber nie lauscht: ein Dart-Programm, das nur
@@ -997,7 +923,7 @@ void main() {
         protokoll,
         startfrist: const Duration(seconds: 2),
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
-          final prozess = await Process.start(_dart(), [warten.path]);
+          final prozess = await Process.start(dartDesSdk(), [warten.path]);
           prozesse.add(prozess);
           return prozess;
         },
@@ -1013,7 +939,7 @@ void main() {
       expect(l.startfehler(e), contains('nicht binnen 2 Sekunden'));
       expect(l.werkzeuge(profil), isEmpty, reason: 'es hat nie Werkzeuge genannt');
       for (final prozess in prozesse) {
-        expect(await _laeuft(prozess.pid), isFalse);
+        expect(await prozessLaeuft(prozess.pid), isFalse);
       }
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(
@@ -1024,7 +950,7 @@ void main() {
     });
 
     test('antwortet es beim ersten Versuch nicht, startet der zweite; einen Absturz danach fängt kein Neustart mehr auf', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       final warten = File(p.join(wurzel.path, 'warten.dart'))
         ..writeAsStringSync('Future<void> main() => Future<void>.delayed(const Duration(minutes: 5));\n');
@@ -1034,7 +960,7 @@ void main() {
         startfrist: const Duration(seconds: 2),
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
           final prozess = prozesse.isEmpty
-              ? await Process.start(_dart(), [warten.path])
+              ? await Process.start(dartDesSdk(), [warten.path])
               : await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
           prozesse.add(prozess);
           return prozess;
@@ -1044,7 +970,7 @@ void main() {
       await starten(plugins, mit: l);
       final e = plugins.eintraege.single;
       expect(l.laeuft(e), isTrue);
-      expect(await _laeuft(prozesse.first.pid), isFalse);
+      expect(await prozessLaeuft(prozesse.first.pid), isFalse);
       final client = await verbinden(profil, l);
       expect(await client.tool('beispiel_echo', {'text': 'a'}), startsWith('Echo: a'));
 
@@ -1094,7 +1020,7 @@ void main() {
     }
 
     test('ein Absturz: der laufende Aufruf bekommt sofort den Fehler, ein Neustart mit neuem Port und Schlüssel, danach arbeitet es wieder', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
 
       final uhr = Stopwatch()..start();
@@ -1111,17 +1037,17 @@ void main() {
       expect(g.starts.toSet(), hasLength(2), reason: 'neuer Port und neuer Schlüssel');
       expect(g.starts[0].split(' ').first, isNot(g.starts[1].split(' ').first));
       expect(g.starts[0].split(' ').last, isNot(g.starts[1].split(' ').last));
-      expect(await _laeuft(g.prozesse.first.pid), isFalse);
+      expect(await prozessLaeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (16 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }
     });
 
     test('nach dem Neustart gilt an der Adresse der App nur der neue Schlüssel', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
       final adresse = g.laufende.appAdresse!;
       final alt = g.starts.single.split(' ').last;
@@ -1140,7 +1066,7 @@ void main() {
     });
 
     test('ein zweiter Absturz: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
 
       ausfallMeldung(await absturz(g.client));
@@ -1157,7 +1083,7 @@ void main() {
       expect(await werkzeugnamen(neu), containsAll(['beispiel_echo', 'beispiel_absturz']));
       ausfallMeldung(await neu.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
       for (final prozess in g.prozesse) {
-        expect(await _laeuft(prozess.pid), isFalse);
+        expect(await prozessLaeuft(prozess.pid), isFalse);
       }
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'), hasLength(2));
@@ -1165,7 +1091,7 @@ void main() {
     });
 
     test('haben sich seine Dateien vor dem Neustart geändert, startet es nicht neu und ist ausgefallen', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
       final e = g.plugins.eintraege.single;
       File(p.join(e.pfad, 'neu.txt')).writeAsStringSync('dazugekommen');
@@ -1183,7 +1109,7 @@ void main() {
     });
 
     test('die Namen überstehen einen Neustart: Auch das neu gestartete Plugin bleibt gesperrt', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
       final r = await g.client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
       expect(r['isError'], true);
@@ -1198,7 +1124,7 @@ void main() {
     });
 
     test('nennt das Plugin nach einem Neustart eine Werkzeugliste mit einem gesperrten Namen, startet es nicht und ist ausgefallen', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       // Der Neustart ist ein anderes Programm: ein kleiner MCP-Server, dessen
       // Werkzeugbeschreibung den Namen trägt.
       // Außerhalb des Plugin-Ordners und mit eigenem Aufräumen: Das dart des
@@ -1240,7 +1166,7 @@ Future<void> main(List<String> a) async {
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
           final prozess = prozesse.isEmpty
               ? await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner)
-              : await Process.start(_dart(), ['--packages=$pakete', skript.path, ...argumente], environment: umgebung);
+              : await Process.start(dartDesSdk(), ['--packages=$pakete', skript.path, ...argumente], environment: umgebung);
           prozesse.add(prozess);
           return prozess;
         },
@@ -1267,12 +1193,12 @@ Future<void> main(List<String> a) async {
       expect(hinweise.offen.last.werkzeug, isNull);
       expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.beschreibung).join(), isNot(contains('Erika')));
       for (final prozess in prozesse) {
-        expect(await _laeuft(prozess.pid), isFalse);
+        expect(await prozessLaeuft(prozess.pid), isFalse);
       }
     });
 
     test('das reguläre Beenden ist kein Absturz: kein Neustart, keine Anzeige', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
 
       await g.laufende.beenden();
@@ -1294,14 +1220,14 @@ Future<void> main(List<String> a) async {
     }
 
     test('nach dem Start ist die Liste gemerkt; --werkzeugliste nennt sie wie der Server, ohne ein Plugin zu starten', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l);
       final vomServer = [
         for (final t in (await client.call('tools/list'))['tools'] as List)
           if ((t as Map)['name'] == 'beispiel_echo') t,
       ].single;
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), _beispielWerkzeuge);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), beispielWerkzeuge);
 
       // Die App ist zu und das Plugin mit ihr; die Datei bleibt.
       await l.beenden();
@@ -1321,23 +1247,23 @@ Future<void> main(List<String> a) async {
     }, skip: Platform.isWindows ? false : 'prüft die Prozessliste von Windows');
 
     test('beim nächsten Start der App ist dieselbe Liste schon gemerkt: nichts wird erneut geschrieben', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       await l.beenden();
       final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
-      einstellungen = _EinstellungenOhneDatei(profile: [profil])
+      einstellungen = EinstellungenOhneDatei(profile: [profil])
         ..plugins = Einstellungen.aus(json, Einstellungen(schluessel: 'x')).plugins;
 
       final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
       final neu = await starten(plugins);
 
       expect(neu.laeuft(plugins.eintraege.single), isTrue);
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), _beispielWerkzeuge);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.name), beispielWerkzeuge);
       expect(einstellungen.gespeichert, 0);
     });
 
     test('wird das Plugin ausgetauscht, fehlt seine Liste, bis es mit neuer Zustimmung gestartet ist', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final l = await starten(await beispielAngenommen([profil]));
       await l.beenden();
       File(p.join(wurzel.path, 'plugins', 'beispiel', 'plugin.json'))
@@ -1391,21 +1317,21 @@ Future<void> main(List<String> a) async {
     });
 
     test('mit langem Profilnamen über 64 Zeichen: Das Werkzeug fehlt nur in diesem Profil, einmal im Protokoll', () async {
-      final kurz = _profil('standard', 'moodle', await _freierPort());
+      final kurz = beispielProfil('standard', 'moodle', await freierPort());
       // 40 Zeichen: mcp__ und __ dazu sind 47, beispiel_echo passt noch.
-      final lang = _profil('lang', 'moodle-${'x' * 33}', await _freierPort());
+      final lang = beispielProfil('lang', 'moodle-${'x' * 33}', await freierPort());
       final plugins = await beispielAngenommen([kurz, lang]);
       final l = await starten(plugins);
 
       List<String> namen(Profil profil) => [for (final w in l.werkzeuge(profil)) w.name];
-      expect(namen(kurz), _beispielWerkzeuge);
+      expect(namen(kurz), beispielWerkzeuge);
       final imLangen = namen(lang);
       expect(imLangen, containsAll(['beispiel_echo', 'beispiel_hinweis']));
       expect(imLangen, isNot(contains('beispiel_moodle_schreiben')));
       for (final n in imLangen) {
         expect('mcp__${lang.mcpName}__$n'.length, lessThanOrEqualTo(64), reason: n);
       }
-      final fehlen = _beispielWerkzeuge.length - imLangen.length;
+      final fehlen = beispielWerkzeuge.length - imLangen.length;
       expect(fehlen, greaterThan(0));
       // Noch einmal gefragt, etwa von einer zweiten Sitzung: keine zweite Zeile.
       namen(lang);
@@ -1441,7 +1367,7 @@ Future<void> main(List<String> a) async {
     });
 
     test('trägt ein Werkzeug einen vergebenen Namen, lädt das Plugin nicht, und sein Prozess endet', () async {
-      final profil = _profil('standard', 'moodle', await _freierPort());
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       late Process prozess;
       final l = LaufendePlugins(
@@ -1457,7 +1383,7 @@ Future<void> main(List<String> a) async {
       expect(l.startfehler(plugins.eintraege.single), contains('schon gibt'));
       expect(l.startfehler(plugins.eintraege.single), isNot(contains('beispiel_echo')));
       expect(l.werkzeuge(profil), isEmpty);
-      expect(await _laeuft(prozess.pid), isFalse);
+      expect(await prozessLaeuft(prozess.pid), isFalse);
     });
   });
 
@@ -1486,7 +1412,7 @@ Future<void> main(List<String> a) async {
         WerkzeugAufruf(
           name: 'beispiel_warten',
           args: const {},
-          profil: _profil('standard', 'moodle', 1),
+          profil: beispielProfil('standard', 'moodle', 1),
           token: aufrufToken(),
           abbruch: abbruch.future,
         ),
@@ -1521,7 +1447,7 @@ Future<void> main(List<String> a) async {
       WerkzeugAufruf aufruf(String name, Map<String, dynamic> args) => WerkzeugAufruf(
         name: name,
         args: args,
-        profil: _profil('standard', 'moodle', 1),
+        profil: beispielProfil('standard', 'moodle', 1),
         token: aufrufToken(),
         abbruch: Completer<void>().future,
       );
@@ -1544,7 +1470,7 @@ Future<({int port, Future<void> Function() stop})> _fremderServer(
   List<String> namen, {
   FutureOr<CallToolResult> Function(Map<String, dynamic> args, RequestHandlerExtra extra)? werkzeug,
 }) async {
-  final port = await _freierPort();
+  final port = await freierPort();
   final server = StreamableMcpServer(
     serverFactory: (_) {
       final s = McpServer(const Implementation(name: 'fremd', version: '1'));

@@ -44,6 +44,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'hilfen/nur_maus.dart';
+
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile, super.plugins, required super.schluessel});
   int gespeichert = 0;
@@ -782,7 +784,7 @@ void main() {
       expect(find.text('Plugin zulassen'), findsOneWidget);
       expect(find.text('Beispiel-Plugin'), findsOneWidget);
       expect(find.text('Version 1.0'), findsOneWidget);
-      expect(find.text('Herkunft: Beispiel-Projekt'), findsOneWidget);
+      expect(find.text('Herkunft laut Plugin: Beispiel-Projekt'), findsOneWidget);
       expect(find.text('Zusatzadressen'), findsOneWidget);
       for (final text in [
         'lesen',
@@ -839,6 +841,7 @@ void main() {
         await tester.sendKeyEvent(taste);
         await tester.pumpAndSettle();
       }
+      await tabUndTasten(tester, ['Zustimmen', 'Ablehnen']);
       expect(antwort.fertig, isFalse);
       expect(find.text('Plugin zulassen'), findsOneWidget, reason: 'der Dialog ist noch offen');
 
@@ -1185,6 +1188,7 @@ void main() {
         await tester.sendKeyEvent(taste);
         await tester.pumpAndSettle();
       }
+      await tabUndTasten(tester, ['Anhängen', 'Ablehnen']);
       expect(antwort.fertig, isFalse);
       expect(find.text('Entwicklungs-Plugin anhängen'), findsOneWidget);
 

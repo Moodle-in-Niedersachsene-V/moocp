@@ -7,8 +7,8 @@ part of 'main.dart';
 //
 // Ein Dialog eines Plugins ist keine Freigabe; trotzdem kommt er oft nach
 // vorn, während die Lehrkraft woanders tippt. Deshalb nehmen seine Knöpfe
-// erst nach der Sperrzeit etwas an (nur_maus.dart) und sind nicht über die
-// Tastatur zu erreichen (ExcludeFocus): Ein Return, der gerade unterwegs ist,
+// erst nach der Sperrzeit etwas an und sind nicht über die Tastatur zu
+// erreichen (beides Sperrzeit, nur_maus.dart): Ein Return, der gerade unterwegs ist,
 // entscheidet nichts. NurMaus selbst umschließt den Dialog nicht, weil es
 // auch die Leertaste im Such- und Eingabefeld schluckte.
 //
@@ -241,24 +241,23 @@ class _PluginDialogFensterState extends State<PluginDialogFenster> {
         ),
       ),
       actions: [
-        ExcludeFocus(
-          child: Sperrzeit(
-            builder: (bereit) => Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!hinweis) ...[
-                  OutlinedButton(
-                    onPressed: bereit ? () => Navigator.of(context).pop() : null,
-                    child: const Text('Abbrechen'),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                FilledButton(
-                  onPressed: bereit && _gueltig ? () => Navigator.of(context).pop(_antwort) : null,
-                  child: Text(hinweis ? 'OK' : 'Übernehmen'),
+        // Sperrzeit nimmt die Knöpfe auch aus dem Tastaturfokus.
+        Sperrzeit(
+          builder: (bereit) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!hinweis) ...[
+                OutlinedButton(
+                  onPressed: bereit ? () => Navigator.of(context).pop() : null,
+                  child: const Text('Abbrechen'),
                 ),
+                const SizedBox(width: 8),
               ],
-            ),
+              FilledButton(
+                onPressed: bereit && _gueltig ? () => Navigator.of(context).pop(_antwort) : null,
+                child: Text(hinweis ? 'OK' : 'Übernehmen'),
+              ),
+            ],
           ),
         ),
       ],

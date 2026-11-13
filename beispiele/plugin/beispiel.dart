@@ -70,7 +70,7 @@
 // Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
 // lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt),
 // `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
-// Freigabe, und selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
+// Freigabe; in einem Lauf auch selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
 // Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
 // Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
 // nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
@@ -518,9 +518,16 @@ McpServer _server() {
   // 2. `/v1/moodle/zusatz/schreiben` mit der `kennung` und genau denselben
   //    `methode`, `pfad` und `felder`. Die Kennung gilt einmal und nur in
   //    diesem Aufruf. Den sesskey setzt moocp ein; ein Plugin schickt ihn nie
-  //    mit. Die Antwort hat `geschrieben`, `status`, `inhaltstyp`, `pfad`
-  //    (nach Umleitungen) und `text`, und `umleitungNichtGelesen`, wenn moocp
-  //    einer Umleitung nicht folgen durfte.
+  //    mit. Die Antwort hat `geschrieben`, `status` und `pfad`, und
+  //    `umleitungNichtGelesen`, wenn moocp einer Umleitung nicht folgen durfte.
+  //
+  // Den Inhalt der Seite danach (`inhaltstyp`, `text`, `pfad` mit Parametern)
+  // liefert moocp nur in einem Lauf (siehe `beispiel_lauf`) und nur, wenn die
+  // Seite zu Kurs und Aktivität des Laufs passt; sonst steht in `pfad` nur der
+  // Pfad bis zum Skriptnamen und in `hinweis` ein fester Satz. Geschrieben wird
+  // auch ohne Lauf. Wer nach dem Schreiben nachsehen will, beginnt also vorher
+  // einen Lauf mit der Aktivität, in die er schreibt (hier mit `lauf`: true;
+  // die Nummer an der Seite ist dann die der Aktivität).
   //
   // Zurücklesen und Prüfen ist Sache des Plugins: moocp kennt die Seite nicht.
   // Vor seine Antwort an die KI setzt moocp, dass das Plugin geprüft hat,
@@ -529,12 +536,14 @@ McpServer _server() {
     'beispiel_moodle_schreiben',
     description:
         'Speichert über moocp eine Notiz auf einer erfundenen Seite (/mod/beispiel/speichern.php), mit Freigabe '
-        'der Lehrkraft, und prüft selbst, ob sie danach dort steht. Zeigt das Schreiben über eine Zusatzadresse; '
-        'in einem echten Moodle gibt es die Seite nicht. $nurSchnittstelle',
+        'der Lehrkraft. Ohne Lauf nennt es nur den Status; mit Lauf prüft es selbst, ob die Notiz danach dort '
+        'steht. Zeigt das Schreiben über eine Zusatzadresse; in einem echten Moodle gibt es die Seite nicht. '
+        '$nurSchnittstelle',
     inputSchema: JsonSchema.object(
       properties: {
-        'id': JsonSchema.integer(description: 'Die Nummer, die an der Seite steht.'),
+        'id': JsonSchema.integer(description: 'Die Nummer, die an der Seite steht; mit Lauf die der Aktivität.'),
         'notiz': JsonSchema.string(description: 'Die Notiz.'),
+        'lauf': JsonSchema.boolean(description: 'In einem Lauf für die Aktivität id schreiben und nachsehen.'),
       },
       required: ['id', 'notiz'],
     ),
@@ -546,14 +555,23 @@ McpServer _server() {
     ),
     callback: (args, extra) async {
       final notiz = '${args['notiz']}';
+      final id = (args['id'] as num).toInt();
+      final imLauf = args['lauf'] == true;
       final schreibvorgang = {
         'methode': 'POST',
-        'pfad': '/mod/beispiel/speichern.php?id=${(args['id'] as num).toInt()}',
+        'pfad': '/mod/beispiel/speichern.php?id=$id',
         'felder': [
           {'name': 'notiz', 'wert': notiz},
         ],
       };
+      var laufBegonnen = false;
       try {
+        // Der Lauf beginnt vor der Freigabe: Nur dann kennt moocp den Kurs
+        // schon beim Fragen (im Testbetrieb gibt es danach frei).
+        if (imLauf) {
+          await anMoocp(adresse(), '/v1/moodle/lauf/beginnen', {'cmid': id}, aufruf: token(extra));
+          laufBegonnen = true;
+        }
         final freigabe = await anMoocp(adresse(), '/v1/moodle/zusatz/freigabe', {
           ...schreibvorgang,
           'titel': 'Notiz speichern?',
@@ -572,13 +590,29 @@ McpServer _server() {
         if (antwort['umleitungNichtGelesen'] != null) {
           return text('Gesendet, aber nicht geprüft: Das Plugin konnte die Seite danach nicht lesen.', fehler: true);
         }
-        final steht = '${antwort['text']}'.contains('Notiz: ${const HtmlEscape().convert(notiz)}') ||
-            '${antwort['text']}'.contains('Notiz: $notiz');
+        // Ohne Lauf, oder wenn die Seite nicht zu ihm passt, liefert moocp
+        // nur Status und Pfad.
+        final inhalt = antwort['text'];
+        if (inhalt is! String) {
+          return text(
+            'Gesendet; Moodle antwortet mit Status ${antwort['status']}. Nicht geprüft: Ohne Lauf liefert moocp den '
+            'Inhalt der Seite nicht.',
+          );
+        }
+        final steht = inhalt.contains('Notiz: ${const HtmlEscape().convert(notiz)}') || inhalt.contains('Notiz: $notiz');
         return steht
             ? text('Geschrieben und vom Plugin geprüft: Die Notiz steht auf der Seite.')
             : text('Gesendet, aber die Prüfung des Plugins hat die Notiz auf der Seite nicht gefunden.', fehler: true);
       } on MoocpFehler catch (f) {
         return text(f.text, fehler: true);
+      } finally {
+        if (laufBegonnen) {
+          try {
+            await anMoocp(adresse(), '/v1/moodle/lauf/beenden', {}, aufruf: token(extra));
+          } on MoocpFehler {
+            // Endet der Aufruf, endet der Lauf ohnehin mit ihm.
+          }
+        }
       }
     },
   );

@@ -199,11 +199,12 @@ void main() {
 
     List<String> posts() => [for (final a in moodle.angefragt) if (a.startsWith('POST ')) a];
 
-    Map<String, Object?> anfrage(int id, {String notiz = 'Hallo'}) => {
+    Map<String, Object?> anfrage(int id, {String notiz = 'Hallo', Map<String, String> mehr = const {}}) => {
       'methode': 'POST',
       'pfad': '/mod/beispiel/speichern.php?id=$id',
       'felder': [
         {'name': 'notiz', 'wert': notiz},
+        for (final MapEntry(:key, :value) in mehr.entries) {'name': key, 'wert': value},
       ],
       'titel': 'Notiz speichern?',
       'zusammenfassung': 'Speichert die Notiz.',
@@ -281,6 +282,45 @@ void main() {
       expect(f.json, {'ausgang': 'abgelehnt'});
       expect(gezeigt, hasLength(1));
       expect(freigaben.testfreigaben, 0);
+    });
+
+    // Moodle liest Formularfelder vor den Parametern der Adresse: Ein Feld mit
+    // einer anderen Nummer hebt die Bindung an den Lauf auf.
+    for (final felder in <Map<String, String>>[
+      {'course': '13'},
+      {'courseid': '13'},
+      {'data[course]': '13'},
+      {'Course': '13'},
+      {'cmid': '502'},
+      {'coursemodule': '502'},
+      {'id': '502'},
+      {'contextid': '960'},
+      {'course': ''},
+    ]) {
+      test('in einem Lauf im Testkurs, aber ein Formularfeld nennt eine andere Nummer ($felder): der Dialog', () async {
+        final a = aufruf(dienst(zugang));
+        await laufBeginnen(a.token, 501);
+
+        final f = await freigabe(a.token, anfrage(501, mehr: felder));
+
+        expect(f.json, {'ausgang': 'abgelehnt'});
+        expect(gezeigt, hasLength(1));
+        expect(freigaben.testfreigaben, 0);
+      });
+    }
+
+    test('Formularfelder mit den Nummern des Laufs: weiter automatisch freigegeben', () async {
+      final a = aufruf(dienst(zugang));
+      await laufBeginnen(a.token, 501);
+
+      final f = await freigabe(
+        a.token,
+        anfrage(501, mehr: {'course': '12', 'coursemodule': '501', 'contextid': '950', 'data[id]': '501', 'seite': '3'}),
+      );
+
+      expect(f.json['ausgang'], 'freigegeben');
+      expect(f.json['testbetrieb'], isTrue);
+      expect(gezeigt, isEmpty);
     });
 
     for (final fall in ['Profil', 'Adresse', 'Kurs']) {

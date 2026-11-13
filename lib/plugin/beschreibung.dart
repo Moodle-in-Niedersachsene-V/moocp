@@ -17,8 +17,10 @@ import '../update/updateliste.dart' show herkunftGueltig;
 import 'adressmuster.dart';
 
 /// Der Kurzname hat eine Höchstlänge, damit der Name, unter dem ein KI-Werkzeug
-/// ein Werkzeug des Plugins sieht (`mcp__<Profil>__<Kurzname>_<Werkzeug>`), in
-/// die 64 Zeichen passt, die Claude Code zulässt.
+/// ein Werkzeug des Plugins sieht (`mcp__<Profil>__<Kurzname>_<Werkzeug>`), im
+/// Standardprofil `moodle` in die 64 Zeichen passt, die Claude Code zulässt;
+/// bei einem längeren Profilnamen fehlt ein zu langes Werkzeug in diesem
+/// Profil (verbindung.dart, werkzeugnameZuLang).
 const int kurznameHoechstens = 12;
 
 final RegExp _kurzname = RegExp(r'^[a-z][a-z0-9]*$');
@@ -117,7 +119,7 @@ class PluginBeschreibung {
   static PluginBeschreibung ausText(String text) {
     final Object? json;
     try {
-      json = jsonDecode(text.startsWith('﻿') ? text.substring(1) : text);
+      json = jsonDecode(text.startsWith(String.fromCharCode(0xFEFF)) ? text.substring(1) : text);
     } on FormatException {
       throw const PluginFehler('Die Beschreibungsdatei ist keine gültige JSON-Datei.');
     }

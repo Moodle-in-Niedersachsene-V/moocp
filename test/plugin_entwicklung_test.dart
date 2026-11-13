@@ -494,7 +494,9 @@ void main() {
       final regelwidrig = await _fremderServer(port, const ['beispiel_echo', 'kurs_uebersicht']);
       await Future<void>.delayed(const Duration(milliseconds: 800));
       expect(l.entwicklung?.verbunden, isFalse);
-      expect(zeilen(), contains(allOf(startsWith('Entwicklungs-Plugin „Beispiel“ nicht verbunden: '), contains('„kurs_uebersicht“'))));
+      // Die Meldung nennt den Verstoß, nicht den Namen aus dem Plugin.
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ nicht verbunden: Ein Werkzeug beginnt nicht mit „beispiel_“.'));
+      expect(zeilen().join('\n'), isNot(contains('kurs_uebersicht')));
       await regelwidrig();
 
       final neu = await _fremderServer(port, const ['beispiel_neu']);

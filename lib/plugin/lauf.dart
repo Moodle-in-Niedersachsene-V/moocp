@@ -391,18 +391,26 @@ String _parametername(String roh) => prozentAufgeloest(
 /// Zusatzadressen an Daten eines anderen Kurses kommen, wenn das Skript dahinter
 /// es zulässt; die letzte Sperre kennt dann nur die Namen dieses Kurses. Dafür
 /// steht das Plugin ein, das die Zusatzadresse angemeldet hat (E35).
-String? laufBindungVerletzt(Lauf lauf, Uri uri) {
+///
+/// [felder] sind die Formularfelder eines POST. Moodle liest ein Feld vor dem
+/// gleichnamigen Parameter der Adresse (`optional_param` fragt `$_POST`
+/// zuerst), also gilt für sie dieselbe Regel: Jedes Feld, dessen Name die App
+/// als Kurs-, Aktivitäts- oder Kontextnummer erkennt, muss zum Lauf passen.
+/// Bei der Klammerschreibweise zählt jeder Teil für sich (`data[course]`
+/// prüft `data` und `course`): strenger als PHP, und so gewollt. Ein Feld
+/// ersetzt nicht die Nummer in der Adresse; die braucht die Adresse selbst.
+String? laufBindungVerletzt(Lauf lauf, Uri uri, {Felder felder = const []}) {
   final pfad = pfadNormalisieren(uri.path);
   final skript = _skriptKlein(pfad);
   final kontexte = {?lauf.kurskontext, ?lauf.modulkontext};
   var erkannt = 0;
 
-  String? kontextPruefen(String? wert) {
+  String? kontextPruefen(String? wert, [String wer = 'Die Adresse']) {
     erkannt++;
     final n = wert == null ? null : _zahl(wert);
     return n != null && kontexte.contains(n)
         ? null
-        : 'Die Adresse nennt einen anderen Kontext als den des Kurses oder der Aktivität des Laufs.';
+        : '$wer nennt einen anderen Kontext als den des Kurses oder der Aktivität des Laufs.';
   }
 
   final datei = skript == '/pluginfile.php' || skript == '/draftfile.php';
@@ -418,50 +426,77 @@ String? laufBindungVerletzt(Lauf lauf, Uri uri) {
     final s when _idIstPerson.contains(s) => null,
     _ => _Art.kurs,
   };
+
+  // Prüft eine Nummer mit dem verglichenen Namen und ihrem Wert; `feld` sagt,
+  // ob sie aus einem Formularfeld kommt statt aus der Adresse.
+  String? nummerPruefen(String name, String wert, {bool feld = false}) {
+    final wer = feld ? 'Ein Formularfeld' : 'Die Adresse';
+    final woher = feld ? 'Feld' : 'Parameter';
+    final art = _kursParameter.contains(name)
+        ? _Art.kurs
+        : _aktivitaetParameter.contains(name)
+        ? _Art.aktivitaet
+        : _kontextParameter.contains(name)
+        ? _Art.kontext
+        : name == 'id'
+        ? idArt
+        : datei && name == 'file'
+        ? _Art.datei
+        : null;
+    switch (art) {
+      case null:
+        return null;
+      case _Art.kurs:
+        erkannt++;
+        if (_zahl(wert) != lauf.kurs) {
+          return '$wer nennt eine andere Kursnummer ($woher „$name“) als der Kurs der Aktivität des Laufs.';
+        }
+      case _Art.aktivitaet:
+        erkannt++;
+        if (_zahl(wert) != lauf.cmid) {
+          return '$wer nennt eine andere Aktivität ($woher „$name“) als die des Laufs.';
+        }
+      case _Art.kontext:
+        return kontextPruefen(wert, wer);
+      case _Art.datei:
+        return kontextPruefen(RegExp(r'^/([^/]*)').firstMatch(wert)?[1], wer);
+    }
+    return null;
+  }
+
   if (uri.hasQuery) {
     for (final teil in uri.query.split('&')) {
       if (teil.isEmpty) continue;
       final i = teil.indexOf('=');
       final name = _parametername(i < 0 ? teil : teil.substring(0, i));
       final wert = prozentAufgeloest((i < 0 ? '' : teil.substring(i + 1)).replaceAll('+', ' '));
-      final art = _kursParameter.contains(name)
-          ? _Art.kurs
-          : _aktivitaetParameter.contains(name)
-          ? _Art.aktivitaet
-          : _kontextParameter.contains(name)
-          ? _Art.kontext
-          : name == 'id'
-          ? idArt
-          : datei && name == 'file'
-          ? _Art.datei
-          : null;
-      switch (art) {
-        case null:
-          continue;
-        case _Art.kurs:
-          erkannt++;
-          if (_zahl(wert) != lauf.kurs) {
-            return 'Die Adresse nennt eine andere Kursnummer (Parameter „$name“) als der Kurs der Aktivität des '
-                'Laufs.';
-          }
-        case _Art.aktivitaet:
-          erkannt++;
-          if (_zahl(wert) != lauf.cmid) {
-            return 'Die Adresse nennt eine andere Aktivität (Parameter „$name“) als die des Laufs.';
-          }
-        case _Art.kontext:
-          if (kontextPruefen(wert) case final grund?) return grund;
-        case _Art.datei:
-          final m = RegExp(r'^/([^/]*)').firstMatch(wert);
-          if (kontextPruefen(m?[1]) case final grund?) return grund;
-      }
+      if (nummerPruefen(name, wert) case final grund?) return grund;
     }
   }
   if (erkannt == 0) {
     return 'Die Adresse nennt keine Kurs-, Aktivitäts- oder Kontextnummer, an der moocp sie dem Kurs des Laufs '
         'zuordnen kann.';
   }
+  for (final MapEntry(key: roh, value: wert) in felder) {
+    for (final name in _feldnamen(roh)) {
+      if (nummerPruefen(name, wert, feld: true) case final grund?) return grund;
+    }
+  }
   return null;
+}
+
+/// Die Namen, die ein Formularfeld für die Regel trägt: der Name vor der
+/// ersten Klammer und jeder Schlüssel in Klammern (`data[course][]` ergibt
+/// `data` und `course`), je wie [_parametername] sie vergleicht; leere
+/// Schlüssel fallen weg.
+Iterable<String> _feldnamen(String roh) sync* {
+  final i = roh.indexOf('[');
+  yield _parametername(i < 0 ? roh : roh.substring(0, i));
+  if (i < 0) return;
+  for (final m in RegExp(r'\[([^\]]*)\]').allMatches(roh.substring(i))) {
+    final n = _parametername(m[1]!);
+    if (n.isNotEmpty) yield n;
+  }
 }
 
 enum _Art { kurs, aktivitaet, kontext, datei }

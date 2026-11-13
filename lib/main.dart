@@ -258,6 +258,8 @@ Future<int> _claudeEntfernen() async {
         ...?gespeichert?.pluginSkills,
       ],
       mcpNamen: _gespeicherteMcpNamen(gespeichert),
+      // Ordner gleichen Namens, die nicht von moocp stammen, bleiben.
+      auslassen: gespeichert?.fremdeSkillOrdner ?? const {},
     )).code;
   } catch (_) {
     return 3; // unbekannt, was geblieben ist: beides melden
@@ -1105,7 +1107,6 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       appNamen: appNamen,
       entwicklung: entwicklung == null ? null : (ordner: entwicklung.ordner, beschreibung: entwicklung.beschreibung),
     );
-    _skillFehlerStand = plugins.fehlerStand;
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
@@ -1117,9 +1118,26 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       abgewaehlt: e.werkzeugeAbgewaehlt,
       gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
       verwaist: verwaisteSkills(e.pluginSkills, plugins, appNamen),
+      pluginSkills: e.pluginSkills,
+      fremd: e.fremdeSkillOrdner,
+      gesehen: e.skillFehlerGesehen,
       skillFehler: plugins.fehler,
       skillFehlerNeu: !e.skillFehlerGesehen.containsAll(plugins.fehlerStand),
     );
+    _skillFehlerStand = {...plugins.fehlerStand, ...stand.konfliktStand};
+    // Fremde Ordner gleichen Namens bleiben fremd, auch wenn moocp den Skill
+    // inzwischen in einem anderen Werkzeug installiert hat (einrichtung.dart).
+    if (stand.fremdeOrdner.length != e.fremdeSkillOrdner.length ||
+        !stand.fremdeOrdner.containsAll(e.fremdeSkillOrdner)) {
+      final alt = e.fremdeSkillOrdner;
+      e.fremdeSkillOrdner = stand.fremdeOrdner;
+      try {
+        await e.speichern();
+      } catch (x) {
+        widget.protokoll.eintrag(Art.fehler, 'Fremde Skill-Ordner nicht gemerkt (${x.runtimeType})');
+        e.fremdeSkillOrdner = alt.union(stand.fremdeOrdner);
+      }
+    }
     final gemerkt = pluginSkillsGemerkt(
       gemerkt: e.pluginSkills,
       stand: stand,

@@ -49,6 +49,14 @@
 // solch einem Ziel nicht gefolgt. Wird einer Umleitung nicht gefolgt, sagt
 // die Antwort, dass der Schreibvorgang schon gesendet ist.
 //
+// Den Inhalt der Antwort (die Seite nach dem POST oder das Ziel der
+// Umleitung) bekommt das Plugin nur in einem Lauf und nur, wenn diese Seite
+// zu Kurs und Aktivität des Laufs passt (laufBindungVerletzt, beim POST mit
+// den Formularfeldern): Hinter einer Zusatzadresse ist mit Namen zu rechnen,
+// und nur im Lauf stehen die Namen des Kurses in der letzten Sperre. Sonst
+// bekommt es nur Status und Pfad bis zum Skriptnamen ([inhaltNurImLauf]).
+// Schreiben selbst geht auch ohne Lauf.
+//
 // Lesen über eine Zusatzadresse mit der Art „lesen“ ([ZusatzLeser]) gibt es
 // nur in einem Lauf: mit GET, ohne sesskey, mit denselben Prüfungen wie oben
 // und dazu der Bindung an Kurs und Aktivität des Laufs (laufBindungVerletzt)
@@ -171,6 +179,14 @@ Zusatzadresse? zusatzadresseFuer(List<Zusatzadresse> liste, Uri uri, ZugriffsArt
   }
   return null;
 }
+
+/// Was das Plugin nach einem Schreibvorgang statt des Inhalts der Antwort
+/// bekommt, wenn kein Lauf läuft oder die Seite nicht zu ihm passt
+/// (app_adresse.dart): ein fester Satz ohne Werte.
+const inhaltNurImLauf =
+    'Geschrieben ist der Schreibvorgang; den Inhalt der Antwort liefert moocp nur in einem Lauf (/v1/moodle/lauf/beginnen '
+    'mit der Nummer der Aktivität) und nur, wenn die Seite zu Kurs und Aktivität des Laufs passt. Hier stehen nur '
+    'Status und Pfad bis zum Skriptnamen.';
 
 /// Was der Freigabedialog außer Titel und Zusammenfassung des Plugins zeigt:
 /// die Adresse ohne Werte, die Namen der Formularfelder und den Grund der

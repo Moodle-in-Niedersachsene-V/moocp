@@ -47,9 +47,10 @@
 // Verbindung ohnehin nicht weiter (verbindung.dart). Die Namen gelten je
 // Plugin für alle Profile; sie liegen in [sperre], die so lange lebt wie die
 // App, und überstehen so das Ende eines Aufrufs, einen Neustart nach einem
-// Absturz und das Wiederverbinden eines Entwicklungs-Plugins. Auch eine
-// Werkzeugliste, die nach einem Neustart neu gelesen wird, geht erst durch
-// die Sperre: Ihre Beschreibungen gehen an die KI und in die Einstellungen.
+// Absturz und das Wiederverbinden eines Entwicklungs-Plugins. Auch die
+// Werkzeugliste geht bei jedem Start, auch nach einem Absturz, erst durch die
+// Sperre, mit den Namen der Werkzeuge (verbindung.dart, werkzeuglisteTexte):
+// Sie geht an die KI und in die Einstellungen.
 // Für jedes Plugin sperrt sie außerdem den Pfad des Ordners für Downloads
 // ([downloads]), den [beenden] auch leert.
 //
@@ -444,11 +445,11 @@ class LaufendePlugins implements WerkzeugQuelle {
         await verbindung.schliessen();
         throw const PluginFehler('moocp wurde während des Starts beendet.');
       }
-      // Nach einem Neustart kann es schon Namen geben: Die Beschreibungen
-      // gingen an die KI und in die Einstellungen.
+      // Nach einem Neustart kann es schon Namen geben: Namen und
+      // Beschreibungen gingen an die KI und in die Einstellungen.
       if (sperre.gesperrt(
         b.kurzname,
-        werkzeuglisteTexte(verbindung.werkzeuge),
+        werkzeuglisteTexte(verbindung.werkzeuge, b.kurzname),
         plugin: e.anzeigename,
         werkzeug: null,
         stelle: SperrStelle.werkzeugliste,
@@ -559,13 +560,59 @@ class LaufendePlugins implements WerkzeugQuelle {
     );
   }
 
+  /// Die Werkzeuge der Plugins, die in [profil] eingeschaltet sind, ohne
+  /// die, deren Name mit `mcp__<Profil>__` davor länger als 64 Zeichen wäre
+  /// (verbindung.dart, werkzeugnameZuLang): Claude Code nähme sie nicht an.
+  /// Der Kurzname ist so begrenzt, dass beim Profil `moodle` alles passt; den
+  /// Namen eines Profils begrenzt die App nicht. Was fehlt, nennt das
+  /// Protokoll einmal je Profil, Plugin und Werkzeugliste, nicht bei jeder
+  /// Sitzung, und der Dialog „Plugins“ beim Plugin ([zuLangeWerkzeuge]).
   @override
-  List<WerkzeugBeschreibung> werkzeuge(Profil profil) => [
-    for (final (e, liste) in _alle())
-      if (_aktiv(e, profil)) ...liste,
+  List<WerkzeugBeschreibung> werkzeuge(Profil profil) {
+    final ergebnis = <WerkzeugBeschreibung>[];
+    void dazu(String plugin, List<WerkzeugBeschreibung> liste) {
+      final zuLang = [for (final w in liste) if (werkzeugnameZuLang(profil.mcpName, w.name)) w.name];
+      ergebnis.addAll(zuLang.isEmpty ? liste : liste.where((w) => !zuLang.contains(w.name)));
+      if (zuLang.isNotEmpty && _zuLangGemeldet.add('${profil.kennung}\n$plugin\n${zuLang.join('\n')}')) {
+        _protokoll.eintrag(
+          Art.info,
+          'Plugin „$plugin“: ${_werkzeugeText(zuLang.length)} fehlen im Profil „${profil.name}“ (${profil.mcpName}); '
+          'mit mcp__${profil.mcpName}__ davor wären ihre Namen länger als $mcpWerkzeugnameHoechstens Zeichen.',
+        );
+      }
+    }
+
+    for (final (e, liste) in _alle()) {
+      if (_aktiv(e, profil)) dazu(e.anzeigename, liste);
+    }
     // Ein Entwicklungs-Plugin ist in jedem Profil eingeschaltet.
-    ...?_angehaengt?.werkzeuge,
-  ];
+    if (_angehaengt case final a?) dazu(a.plugin.name, a.werkzeuge);
+    return ergebnis;
+  }
+
+  /// Was das Protokoll über zu lange Werkzeugnamen schon gesagt hat
+  /// ([werkzeuge]).
+  final _zuLangGemeldet = <String>{};
+
+  static String _werkzeugeText(int n) => n == 1 ? '1 Werkzeug' : '$n Werkzeuge';
+
+  /// Für den Dialog „Plugins“: je Profil aus [profile], in dem [e]
+  /// eingeschaltet ist und Werkzeuge fehlen, weil ihr Name dort zu lang wäre
+  /// ([werkzeuge]), ein Satz; leer, wenn nichts fehlt.
+  List<String> zuLangeWerkzeuge(PluginEintrag e, List<Profil> profile) {
+    final liste = [
+      for (final (x, l) in _alle())
+        if (x.ordner == e.ordner) ...l,
+    ];
+    return [
+      for (final profil in profile)
+        if (_aktiv(e, profil))
+          if (liste.where((w) => werkzeugnameZuLang(profil.mcpName, w.name)).length case final n when n > 0)
+            'Im Profil „${profil.name}“ fehlen ${_werkzeugeText(n)}: Mit dem technischen Namen des Profils '
+                '(${profil.mcpName}) davor wären ihre Namen länger als $mcpWerkzeugnameHoechstens Zeichen, mehr '
+                'nimmt Claude Code nicht an. In einem Profil mit kürzerem Namen sind sie da.',
+    ];
+  }
 
   bool _aktiv(PluginEintrag e, Profil profil) => _plugins?.stand(e).aktivIn(profil.kennung) ?? false;
 

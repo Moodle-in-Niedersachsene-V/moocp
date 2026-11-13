@@ -806,6 +806,13 @@ class _PluginsDialogState extends State<PluginsDialog> {
                   null => Text('Das Plugin läuft ab dem nächsten Start von moocp.', style: klein),
                 },
               ),
+            // Werkzeuge, deren Name mit einem langen Profilnamen davor zu lang
+            // wäre, fehlen in diesem Profil (laufende_plugins.dart).
+            for (final h in widget.laufende?.zuLangeWerkzeuge(e, widget.profile) ?? const <String>[])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(h, style: TextStyle(color: theme.colorScheme.error)),
+              ),
             switch (s.zustand) {
               PluginZustand.nichtGeladen => Text(e.fehler!, style: TextStyle(color: theme.colorScheme.error)),
               PluginZustand.abgelehnt => Text('moocp nutzt dieses Plugin nicht.', style: klein),

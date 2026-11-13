@@ -46,7 +46,9 @@
 // Einstellungen (Einstellungen.pluginSkills, einrichtung.dart
 // pluginSkillsGemerkt). Fehlt das Plugin, ist es abgelehnt oder nennt es einen
 // gemerkten Skill nicht mehr, ist der Skill verwaist ([verwaisteSkills]), und
-// die Einrichtung bietet ihn zum Entfernen an.
+// die Einrichtung bietet ihn zum Entfernen an. Einen fremden Ordner gleichen
+// Namens im Skill-Ordner eines KI-Werkzeugs überschreibt und entfernt sie nie
+// (einrichtung.dart, einrichtungPruefen).
 
 import 'dart:convert';
 import 'dart:io';

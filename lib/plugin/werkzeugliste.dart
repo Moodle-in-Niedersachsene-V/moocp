@@ -19,7 +19,9 @@
 //     `moodle` (E21), und das ist das Standardprofil (E31), und
 //   - seine Werkzeugnamen den Regeln genügen, wie beim Start der App (Kurzname
 //     davor, kein Name eines eingebauten Werkzeugs oder eines früheren Plugins,
-//     jedes Werkzeug aus `ohneAnmeldung` in der Liste).
+//     jedes Werkzeug aus `ohneAnmeldung` in der Liste). Ein einzelnes
+//     Werkzeug, dessen Name mit `mcp__<Profil>__` davor länger als 64 Zeichen
+//     wäre, fehlt wie im Server der App ([GemerkteWerkzeuge]).
 //
 // Die Werkzeuge ohne Anmeldung nennt die Liste unter `ohneAnmeldung`, neben
 // `initialize` und `tools` (McpDienst.werkzeugliste): Die Brücke wartet bei
@@ -42,7 +44,7 @@ import '../protokoll.dart';
 import 'beschreibung.dart' show PluginFehler;
 import 'entscheidung.dart';
 import 'plugins.dart';
-import 'verbindung.dart' show ohneAnmeldungPruefen, werkzeugnamenPruefen;
+import 'verbindung.dart' show ohneAnmeldungPruefen, werkzeugnameZuLang, werkzeugnamenPruefen;
 
 /// Die Werkzeugliste, die `moocp.exe --werkzeugliste` ausgibt: was der
 /// MCP-Server des Standardprofils auf `initialize` und `tools/list` antwortet
@@ -145,7 +147,10 @@ Future<List<WerkzeugBeschreibung>> gemerkteWerkzeuge({
 
 /// Die gemerkten Werkzeuge als Quelle für den MCP-Server der Werkzeugliste.
 /// Sie nennt sie nur für das Profil, für das sie ermittelt wurden, und führt
-/// nichts aus: Aufrufe gehen immer an die laufende App.
+/// nichts aus: Aufrufe gehen immer an die laufende App. Wie im Server der App
+/// fehlt ein Werkzeug, dessen Name mit `mcp__<Profil>__` davor zu lang wäre
+/// (verbindung.dart, werkzeugnameZuLang); beim Standardprofil `moodle` kommt
+/// das nicht vor.
 class GemerkteWerkzeuge implements WerkzeugQuelle {
   GemerkteWerkzeuge(this.profilKennung, this._liste);
 
@@ -153,7 +158,9 @@ class GemerkteWerkzeuge implements WerkzeugQuelle {
   final List<WerkzeugBeschreibung> _liste;
 
   @override
-  List<WerkzeugBeschreibung> werkzeuge(Profil profil) => profil.kennung == profilKennung ? _liste : const [];
+  List<WerkzeugBeschreibung> werkzeuge(Profil profil) => profil.kennung == profilKennung
+      ? [for (final w in _liste) if (!werkzeugnameZuLang(profil.mcpName, w.name)) w]
+      : const [];
 
   @override
   Future<String> aufrufen(WerkzeugAufruf aufruf) =>

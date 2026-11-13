@@ -405,6 +405,17 @@ void main() {
       speichern();
     }
 
+    test('ein Werkzeug, dessen Name mit dem Profilnamen davor über 64 Zeichen käme, fehlt in diesem Profil', () {
+      WerkzeugBeschreibung w(String name) =>
+          WerkzeugBeschreibung(name: name, beschreibung: 'Probe', eingabeSchema: const {'type': 'object'});
+      final quelle = GemerkteWerkzeuge('standard', [w('beispiel_echo'), w('beispiel_moodle_schreiben')]);
+      Profil profil(String mcpName) =>
+          Profil(kennung: 'standard', name: 'Moodle', adresse: '', port: 1, mcpName: mcpName);
+
+      expect([for (final x in quelle.werkzeuge(profil('moodle'))) x.name], ['beispiel_echo', 'beispiel_moodle_schreiben']);
+      expect([for (final x in quelle.werkzeuge(profil('moodle-${'x' * 33}'))) x.name], ['beispiel_echo']);
+    });
+
     test('ohne Plugin ist die Ausgabe Byte für Byte die, die sie vor den Plugins war', () async {
       final bisher = jsonEncode(await dienst([LaufendePlugins(protokoll)]).werkzeugliste());
       expect(jsonEncode(await dienst(const []).werkzeugliste()), bisher);

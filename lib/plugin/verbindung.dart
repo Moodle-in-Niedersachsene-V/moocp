@@ -25,7 +25,9 @@ const metaProfil = 'moocp/profil';
 const metaAufruf = 'moocp/aufruf';
 
 /// Höchstlänge eines Werkzeugnamens: Mit `mcp__<Profil>__` davor bleibt der
-/// Name, den ein KI-Werkzeug sieht, in den 64 Zeichen, die Claude Code zulässt.
+/// Name, den ein KI-Werkzeug sieht, bei einem Profilnamen bis 17 Zeichen (etwa
+/// `moodle`) in den 64 Zeichen, die Claude Code zulässt. Bei einem längeren
+/// Profilnamen prüft [werkzeugnameZuLang] je Werkzeug.
 const werkzeugnameHoechstens = 40;
 
 /// Die Zeichen eines Werkzeugnamens: Buchstaben, Ziffern, „_“ und „-“. MCP
@@ -50,12 +52,21 @@ class PluginErgebnisFehler extends MoodleFehler {
   PluginErgebnisFehler(super.meldung);
 }
 
-/// Alle Texte einer Werkzeugliste, die an die KI gehen: Beschreibung, Titel
-/// und Eingabeschema jedes Werkzeugs, für die letzte Sperre beim erneuten
-/// Lesen nach einem Neustart oder Wiederverbinden. Die Namen der Werkzeuge
-/// nicht: Für sie gelten die Namensregeln ([werkzeugnamenPruefen]).
-Iterable<String> werkzeuglisteTexte(List<WerkzeugBeschreibung> werkzeuge) sync* {
+/// Alle Texte einer Werkzeugliste des Plugins [kurzname], die an die KI gehen,
+/// für die letzte Sperre (namenssperre.dart) beim Start, nach einem Neustart
+/// und beim Wiederverbinden: Name, Beschreibung, Titel und Eingabeschema
+/// jedes Werkzeugs. Was sie hier durchlässt, merkt sich die App auch für
+/// `--werkzeugliste` (plugins.dart, werkzeugeMerken).
+///
+/// Vom Namen geht nur der Teil nach `<kurzname>_` in die Prüfung: Den
+/// Kurznamen kennt die Lehrkraft vor dem Start aus der Beschreibungsdatei,
+/// und hieße ein Kind wie er, träfe sonst jeder Werkzeugname. Im Rest trennen
+/// „_“ und „-“ Wörter wie jedes Satzzeichen, `beispiel_Erika_Mustermann`
+/// trifft also „Erika“.
+Iterable<String> werkzeuglisteTexte(List<WerkzeugBeschreibung> werkzeuge, String kurzname) sync* {
+  final praefix = '${kurzname}_';
   for (final w in werkzeuge) {
+    yield w.name.startsWith(praefix) ? w.name.substring(praefix.length) : w.name;
     yield w.beschreibung;
     if (w.titel case final t?) yield t;
     yield* texteIn(w.eingabeSchema);
@@ -63,7 +74,8 @@ Iterable<String> werkzeuglisteTexte(List<WerkzeugBeschreibung> werkzeuge) sync* 
 }
 
 /// Warum ein Plugin nicht startet oder sich nicht verbindet, wenn seine
-/// Werkzeugliste die letzte Sperre trifft; ohne das Wort.
+/// Werkzeugliste (Namen und Texte, [werkzeuglisteTexte]) die letzte Sperre
+/// trifft; ohne das Wort.
 const werkzeuglisteGesperrt =
     'Seine Werkzeugliste enthält ein Wort, das ein Name sein könnte, den das Plugin zum Sperren genannt hat; '
     'moocp bietet sie der KI nicht an.';
@@ -77,7 +89,9 @@ class PluginStartFehler extends PluginFehler {
 
 /// Prüft die Werkzeugnamen eines Plugins mit [kurzname] gegen die Regeln und
 /// gegen [vergeben] (eingebaute Werkzeuge und die anderer Plugins). Wirft
-/// [PluginFehler] mit dem ersten Verstoß; der Grund nennt das Werkzeug.
+/// [PluginFehler] mit dem ersten Verstoß. Der Grund nennt die Art des
+/// Verstoßes, nie den Namen: Er kommt vom laufenden Plugin, steht gleich im
+/// Protokoll und ist noch nicht durch die letzte Sperre gegangen.
 void werkzeugnamenPruefen(
   Iterable<String> namen,
   String kurzname,
@@ -85,30 +99,37 @@ void werkzeugnamenPruefen(
 ) {
   final gesehen = <String>{};
   for (final name in namen) {
-    // Der Name kommt vom Plugin und steht gleich im Protokoll: ohne
-    // Steuerzeichen, gekürzt, damit er keine Zeilen fälscht.
-    final n = name.length > 60
-        ? '${name.substring(0, 59)}…'
-        : name.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '?');
     if (!_werkzeugnameZeichen.hasMatch(name)) {
-      throw PluginFehler(
-        'Das Werkzeug „$n“ hat Zeichen im Namen, die nicht erlaubt sind '
+      throw const PluginFehler(
+        'Ein Werkzeug hat Zeichen im Namen, die nicht erlaubt sind '
         '(erlaubt sind Buchstaben, Ziffern, „_“ und „-“).',
       );
     }
     if (!name.startsWith('${kurzname}_')) {
-      throw PluginFehler('Das Werkzeug „$n“ beginnt nicht mit „${kurzname}_“.');
+      throw PluginFehler('Ein Werkzeug beginnt nicht mit „${kurzname}_“.');
     }
     if (name.length > werkzeugnameHoechstens) {
-      throw PluginFehler(
-        'Der Name des Werkzeugs „$n“ ist länger als $werkzeugnameHoechstens Zeichen.',
-      );
+      throw const PluginFehler('Der Name eines Werkzeugs ist länger als $werkzeugnameHoechstens Zeichen.');
     }
-    if (vergeben.contains(name) || !gesehen.add(name)) {
-      throw PluginFehler('Den Werkzeugnamen „$n“ gibt es schon.');
+    if (vergeben.contains(name)) {
+      throw const PluginFehler('Ein Werkzeug trägt einen Namen, den es bei moocp oder einem anderen Plugin schon gibt.');
     }
+    if (!gesehen.add(name)) throw const PluginFehler('Zwei Werkzeuge tragen denselben Namen.');
   }
 }
+
+/// So lang darf der Name eines Werkzeugs sein, wie ein KI-Werkzeug ihn sieht
+/// (`mcp__<Profil>__<Werkzeug>`): mehr lässt Claude Code nicht zu.
+const mcpWerkzeugnameHoechstens = 64;
+
+/// Ob das Werkzeug [werkzeug] im Server des Profils mit dem technischen Namen
+/// [mcpName] zu lang wäre ([mcpWerkzeugnameHoechstens]). Der Kurzname eines
+/// Plugins ist so begrenzt, dass es beim Profil `moodle` immer passt; ein
+/// längerer Profilname kann es sprengen. Den Profilnamen begrenzt die App
+/// nicht; ein zu langes Werkzeug fehlt in diesem Profil (laufende_plugins.dart,
+/// werkzeugliste.dart).
+bool werkzeugnameZuLang(String mcpName, String werkzeug) =>
+    'mcp__${mcpName}__$werkzeug'.length > mcpWerkzeugnameHoechstens;
 
 /// Prüft `ohneAnmeldung` aus der Beschreibungsdatei gegen die Werkzeugnamen,
 /// die das Plugin nennt: Ein Werkzeug, das es nicht hat, wirft [PluginFehler],

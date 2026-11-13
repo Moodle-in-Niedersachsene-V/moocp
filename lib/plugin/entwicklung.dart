@@ -287,12 +287,12 @@ class AngehaengtesPlugin {
     // Die Beschreibungen gingen an die KI. Gewarnt und protokolliert wird
     // einmal, nicht bei jedem Versuch im Takt des Intervalls.
     final s = sperre;
-    if (s != null && s.treffer(plugin.kurzname, werkzeuglisteTexte(v.werkzeuge)) != null) {
+    if (s != null && s.treffer(plugin.kurzname, werkzeuglisteTexte(v.werkzeuge, plugin.kurzname)) != null) {
       await v.schliessen();
       if (_letzterFehler != werkzeuglisteGesperrt && !_beendet) {
         s.gesperrt(
           plugin.kurzname,
-          werkzeuglisteTexte(v.werkzeuge),
+          werkzeuglisteTexte(v.werkzeuge, plugin.kurzname),
           plugin: plugin.name,
           werkzeug: null,
           stelle: SperrStelle.werkzeugliste,

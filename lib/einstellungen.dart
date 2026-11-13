@@ -35,10 +35,12 @@ class Einstellungen {
     Map<String, PluginEntscheidung>? plugins,
     Map<String, PluginUpdateStand>? pluginUpdates,
     Set<String> pluginSkills = const {},
+    Set<String> fremdeSkillOrdner = const {},
     Set<String> skillFehlerGesehen = const {},
   })  : plugins = Map.of(plugins ?? const {}),
         pluginUpdates = Map.of(pluginUpdates ?? const {}),
         pluginSkills = {...pluginSkills},
+        fremdeSkillOrdner = {...fremdeSkillOrdner},
         skillFehlerGesehen = {...skillFehlerGesehen},
         profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
@@ -171,6 +173,13 @@ class Einstellungen {
   /// sein kann: Aus ihm wird ein Pfad zum Löschen.
   Set<String> pluginSkills;
 
+  /// Ordner in den Skill-Ordnern der KI-Werkzeuge, die den Namen eines
+  /// Plugin-Skills tragen, aber nicht von moocp stammen, je `<Werkzeug>/<Name>`
+  /// (einrichtung.dart, einrichtungPruefen, fremderOrdner). Die Einrichtung
+  /// überschreibt und entfernt sie nicht, auch wenn moocp denselben Skill in
+  /// einem anderen Werkzeug installiert und darum in [pluginSkills] gemerkt hat.
+  Set<String> fremdeSkillOrdner;
+
   /// Die unbrauchbaren Skill-Pakete von Plugins, die die Lehrkraft im Dialog
   /// „KI-Werkzeuge einrichten“ schon gesehen hat, je Plugin ein Stand
   /// (plugin/skills.dart, PluginSkills.fehlerStand). Ein Stand, der hier
@@ -261,6 +270,7 @@ class Einstellungen {
       plugins: pluginEntscheidungenAus(j['plugins']),
       pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
       pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
+      fremdeSkillOrdner: (j['fremdeSkillOrdner'] as List?)?.whereType<String>().toSet() ?? const {},
       skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
   }
@@ -281,6 +291,7 @@ class Einstellungen {
         if (pluginUpdates.isNotEmpty)
           'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
         if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
+        if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
         if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),
       };
 

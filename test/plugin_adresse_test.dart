@@ -349,6 +349,36 @@ void main() {
       expect(gross.json['fehler'], contains('größer als'));
       expect(zeilen(), isNot(contains(startsWith('Plugin „Beispiel“: '))));
     });
+
+    test('zu groß ohne Längenangabe: 413, sobald die Grenze überschritten ist, ohne auf das Ende zu warten', () async {
+      final socket = await Socket.connect(InternetAddress.loopbackIPv4, adresse.adresse.port);
+      addTearDown(socket.destroy);
+      final antwort = StringBuffer();
+      final geschlossen = Completer<void>();
+      socket.listen(
+        (d) => antwort.write(latin1.decode(d)),
+        onDone: () => geschlossen.isCompleted ? null : geschlossen.complete(),
+        onError: (Object _) => geschlossen.isCompleted ? null : geschlossen.complete(),
+      );
+      socket.write(
+        'POST $pfadProtokoll HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer $_schluessel\r\n'
+        'Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n',
+      );
+      // Mehr als die Grenze von 1 MB, in Stücken; das Ende des Inhalts kommt nie.
+      final stueck = 'x' * 65536;
+      for (var i = 0; i < 20 && !geschlossen.isCompleted; i++) {
+        try {
+          socket.write('${stueck.length.toRadixString(16)}\r\n$stueck\r\n');
+          await socket.flush();
+        } catch (_) {
+          break;
+        }
+      }
+
+      await geschlossen.future.timeout(const Duration(seconds: 10));
+      expect(antwort.toString(), startsWith('HTTP/1.1 413'));
+      expect(zeilen(), isNot(contains(startsWith('Plugin „Beispiel“: '))));
+    });
   });
 
   group('Ein eingebautes Werkzeug über die Adresse', () {

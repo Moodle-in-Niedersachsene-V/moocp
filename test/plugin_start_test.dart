@@ -21,6 +21,7 @@ import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
+import 'package:moocp/plugin/namenssperre.dart' show LetzteSperre;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
 import 'package:moocp/plugin/werkzeugliste.dart';
@@ -485,14 +486,31 @@ void main() {
       final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l, moodle: zugang, freigaben: freigaben);
 
-      final geschrieben = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Hallo'});
+      // Ohne Lauf: geschrieben, aber den Inhalt der Seite danach bekommt das
+      // Plugin nicht und kann nicht nachsehen.
+      final ohneLauf = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Hallo'});
+      expect(
+        ohneLauf,
+        '${zusatzKennzeichnung('Beispiel', 1)}\n\nGesendet; Moodle antwortet mit Status 200. Nicht geprüft: Ohne '
+        'Lauf liefert moocp den Inhalt der Seite nicht.',
+      );
+      expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=7', 'GET /mod/beispiel/speichern.php?id=7&gespeichert=1']);
+      expect(moodle.notiz, 'Hallo');
+      moodle.angefragt.clear();
+      gezeigt.clear();
+
+      // Im Lauf für die Aktivität: geschrieben und vom Plugin nachgesehen.
+      final geschrieben = await client.tool('beispiel_moodle_schreiben', {'id': 501, 'notiz': 'Hallo', 'lauf': true});
 
       expect(
         geschrieben,
         '${zusatzKennzeichnung('Beispiel', 1)}\n\nGeschrieben und vom Plugin geprüft: Die Notiz steht auf der Seite.',
       );
       expect(geschrieben, isNot(contains('verified')));
-      expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=7', 'GET /mod/beispiel/speichern.php?id=7&gespeichert=1']);
+      expect(
+        moodle.angefragt.where((x) => x.contains('/mod/beispiel/')),
+        ['POST /mod/beispiel/speichern.php?id=501', 'GET /mod/beispiel/speichern.php?id=501&gespeichert=1'],
+      );
       expect(moodle.rumpfe[moodle.rumpfe.length - 2], 'notiz=Hallo&sesskey=abc123');
       final f = gezeigt.single;
       expect(f.ab, Bestaetigungen.keine);
@@ -576,6 +594,60 @@ void main() {
       // Ohne passende Antwort erscheint der Dialog, und die Antwort bleibt, wie sie ist.
       expect(await client.tool('beispiel_auswahl', {}), isNot(contains('Hinweis von moocp')));
       expect(gezeigt, 1);
+    });
+
+    test('Testbetrieb: Schreiben in einem Lauf im Testkurs, automatisch freigegeben, die KI erfährt es', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      await zugang.sesskey();
+      moodle.angefragt.clear();
+      final freigaben = Freigaben(protokoll);
+      final gezeigt = <FreigabeAnfrage>[];
+      freigaben.addListener(() {
+        final f = freigaben.aktuell;
+        if (f != null && f.offen && !gezeigt.contains(f)) {
+          gezeigt.add(f);
+          scheduleMicrotask(() => freigaben.entscheiden(false));
+        }
+      });
+      final profil = Profil(
+        kennung: 'standard',
+        name: 'moodle',
+        adresse: moodle.basis.toString(),
+        port: await _freierPort(),
+        mcpName: 'moodle',
+        schluessel: 'test',
+      );
+      // Erfunden: Die Zugangsdatei selbst liest hier niemand.
+      final testzugang = Testzugang(
+        kennung: 'standard',
+        datei: p.join(wurzel.path, 'testzugang.env'),
+        adresse: profil.adresse,
+        kurse: const {12},
+      );
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l, moodle: zugang, freigaben: freigaben, testzugang: testzugang);
+
+      final text = await client.tool('beispiel_moodle_schreiben', {'id': 501, 'notiz': 'Hallo', 'lauf': true});
+
+      expect(gezeigt, isEmpty);
+      expect(freigaben.testfreigaben, 1);
+      expect(
+        text,
+        startsWith(
+          '${zusatzKennzeichnung('Beispiel', 1, automatisch: 1)}\n\n'
+          'Geschrieben und vom Plugin geprüft: Die Notiz steht auf der Seite.',
+        ),
+      );
+      expect(text, contains(testfreigabeHinweis));
+      expect(moodle.angefragt.where((x) => x.startsWith('POST ')), ['POST /mod/beispiel/speichern.php?id=501']);
+
+      // Außerhalb eines Laufs kennt moocp den Kurs nicht: der Dialog.
+      final ohneLauf = await client.tool('beispiel_moodle_schreiben', {'id': 501, 'notiz': 'Nein'});
+      expect(ohneLauf, 'Nicht geschrieben: Die Lehrkraft hat nicht freigegeben (abgelehnt).');
+      expect(gezeigt, hasLength(1));
     });
 
     test('ein Lauf: ohne abgelehnt, im Lauf gelesen, danach abgelehnt; die Namen des Kurses sperren jede Antwort', () async {
@@ -1280,25 +1352,75 @@ Future<void> main(List<String> a) async {
   });
 
   group('Werkzeugnamen eines Plugins', () {
-    test('jeder Verstoß hält das Plugin vom Laden ab und nennt das Werkzeug', () {
+    test('jeder Verstoß hält das Plugin vom Laden ab; der Grund nennt die Art, nie den Namen', () {
       void verstoss(List<String> namen, String grund, {Set<String> vergeben = const {}}) => expect(
         () => werkzeugnamenPruefen(namen, 'beispiel', vergeben),
-        throwsA(isA<Object>().having((e) => e.toString(), 'grund', contains(grund))),
+        throwsA(
+          isA<Object>()
+              .having((e) => e.toString(), 'grund', contains(grund))
+              .having((e) => e.toString().toLowerCase(), 'ohne Namen', isNot(contains('erika'))),
+        ),
         reason: '$namen',
       );
 
-      verstoss(['echo'], '„echo“ beginnt nicht mit „beispiel_“');
-      verstoss(['beispielecho'], 'beginnt nicht mit');
-      verstoss(['beispiel_${'x' * 32}'], 'länger als 40 Zeichen');
-      verstoss(['beispiel_ä'], 'Zeichen im Namen');
-      verstoss(['beispiel_a b'], 'Zeichen im Namen');
-      verstoss(['beispiel_a.b'], 'Zeichen im Namen');
-      verstoss(['beispiel_echo', 'beispiel_echo'], '„beispiel_echo“ gibt es schon');
-      verstoss(['beispiel_status'], '„beispiel_status“ gibt es schon', vergeben: {'beispiel_status'});
+      verstoss(['erika'], 'Ein Werkzeug beginnt nicht mit „beispiel_“');
+      verstoss(['beispielerika'], 'beginnt nicht mit');
+      verstoss(['beispiel_erika${'x' * 27}'], 'länger als 40 Zeichen');
+      verstoss(['beispiel_ä_erika'], 'Zeichen im Namen');
+      verstoss(['beispiel_erika b'], 'Zeichen im Namen');
+      verstoss(['beispiel_erika.b'], 'Zeichen im Namen');
+      verstoss(['beispiel_erika${String.fromCharCode(10)}'], 'Zeichen im Namen');
+      verstoss(['beispiel_erika', 'beispiel_erika'], 'Zwei Werkzeuge tragen denselben Namen');
+      verstoss(['beispiel_erika'], 'schon gibt', vergeben: {'beispiel_erika'});
       werkzeugnamenPruefen(['beispiel_echo', 'beispiel_a_b-c', 'beispiel_${'x' * 31}'], 'beispiel', {'status'});
     });
 
-    test('ein Werkzeug außerhalb des Kurznamens bricht die Verbindung ab und nennt das Werkzeug', () async {
+    test('die letzte Sperre prüft auch die Namen der Werkzeuge, ohne den Kurznamen davor', () {
+      WerkzeugBeschreibung w(String name) =>
+          WerkzeugBeschreibung(name: name, beschreibung: 'Probe', eingabeSchema: const {'type': 'object'});
+      final sperre = LetzteSperre()..namenHinzufuegen('beispiel', ['Erika Mustermann', 'Max Beispiel']);
+
+      // „_“ und „-“ trennen Wörter: Der Vorname allein trifft.
+      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo'), w('beispiel_Erika_x')], 'beispiel')), 'Erika');
+      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_liste-mustermann')], 'beispiel')), 'mustermann');
+      // Heißt ein Kind wie der Kurzname, trifft nicht jeder Werkzeugname;
+      // dasselbe Wort hinter dem Kurznamen schon.
+      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo'), w('beispiel_max_a')], 'beispiel')), 'max');
+      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo')], 'beispiel')), isNull);
+      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_a_beispiel')], 'beispiel')), 'beispiel');
+    });
+
+    test('mit langem Profilnamen über 64 Zeichen: Das Werkzeug fehlt nur in diesem Profil, einmal im Protokoll', () async {
+      final kurz = _profil('standard', 'moodle', await _freierPort());
+      // 40 Zeichen: mcp__ und __ dazu sind 47, beispiel_echo passt noch.
+      final lang = _profil('lang', 'moodle-${'x' * 33}', await _freierPort());
+      final plugins = await beispielAngenommen([kurz, lang]);
+      final l = await starten(plugins);
+
+      List<String> namen(Profil profil) => [for (final w in l.werkzeuge(profil)) w.name];
+      expect(namen(kurz), _beispielWerkzeuge);
+      final imLangen = namen(lang);
+      expect(imLangen, containsAll(['beispiel_echo', 'beispiel_hinweis']));
+      expect(imLangen, isNot(contains('beispiel_moodle_schreiben')));
+      for (final n in imLangen) {
+        expect('mcp__${lang.mcpName}__$n'.length, lessThanOrEqualTo(64), reason: n);
+      }
+      final fehlen = _beispielWerkzeuge.length - imLangen.length;
+      expect(fehlen, greaterThan(0));
+      // Noch einmal gefragt, etwa von einer zweiten Sitzung: keine zweite Zeile.
+      namen(lang);
+      final zeilen = [for (final z in protokoll.eintraege) if (z.text.contains('64 Zeichen')) z.text];
+      expect(zeilen, [
+        'Plugin „Beispiel“: $fehlen Werkzeuge fehlen im Profil „${lang.name}“ (${lang.mcpName}); mit '
+            'mcp__${lang.mcpName}__ davor wären ihre Namen länger als 64 Zeichen.',
+      ]);
+      final hinweis = l.zuLangeWerkzeuge(plugins.eintraege.single, [kurz, lang]);
+      expect(hinweis, hasLength(1));
+      expect(hinweis.single, contains('„${lang.name}“'));
+      expect(hinweis.single, contains('$fehlen Werkzeuge'));
+    });
+
+    test('ein Werkzeug außerhalb des Kurznamens bricht die Verbindung ab, ohne das Werkzeug zu nennen', () async {
       final fremd = await _fremderServer(['beispiel_echo', 'kurs_uebersicht']);
       addTearDown(fremd.stop);
 
@@ -1310,7 +1432,11 @@ Future<void> main(List<String> a) async {
           vergeben: eingebaut,
           frist: const Duration(seconds: 5),
         ),
-        throwsA(isA<Object>().having((e) => e.toString(), 'grund', contains('„kurs_uebersicht“'))),
+        throwsA(
+          isA<Object>()
+              .having((e) => e.toString(), 'grund', contains('beginnt nicht mit „beispiel_“'))
+              .having((e) => e.toString(), 'ohne Namen', isNot(contains('kurs_uebersicht'))),
+        ),
       );
     });
 
@@ -1328,7 +1454,8 @@ Future<void> main(List<String> a) async {
       await l.starten(plugins, eingebaut: {...eingebaut, 'beispiel_echo'});
 
       expect(l.laeuft(plugins.eintraege.single), isFalse);
-      expect(l.startfehler(plugins.eintraege.single), contains('„beispiel_echo“ gibt es schon'));
+      expect(l.startfehler(plugins.eintraege.single), contains('schon gibt'));
+      expect(l.startfehler(plugins.eintraege.single), isNot(contains('beispiel_echo')));
       expect(l.werkzeuge(profil), isEmpty);
       expect(await _laeuft(prozess.pid), isFalse);
     });

@@ -98,12 +98,15 @@ void main() {
       abgewaehlt: abgewaehlt,
       gewaehlt: gewaehlt ?? gewaehltVorgabe(umgebung, wahl.keys),
       verwaist: verwaisteSkills(einstellungen.pluginSkills, ps, _appNamen),
+      pluginSkills: einstellungen.pluginSkills,
+      fremd: einstellungen.fremdeSkillOrdner,
       skillFehler: ps.fehler,
       gefunden: [codex, lm],
       python: () async => true,
     );
     einstellungen.pluginSkills =
         pluginSkillsGemerkt(gemerkt: einstellungen.pluginSkills, stand: stand, werkzeuge: [codex, lm]);
+    einstellungen.fremdeSkillOrdner = stand.fremdeOrdner;
     return stand;
   }
 
@@ -308,6 +311,136 @@ void main() {
       expect(einstellungen.pluginSkills, isEmpty);
     });
 
+    test('ein fremder Ordner gleichen Namens wird nicht überschrieben; der Dialog nennt ihn, ohne aufzuhalten', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      final fremd = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('von jemand anderem');
+      File(p.join(skillOrdner(codex, 'beispiel').path, 'notizen.md')).writeAsStringSync('eigene Notizen');
+
+      var s = await pruefen(plugins);
+      final codexStand = s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex');
+      expect(codexStand.skills.map((x) => x.name), isNot(contains('beispiel')));
+      expect(codexStand.entfernen, isEmpty);
+      final konflikt = s.skillFehler.where((f) => f.contains('stammt nicht von moocp')).single;
+      expect(konflikt, allOf(contains('Codex CLI'), contains('beispiel'), contains('„Beispiel“')));
+      expect(s.einrichtbar, isTrue, reason: 'in LM Studio ist etwas zu tun');
+
+      installieren(s);
+      s = await pruefen(plugins);
+      expect(fremd.readAsStringSync(), 'von jemand anderem');
+      expect(File(p.join(skillOrdner(codex, 'beispiel').path, 'notizen.md')).existsSync(), isTrue);
+      expect(File(p.join(skillOrdner(lm, 'beispiel').path, 'SKILL.md')).existsSync(), isTrue);
+      // Nichts hält auf: Bei den Skills ist in beiden Werkzeugen nichts mehr zu tun.
+      expect(s.werkzeuge.every((w) => w.skills.every((x) => w.stand[x.name]!.aktuell) && w.entfernen.isEmpty), isTrue);
+      expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')), hasLength(1));
+      // Gemerkt ist er, weil moocp ihn in LM Studio installiert hat; in Codex
+      // bleibt der fremde Ordner trotzdem, solange moocp ihn nicht kennt.
+      expect(einstellungen.pluginSkills, {'beispiel'});
+    });
+
+    test('ein fremder Ordner öffnet den Dialog einmal und bleibt bei der Deinstallation stehen', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      final fremd = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('von jemand anderem');
+      final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen);
+      Future<Einrichtungsstand> mit(Set<String> gesehen) => einrichtungPruefen(
+        umgebung: umgebung,
+        port: 47811,
+        schluessel: 'abc',
+        skills: ps.pakete,
+        wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
+        gesehen: gesehen,
+        gefunden: [codex, lm],
+        python: () async => true,
+      );
+
+      final erst = await mit(const {});
+      expect(erst.skillFehlerNeu, isTrue);
+      expect(erst.fremdeOrdner, {'codex/beispiel'});
+      expect((await mit(erst.konfliktStand)).skillFehlerNeu, isFalse);
+
+      installieren(await pruefen(plugins));
+      await pruefen(plugins);
+      expect(einstellungen.fremdeSkillOrdner, {'codex/beispiel'});
+      await einrichtungEntfernen(
+        umgebung: umgebung,
+        skills: [...einstellungen.pluginSkills],
+        werkzeuge: [codex, lm],
+        auslassen: einstellungen.fremdeSkillOrdner,
+      );
+      expect(fremd.readAsStringSync(), 'von jemand anderem');
+      expect(skillOrdner(lm, 'beispiel').existsSync(), isFalse);
+    });
+
+    test('ein fremder Ordner gleichen Namens in einem abgewählten Werkzeug wird nicht entfernt', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      final fremd = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('von jemand anderem');
+
+      final s = await pruefen(plugins, abgewaehlt: {'codex'});
+      expect(s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex').entfernen, isEmpty);
+      installieren(s);
+      expect(fremd.readAsStringSync(), 'von jemand anderem');
+    });
+
+    test('ein Ordner, den moocp für das Plugin installiert hat, wird weiter aktualisiert', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      installieren(await pruefen(plugins));
+      await pruefen(plugins);
+      expect(einstellungen.pluginSkills, {'beispiel'});
+      final datei = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))..writeAsStringSync('veraltet');
+
+      final s = await pruefen(plugins);
+      expect(s.skillFehler, isEmpty);
+      installieren(s);
+      expect(datei.readAsStringSync(), isNot('veraltet'));
+    });
+
+    test('eine Verknüpfung an Stelle des Skill-Ordners: nicht gefolgt, nichts hineingeschrieben', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      final draussen = Directory(p.join(tmp.path, 'draussen'))..createSync();
+      codex.skillOrdner.createSync(recursive: true);
+      try {
+        Link(skillOrdner(codex, 'beispiel').path).createSync(draussen.path);
+      } on FileSystemException {
+        markTestSkipped('Verknüpfungen lassen sich hier nicht anlegen (fehlendes Recht).');
+        return;
+      }
+
+      final s = await pruefen(plugins);
+      expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')), hasLength(1));
+      installieren(s);
+      expect(draussen.listSync(), isEmpty);
+    });
+
+    test('eine Verknüpfung in einem installierten Skill: Aufräumen folgt ihr nicht, entfernt nur sie', () {
+      final ziel = Directory(p.join(tmp.path, 'skills', 'moodle'))..createSync(recursive: true);
+      final draussen = Directory(p.join(tmp.path, 'draussen'))..createSync();
+      final geheim = File(p.join(draussen.path, 'geheim.md'))..writeAsStringSync('bleibt');
+      try {
+        Link(p.join(ziel.path, 'verweis')).createSync(draussen.path);
+      } on FileSystemException {
+        markTestSkipped('Verknüpfungen lassen sich hier nicht anlegen (fehlendes Recht).');
+        return;
+      }
+      final paket = SkillPaket('moodle', {'SKILL.md': utf8.encode('Skill')}, herkunft: SkillHerkunft.app);
+
+      expect(skillVergleichen(paket, ziel).ueberzaehlig, 0, reason: 'der Inhalt hinter der Verknüpfung zählt nicht');
+      skillInstallieren(paket, ziel);
+      expect(geheim.readAsStringSync(), 'bleibt');
+      expect(FileSystemEntity.typeSync(p.join(ziel.path, 'verweis'), followLinks: false), FileSystemEntityType.notFound);
+      skillEntfernen(ziel);
+      expect(geheim.existsSync(), isTrue);
+    });
+
     test('ein unbrauchbares Paket: Der Dialog nennt es, alles andere wird eingerichtet', () async {
       beispielAnlegen(manifest: (m) => {...m, 'skills': ['beispiel', 'beispiel-fehlt']});
       final s = await pruefen(await entschieden(zugestimmt: true));
@@ -345,12 +478,15 @@ void main() {
         wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
         gewaehlt: gewaehlt,
         verwaist: verwaisteSkills(einstellungen.pluginSkills, ps, _appNamen),
+        pluginSkills: einstellungen.pluginSkills,
+        fremd: einstellungen.fremdeSkillOrdner,
         skillFehler: ps.fehler,
         gefunden: [codex, lm],
         python: () async => true,
       );
       einstellungen.pluginSkills =
           pluginSkillsGemerkt(gemerkt: einstellungen.pluginSkills, stand: stand, werkzeuge: [codex, lm]);
+      einstellungen.fremdeSkillOrdner = stand.fremdeOrdner;
       return stand;
     }
 
@@ -485,6 +621,17 @@ void main() {
       j['pluginSkills'] = ['beispiel', '..', r'a\b', 'C:', 3];
       expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkills, {'beispiel'});
       expect(Einstellungen(schluessel: 'k').zuJson().containsKey('pluginSkills'), isFalse);
+    });
+
+    test('die fremden Ordner überstehen das Speichern', () {
+      final e = Einstellungen(schluessel: 'k', fremdeSkillOrdner: {'codex/beispiel', 'claude/beispiel-vorlage'});
+      final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
+      expect(j['fremdeSkillOrdner'], ['claude/beispiel-vorlage', 'codex/beispiel']);
+      expect(
+        Einstellungen.aus(j, Einstellungen(schluessel: 'x')).fremdeSkillOrdner,
+        {'codex/beispiel', 'claude/beispiel-vorlage'},
+      );
+      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('fremdeSkillOrdner'), isFalse);
     });
 
     test('Skill-Namen: wie die der App, nichts, was einen Pfad bildet', () {

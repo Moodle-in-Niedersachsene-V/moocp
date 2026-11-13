@@ -512,18 +512,25 @@ void main() {
   group('Senden', () {
     test('POST mit den Feldern des Plugins und dem sesskey von moocp; Antwort ohne Cookies und Kopfzeilen', () async {
       final a = aufruf();
+      // Den Inhalt der Antwort gibt es nur in einem Lauf, zu dem sie passt.
+      expect((await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token)).status, 200);
+      moodle.angefragt.clear();
+      moodle.rumpfe.clear();
       final r = await freigebenUndSchreiben(
         a.token,
-        anfrage('/mod/beispiel/speichern.php?id=7', felder: {'notiz': 'Hallo Welt', 'tags[]': 'a'}),
+        anfrage('/mod/beispiel/speichern.php?id=501', felder: {'notiz': 'Hallo Welt', 'tags[]': 'a'}),
       );
 
       expect(r.status, 200);
       expect(r.json.keys.toSet(), {'geschrieben', 'status', 'inhaltstyp', 'pfad', 'text'});
       expect(r.json['geschrieben'], true);
       expect(r.json['status'], 200);
-      expect(r.json['pfad'], '/mod/beispiel/speichern.php?id=7&gespeichert=1');
+      expect(r.json['pfad'], '/mod/beispiel/speichern.php?id=501&gespeichert=1');
       expect(r.json['text'], '<html>Notiz: Hallo Welt</html>');
-      expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=7', 'GET /mod/beispiel/speichern.php?id=7&gespeichert=1']);
+      expect(moodle.angefragt, [
+        'POST /mod/beispiel/speichern.php?id=501',
+        'GET /mod/beispiel/speichern.php?id=501&gespeichert=1',
+      ]);
       expect(moodle.rumpfe.first, 'notiz=Hallo+Welt&tags%5B%5D=a&sesskey=abc123');
       for (final geheim in [sitzungsCookie, 'MoodleSession', 'abc123']) {
         expect(r.roh, isNot(contains(geheim)));
@@ -554,7 +561,8 @@ void main() {
       final a = aufruf();
       final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/report.php'));
       expect(r.status, 200);
-      expect(r.json['text'], '<html>Bericht</html>');
+      expect(r.json['status'], 200);
+      expect(posts(), ['POST /mod/beispiel/report.php']);
 
       // Positivliste und Sperrliste der App sind dieselben wie vorher.
       final bericht = moodle.basis.resolve('/mod/beispiel/report.php');
@@ -571,8 +579,10 @@ void main() {
       test('gefolgt wird zu einer Zusatzadresse „schreiben“ dieses Plugins und zu Lesbarem', () async {
         final a = aufruf();
         final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=12'));
-        expect(r.json['pfad'], '/question/banks.php?courseid=12');
+        // Ohne Lauf nur bis zum Skriptnamen.
+        expect(r.json['pfad'], '/question/banks.php');
         expect(r.json.containsKey('umleitungNichtGelesen'), isFalse);
+        expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=12', 'GET /question/banks.php?courseid=12']);
       });
 
       test('sonst nicht; die Antwort sagt unmissverständlich, dass schon geschrieben ist', () async {
@@ -589,7 +599,7 @@ void main() {
           expect(r.status, 200, reason: id);
           expect(r.json['geschrieben'], true, reason: id);
           expect(r.json['status'], 303, reason: id);
-          expect(r.json['pfad'], '/mod/beispiel/speichern.php?id=$id', reason: id);
+          expect(r.json['pfad'], '/mod/beispiel/speichern.php', reason: id);
           expect(r.json['umleitungNichtGelesen'], startsWith('Geschrieben ist schon: Der Schreibvorgang ist gesendet'), reason: id);
           expect(r.json['umleitungNichtGelesen'], contains(grund), reason: id);
           expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=$id'], reason: id);
@@ -624,6 +634,77 @@ void main() {
         contains('schreiben: Plugin „Beispiel“, Zusatzadresse: POST /mod/beispiel/speichern.php?id=… → 403 (Schutzdienst: Prüfung verlangt, Ray-ID r2-FRA)'),
       );
       expect(a.angemeldet.zusatzSchreibvorgaenge, 0);
+    });
+  });
+
+  group('Den Inhalt der Antwort gibt es nur in einem Lauf', () {
+    Future<void> laufBeginnen(String token, int cmid) async {
+      final r = await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': cmid}, token: token);
+      expect(r.status, 200, reason: '${r.json}');
+      moodle.angefragt.clear();
+      moodle.rumpfe.clear();
+    }
+
+    /// Geschrieben, aber ohne Inhalt: nur Status, Pfad bis zum Skriptnamen
+    /// und der feste Hinweis.
+    void ohneInhalt(_Antwort r, {required String pfad, int status = 200}) {
+      expect(r.status, 200, reason: '${r.json}');
+      expect(r.json['geschrieben'], true);
+      expect(r.json['status'], status);
+      expect(r.json['pfad'], pfad);
+      expect(r.json['hinweis'], inhaltNurImLauf);
+      expect(r.json.containsKey('text'), isFalse);
+      expect(r.json.containsKey('inhaltstyp'), isFalse);
+      expect(r.roh, isNot(contains('Notiz:')));
+    }
+
+    test('außerhalb eines Laufs: geschrieben, aber nur Status und Pfad bis zum Skriptnamen', () async {
+      final a = aufruf();
+      final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=7', felder: {'notiz': 'Hallo'}));
+
+      ohneInhalt(r, pfad: '/mod/beispiel/speichern.php');
+      expect(posts(), ['POST /mod/beispiel/speichern.php?id=7']);
+      expect(moodle.notiz, 'Hallo', reason: 'geschrieben ist trotzdem');
+      expect(a.angemeldet.zusatzSchreibvorgaenge, 1);
+    });
+
+    test('im Lauf und passend zu Kurs und Aktivität: mit Inhalt', () async {
+      final a = aufruf();
+      await laufBeginnen(a.token, 501);
+      final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=501', felder: {'notiz': 'Hallo'}));
+
+      expect(r.status, 200);
+      expect(r.json['pfad'], '/mod/beispiel/speichern.php?id=501&gespeichert=1');
+      expect(r.json['text'], '<html>Notiz: Hallo</html>');
+      expect(r.json.containsKey('hinweis'), isFalse);
+    });
+
+    test('im Lauf, aber die Adresse passt nicht zum Lauf: ohne Inhalt', () async {
+      final a = aufruf();
+      await laufBeginnen(a.token, 501);
+      final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=7'));
+
+      ohneInhalt(r, pfad: '/mod/beispiel/speichern.php');
+    });
+
+    test('im Lauf, aber ein Formularfeld nennt einen anderen Kurs: ohne Inhalt', () async {
+      final a = aufruf();
+      await laufBeginnen(a.token, 501);
+      final r = await freigebenUndSchreiben(
+        a.token,
+        anfrage('/mod/beispiel/report.php?id=501', felder: {'notiz': 'Hallo', 'data[course]': '13'}),
+      );
+
+      ohneInhalt(r, pfad: '/mod/beispiel/report.php');
+    });
+
+    test('nach dem Ende des Laufs: ohne Inhalt', () async {
+      final a = aufruf();
+      await laufBeginnen(a.token, 501);
+      await _post(adresse.adresse, pfadLaufBeenden, const {}, token: a.token);
+      final r = await freigebenUndSchreiben(a.token, anfrage('/mod/beispiel/speichern.php?id=501'));
+
+      ohneInhalt(r, pfad: '/mod/beispiel/speichern.php');
     });
   });
 

@@ -459,23 +459,44 @@ class AppAdresse {
 
   /// Der Inhalt der Anfrage als JSON-Objekt, höchstens [anfrageHoechstens]
   /// Bytes; ein leerer Inhalt gilt als `{}`. Sonst die Antwort mit dem Fehler.
+  ///
+  /// Wird die Grenze überschritten, auch ohne Längenangabe im Kopf (chunked),
+  /// hört die App sofort auf zu lesen und antwortet mit 413; die Verbindung
+  /// schließt sie danach (dart:io verwirft eine Verbindung, deren Inhalt nicht
+  /// zu Ende gelesen ist). So kann ein Plugin sie nicht mit einem Inhalt ohne
+  /// Ende beschäftigen. Angehalten wird das Lesen, nicht abgebrochen: Ein
+  /// Abbruch schlösse die Verbindung, bevor die Antwort hinausgeht.
   Future<Object> _inhalt(HttpRequest r) async {
     if (r.contentLength > anfrageHoechstens) {
       r.response.persistentConnection = false;
       return _zuGross();
     }
     final bytes = BytesBuilder(copy: false);
-    var zuGross = false;
-    await for (final teil in r) {
-      if (zuGross) continue;
-      if (bytes.length + teil.length > anfrageHoechstens) {
-        zuGross = true;
-        bytes.clear();
-        continue;
-      }
-      bytes.add(teil);
+    final fertig = Completer<bool>();
+    late final StreamSubscription<List<int>> abo;
+    abo = r.listen(
+      (teil) {
+        if (fertig.isCompleted) return;
+        if (bytes.length + teil.length > anfrageHoechstens) {
+          bytes.clear();
+          abo.pause();
+          fertig.complete(false);
+          return;
+        }
+        bytes.add(teil);
+      },
+      onDone: () {
+        if (!fertig.isCompleted) fertig.complete(true);
+      },
+      onError: (Object x) {
+        if (!fertig.isCompleted) fertig.completeError(x);
+      },
+      cancelOnError: true,
+    );
+    if (!await fertig.future) {
+      r.response.persistentConnection = false;
+      return _zuGross();
     }
-    if (zuGross) return _zuGross();
     if (bytes.isEmpty) return <String, Object?>{};
     final Object? json;
     try {
@@ -891,8 +912,9 @@ class AppAdresse {
   /// `{"ausgang": "abgelehnt" | "abgebrochen"}`. Die Kennung gilt einmal, nur
   /// in diesem Aufruf.
   ///
-  /// Testbetrieb (E35): Läuft ein Lauf und passt die Adresse zu seinem Kurs
-  /// und seiner Aktivität (laufBindungVerletzt), geht der Kurs des Laufs mit
+  /// Testbetrieb (E35): Läuft ein Lauf und passen die Adresse und die
+  /// Formularfelder zu seinem Kurs und seiner Aktivität
+  /// (laufBindungVerletzt), geht der Kurs des Laufs mit
   /// an die Freigabe; ist er ein gebundener Testkurs, gibt der Testbetrieb
   /// frei (McpDienst). Dann trägt die Antwort `"testbetrieb": true` und einen
   /// Hinweis, und die Kennung gilt nur in diesem Lauf. Außerhalb eines Laufs
@@ -915,10 +937,12 @@ class AppAdresse {
       return _fehler(HttpStatus.badRequest, 'zusammenfassung fehlt: was geschrieben werden soll, als Text.');
     }
     return _einzeln(a, plugin, aufruf, () async {
-      // Nur ein Lauf, zu dem die Adresse passt, bringt den Kurs mit, den die
-      // App selbst ermittelt hat; nur dann kann der Testbetrieb freigeben.
+      // Nur ein Lauf, zu dem Adresse und Formularfelder passen, bringt den
+      // Kurs mit, den die App selbst ermittelt hat; nur dann kann der
+      // Testbetrieb freigeben. Die Felder zählen mit, weil Moodle sie vor den
+      // Parametern der Adresse liest.
       final lauf = switch (aufruf.laufend) {
-        final l? when laufBindungVerletzt(l, uri) == null => l,
+        final l? when laufBindungVerletzt(l, uri, felder: felder) == null => l,
         _ => null,
       };
       final ausgang = await aufruf.kontext.pluginFreigabe(
@@ -975,7 +999,9 @@ class AppAdresse {
   /// nichts, auf keiner Stufe. Gesendet wird mit der Sitzung des Profils, den
   /// sesskey setzt die App ein; einer Umleitung folgt sie nach den Regeln in
   /// moodle_schreiben.dart. Antwort `{"geschrieben": true, "status": …,
-  /// "inhaltstyp": …, "pfad": …, "text": …}`, nie Cookies oder Kopfzeilen;
+  /// "inhaltstyp": …, "pfad": …, "text": …}`, nie Cookies oder Kopfzeilen,
+  /// mit Inhalt nur in einem Lauf, zu dem die Seite passt; sonst nur
+  /// `status`, `pfad` bis zum Skriptnamen und `hinweis` ([inhaltNurImLauf]);
   /// dazu `umleitungNichtGelesen`, wenn einer Umleitung nicht gefolgt wurde,
   /// oder nur `{"geschrieben": true, "hinweis": …}`, wenn die Antwort zu groß
   /// war. Ein Fehler, nach dem nichts geschrieben ist: 403, 409, 502, 503;
@@ -1101,6 +1127,27 @@ class AppAdresse {
             'Geschrieben ist schon: Der Schreibvorgang ist gesendet, Moodle hat mit einer Umleitung geantwortet. '
             'Deren Ziel ließ sich nicht lesen. ${x.meldung}';
       }
+    }
+    // Den Inhalt bekommt das Plugin nur in einem Lauf und nur, wenn die Seite,
+    // deren Inhalt es bekäme, zu Kurs und Aktivität des Laufs passt: die
+    // Antwort auf den POST (Adresse und Formularfelder) oder das Ziel der
+    // Umleitung. Hinter einer Zusatzadresse ist mit Namen zu rechnen, und nur
+    // im Lauf hat die App die Namen des Kurses für die letzte Sperre geladen
+    // (E36). Sonst nur Status und Pfad bis zum Skriptnamen; geschrieben ist
+    // trotzdem.
+    final lauf = aufruf.laufend;
+    final passt =
+        lauf != null &&
+        (identical(ende, r)
+            ? laufBindungVerletzt(lauf, uri, felder: felder) == null
+            : laufBindungVerletzt(lauf, ende.adresse) == null);
+    if (!passt) {
+      return _geschrieben(aufruf, {
+        'status': ende.status,
+        'pfad': skriptPfad(ende.adresse),
+        'hinweis': inhaltNurImLauf,
+        'umleitungNichtGelesen': ?nichtGelesen,
+      });
     }
     // Was das Plugin von der Seite bekommt, wie beim Lesen über eine
     // Zusatzadresse: von einer ganzen Seite nur der Hauptbereich, nie der

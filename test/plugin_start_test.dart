@@ -30,6 +30,21 @@ import 'package:path/path.dart' as p;
 import 'mcp_client.dart';
 import 'plugin_moodle_test.dart' show PluginTestMoodle, exportGroesse, lehrkraftImDoppel, sitzungsCookie;
 
+/// Ein Zugang, dessen Anmeldung der Test schaltet, ohne Moodle; er zählt,
+/// ob jemand sich anzumelden versucht.
+class _Zugang extends MoodleZugang {
+  _Zugang(super.protokoll);
+
+  var an = false;
+  var anmeldeversuche = 0;
+
+  @override
+  bool get angemeldet => an;
+
+  @override
+  Future<void> anmelden(String adresse, String benutzer, String passwort) async => anmeldeversuche++;
+}
+
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
 
@@ -212,11 +227,17 @@ void main() {
   });
 
   /// Legt das übersetzte Beispiel-Plugin unter `plugins/beispiel` an und
-  /// stimmt ihm zu, eingeschaltet in [aktiv].
-  Future<Plugins> beispielAngenommen(List<Profil> profile, {Set<String>? aktiv}) async {
+  /// stimmt ihm zu, eingeschaltet in [aktiv]. Mit [ohneAnmeldung] steht diese
+  /// Liste statt der aus dem Repository in seiner Beschreibungsdatei.
+  Future<Plugins> beispielAngenommen(List<Profil> profile, {Set<String>? aktiv, List<String>? ohneAnmeldung}) async {
     final ordner = Directory(p.join(wurzel.path, 'plugins', 'beispiel'))..createSync(recursive: true);
     for (final f in vorlage.listSync().whereType<File>()) {
       f.copySync(p.join(ordner.path, p.basename(f.path)));
+    }
+    if (ohneAnmeldung != null) {
+      final datei = File(p.join(ordner.path, 'plugin.json'));
+      final j = jsonDecode(datei.readAsStringSync()) as Map<String, dynamic>;
+      datei.writeAsStringSync(jsonEncode({...j, 'ohneAnmeldung': ohneAnmeldung}));
     }
     einstellungen = _EinstellungenOhneDatei(profile: profile);
     final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
@@ -242,6 +263,7 @@ void main() {
     String arbeitsordner = '',
     Freigaben? freigaben,
     MoodleZugang? moodle,
+    bool vorAnmeldung = false,
   }) async {
     final d = McpDienst(
       einstellungen,
@@ -253,7 +275,7 @@ void main() {
       werkzeugquellen: [quelle],
     );
     dienste.add(d);
-    await d.starten();
+    await d.starten(vorAnmeldung: vorAnmeldung);
     final c = McpTestClient(profil.port);
     clients.add(c);
     await c.initialize();
@@ -300,6 +322,61 @@ void main() {
       expect(status, contains('Profil: moodle (moodle)'));
       expect(zeilen, contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
       expect(l.appAdresse?.host, '127.0.0.1');
+    });
+
+    test('vor der Anmeldung: die Werkzeuge ohne Anmeldung gehen, die übrigen und die eingebauten erst danach, in derselben Sitzung', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final ohne = _profil('weiteres', 'moodle-weiteres', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil, ohne], aktiv: {'standard'}));
+      expect(l.ohneAnmeldungIn(profil), isTrue);
+      expect(l.ohneAnmeldungIn(ohne), isFalse, reason: 'dort ist das Plugin nicht eingeschaltet');
+      final zugang = _Zugang(protokoll);
+      final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
+      final client = await verbinden(profil, l, arbeitsordner: ordner.path, moodle: zugang, vorAnmeldung: true);
+      const hinweis = 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.';
+      Future<Map> aufrufen(String name, [Map<String, Object?> args = const {}]) =>
+          client.call('tools/call', {'name': name, 'arguments': args});
+      String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+
+      expect(await werkzeugnamen(client), containsAll([..._beispielWerkzeuge, 'status', 'meine_kurse']));
+      expect(await client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
+      expect(await client.tool('beispiel_protokoll', {'text': 'vorher'}), 'Die Zeile steht im Protokoll von moocp.');
+      expect(await client.tool('beispiel_datei', {'text': 'vorher'}), startsWith('Datei abgelegt: '));
+      for (final name in ['status', 'meine_kurse', 'beispiel_status', 'beispiel_moodle_lesen']) {
+        final r = await aufrufen(name, name == 'beispiel_moodle_lesen' ? {'kurs': 12} : const {});
+        expect(r['isError'], true, reason: name);
+        expect(text(r), hinweis, reason: name);
+      }
+      expect(zugang.anmeldeversuche, 0);
+
+      zugang.an = true;
+      final status = await aufrufen('status');
+      final ueberPlugin = await aufrufen('beispiel_status');
+      expect(status['isError'], isNot(true));
+      expect(text(status), contains('Angemeldet: ja'));
+      expect(ueberPlugin['isError'], isNot(true));
+      expect(text(ueberPlugin), contains('Angemeldet: ja'));
+      expect(client.session, isNotNull);
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: vorher'));
+      expect(zeilen, contains('beispiel_status: vor der Anmeldung nicht ausgeführt'));
+    });
+
+    test('nennt ohneAnmeldung ein Werkzeug, das das Plugin nicht hat, lädt es nicht', () async {
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final plugins = await beispielAngenommen([profil], ohneAnmeldung: ['beispiel_echo', 'beispiel_gibtesnicht']);
+      final l = await starten(plugins);
+      final e = plugins.eintraege.single;
+
+      expect(l.laeuft(e), isFalse);
+      expect(l.startfehler(e), 'Das Feld „ohneAnmeldung“ nennt das Werkzeug „beispiel_gibtesnicht“, das das Plugin nicht hat.');
+      expect(l.werkzeuge(profil), isEmpty);
+      expect(l.ohneAnmeldungIn(profil), isFalse);
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(
+        zeilen,
+        contains('Plugin „Beispiel“ nicht gestartet: Das Feld „ohneAnmeldung“ nennt das Werkzeug „beispiel_gibtesnicht“, das das Plugin nicht hat.'),
+      );
     });
 
     test('Dialoge und Freigabe: jede Art über die Adresse der App, die Antwort kommt beim Plugin an', () async {
@@ -1043,7 +1120,9 @@ Future<void> main(List<String> a) async {
           return prozess;
         },
       );
-      final plugins = await beispielAngenommen([profil]);
+      // Das Programm des Neustarts hat nur beispiel_echo; ohneAnmeldung nennt
+      // darum nur das, sonst hielte schon diese Prüfung den Neustart auf.
+      final plugins = await beispielAngenommen([profil], ohneAnmeldung: ['beispiel_echo']);
       await starten(plugins, mit: l);
       final client = await verbinden(profil, l);
       expect((await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}}))['isError'], true);

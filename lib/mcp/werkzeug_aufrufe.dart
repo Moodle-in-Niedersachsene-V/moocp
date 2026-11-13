@@ -8,12 +8,13 @@ import '../freigabe.dart';
 import '../log.dart';
 import '../moodle/moodle_zugang.dart';
 import '../protokoll.dart';
+import 'vor_anmeldung.dart';
 import 'werkzeugquelle.dart';
 
 typedef _Huelle = Future<CallToolResult> Function(Map<String, dynamic> args, Future<void> abbruch, String? aufrufer);
 
 class WerkzeugAufrufe {
-  WerkzeugAufrufe(this.protokoll, this.freigaben, {required this.ausfuehren});
+  WerkzeugAufrufe(this.protokoll, this.freigaben, {required this.ausfuehren, this.anmeldungFehlt});
   final Future<String> Function(
     String,
     Map<String, dynamic>,
@@ -22,6 +23,13 @@ class WerkzeugAufrufe {
   ausfuehren;
   final Protokoll protokoll;
   final Freigaben freigaben;
+
+  /// Ob der Server vor der Anmeldung läuft und die Lehrkraft sich noch nicht
+  /// angemeldet hat (McpDienst.wartetAufAnmeldung). Dann antwortet jedes
+  /// Werkzeug, das nicht [WerkzeugBeschreibung.ohneAnmeldung] trägt, mit
+  /// [anmeldungFehltText], ohne etwas auszuführen. Gefragt bei jedem Aufruf:
+  /// Nach der Anmeldung geht derselbe Aufruf in derselben Sitzung.
+  final bool Function()? anmeldungFehlt;
 
   /// Ein Werkzeug: Aufruf ins Protokoll, Fehler als Werkzeugfehler zurück.
   void registrieren(
@@ -78,6 +86,7 @@ class WerkzeugAufrufe {
       pflicht: schema.required ?? const [],
       nurLesen: werkzeug.nurLesen,
       zerstoerend: werkzeug.zerstoerend,
+      ohneAnmeldung: werkzeug.ohneAnmeldung,
       ausfuehren: ausfuehren,
     );
   }
@@ -128,6 +137,7 @@ class WerkzeugAufrufe {
     required List<String> pflicht,
     required bool nurLesen,
     required bool zerstoerend,
+    bool ohneAnmeldung = false,
     required Future<String> Function(Map<String, dynamic> a, Future<void> abbruch) ausfuehren,
   }) {
     if (!(_namen[server] ??= {}).add(name)) {
@@ -145,6 +155,18 @@ class WerkzeugAufrufe {
         '$name(${aufruf.length > 200 ? '${aufruf.substring(0, 199)}…' : aufruf})'
         '${aufrufer == null ? '' : ' -- Aufrufer: $aufrufer'}',
       );
+      // Vor der Anmeldung: nur die Werkzeuge ohne Anmeldung. Alles andere,
+      // auch die eingebauten Werkzeuge und der Aufruf eines eingebauten durch
+      // ein Plugin, bekommt den festen Satz, und nichts wird ausgeführt --
+      // auch kein Versuch, sich anzumelden (A2, E7).
+      if (!ohneAnmeldung && (anmeldungFehlt?.call() ?? false)) {
+        protokoll.eintrag(Art.info, '$name: vor der Anmeldung nicht ausgeführt');
+        return CallToolResult(
+          content: [TextContent(text: anmeldungFehltText)],
+          isError: true,
+          meta: const {anmeldungFehltMeta: anmeldungFehltWert},
+        );
+      }
       for (final p in pflicht) {
         if (args[p] == null) return _fehler('$p fehlt.');
       }

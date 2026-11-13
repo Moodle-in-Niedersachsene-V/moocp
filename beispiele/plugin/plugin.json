@@ -27,6 +27,6 @@
   "wahlSkills": {
     "beispiel-vorlage": "Vorlage für einen wählbaren Skill eines Plugins; zeigt, wie ein Skill mit Haken aussieht."
   },
-  "ohneAnmeldung": [],
+  "ohneAnmeldung": ["beispiel_echo", "beispiel_protokoll", "beispiel_datei"],
   "entwicklungsPort": 47900
 }

@@ -285,7 +285,7 @@ void main() {
       expect(grund, isNot(contains('beispiel-x')), reason: 'der Grund nennt keine Inhalte');
     });
 
-    test('Werkzeuge ohne Anmeldung: eine Liste von Namen, gegen nichts geprüft', () {
+    test('Werkzeuge ohne Anmeldung: eine Liste von Namen; ob es sie gibt, prüft erst der Start', () {
       expect(_grund(_mit(_minimal(), 'ohneAnmeldung', ['irgendeins', 'noch_eins'])), isNull);
       expect(_grund(_mit(_minimal(), 'ohneAnmeldung', 'x')), contains('„ohneAnmeldung“'));
       expect(_grund(_mit(_minimal(), 'ohneAnmeldung', [1])), contains('„ohneAnmeldung“'));

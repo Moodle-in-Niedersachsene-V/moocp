@@ -160,6 +160,77 @@ void main() {
       expect(aufrufe, ['update', 'plugin-prüfung', 'zustimmung']);
     });
 
+    /// Der ganze Weg bis zum MCP-Server, wie _starten und _anmelden ihn
+    /// gehen: startBisAnmeldung, danach nachEinrichtung mit einem Profil,
+    /// dessen Server vor der Anmeldung startet, wenn dort ein Plugin mit
+    /// Werkzeugen ohne Anmeldung eingeschaltet ist; nach der Anmeldung
+    /// startet jeder Server, der noch nicht läuft (_mcpStarten).
+    Future<List<String>> bisZumServer({required bool ohneAnmeldung}) async {
+      final aufrufe = <String>[];
+      var laeuft = false;
+      final ausgang = await startBisAnmeldung(
+        update: () async {
+          aufrufe.add('update');
+          return false;
+        },
+        pluginPruefung: () async {
+          aufrufe.add('plugin-prüfung');
+          return false;
+        },
+        pluginZustimmung: () async => aufrufe.add('zustimmung'),
+        pluginsStarten: () async => aufrufe.add('plugins starten'),
+        einrichtungUndAnmeldung: () async {
+          aufrufe.add('einrichtung');
+          return true;
+        },
+        weiter: () => true,
+      );
+      expect(ausgang, StartAusgang.bereit);
+      await nachEinrichtung(
+        server: [
+          (
+            ohneAnmeldung: () => ohneAnmeldung && !laeuft,
+            starten: () async {
+              aufrufe.add('server vor der anmeldung');
+              laeuft = true;
+            },
+          ),
+        ],
+        anmelden: () async {
+          aufrufe.add('anmelden');
+          if (!laeuft) {
+            aufrufe.add('server');
+            laeuft = true;
+          }
+        },
+      );
+      return aufrufe;
+    }
+
+    test('ohne Plugin mit Werkzeugen ohne Anmeldung: Einrichtung, Anmeldung, dann der Server', () async {
+      expect(await bisZumServer(ohneAnmeldung: false), [
+        'update',
+        'plugin-prüfung',
+        'zustimmung',
+        'plugins starten',
+        'einrichtung',
+        'anmelden',
+        'server',
+      ]);
+    });
+
+    test('mit einem Plugin mit Werkzeugen ohne Anmeldung: der Server nach der Einrichtung, vor der Anmeldung', () async {
+      expect(await bisZumServer(ohneAnmeldung: true), [
+        'update',
+        'plugin-prüfung',
+        'zustimmung',
+        'plugins starten',
+        'einrichtung',
+        'server vor der anmeldung',
+        'anmelden',
+      ]);
+    });
+
     test('ist die Oberfläche nach der Prüfung der Plugins weg, fragt keine Zustimmung', () async {
       final aufrufe = <String>[];
       var weg = false;

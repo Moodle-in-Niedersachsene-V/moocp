@@ -19,8 +19,10 @@
 // (`moocp.exe --werkzeugliste`, Werkzeugliste) -- also genau die installierte
 // Version, ob die App läuft oder nicht --, und ping ohnehin. Läuft die App
 // beim Werkzeugaufruf nicht, startet die Brücke sie und wartet, bis sie
-// angemeldet ist. So geht moocp nicht bei jedem Start des Clients mit auf,
-// und wer vergessen hat, es zu starten, merkt davon nur eine kurze Pause.
+// angemeldet ist -- bei einem Werkzeug eines Plugins, das ohne Anmeldung
+// arbeitet (`ohneAnmeldung` in der Werkzeugliste), nur, bis ihr Server
+// lauscht. So geht moocp nicht bei jedem Start des Clients mit auf, und wer
+// vergessen hat, es zu starten, merkt davon nur eine kurze Pause.
 //
 // Den Schlüssel liest die Brücke selbst aus den Einstellungen; im
 // KI-Werkzeug steht deshalb nur der Pfad der Brücke und kein Geheimnis.
@@ -44,6 +46,7 @@ import 'package:path/path.dart' as p;
 import '../einrichtung.dart';
 import '../einstellungen_ort.dart';
 import '../plattform/kindprozess.dart';
+import 'vor_anmeldung.dart';
 
 /// Aufruf aus bin/moocp_bruecke.dart.
 Future<int> brueckeStarten() async {
@@ -109,11 +112,22 @@ Future<Werkzeugliste?> werkzeuglisteHolen(File exe) async {
 /// er beim initialize annimmt. Darin stehen nur Namen, Beschreibungen und
 /// Parameter der Werkzeuge -- keine Kursinhalte, kein Schlüssel.
 class Werkzeugliste {
-  Werkzeugliste({required this.versionen, required this.initialize, required this.tools});
+  Werkzeugliste({
+    required this.versionen,
+    required this.initialize,
+    required this.tools,
+    this.ohneAnmeldung = const {},
+  });
 
   final List<String> versionen;
   final Map<String, dynamic> initialize;
   final Map<String, dynamic> tools;
+
+  /// Die Werkzeuge der Plugins, die ohne Moodle-Anmeldung arbeiten
+  /// (McpDienst.werkzeugliste, `ohneAnmeldung`). Für sie wartet die Brücke
+  /// nur auf den Server, nicht auf die Anmeldung. Der Client sieht die Angabe
+  /// nicht: An ihn gehen nur [initialize] und [tools].
+  final Set<String> ohneAnmeldung;
 
   /// Die Version, die der Server der App einem Client zusagt, der
   /// [gewuenscht] verlangt (wie _oninitialize in mcp_dart): die gewünschte,
@@ -126,19 +140,34 @@ class Werkzeugliste {
     try {
       final versionen = ((j as Map)['versionen'] as List).cast<String>();
       if (versionen.isEmpty) return null;
+      final ohne = j['ohneAnmeldung'];
       return Werkzeugliste(
         versionen: versionen,
         initialize: (j['initialize'] as Map).cast<String, dynamic>(),
         tools: (j['tools'] as Map).cast<String, dynamic>(),
+        // Eine unbrauchbare Angabe ist keine: Dann wartet jeder Aufruf auf
+        // die Anmeldung, wie ohne Plugin.
+        ohneAnmeldung: ohne is List ? ohne.whereType<String>().toSet() : const {},
       );
     } catch (_) {
       return null;
     }
   }
 
-  Map<String, dynamic> toJson() => {'versionen': versionen, 'initialize': initialize, 'tools': tools};
+  Map<String, dynamic> toJson() => {
+    'versionen': versionen,
+    'initialize': initialize,
+    'tools': tools,
+    if (ohneAnmeldung.isNotEmpty) 'ohneAnmeldung': ohneAnmeldung.toList(),
+  };
 }
 
+const _nochNichtBereit =
+    'moocp ist gestartet, aber noch nicht bereit: in moocp bei Moodle anmelden (und einen offenen '
+    'Dialog dort abschließen), dann noch einmal versuchen.';
+const _nochNichtBereitOhneAnmeldung =
+    'moocp ist gestartet, aber noch nicht bereit: einen offenen Dialog in moocp abschließen, dann noch '
+    'einmal versuchen.';
 const _keineListe = 'moocp gibt seine Werkzeuge nicht heraus: moocp neu installieren.';
 const _laeuftNicht = 'moocp läuft nicht: die App starten und bei Moodle anmelden.';
 const _schluesselFalsch =
@@ -158,6 +187,7 @@ class Bruecke {
     // Kürzer als das Zeitlimit des Clients (einrichtung.dart): Die KI soll den Hinweis
     // „moocp ist noch nicht bereit" bekommen, nicht nur eine Zeitüberschreitung.
     this.aufAppWarten = const Duration(minutes: 5),
+    this.anmeldungsTakt = const Duration(seconds: 2),
     HttpClient? client,
   }) : _client = client ?? (HttpClient()..connectionTimeout = const Duration(milliseconds: 500));
 
@@ -177,13 +207,27 @@ class Bruecke {
   final Future<bool> Function() appStarten;
 
   /// Wie lange ein Werkzeugaufruf nach dem Start der App auf ihren
-  /// MCP-Server wartet. Der läuft erst nach der Anmeldung (E13): mit
-  /// gespeicherten Anmeldedaten nach wenigen Sekunden, sonst, sobald die
-  /// Lehrkraft sich angemeldet hat, nach einem Update auch erst nach dem
-  /// Dialog „KI-Werkzeuge einrichten". Kürzer als das Zeitlimit, das die App
-  /// in ein KI-Werkzeug einträgt ([clientZeitlimit]): So bekommt die KI den Hinweis,
+  /// MCP-Server und auf die Anmeldung wartet. Der Server läuft erst nach der
+  /// Anmeldung (E13): mit gespeicherten Anmeldedaten nach wenigen Sekunden,
+  /// sonst, sobald die Lehrkraft sich angemeldet hat, nach einem Update auch
+  /// erst nach dem Dialog „KI-Werkzeuge einrichten". Ist in seinem Profil ein
+  /// Plugin mit Werkzeugen ohne Anmeldung eingeschaltet, läuft er schon nach
+  /// der Einrichtung: Ein Werkzeug aus [Werkzeugliste.ohneAnmeldung] wartet
+  /// dann nur auf ihn; jedes andere fragt, solange die App antwortet, dass die
+  /// Anmeldung fehlt (vor_anmeldung.dart), alle [anmeldungsTakt] wieder, bis
+  /// diese Frist um ist. Kürzer als das Zeitlimit, das die App in ein
+  /// KI-Werkzeug einträgt ([clientZeitlimit]): So bekommt die KI den Hinweis,
   /// dass moocp noch nicht bereit ist, statt nur einer Zeitüberschreitung.
   final Duration aufAppWarten;
+
+  /// Wie oft ein Werkzeugaufruf, der auf die Anmeldung wartet, die App
+  /// wieder fragt. Jede Frage steht im Protokoll der App; seltener
+  /// hielte die Lehrkraft nach der Anmeldung länger auf.
+  final Duration anmeldungsTakt;
+
+  /// Die Werkzeugliste vom letzten initialize oder tools/list; daraus die
+  /// Werkzeuge ohne Anmeldung.
+  Werkzeugliste? _liste;
 
   /// Mit kurzer Frist für den Verbindungsaufbau: Lauscht die App, nimmt
   /// Windows die Verbindung auf 127.0.0.1 sofort an, auch wenn sie gerade
@@ -255,7 +299,10 @@ class Bruecke {
         // meldet sie sich beim Verbinden selbst als initialisiert.
         return;
       case String():
-        if (id != null) return _aufruf(zeile, id, werkzeug: methode == 'tools/call');
+        if (id != null) {
+          final werkzeug = methode == 'tools/call';
+          return _aufruf(zeile, id, werkzeug: werkzeug, ohneAnmeldung: werkzeug && _ohneAnmeldung(n['params']));
+        }
         if (methode == 'notifications/cancelled') {
           final r = (n['params'] as Map?)?['requestId'];
           if (r != null && _offen.contains(r)) _abgebrochen.add(r);
@@ -279,6 +326,7 @@ class Bruecke {
       _fehler(id, -32000, _keineListe);
       return;
     }
+    _liste = l;
     final Map<String, dynamic> ergebnis;
     if (initialize) {
       final params = _anmeldung?['params'];
@@ -292,19 +340,34 @@ class Bruecke {
   /// Alles andere braucht die App. Für einen Werkzeugaufruf startet die
   /// Brücke sie, wenn sie nicht läuft; scheitert das, bekommt das Modell
   /// den Grund als Ergebnis des Werkzeugs und kann ihn der Lehrkraft sagen.
-  Future<void> _aufruf(String zeile, Object id, {required bool werkzeug}) async {
+  Future<void> _aufruf(String zeile, Object id, {required bool werkzeug, required bool ohneAnmeldung}) async {
     _offen.add(id);
     try {
-      await _aufrufen(zeile, id, werkzeug: werkzeug);
+      await _aufrufen(zeile, id, werkzeug: werkzeug, ohneAnmeldung: ohneAnmeldung);
     } finally {
       _offen.remove(id);
       _abgebrochen.remove(id);
     }
   }
 
-  Future<void> _aufrufen(String zeile, Object id, {required bool werkzeug}) async {
+  /// Ob der Werkzeugaufruf mit [params] einem Werkzeug ohne Anmeldung gilt
+  /// (Werkzeugliste.ohneAnmeldung).
+  bool _ohneAnmeldung(Object? params) {
+    final name = params is Map ? params['name'] : null;
+    return name is String && (_liste?.ohneAnmeldung.contains(name) ?? false);
+  }
+
+  /// Ein Aufruf an die App. Ein Werkzeug ohne Anmeldung ([ohneAnmeldung])
+  /// wartet nur, bis ihr Server lauscht. Jedes andere wartet außerdem, solange
+  /// die App antwortet, dass die Anmeldung fehlt, und fragt alle
+  /// [anmeldungsTakt] wieder -- die App hat den Aufruf dann nicht ausgeführt,
+  /// und erst nach der Anmeldung geht er. Beides zusammen höchstens
+  /// [aufAppWarten]; danach bekommt der Client die letzte Antwort der App.
+  Future<void> _aufrufen(String zeile, Object id, {required bool werkzeug, required bool ohneAnmeldung}) async {
+    final bis = DateTime.now().add(aufAppWarten);
     String? grund;
-    for (var versuch = 0; versuch < 2; versuch++) {
+    var versuche = 0;
+    while (versuche < 2) {
       if (_sitzung == null) {
         grund = await _verbinden(starten: werkzeug);
         if (grund != null) break;
@@ -312,13 +375,27 @@ class Bruecke {
       // Abgebrochen, während die Brücke auf die App wartete: nicht mehr
       // senden und nicht antworten -- der Client will keine Antwort mehr.
       if (_abgebrochen.contains(id)) return;
-      if (await _senden(zeile, id) == _Ergebnis.erledigt) return;
-      // Die App ist inzwischen weg: neu verbinden, notfalls starten.
-      _sitzung = null;
-      grund = _laeuftNicht;
+      final (ergebnis, zurueckgehalten) = await _senden(zeile, id, anmeldungAbwarten: werkzeug && !ohneAnmeldung);
+      switch (ergebnis) {
+        case _Ergebnis.erledigt:
+          return;
+        case _Ergebnis.anmeldungFehlt:
+          if (!DateTime.now().isBefore(bis)) {
+            _weiter(zurueckgehalten!);
+            return;
+          }
+          await Future<void>.delayed(anmeldungsTakt);
+          if (_abgebrochen.contains(id)) return;
+        case _Ergebnis.nichtErreichbar:
+          // Die App ist inzwischen weg: neu verbinden, notfalls starten.
+          _sitzung = null;
+          grund = _laeuftNicht;
+          versuche++;
+      }
     }
     if (_abgebrochen.contains(id)) return;
-    final text = grund ?? _laeuftNicht;
+    var text = grund ?? _laeuftNicht;
+    if (ohneAnmeldung && text == _nochNichtBereit) text = _nochNichtBereitOhneAnmeldung;
     if (werkzeug) {
       ausgabe(
         jsonEncode({
@@ -388,10 +465,7 @@ class Bruecke {
             return 'moocp läuft nicht und ließ sich nicht starten: die App starten und bei Moodle anmelden.';
           }
         }
-        if (!DateTime.now().isBefore(bis)) {
-          return 'moocp ist gestartet, aber noch nicht bereit: in moocp bei Moodle anmelden (und einen offenen '
-              'Dialog dort abschließen), dann noch einmal versuchen.';
-        }
+        if (!DateTime.now().isBefore(bis)) return _nochNichtBereit;
         await Future<void>.delayed(const Duration(milliseconds: 500));
       } catch (x) {
         return 'moocp nicht erreichbar (${x.runtimeType}).';
@@ -413,16 +487,25 @@ class Bruecke {
 
   /// Schickt eine Nachricht an die App und gibt ihre Antwort an den Client.
   /// [_Ergebnis.nichtErreichbar], wenn die App nicht lauscht -- dann hat der
-  /// Client noch nichts bekommen, und der Aufrufer entscheidet.
-  Future<_Ergebnis> _senden(String text, Object? id, {bool nochmal = true}) async {
+  /// Client noch nichts bekommen, und der Aufrufer entscheidet. Mit
+  /// [anmeldungAbwarten] hält es eine Antwort, die sagt, dass die Anmeldung
+  /// fehlt (vor_anmeldung.dart), zurück und gibt sie dem Aufrufer mit
+  /// [_Ergebnis.anmeldungFehlt].
+  Future<(_Ergebnis, String?)> _senden(
+    String text,
+    Object? id, {
+    bool nochmal = true,
+    bool anmeldungAbwarten = false,
+  }) async {
+    const erledigt = (_Ergebnis.erledigt, null);
     final HttpClientResponse antwort;
     try {
       antwort = await _post(text, mitSitzung: true);
     } on SocketException {
-      return _Ergebnis.nichtErreichbar;
+      return (_Ergebnis.nichtErreichbar, null);
     } catch (x) {
       if (id != null) _fehler(id, -32000, 'moocp nicht erreichbar (${x.runtimeType}).');
-      return _Ergebnis.erledigt;
+      return erledigt;
     }
     final status = antwort.statusCode;
     // Die App wurde neu gestartet und kennt die Sitzung nicht mehr: neu
@@ -431,27 +514,38 @@ class Bruecke {
       await antwort.drain<void>();
       _sitzung = null;
       final grund = await _verbinden(starten: false);
-      if (grund == null) return _senden(text, id, nochmal: false);
-      if (grund == _laeuftNicht) return _Ergebnis.nichtErreichbar;
+      if (grund == null) return _senden(text, id, nochmal: false, anmeldungAbwarten: anmeldungAbwarten);
+      if (grund == _laeuftNicht) return (_Ergebnis.nichtErreichbar, null);
       if (id != null) _fehler(id, -32000, grund);
-      return _Ergebnis.erledigt;
+      return erledigt;
     }
     if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
       await antwort.drain<void>();
       if (id != null) _fehler(id, -32000, _schluesselFalsch);
-      return _Ergebnis.erledigt;
+      return erledigt;
     }
     if (antwort.headers.contentType?.mimeType == 'text/event-stream') {
       await _ereignisse(antwort);
-      return _Ergebnis.erledigt;
+      return erledigt;
     }
     final inhalt = await utf8.decodeStream(antwort);
+    if (anmeldungAbwarten && _anmeldungFehlt(inhalt)) return (_Ergebnis.anmeldungFehlt, inhalt);
     if (inhalt.trim().isNotEmpty) {
       _weiter(inhalt);
     } else if (status >= 400 && id != null) {
       _fehler(id, -32000, 'moocp antwortet mit Status $status.');
     }
-    return _Ergebnis.erledigt;
+    return erledigt;
+  }
+
+  /// Ob [json] die Antwort der App auf einen Werkzeugaufruf ist, der vor der
+  /// Anmeldung nicht ausgeführt wurde: die Angabe in `_meta` des Ergebnisses
+  /// (vor_anmeldung.dart).
+  static bool _anmeldungFehlt(String json) {
+    final n = _json(json);
+    final ergebnis = n is Map ? n['result'] : null;
+    final meta = ergebnis is Map ? ergebnis['_meta'] : null;
+    return meta is Map && meta[anmeldungFehltMeta] == anmeldungFehltWert;
   }
 
   /// Ereignisse einer SSE-Antwort: jedes `data:` ist eine Nachricht. Die App
@@ -525,4 +619,4 @@ class Bruecke {
   );
 }
 
-enum _Ergebnis { erledigt, nichtErreichbar }
+enum _Ergebnis { erledigt, nichtErreichbar, anmeldungFehlt }

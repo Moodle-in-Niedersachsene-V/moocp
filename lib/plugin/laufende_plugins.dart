@@ -438,6 +438,7 @@ class LaufendePlugins implements WerkzeugQuelle {
         frist: startfrist,
         weiter: () => lebt && !_beendet,
         adresse: adresse.adresse,
+        ohneAnmeldung: b.ohneAnmeldung,
       );
       if (_beendet) {
         await verbindung.schliessen();
@@ -567,6 +568,15 @@ class LaufendePlugins implements WerkzeugQuelle {
   ];
 
   bool _aktiv(PluginEintrag e, Profil profil) => _plugins?.stand(e).aktivIn(profil.kennung) ?? false;
+
+  /// Ob in [profil] ein Plugin eingeschaltet ist, das mindestens ein Werkzeug
+  /// ohne Anmeldung hat: Dann startet der MCP-Server dieses Profils schon vor
+  /// der Anmeldung (main.dart, E13). Ein angehängtes Entwicklungs-Plugin zählt
+  /// nach seiner Beschreibungsdatei, auch bevor es verbunden ist: Es ist in
+  /// jedem Profil eingeschaltet, und seine Werkzeuge kommen oft erst später.
+  bool ohneAnmeldungIn(Profil profil) =>
+      werkzeuge(profil).any((w) => w.ohneAnmeldung) ||
+      (_angehaengt?.plugin.beschreibung.ohneAnmeldung.isNotEmpty ?? false);
 
   /// Führt den Aufruf beim Plugin aus. Solange er läuft, gilt sein Token an
   /// der Adresse der App für genau dieses Plugin (app_adresse.dart); danach

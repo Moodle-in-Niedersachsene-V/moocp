@@ -259,6 +259,7 @@ class AngehaengtesPlugin {
         frist: versuchsfrist,
         weiter: () => !_beendet,
         adresse: adresse?.adresse,
+        ohneAnmeldung: plugin.beschreibung.ohneAnmeldung,
       );
     } on PluginStartFehler {
       // Nicht erreichbar oder keine Antwort in der Frist: Das Plugin läuft

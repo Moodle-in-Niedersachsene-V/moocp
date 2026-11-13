@@ -104,7 +104,9 @@ class PluginBeschreibung {
   /// liegen wie [skills] unter `skills/<name>/`. Kein Name steht in beiden.
   final Map<String, String> wahlSkills;
 
-  /// Die Werkzeuge, die ohne Moodle-Anmeldung arbeiten. Gegen nichts geprüft.
+  /// Die Werkzeuge, die ohne Moodle-Anmeldung arbeiten. Hier wird nur die Form
+  /// geprüft; dass das Plugin jedes davon hat, prüft die Verbindung beim Start
+  /// (verbindung.dart, ohneAnmeldungPruefen), sonst lädt es nicht.
   final List<String> ohneAnmeldung;
 
   /// Der feste Port, auf dem das Plugin im Debugger seines Entwicklers läuft.

@@ -71,6 +71,7 @@ Directory _plugin(
   String kurzname = 'beispiel',
   String version = '1.0',
   String programm = 'Programm',
+  List<String>? ohneAnmeldung,
 }) {
   final d = Directory(p.join(plugins.path, ordner))..createSync(recursive: true);
   File(p.join(d.path, 'plugin.json')).writeAsStringSync(
@@ -81,6 +82,7 @@ Directory _plugin(
       'schnittstelle': 1,
       'programm': 'plugin.exe',
       'herkunft': 'Beispiel-Projekt',
+      'ohneAnmeldung': ?ohneAnmeldung,
     }),
   );
   File(p.join(d.path, 'plugin.exe')).writeAsStringSync(programm);
@@ -395,8 +397,9 @@ void main() {
       List<WerkzeugBeschreibung> werkzeuge, {
       String kurzname = 'beispiel',
       Set<String> profile = const {'standard'},
+      List<String>? ohneAnmeldung,
     }) async {
-      _plugin(pluginOrdner, ordner, kurzname: kurzname);
+      _plugin(pluginOrdner, ordner, kurzname: kurzname, ohneAnmeldung: ohneAnmeldung);
       final plugins = await laden();
       await annehmen(plugins, ordner, profile: profile, werkzeuge: werkzeuge);
       speichern();
@@ -429,6 +432,27 @@ void main() {
 
       expect(_namen(ausgabe), [...await eingebaut(), 'beispiel_echo', 'beispiel_aufraeumen']);
       expect(jsonEncode(ausgabe), jsonEncode(await dienst([_Quelle(werkzeuge)]).werkzeugliste()));
+    });
+
+    test('Werkzeuge ohne Anmeldung: aus der Beschreibungsdatei, neben der Liste, nicht in den Werkzeugen', () async {
+      await gemerkt('beispiel', [_werkzeug('beispiel_echo'), _werkzeug('beispiel_status')], ohneAnmeldung: ['beispiel_echo']);
+
+      final ausgabe = await liste();
+
+      expect(ausgabe['ohneAnmeldung'], ['beispiel_echo']);
+      expect(_namen(ausgabe), [...await eingebaut(), 'beispiel_echo', 'beispiel_status']);
+      expect(jsonEncode(ausgabe['tools']), isNot(contains('ohneAnmeldung')), reason: 'der Client sieht davon nichts');
+      expect(einstellungen.plugins['beispiel']!.toJson().toString(), isNot(contains('ohneAnmeldung')), reason: 'nicht gemerkt');
+    });
+
+    test('nennt ohneAnmeldung ein Werkzeug, das nicht in der Liste steht, fehlt das Plugin', () async {
+      await gemerkt('da', [_werkzeug('da_x')], kurzname: 'da');
+      await gemerkt('beispiel', [_werkzeug('beispiel_echo')], ohneAnmeldung: ['beispiel_gibtesnicht']);
+
+      final ausgabe = await liste();
+
+      expect(_namen(ausgabe), [...await eingebaut(), 'da_x']);
+      expect(ausgabe.containsKey('ohneAnmeldung'), isFalse);
     });
 
     test('mehrere Plugins: in der Reihenfolge der Ordner', () async {

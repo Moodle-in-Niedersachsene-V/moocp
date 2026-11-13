@@ -454,13 +454,16 @@ void main() {
       expect(moodle.angefragt, isEmpty);
     });
 
-    test('nicht angemeldet: 503 mit dem Satz der eingebauten Werkzeuge, nichts gesendet', () async {
+    test('nicht angemeldet: 503 mit dem Satz für Werkzeuge vor der Anmeldung, nichts gesendet', () async {
       final a = aufruf(z: MoodleZugang(protokoll));
-      for (final f in [pfadMoodleLesen, pfadMoodleDatei]) {
+      for (final f in [pfadMoodleLesen, pfadMoodleDatei, pfadZusatzLesen, pfadZusatzDatei]) {
         final r = await _post(adresse.adresse, f, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
         expect(r.status, 503);
-        expect(r.json, {'fehler': 'Nicht angemeldet. Bitte in der App anmelden.'});
+        expect(r.json, {'fehler': 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.'});
       }
+      final lauf = await _post(adresse.adresse, pfadLaufBeginnen, {'cmid': 501}, token: a.token);
+      expect(lauf.status, 503);
+      expect(lauf.json, {'fehler': 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.'});
       expect(moodle.angefragt, isEmpty);
     });
   });

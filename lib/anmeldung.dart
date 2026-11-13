@@ -90,6 +90,28 @@ Future<StartAusgang> startBisAnmeldung({
   return await einrichtungUndAnmeldung() ? StartAusgang.bereit : StartAusgang.abgebrochen;
 }
 
+/// Der MCP-Server eines Profils, den der Start vor der Anmeldung starten
+/// könnte: [ohneAnmeldung] sagt, ob in diesem Profil ein Plugin mit
+/// Werkzeugen ohne Anmeldung eingeschaltet ist und sein Server noch nicht
+/// läuft; [starten] startet ihn vor der Anmeldung.
+typedef ServerVorAnmeldung = ({bool Function() ohneAnmeldung, Future<void> Function() starten});
+
+/// Der Start nach der Einrichtung (E13, E35): Zuerst startet der MCP-Server
+/// jedes Profils, in dem ein Plugin mit Werkzeugen ohne Anmeldung
+/// eingeschaltet ist, dann kommt die Anmeldung ([anmelden]), nach der die
+/// übrigen Server starten (main.dart, _mcpStarten). Ohne ein solches Plugin
+/// bleibt es bei Einrichtung, Anmeldung, Server. Ein Server, der vor der
+/// Anmeldung startet, bleibt danach an, wie jeder andere.
+Future<void> nachEinrichtung({
+  required List<ServerVorAnmeldung> server,
+  required Future<void> Function() anmelden,
+}) async {
+  for (final s in server) {
+    if (s.ohneAnmeldung()) await s.starten();
+  }
+  await anmelden();
+}
+
 /// Hält den normalen Start bei der Einrichtung an; nur eine explizite
 /// Testprofilbindung darf die Testanmeldung vor dem Einrichtungsdialog starten.
 Future<bool> testprofilVorEinrichtungStarten({

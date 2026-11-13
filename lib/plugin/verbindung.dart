@@ -110,6 +110,23 @@ void werkzeugnamenPruefen(
   }
 }
 
+/// Prüft `ohneAnmeldung` aus der Beschreibungsdatei gegen die Werkzeugnamen,
+/// die das Plugin nennt: Ein Werkzeug, das es nicht hat, wirft [PluginFehler],
+/// und das Plugin lädt nicht -- sonst liefe der MCP-Server eines Profils vor
+/// der Anmeldung für ein Werkzeug, das es gar nicht gibt (mcp_dienst.dart).
+/// Liefert die Namen als Menge.
+Set<String> ohneAnmeldungPruefen(Iterable<String> ohneAnmeldung, Iterable<String> namen) {
+  final vorhanden = namen.toSet();
+  for (final name in ohneAnmeldung) {
+    if (vorhanden.contains(name)) continue;
+    // Der Name kommt aus der Beschreibungsdatei, ohne Steuerzeichen
+    // (beschreibung.dart); gekürzt, damit er das Protokoll nicht füllt.
+    final n = name.length > 60 ? '${name.substring(0, 59)}…' : name;
+    throw PluginFehler('Das Feld „ohneAnmeldung“ nennt das Werkzeug „$n“, das das Plugin nicht hat.');
+  }
+  return ohneAnmeldung.toSet();
+}
+
 /// Eine Verbindung zu einem Plugin, mit seiner Werkzeugliste vom Start.
 class PluginVerbindung {
   PluginVerbindung._(this._client, this._transport, this.werkzeuge);
@@ -128,7 +145,10 @@ class PluginVerbindung {
   /// lebt noch). Danach, bei verletzten Namensregeln ([werkzeugnamenPruefen])
   /// oder bei einer unbrauchbaren Werkzeugliste wirft es [PluginFehler].
   /// [adresse] ist die Adresse der App für Plugins, die beim initialize
-  /// mitgeht ([vertragBeimInitialize]).
+  /// mitgeht ([vertragBeimInitialize]). [ohneAnmeldung] sind die Werkzeuge
+  /// aus `ohneAnmeldung` der Beschreibungsdatei: Jedes muss in der
+  /// Werkzeugliste stehen, sonst wirft es [PluginFehler], und die Werkzeuge
+  /// tragen danach [WerkzeugBeschreibung.ohneAnmeldung].
   static Future<PluginVerbindung> verbinden({
     required int port,
     required String schluessel,
@@ -137,6 +157,7 @@ class PluginVerbindung {
     required Duration frist,
     bool Function()? weiter,
     Uri? adresse,
+    Iterable<String> ohneAnmeldung = const [],
   }) async {
     final ende = DateTime.now().add(frist);
     final zeitGrund = PluginStartFehler(
@@ -195,7 +216,10 @@ class PluginVerbindung {
               : Duration.zero,
         );
         werkzeugnamenPruefen([for (final w in werkzeuge) w.name], kurzname, vergeben);
-        return PluginVerbindung._(client, transport, werkzeuge);
+        final ohne = ohneAnmeldungPruefen(ohneAnmeldung, [for (final w in werkzeuge) w.name]);
+        return PluginVerbindung._(client, transport, [
+          for (final w in werkzeuge) ohne.contains(w.name) ? w.mitOhneAnmeldung(true) : w,
+        ]);
       } on TimeoutException {
         await _schliessen(client, transport);
         throw zeitGrund;

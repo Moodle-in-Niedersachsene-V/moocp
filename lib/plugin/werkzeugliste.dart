@@ -18,7 +18,13 @@
 //   - es im Standardprofil eingeschaltet ist: Die Brücke kennt nur den Server
 //     `moodle` (E21), und das ist das Standardprofil (E31), und
 //   - seine Werkzeugnamen den Regeln genügen, wie beim Start der App (Kurzname
-//     davor, kein Name eines eingebauten Werkzeugs oder eines früheren Plugins).
+//     davor, kein Name eines eingebauten Werkzeugs oder eines früheren Plugins,
+//     jedes Werkzeug aus `ohneAnmeldung` in der Liste).
+//
+// Die Werkzeuge ohne Anmeldung nennt die Liste unter `ohneAnmeldung`, neben
+// `initialize` und `tools` (McpDienst.werkzeugliste): Die Brücke wartet bei
+// ihnen nur auf den Server, nicht auf die Anmeldung. An den Client geht davon
+// nichts; er bekommt nur `initialize` und `tools`.
 // Sonst fehlen die Werkzeuge dieses Plugins; die eingebauten und die der
 // übrigen Plugins bleiben. Ein Plugin, dessen Ordner fehlt, eine Verknüpfung
 // ist oder sich nicht lesen lässt, hält darum nie die Liste der anderen auf.
@@ -36,7 +42,7 @@ import '../protokoll.dart';
 import 'beschreibung.dart' show PluginFehler;
 import 'entscheidung.dart';
 import 'plugins.dart';
-import 'verbindung.dart' show werkzeugnamenPruefen;
+import 'verbindung.dart' show ohneAnmeldungPruefen, werkzeugnamenPruefen;
 
 /// Die Werkzeugliste, die `moocp.exe --werkzeugliste` ausgibt: was der
 /// MCP-Server des Standardprofils auf `initialize` und `tools/list` antwortet
@@ -121,13 +127,18 @@ Future<List<WerkzeugBeschreibung>> gemerkteWerkzeuge({
   for (final stand in plugins.aktivIn(profilKennung)) {
     final liste = entscheidungen[stand.eintrag.ordner]?.werkzeuge;
     if (liste == null) continue;
+    final beschreibung = stand.eintrag.beschreibung!;
+    final Set<String> ohne;
     try {
-      werkzeugnamenPruefen([for (final w in liste) w.name], stand.eintrag.beschreibung!.kurzname, vergeben);
+      werkzeugnamenPruefen([for (final w in liste) w.name], beschreibung.kurzname, vergeben);
+      ohne = ohneAnmeldungPruefen(beschreibung.ohneAnmeldung, [for (final w in liste) w.name]);
     } on PluginFehler {
       continue;
     }
     vergeben.addAll(liste.map((w) => w.name));
-    ergebnis.addAll(liste);
+    // Welche ohne Anmeldung arbeiten, steht nicht in der gemerkten Liste,
+    // sondern kommt wie beim Start aus der Beschreibungsdatei.
+    ergebnis.addAll([for (final w in liste) w.mitOhneAnmeldung(ohne.contains(w.name))]);
   }
   return ergebnis;
 }

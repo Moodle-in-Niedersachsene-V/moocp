@@ -76,6 +76,7 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import '../freigabe.dart' show Bestaetigungen;
+import '../mcp/vor_anmeldung.dart';
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
@@ -601,6 +602,12 @@ class AppAdresse {
     return (status: HttpStatus.ok, json: <String, Object?>{});
   }
 
+  /// Moodle braucht die Anmeldung, und die App ist nicht angemeldet: 503 mit
+  /// demselben Satz, den vor der Anmeldung jedes Werkzeug bekommt, das eine
+  /// braucht (vor_anmeldung.dart). Moodle wird dabei nicht gefragt, und
+  /// angemeldet wird auch nicht (A2, E7).
+  static _Antwort _nichtAngemeldet() => _fehler(HttpStatus.serviceUnavailable, anmeldungFehltText);
+
   static _Antwort _abgebrochen() => _fehler(
     HttpStatus.conflict,
     'Abgebrochen: Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen.',
@@ -611,7 +618,7 @@ class AppAdresse {
   /// Verbindung (502). Die Meldungen nennen keine Parameterwerte.
   static _Antwort _moodleFehler(MoodleFehler x) => switch (x) {
     AnfrageGesperrt() => _fehler(HttpStatus.forbidden, x.meldung),
-    NichtAngemeldet() => _fehler(HttpStatus.serviceUnavailable, x.meldung),
+    NichtAngemeldet() => _nichtAngemeldet(),
     AntwortZuGross() => _fehler(
       HttpStatus.requestEntityTooLarge,
       '${x.meldung} Größere Inhalte über $pfadMoodleDatei in den Ordner des Plugins laden.',
@@ -627,7 +634,7 @@ class AppAdresse {
   static Object _moodleAdresse(AppAdresse a, _Plugin plugin, _Aufruf aufruf, Map<String, Object?> daten) {
     final moodle = aufruf.kontext.moodle;
     final basis = moodle.basis;
-    if (!moodle.angemeldet || basis == null) return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
+    if (!moodle.angemeldet || basis == null) return _nichtAngemeldet();
     final Uri uri;
     try {
       uri = pluginAdresse(basis, daten['pfad']);
@@ -811,7 +818,7 @@ class AppAdresse {
     final moodle = aufruf.kontext.moodle;
     final basis = moodle.basis;
     final protokoll = aufruf.kontext.protokoll;
-    if (!moodle.angemeldet || basis == null) return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
+    if (!moodle.angemeldet || basis == null) return _nichtAngemeldet();
     if (daten['methode'] != 'POST') {
       protokoll.eintrag(Art.gesperrt, '${plugin.aufrufer}: Schreiben über eine Zusatzadresse abgewiesen (Methode)');
       return _fehler(
@@ -1001,8 +1008,8 @@ class AppAdresse {
       return nichtGeschrieben(HttpStatus.badGateway, '${x.meldung} $verbraucht');
     } on AnfrageGesperrt catch (x) {
       return nichtGeschrieben(HttpStatus.forbidden, x.meldung);
-    } on NichtAngemeldet catch (x) {
-      return nichtGeschrieben(HttpStatus.serviceUnavailable, x.meldung);
+    } on NichtAngemeldet {
+      return nichtGeschrieben(HttpStatus.serviceUnavailable, anmeldungFehltText);
     } on MoodleNichtErreichbar catch (x) {
       return _fehler(
         HttpStatus.badGateway,
@@ -1086,9 +1093,7 @@ class AppAdresse {
       );
     }
     final moodle = aufruf.kontext.moodle;
-    if (!moodle.angemeldet || moodle.basis == null) {
-      return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
-    }
+    if (!moodle.angemeldet || moodle.basis == null) return _nichtAngemeldet();
     aufruf.laufBeginnt = true;
     const ohne = 'Kein Lauf begonnen; lesende Zusatzadressen bleiben gesperrt.';
     try {

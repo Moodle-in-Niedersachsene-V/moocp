@@ -71,8 +71,9 @@
 // lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt),
 // `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
 // Freigabe, und selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
-// Zusatzadresse lesen) und `beispiel_namen` (Namen zum Sperren nennen; die
-// letzte Sperre hält danach eine Antwort mit einem davon an).
+// Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
+// Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
+// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -632,6 +633,51 @@ McpServer _server() {
         return text(zeilen.join('\n'));
       } on MoocpFehler catch (f) {
         return text([...zeilen, f.text].join('\n'), fehler: true);
+      }
+    },
+  );
+
+  // Herunterladen in einem Lauf: Eine Datei hinter einer Zusatzadresse mit der
+  // Art „lesen“ lädt ein Plugin über `/v1/moodle/zusatz/datei` mit `pfad`,
+  // nur in einem Lauf und mit denselben Prüfungen wie beim Lesen. moocp legt
+  // sie nicht in den Arbeitsordner, sondern in einen eigenen Ordner je Plugin
+  // und Instanzprofil, unter einem Namen, den moocp vergibt; die Antwort hat
+  // `datei` (den Pfad) und `bytes`. Endet der Lauf oder der Aufruf, löscht
+  // moocp die Datei; was das Plugin behalten will, verarbeitet es vorher.
+  //
+  // Den Pfad gibt ein Plugin nie weiter, weder an die KI noch ins Protokoll:
+  // Wer ihn kennt, könnte die Dateien lesen. Nennt eine Antwort oder eine
+  // Protokollzeile ihn doch, hält moocp sie an wie einen Namen.
+  server.registerTool(
+    'beispiel_download',
+    description:
+        'Lädt über moocp in einem Lauf den Export einer Aktivität von einer erfundenen Seite '
+        '(/mod/beispiel/export.php) herunter, liest die Größe der Datei und beendet den Lauf. Nennt nur die Größe '
+        'und ob die Datei danach gelöscht ist, nie den Pfad oder den Inhalt. Zeigt das Herunterladen über eine '
+        'Zusatzadresse; in einem echten Moodle gibt es die Seite nicht. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {'cmid': JsonSchema.integer(description: 'Die Nummer der Aktivität, die Zahl hinter view.php?id=.')},
+      required: ['cmid'],
+    ),
+    annotations: hinweise('Herunterladen (Beispiel)'),
+    callback: (args, extra) async {
+      final cmid = (args['cmid'] as num).toInt();
+      final zeilen = <String>[];
+      try {
+        await anMoocp(adresse(), '/v1/moodle/lauf/beginnen', {'cmid': cmid}, aufruf: token(extra));
+        final antwort = await anMoocp(adresse(), '/v1/moodle/zusatz/datei', {
+          'pfad': '/mod/beispiel/export.php?id=$cmid',
+        }, aufruf: token(extra));
+        // Mit der Datei arbeiten, solange der Lauf läuft; hier nur ihre Größe.
+        final datei = File(antwort['datei'] as String);
+        zeilen.add('Im Lauf heruntergeladen: ${antwort['bytes']} Bytes, die Datei hat ${await datei.length()} Bytes.');
+        await anMoocp(adresse(), '/v1/moodle/lauf/beenden', {}, aufruf: token(extra));
+        zeilen.add(await datei.exists() ? 'Nach dem Lauf: Die Datei liegt noch da.' : 'Nach dem Lauf: Die Datei ist gelöscht.');
+        return text(zeilen.join('\n'));
+      } on MoocpFehler catch (f) {
+        return text([...zeilen, f.text].join('\n'), fehler: true);
+      } on FileSystemException {
+        return text([...zeilen, 'Die Datei ließ sich nicht lesen.'].join('\n'), fehler: true);
       }
     },
   );

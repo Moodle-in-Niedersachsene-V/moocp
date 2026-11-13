@@ -16,6 +16,11 @@
       "muster": "/mod/beispiel/bericht.php",
       "art": "lesen",
       "grund": "Liest den Bericht einer Aktivität, mit dem das Werkzeug beispiel_lauf zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse liest. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    },
+    {
+      "muster": "/mod/beispiel/export.php",
+      "art": "lesen",
+      "grund": "Lädt den Export einer Aktivität herunter, mit dem das Werkzeug beispiel_download zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse herunterlädt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
     }
   ],
   "wahlSkills": {},

@@ -370,6 +370,8 @@ Section "Uninstall"
   ; (lib/anmeldedaten.dart; der Ordner kommt aus CompanyName und ProductName
   ; in windows/runner/Runner.rc), der Arbeitsordner (lib/arbeitsordner.dart).
   ; Beides liegt unter %APPDATA%\moocp: CompanyName ist dort ebenfalls moocp.
+  ; Dazu der Ordner für Downloads der Plugins (lib/plugin/downloads.dart).
   RMDir /r "$APPDATA\moocp"
   RMDir /r "$TEMP\moocp_arbeitsordner"
+  RMDir /r "$TEMP\moocp_plugin_downloads"
 SectionEnd

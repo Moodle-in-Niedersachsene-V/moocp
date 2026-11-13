@@ -724,6 +724,32 @@ void main() {
       }
     });
 
+    testWidgets('ein Treffer auf den Ordner für Downloads nennt den Ordner, nicht ein Wort', (tester) async {
+      final h = SperrHinweise();
+      await tester.pumpWidget(fenster(h));
+
+      h.melden(
+        SperrTreffer(
+          plugin: 'Beispiel',
+          werkzeug: 'beispiel_download',
+          stelle: SperrStelle.ergebnis,
+          wort: '/tmp/moocp_plugin_downloads',
+          pfad: true,
+          zeit: DateTime(2026, 1, 2, 9, 5, 7),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          '09:05:07  Plugin „Beispiel“, Werkzeug beispiel_download, Antwort an die KI: '
+          'der Pfad des Ordners für Downloads',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Wort „'), findsNothing);
+    });
+
     testWidgets('mehrere Treffer kurz hintereinander: ein Fenster, das mitwächst; danach ein neues', (tester) async {
       final h = SperrHinweise(hoechstens: 3);
       await tester.pumpWidget(fenster(h));

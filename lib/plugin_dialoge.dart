@@ -427,7 +427,8 @@ class _PluginDialogFensterState extends State<PluginDialogFenster> {
 // angehalten, weil ein Wort einer der Namen sein könnte, die für das Plugin
 // gesperrt sind, sieht die Lehrkraft hier Plugin, Werkzeug, Stelle und das
 // Wort, so wie es im Text stand -- nur hier, nie im Protokoll und nie bei der
-// KI. Die Warnung ist ein Hinweis: Der Aufruf ist schon beendet, und es gibt
+// KI. Hat der Pfad des Ordners für Downloads getroffen, steht statt des Worts,
+// dass es dieser Pfad war. Die Warnung ist ein Hinweis: Der Aufruf ist schon beendet, und es gibt
 // nichts zu entscheiden. Einen Knopf, das Gesperrte doch zu senden, gibt es
 // nicht, auch keine Einstellung dafür. Kommen Treffer, solange das Fenster
 // offen ist, erscheinen sie darin (SperrHinweise sammelt sie); ein neues
@@ -534,8 +535,9 @@ class SperrHinweisFenster extends StatelessWidget {
                 children: [
                   const Text(
                     'moocp hat etwas angehalten, das ein Plugin an die KI oder ins Protokoll geben wollte: Es enthält '
-                    'ein Wort, das einer der Namen sein könnte, die für dieses Plugin gesperrt sind. Es ging nicht hinaus, '
-                    'auch nicht in Teilen; die KI erfährt nur, dass gesperrt wurde.',
+                    'ein Wort, das einer der Namen sein könnte, die für dieses Plugin gesperrt sind, oder den Pfad des '
+                    'Ordners, in dem moocp die Downloads der Plugins ablegt. Es ging nicht hinaus, auch nicht in Teilen; '
+                    'die KI erfährt nur, dass gesperrt wurde.',
                   ),
                   const SizedBox(height: 12),
                   for (final t in treffer)
@@ -544,7 +546,7 @@ class SperrHinweisFenster extends StatelessWidget {
                       child: Text(
                         '${_zeit(t.zeit)}  Plugin „${t.plugin}“'
                         '${t.werkzeug == null ? '' : ', Werkzeug ${t.werkzeug}'}, ${t.stelle.text}: '
-                        'Wort „${t.wort}“',
+                        '${t.pfad ? 'der Pfad des Ordners für Downloads' : 'Wort „${t.wort}“'}',
                       ),
                     ),
                   if (weitere > 0) Text('… und $weitere weitere.', style: theme.textTheme.bodySmall),

@@ -135,8 +135,12 @@ Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatz
 Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu. Sie hebt die Sperrliste nur für dieses Plugin auf; über eine Zusatzadresse mit „schreiben“ schreibt es nur mit einer Freigabe, auf jeder Stufe, über eine mit „lesen“ liest es nur in einem Lauf.
 
 **Lauf**
-Die Zeit, in der ein Plugin während eines Aufrufs über seine Zusatzadressen mit „lesen“ liest, angemeldet mit der Aktivität, um die es geht. Die App ermittelt den Kurs selbst, lädt die Namen seiner Teilnehmenden in die letzte Sperre und lehnt jede Anfrage ab, die nicht zu Kurs und Aktivität passt. Er endet mit seinem Beenden oder dem Ende des Aufrufs; die Namen bleiben gesperrt, bis die App endet.
+Die Zeit, in der ein Plugin während eines Aufrufs über seine Zusatzadressen mit „lesen“ liest oder herunterlädt, angemeldet mit der Aktivität, um die es geht. Die App ermittelt den Kurs selbst, lädt die Namen seiner Teilnehmenden in die letzte Sperre und lehnt jede Anfrage ab, die nicht zu Kurs und Aktivität passt. Er endet mit seinem Beenden oder dem Ende des Aufrufs und löscht dann, was er in den Ordner für Downloads geladen hat; die Namen bleiben gesperrt, bis die App endet.
 _Nicht zu verwechseln mit_: der Aufruf eines Werkzeugs (ein Lauf liegt in einem Aufruf, höchstens einer zugleich).
+
+**Ordner für Downloads**
+Der Ordner im Temp-Verzeichnis, in den die App legt, was ein Plugin in einem Lauf über eine Zusatzadresse herunterlädt, je Plugin und Instanzprofil getrennt. Die App leert ihn beim Start und beim Beenden; sein Pfad geht nie an die KI und steht in keinem Protokoll.
+_Nicht zu verwechseln mit_: Arbeitsordner (dort liest die KI) und dem Unterordner `plugin-<Kurzname>` darin.
 
 **Adresse der App (für Plugins)**
 Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge, Freigaben, Lesen in Moodle und Schreiben über eine Zusatzadresse. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.

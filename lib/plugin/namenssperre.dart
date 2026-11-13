@@ -7,6 +7,12 @@
 // Werkzeuge, Pfade an Moodle) und entwicklung.dart (Werkzeugliste beim
 // Wiederverbinden eines Entwicklungs-Plugins).
 //
+// Ebenso, für jedes Plugin, der Pfad des Ordners, in dem die App die Downloads
+// der Plugins ablegt (downloads.dart, [LetzteSperre.pfadSperren]): Wer ihn
+// kennt, kann die Dateien darin mit eigenen Mitteln lesen. Ein Treffer darauf
+// wird behandelt wie einer auf einen Namen; nur die Warnung an die Lehrkraft
+// nennt statt des Worts den Ordner.
+//
 // Die Regel ist bewusst einfach, weil sie die letzte Sperre ist, nicht die
 // erste; Tippfehler, Dateiformate und alles Weitere fängt das Plugin ab:
 //
@@ -212,13 +218,16 @@ enum SperrStelle {
 /// Ein Treffer der letzten Sperre, für die Warnung an die Lehrkraft: Plugin,
 /// Werkzeug (null, wenn es keinen Aufruf gab), die Stelle und das Wort, so
 /// wie es im Text stand. Nur für die Anzeige in der App; das Wort geht in
-/// kein Protokoll und an keine KI.
+/// kein Protokoll und an keine KI. Bei [pfad] hat nicht ein Name getroffen,
+/// sondern der Pfad des Ordners für Downloads (downloads.dart); [wort] ist
+/// dann dieser Pfad.
 class SperrTreffer {
   SperrTreffer({
     required this.plugin,
     required this.werkzeug,
     required this.stelle,
     required this.wort,
+    this.pfad = false,
     DateTime? zeit,
   }) : zeit = zeit ?? DateTime.now();
 
@@ -227,6 +236,7 @@ class SperrTreffer {
   final String? werkzeug;
   final SperrStelle stelle;
   final String wort;
+  final bool pfad;
   final DateTime zeit;
 
   /// Ohne das Wort: Ein Treffer, der versehentlich in einer Ausgabe landet,
@@ -249,21 +259,67 @@ class LetzteSperre {
 
   final _je = <String, Namenssperre>{};
 
+  /// Die gesperrten Pfade in ihrer Vergleichsform ([_pfadform]), mit dem
+  /// Pfad, wie er genannt wurde, und dem letzten Teil der Vergleichsform für
+  /// die schnelle Vorprüfung.
+  final _pfade = <String, ({String pfad, String letzter})>{};
+
   /// Nimmt [namen] für das Plugin [kurzname] auf.
   void namenHinzufuegen(String kurzname, Iterable<String> namen) =>
       (_je[kurzname] ??= Namenssperre()).hinzufuegen(namen);
+
+  /// Sperrt den Pfad eines Ordners (der Ordner für Downloads, downloads.dart)
+  /// für jedes Plugin: Jeder Text, der ihn enthält, trifft. Verglichen wird
+  /// als Teil des Texts, ohne Rücksicht auf Groß- und Kleinschreibung, mit
+  /// `\` und `/` als gleichwertigen Trennern, auch doppelt (`\\` in JSON) oder
+  /// gemischt. So trifft auch eine Datei darin und eine Adresse mit
+  /// `file:///`. Nicht erkannt werden andere Kodierungen (Prozentkodierung,
+  /// Unicode-Escapes, Base64) und Kurznamen für einen anderen Teil des Pfads als den
+  /// gesperrten; die Sperre bleibt die letzte, nicht die erste.
+  void pfadSperren(String pfad) {
+    var f = _pfadform(pfad);
+    while (f.endsWith('/')) {
+      f = f.substring(0, f.length - 1);
+    }
+    final letzter = f.split('/').last;
+    // Ein Laufwerk oder die Wurzel allein sperrte jeden Pfad.
+    if (letzter.isEmpty || !f.contains('/')) return;
+    _pfade[f] = (pfad: pfad, letzter: letzter);
+  }
+
+  static String _pfadform(String s) => s.toLowerCase().replaceAll(RegExp(r'[\\/]+'), '/');
+
+  /// Der gesperrte Pfad, den [text] nennt, so wie er gesperrt wurde; sonst
+  /// null.
+  String? _pfadIn(String text) {
+    if (_pfade.isEmpty || text.isEmpty) return null;
+    final klein = text.toLowerCase();
+    String? form;
+    for (final MapEntry(key: f, value: (:pfad, :letzter)) in _pfade.entries) {
+      if (!klein.contains(letzter)) continue;
+      form ??= _pfadform(text);
+      if (form.contains(f)) return pfad;
+    }
+    return null;
+  }
 
   /// Wie viele verschiedene Namen für das Plugin [kurzname] geladen sind.
   int anzahl(String kurzname) => _je[kurzname]?.anzahl ?? 0;
 
   /// Das erste Wort aus [texte], das einen Namen des Plugins [kurzname]
-  /// trifft; null ohne Treffer.
-  String? treffer(String kurzname, Iterable<String> texte) {
+  /// trifft, oder der gesperrte Pfad, den einer der Texte nennt; null ohne
+  /// Treffer.
+  String? treffer(String kurzname, Iterable<String> texte) => _suchen(kurzname, texte)?.wort;
+
+  ({String wort, bool pfad})? _suchen(String kurzname, Iterable<String> texte) {
     final s = _je[kurzname];
-    if (s == null || s.leer) return null;
+    final namen = s != null && !s.leer;
+    if (!namen && _pfade.isEmpty) return null;
     for (final t in texte) {
-      final w = s.treffer(t);
-      if (w != null) return w;
+      final w = namen ? s.treffer(t) : null;
+      if (w != null) return (wort: w, pfad: false);
+      final pfad = _pfadIn(t);
+      if (pfad != null) return (wort: pfad, pfad: true);
     }
     return null;
   }
@@ -277,9 +333,9 @@ class LetzteSperre {
     required String? werkzeug,
     required SperrStelle stelle,
   }) {
-    final w = treffer(kurzname, texte);
-    if (w == null) return false;
-    melden?.call(SperrTreffer(plugin: plugin, werkzeug: werkzeug, stelle: stelle, wort: w));
+    final t = _suchen(kurzname, texte);
+    if (t == null) return false;
+    melden?.call(SperrTreffer(plugin: plugin, werkzeug: werkzeug, stelle: stelle, wort: t.wort, pfad: t.pfad));
     return true;
   }
 }

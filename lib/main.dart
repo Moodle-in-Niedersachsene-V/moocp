@@ -38,6 +38,7 @@ import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
 import 'plattform/plattform.dart' show benutzerordner;
 import 'plugin/dialoge.dart';
+import 'plugin/downloads.dart';
 import 'plugin/entscheidung.dart';
 import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
@@ -123,7 +124,23 @@ Future<void> main(List<String> argumente) async {
   // Die Plugins laufen einmal je App; ihre Werkzeuge bietet jeder MCP-Server
   // an, in dessen Profil sie eingeschaltet sind. Gestartet werden sie erst
   // nach der Zustimmung (_HauptseiteState._pluginsStarten).
-  final laufendePlugins = LaufendePlugins(protokoll, dialoge: PluginDialoge(), sperrHinweise: SperrHinweise());
+  // Der Ordner für Downloads der Plugins über Zusatzadressen, außerhalb des
+  // Arbeitsordners (plugin/downloads.dart): beim Start geleert wie dieser,
+  // beim Beenden von LaufendePlugins.beenden. Sein Pfad gehört in kein
+  // Protokoll.
+  final (downloads, downloadsGeblieben) = PluginDownloads.einrichten();
+  protokoll.eintrag(
+    Art.info,
+    downloadsGeblieben == 0
+        ? 'Ordner für Downloads von Plugins geleert'
+        : 'Ordner für Downloads von Plugins: $downloadsGeblieben Einträge in Benutzung, nicht gelöscht',
+  );
+  final laufendePlugins = LaufendePlugins(
+    protokoll,
+    dialoge: PluginDialoge(),
+    sperrHinweise: SperrHinweise(),
+    downloads: downloads,
+  );
   final instanzen = [
     for (final pr in profile)
       _instanzFuer(

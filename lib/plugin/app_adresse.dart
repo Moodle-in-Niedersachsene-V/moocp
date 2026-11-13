@@ -46,7 +46,9 @@
 // Zusatzadresse mit der Art „lesen“ liest es nur in einem Lauf (lauf.dart):
 // Es beginnt ihn mit der Nummer einer Aktivität, die App ermittelt den Kurs,
 // lädt die Namen seiner Teilnehmenden in die letzte Sperre und bindet jede
-// Anfrage des Laufs an Kurs und Aktivität. Die Antwort trägt nie Cookies oder
+// Anfrage des Laufs an Kurs und Aktivität. Was es dort herunterlädt, legt die
+// App in den Ordner für Downloads (downloads.dart), nie in den Arbeitsordner;
+// das Ende des Laufs löscht es. Die Antwort trägt nie Cookies oder
 // Kopfzeilen von Moodle, nur Status, Inhaltstyp, den Pfad nach Umleitungen und
 // den Inhalt, von einer Seite nur den Hauptbereich und nie den sesskey
 // (moodle_lesen.dart, textFuerPlugin).
@@ -58,7 +60,8 @@
 // von diesem Plugin ins Protokoll ginge, gegen sie: seine Protokollzeilen,
 // den Namen und die Argumente eines eingebauten Werkzeugs, das es aufruft
 // (beide stehen im Protokoll der Hülle), und Pfad, Parameternamen und
-// Feldnamen einer Anfrage an Moodle. Bei einem Treffer geht nichts davon ins Protokoll; dort
+// Feldnamen einer Anfrage an Moodle. Ebenso für jedes Plugin den Pfad des
+// Ordners für Downloads. Bei einem Treffer geht nichts davon ins Protokoll; dort
 // steht nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort in der
 // Warnung der App. Was die App selbst schreibt (Dialog geöffnet, Ausgang
 // einer Freigabe), prüft sie nicht: Darin steht kein Text des Plugins.
@@ -76,9 +79,11 @@ import '../freigabe.dart' show Bestaetigungen;
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
+import '../moodle/wiederherstellung_regeln.dart' show archivGrenzeStandard;
 import '../protokoll.dart';
 import 'beschreibung.dart' show Zusatzadresse, ZugriffsArt;
 import 'dialoge.dart';
+import 'downloads.dart';
 import 'klartext.dart';
 import 'lauf.dart';
 import 'moodle_lesen.dart';
@@ -106,6 +111,7 @@ const pfadZusatzSchreiben = '/v1/moodle/zusatz/schreiben';
 const pfadLaufBeginnen = '/v1/moodle/lauf/beginnen';
 const pfadLaufBeenden = '/v1/moodle/lauf/beenden';
 const pfadZusatzLesen = '/v1/moodle/zusatz/lesen';
+const pfadZusatzDatei = '/v1/moodle/zusatz/datei';
 const pfadNamen = '/v1/namen';
 
 /// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
@@ -142,8 +148,12 @@ class _Plugin {
 }
 
 class _Aufruf {
-  _Aufruf(this.kurzname, this.werkzeug, this.kontext);
+  _Aufruf(this.kurzname, this.werkzeug, this.kontext, this.profil);
   final String kurzname;
+
+  /// Die Kennung des Instanzprofils, über das der Aufruf kam; sie wählt den
+  /// Ordner für Downloads (downloads.dart).
+  final String profil;
 
   /// Das Werkzeug des Plugins, das die KI aufgerufen hat; für die Warnung
   /// der letzten Sperre.
@@ -216,7 +226,7 @@ typedef _Geprueft = ({Uri uri, Felder felder, Zusatzadresse zusatzadresse});
 /// Die Adresse der App für Plugins: der Server, die angemeldeten Plugins mit
 /// ihren Schlüsseln und die laufenden Aufrufe mit ihren Token.
 class AppAdresse {
-  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens, this._dialoge, this.sperre);
+  AppAdresse._(this._server, this._protokoll, this.anfrageHoechstens, this._dialoge, this.sperre, this._downloads);
 
   /// Öffnet den Server auf 127.0.0.1 mit einem freien Port. [protokoll] ist
   /// das Protokoll der App ohne Profilbezug: Dorthin geht eine Protokollzeile
@@ -224,14 +234,21 @@ class AppAdresse {
   /// Bytes. [dialoge] zeigt die Dialoge der Plugins; ohne sie lehnt die
   /// Adresse jeden Dialog ab. [sperre] hält die Namen der letzten Sperre für
   /// die ganze App (laufende_plugins.dart); ohne Angabe eine eigene.
+  /// [downloads] ist der Ordner für Downloads über Zusatzadressen; sein Pfad
+  /// kommt in die letzte Sperre. Ohne ihn gibt es keinen solchen Download.
   static Future<AppAdresse> starten(
     Protokoll protokoll, {
     int anfrageHoechstens = 1024 * 1024,
     PluginDialoge? dialoge,
     LetzteSperre? sperre,
+    PluginDownloads? downloads,
   }) async {
+    final s = sperre ?? LetzteSperre();
+    for (final f in downloads?.pfadformen ?? const <String>{}) {
+      s.pfadSperren(f);
+    }
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final a = AppAdresse._(server, protokoll, anfrageHoechstens, dialoge, sperre ?? LetzteSperre());
+    final a = AppAdresse._(server, protokoll, anfrageHoechstens, dialoge, s, downloads);
     server.listen(a._bearbeiten, onError: (Object _) {});
     protokoll.eintrag(Art.info, 'Adresse der App für Plugins: ${a.adresse}');
     return a;
@@ -241,6 +258,7 @@ class AppAdresse {
   final Protokoll _protokoll;
   final int anfrageHoechstens;
   final PluginDialoge? _dialoge;
+  final PluginDownloads? _downloads;
 
   /// Die Namen der letzten Sperre, je Plugin; sie bleiben, auch wenn sich ein
   /// Plugin mit neuem Schlüssel anmeldet.
@@ -285,7 +303,7 @@ class AppAdresse {
   AngemeldeterAufruf aufrufAnmelden(String kurzname, WerkzeugAufruf aufruf) {
     final kontext = aufruf.kontext;
     if (kontext == null || aufruf.token.isEmpty || _beendet) return AngemeldeterAufruf._(() {}, null);
-    final a = _Aufruf(kurzname, aufruf.name, kontext);
+    final a = _Aufruf(kurzname, aufruf.name, kontext, aufruf.profil.kennung);
     _aufrufe[aufruf.token] = a;
     _lehrkraftSperren(kurzname, a);
     void ende() {
@@ -510,6 +528,7 @@ class AppAdresse {
     pfadLaufBeginnen: const _Funktion(mitAufruf: true, ausfuehren: _laufBeginnen),
     pfadLaufBeenden: const _Funktion(mitAufruf: true, ausfuehren: _laufBeenden),
     pfadZusatzLesen: const _Funktion(mitAufruf: true, ausfuehren: _zusatzLesen),
+    pfadZusatzDatei: const _Funktion(mitAufruf: true, ausfuehren: _zusatzDatei),
     pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
   };
 
@@ -518,8 +537,9 @@ class AppAdresse {
   /// Warnung der App.
   static _Antwort _sperrAntwort(String was) => _fehler(
     HttpStatus.unprocessableEntity,
-    'Gesperrt: $was enthält ein Wort, das ein Name sein könnte, den dieses Plugin zum Sperren genannt hat. '
-    'Nichts davon steht im Protokoll; die Lehrkraft sieht in moocp, welches Wort es war.',
+    'Gesperrt: $was enthält ein Wort, das ein Name sein könnte, den dieses Plugin zum Sperren genannt hat, '
+    'oder den Pfad des Ordners, in dem moocp die Downloads über Zusatzadressen ablegt. Nichts davon steht im '
+    'Protokoll; die Lehrkraft sieht in moocp, was es war.',
   );
 
   /// `POST /v1/namen` `{"namen": ["…", …]}`: Namen, die die App von nun an
@@ -1131,8 +1151,8 @@ class AppAdresse {
   /// Die Adresse und jedes Umleitungsziel müssen zu Kurs und Aktivität des
   /// Laufs passen. Außerhalb eines Laufs lehnt die App jede solche Anfrage ab
   /// (403). Antwort wie bei /v1/moodle/lesen; von einer ganzen HTML-Seite nur
-  /// der Hauptbereich, nie der sesskey. Herunterladen über eine Zusatzadresse
-  /// gibt es nicht: Größer als [textHoechstens] Bytes ist 413. Endet der Lauf
+  /// der Hauptbereich, nie der sesskey. Größer als [textHoechstens] Bytes ist
+  /// 413; heruntergeladen wird über /v1/moodle/zusatz/datei. Endet der Lauf
   /// oder der Aufruf, geht nichts mehr hinaus (409).
   static Future<_Antwort> _zusatzLesen(
     AppAdresse a,
@@ -1184,10 +1204,112 @@ class AppAdresse {
       if (aufruf.vorbei) return _abgebrochen();
       return _fehler(
         HttpStatus.requestEntityTooLarge,
-        '${x.meldung} Über eine Zusatzadresse gibt es nur Text; Herunterladen über eine Zusatzadresse gibt es nicht.',
+        '${x.meldung} Größere Inhalte einer Zusatzadresse lädt ein Plugin im Lauf über $pfadZusatzDatei.',
       );
     } on MoodleFehler catch (x) {
       return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
+    }
+  }
+
+  /// `POST /v1/moodle/zusatz/datei` `{"pfad": "/…?…"}`: lädt in einem Lauf
+  /// eine Datei über eine Zusatzadresse dieses Plugins mit der Art „lesen“
+  /// herunter, mit denselben Prüfungen wie /v1/moodle/zusatz/lesen, in den
+  /// Ordner für Downloads (downloads.dart), nie in den Arbeitsordner: in den
+  /// Unterordner dieses Plugins und des Profils des Aufrufs, unter einem
+  /// Namen, den die App vergibt. Grenzen wie beim Download der eingebauten
+  /// Werkzeuge (höchstens 200 MB, keine Seite statt einer Datei, keine
+  /// Umleitung), nur darf die Größe ungenannt sein. Antwort `{"datei": …,
+  /// "bytes": …}`: Den Pfad bekommt nur das Plugin; er steht in keinem
+  /// Protokoll, und die letzte Sperre hält jeden Text an, der ihn nennt. Endet
+  /// der Lauf, löscht er die Datei; endet er oder der Aufruf während des
+  /// Ladens, bricht es ab (409), und keine Datei bleibt.
+  static Future<_Antwort> _zusatzDatei(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final adresse = _moodleAdresse(a, plugin, aufruf!, daten);
+    if (adresse case final _Antwort fehler) return fehler;
+    final uri = adresse as Uri;
+    final protokoll = aufruf.kontext.protokoll;
+    final lauf = aufruf.laufend;
+    if (lauf == null) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Herunterladen über eine Zusatzadresse außerhalb eines Laufs abgewiesen: '
+        'GET ${skriptAdresse(uri)}',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: Über eine Zusatzadresse lädt ein Plugin nur in einem Lauf herunter ($pfadLaufBeginnen mit der '
+        'Nummer der Aktivität). Erst dann kennt moocp den Kurs und hat die Namen seiner Teilnehmenden für die '
+        'letzte Sperre geladen.',
+      );
+    }
+    if (zusatzadresseFuer(plugin.zusatzadressen, uri, ZugriffsArt.lesen) == null) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Gesperrt: GET ${skriptAdresse(uri)} (keine Zusatzadresse „lesen“ dieses Plugins)',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: ${skriptPfad(uri)} ist keine Zusatzadresse dieses Plugins mit der Art „lesen“. Dateien, die die '
+        'Positivliste von moocp erlaubt, lädt ein Plugin über $pfadMoodleDatei.',
+      );
+    }
+    final downloads = a._downloads;
+    if (downloads == null) {
+      return _fehler(HttpStatus.serviceUnavailable, 'moocp hat hier keinen Ordner für Downloads von Plugins.');
+    }
+    final File ziel;
+    try {
+      ziel = downloads.neueDatei(plugin.kurzname, aufruf.profil, uri);
+    } on FileSystemException catch (x) {
+      // Ohne Pfad: Auch die Meldung an das Plugin kann weitergehen.
+      return _fehler(
+        HttpStatus.internalServerError,
+        'Der Ordner für Downloads ließ sich nicht anlegen (${x.runtimeType}).',
+      );
+    }
+    // Gemerkt, bevor geladen wird: Endet der Lauf, ist auch ein halber Teil
+    // weg.
+    lauf.dateiMerken(ziel);
+    final moodle = aufruf.kontext.moodle;
+    final laden = moodle.herunterladenAls(
+      ZusatzLeser(moodle, plugin.aufrufer, plugin.zusatzadressen, lauf),
+      uri,
+      ziel,
+      abbruch: Future.any([aufruf.ende, lauf.ende]),
+      groesseNoetig: false,
+    );
+    // Wurde die Datei im selben Augenblick fertig, in dem Lauf oder Aufruf
+    // endeten, bleibt sie nicht liegen.
+    unawaited(
+      laden.then(
+        (_) async {
+          if (lauf.vorbei || aufruf.vorbei) await ziel.delete().then((_) {}, onError: (Object _) {});
+        },
+        onError: (Object _) {},
+      ),
+    );
+    try {
+      final bytes = await Future.any<int?>([laden, aufruf.ende.then((_) => null), lauf.ende.then((_) => null)]);
+      if (aufruf.vorbei) return _abgebrochen();
+      if (lauf.vorbei || bytes == null) {
+        return _fehler(HttpStatus.conflict, 'Abgebrochen: Der Lauf ist beendet; die Datei ist gelöscht.');
+      }
+      return (status: HttpStatus.ok, json: {'datei': ziel.path, 'bytes': bytes});
+    } on DownloadZuGross {
+      if (aufruf.vorbei) return _abgebrochen();
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        'Die Datei ist größer als ${archivGrenzeStandard ~/ (1024 * 1024)} MB; nicht heruntergeladen.',
+      );
+    } on MoodleFehler catch (x) {
+      if (aufruf.vorbei) return _abgebrochen();
+      if (lauf.vorbei) return _fehler(HttpStatus.conflict, 'Abgebrochen: Der Lauf ist beendet; keine Datei geladen.');
+      return _moodleFehler(x);
     }
   }
 

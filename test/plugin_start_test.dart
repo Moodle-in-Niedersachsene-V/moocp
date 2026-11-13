@@ -17,6 +17,7 @@ import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/dialoge.dart';
+import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart' show zusatzKennzeichnung;
 import 'package:moocp/plugin/plugins.dart';
@@ -27,7 +28,7 @@ import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
 import 'mcp_client.dart';
-import 'plugin_moodle_test.dart' show PluginTestMoodle, lehrkraftImDoppel, sitzungsCookie;
+import 'plugin_moodle_test.dart' show PluginTestMoodle, exportGroesse, lehrkraftImDoppel, sitzungsCookie;
 
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
@@ -74,6 +75,7 @@ const _beispielWerkzeuge = [
   'beispiel_moodle_gesperrt',
   'beispiel_moodle_schreiben',
   'beispiel_lauf',
+  'beispiel_download',
   'beispiel_namen',
 ];
 
@@ -273,7 +275,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (15 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (16 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -493,6 +495,51 @@ void main() {
         expect(ohneArgumente, isNot(contains(n)), reason: n);
       }
       expect(ohneArgumente, isNot(contains('abc123')));
+    });
+
+    test('ein Download im Lauf: nicht im Arbeitsordner, nach dem Lauf gelöscht; der Pfad sperrt jede Antwort', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      moodle.angefragt.clear();
+      final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
+      final hinweise = SperrHinweise();
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final arbeitsordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
+      final l = await starten(
+        await beispielAngenommen([profil]),
+        mit: LaufendePlugins(protokoll, sperrHinweise: hinweise, downloads: downloads),
+      );
+      final client = await verbinden(profil, l, moodle: zugang, arbeitsordner: arbeitsordner.path);
+
+      final text = await client.tool('beispiel_download', {'cmid': 501});
+
+      expect(
+        text,
+        'Im Lauf heruntergeladen: $exportGroesse Bytes, die Datei hat $exportGroesse Bytes.\n'
+        'Nach dem Lauf: Die Datei ist gelöscht.',
+      );
+      expect(moodle.angefragt, contains('GET /mod/beispiel/export.php?id=501'));
+      expect(arbeitsordner.listSync(recursive: true).whereType<File>(), isEmpty);
+      expect(Directory(downloads.wurzel).listSync(recursive: true).whereType<File>(), isEmpty);
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“, Zusatzadresse: GET /mod/beispiel/export.php?id=… → 200'));
+      expect(zeilen.join('\n').toLowerCase(), isNot(contains(PluginDownloads.ordnername)));
+
+      // Nennt eine Antwort des Plugins den Ordner, in welcher Schreibweise
+      // auch immer, geht sie nicht an die KI.
+      for (final t in [
+        p.join(downloads.wurzel, 'beispiel', 'standard', '1.bin'),
+        downloads.wurzel.toUpperCase().replaceAll(r'\', '/'),
+      ]) {
+        final g = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': t}});
+        expect(g['isError'], true, reason: t);
+        expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'), reason: t);
+      }
+      expect(hinweise.offen.map((t) => t.pfad), everyElement(isTrue));
+      expect(hinweise.offen, hasLength(2));
+      expect(await client.tool('beispiel_echo', {'text': 'Aufgabe 3'}), startsWith('Echo: Aufgabe 3'));
     });
 
     test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
@@ -865,7 +912,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (15 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (16 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }

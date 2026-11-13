@@ -117,6 +117,7 @@ const _beispielWerkzeuge = [
   'beispiel_moodle_gesperrt',
   'beispiel_moodle_schreiben',
   'beispiel_lauf',
+  'beispiel_download',
   'beispiel_namen',
 ];
 
@@ -375,7 +376,7 @@ void main() {
       expect(await werkzeugnamen(a), containsAll(['beispiel_echo', 'beispiel_absturz']));
       expect(await a.tool('beispiel_echo', {'text': 'a'}), 'Echo: a\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       expect(await b.tool('beispiel_echo', {'text': 'b'}), contains('Profil: moodle-test\n'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (15 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (16 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
       expect(einstellungen.plugins, isEmpty);
@@ -429,7 +430,7 @@ void main() {
 
       expect(await client.tool('beispiel_echo', {'text': 'nachher'}), startsWith('Echo: nachher'));
       expect(zeilen(), contains(startsWith('Verbindung zum Entwicklungs-Plugin „Beispiel“ verloren')));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (15 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ wieder verbunden (16 Werkzeuge)'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
       expect(einstellungen.gespeichert, 0);
     });
@@ -557,7 +558,7 @@ void main() {
       await pluginStarten();
       await _bis(() => l.entwicklung?.verbunden == true);
       expect(l.werkzeuge(einstellungen.profile.first).map((w) => w.name), contains('beispiel_echo'));
-      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (15 Werkzeuge)'));
+      expect(zeilen(), contains('Entwicklungs-Plugin „Beispiel“ verbunden (16 Werkzeuge)'));
     });
 
     test('ein Absturz ist hier kein Ausfall: kein Neustart durch die App, keine Ausfallanzeige', () async {

@@ -50,6 +50,8 @@
 // Absturz und das Wiederverbinden eines Entwicklungs-Plugins. Auch eine
 // Werkzeugliste, die nach einem Neustart neu gelesen wird, geht erst durch
 // die Sperre: Ihre Beschreibungen gehen an die KI und in die Einstellungen.
+// Für jedes Plugin sperrt sie außerdem den Pfad des Ordners für Downloads
+// ([downloads]), den [beenden] auch leert.
 //
 // Hat das Plugin während des Aufrufs über eine Zusatzadresse an Moodle
 // geschrieben (moodle_schreiben.dart), setzt [aufrufen] einen festen Satz vor
@@ -84,6 +86,7 @@ import '../protokoll.dart';
 import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'dialoge.dart';
+import 'downloads.dart';
 import 'entwicklung.dart';
 import 'moodle_schreiben.dart' show zusatzKennzeichnung;
 import 'namenssperre.dart';
@@ -163,9 +166,20 @@ class LaufendePlugins implements WerkzeugQuelle {
     this.entwicklungsFrist = const Duration(seconds: 2),
     this.dialoge,
     this.sperrHinweise,
-  }) : sperre = LetzteSperre(melden: sperrHinweise?.melden);
+    this.downloads,
+  }) : sperre = LetzteSperre(melden: sperrHinweise?.melden) {
+    for (final f in downloads?.pfadformen ?? const <String>{}) {
+      sperre.pfadSperren(f);
+    }
+  }
 
   final Protokoll _protokoll;
+
+  /// Der Ordner für Downloads über Zusatzadressen (downloads.dart), beim
+  /// Start der App eingerichtet und geleert; [beenden] leert ihn wieder. Sein
+  /// Pfad steht in der letzten Sperre, von Anfang an. Null ohne Oberfläche
+  /// (Tests): Dann gibt es keinen solchen Download.
+  final PluginDownloads? downloads;
 
   /// Die Warnungen der letzten Sperre, die die Oberfläche zeigt; null, wenn
   /// niemand sie zeigt (Tests). Gesperrt wird auch ohne.
@@ -237,7 +251,12 @@ class LaufendePlugins implements WerkzeugQuelle {
   AppAdresse? _offen;
 
   Future<AppAdresse> _adresseHolen() =>
-      _adresse ??= AppAdresse.starten(_protokoll, dialoge: dialoge, sperre: sperre).then((a) => _offen = a);
+      _adresse ??= AppAdresse.starten(
+        _protokoll,
+        dialoge: dialoge,
+        sperre: sperre,
+        downloads: downloads,
+      ).then((a) => _offen = a);
 
   /// Die Adresse der App für Plugins; null, solange kein Plugin gestartet
   /// oder angehängt ist.
@@ -703,6 +722,19 @@ class LaufendePlugins implements WerkzeugQuelle {
         await (await adresse).beenden();
       } catch (_) {
         // Ließ sie sich nicht öffnen, ist nichts zu schließen.
+      }
+    }
+    // Erst wenn kein Plugin mehr läuft: Dann hält keines eine Datei offen.
+    // Was dennoch stehen bleibt, leert der nächste Start. Ohne Pfad im
+    // Protokoll.
+    final d = downloads;
+    if (d != null) {
+      final geblieben = d.leeren();
+      if (geblieben > 0) {
+        _protokoll.eintrag(
+          Art.info,
+          'Ordner für Downloads von Plugins: $geblieben Einträge in Benutzung, der nächste Start leert sie',
+        );
       }
     }
   }

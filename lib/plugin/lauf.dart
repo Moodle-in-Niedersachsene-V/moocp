@@ -8,10 +8,12 @@
 //
 // Ein Lauf gehört zu einem Plugin, einem Instanzprofil und einem Aufruf; je
 // Aufruf läuft höchstens einer zugleich. Er endet, wenn das Plugin ihn beendet
-// oder der Aufruf endet oder abgebrochen wird. Die Namen bleiben danach für
-// die letzte Sperre geladen, bis die App endet. Die Funktionen der Adresse
-// der App stehen in app_adresse.dart, das Lesen selbst in
-// moodle_schreiben.dart (ZusatzLeser); hier stehen der Beginn und die Regeln.
+// oder der Aufruf endet oder abgebrochen wird, auch weil das Plugin abstürzt.
+// Die Namen bleiben danach für die letzte Sperre geladen, bis die App endet;
+// was der Lauf über Zusatzadressen heruntergeladen hat (downloads.dart),
+// löscht sein Ende. Die Funktionen der Adresse der App stehen in
+// app_adresse.dart, das Lesen selbst in moodle_schreiben.dart (ZusatzLeser);
+// hier stehen der Beginn und die Regeln.
 //
 // Der Beginn hält sich an „im Zweifel kein Lauf“: Lässt sich der Kurs nicht
 // ermitteln, die Teilnehmendenseite nicht lesen oder nicht sicher auswerten,
@@ -22,6 +24,7 @@
 // gehen an das Plugin und ins Protokoll.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
@@ -64,8 +67,38 @@ class Lauf {
   Future<void> get ende => _ende.future;
   bool get vorbei => _ende.isCompleted;
 
+  /// Die Dateien, die dieser Lauf über Zusatzadressen lädt oder geladen hat
+  /// (downloads.dart).
+  final _dateien = <File>[];
+
+  /// Merkt sich [datei], bevor sie geladen wird: [beenden] löscht sie und
+  /// ihren unfertigen Teil (`.teil`). Ist der Lauf schon vorbei, gleich.
+  void dateiMerken(File datei) {
+    _dateien.add(datei);
+    if (vorbei) _dateienLoeschen();
+  }
+
+  /// Beendet den Lauf und löscht, was er geladen hat, gleich und ohne zu
+  /// warten: Wer danach nachsieht, findet nichts mehr. Eine Datei, die gerade
+  /// noch geschrieben wird, löscht das Laden selbst, wenn es abbricht
+  /// (MoodleZugang.herunterladenAls), oder die Adresse der App, wenn es im
+  /// selben Augenblick fertig wurde (app_adresse.dart).
   void beenden() {
     if (!_ende.isCompleted) _ende.complete();
+    _dateienLoeschen();
+  }
+
+  void _dateienLoeschen() {
+    for (final d in _dateien) {
+      for (final f in [d, File('${d.path}.teil')]) {
+        try {
+          if (f.existsSync()) f.deleteSync();
+        } on FileSystemException {
+          // In Benutzung: Das Laden räumt seinen Teil selbst weg, und spätestens
+          // das Beenden der App leert den Ordner.
+        }
+      }
+    }
   }
 }
 

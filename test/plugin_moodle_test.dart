@@ -103,6 +103,9 @@ const teilnehmendeKurs12 = <TeilnehmendeImDoppel>[
   (id: 3, name: lehrkraftImDoppel, bild: 'kuerzel'),
 ];
 
+/// So groß ist die erfundene Datei `/mod/beispiel/export.php` im Doppel.
+const exportGroesse = 1234;
+
 /// Ein Moodle, das die Anmeldung kann, ein paar Seiten und Dateien liefert,
 /// Umleitungen auf Erlaubtes und Unerlaubtes macht und alles Angefragte
 /// mitschreibt. Auch für den Ende-zu-Ende-Test mit dem Beispiel-Plugin.
@@ -269,6 +272,22 @@ class PluginTestMoodle {
       return html(
         moodleSeite('<h3>Bericht</h3><p>Erika Mustermann: 3 Punkte</p><a href="?id=501&amp;sesskey=abc123">x</a>'),
       );
+    }
+    // Eine erfundene Datei eines Plugins, die es in einem Lauf über eine
+    // Zusatzadresse herunterlädt (test/plugin_download_test.dart,
+    // Beispiel-Plugin): mit einem Dateinamen, der einen Namen trägt, ohne
+    // angekündigte Größe, mit Umleitung oder angehalten.
+    if (req.uri.path == '/mod/beispiel/export.php' ||
+        req.uri.path.startsWith('/pluginfile.php/950/mod_beispiel/export/')) {
+      if (q['warten'] == '1') await haltenBericht?.future;
+      if (q['umleitung'] == '1') return weiter('/mod/beispiel/export.php?id=501');
+      r.headers.set('content-disposition', 'attachment; filename="Erika_Mustermann.csv"');
+      if (q['ohnegroesse'] == '1') {
+        r.headers.contentType = ContentType('text', 'csv');
+        r.add(List<int>.filled(exportGroesse, 0x61));
+        return r.close();
+      }
+      return datei(List<int>.filled(exportGroesse, 0x61), ContentType('text', 'csv'));
     }
     if (req.uri.path == '/mod/beispiel/fragment.php') return html('<div class="teil">Teil</div>');
     if (req.uri.path == '/mod/beispiel/ohnehaupt.php') return html('<html><body><div>Kein Hauptbereich</div></body></html>');

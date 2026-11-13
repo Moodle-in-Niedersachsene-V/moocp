@@ -2202,19 +2202,29 @@ class MoodleZugang {
   /// Wie [herunterladen], für [aufrufer] (ein Plugin, plugin/moodle_lesen.dart):
   /// Dessen Listen prüfen die Adresse, und seine Zeile steht im Protokoll.
   /// Erfüllt sich [abbruch], hört das Laden beim nächsten Stück auf, und der
-  /// Teil verschwindet.
+  /// Teil verschwindet. Mit [groesseNoetig] false nimmt es auch eine Datei
+  /// ohne angekündigte Größe an (ein Skript, das eine Datei erzeugt, nennt
+  /// sie oft nicht); [maxBytes] zählt dann beim Laden mit.
   Future<int> herunterladenAls(
     Aufrufer aufrufer,
     Uri uri,
     File ziel, {
     int maxBytes = archivGrenzeStandard,
     Future<void>? abbruch,
+    bool groesseNoetig = true,
   }) async {
     _pruefeAngemeldet();
-    return _herunterladen(uri, ziel, maxBytes, aufrufer, abbruch);
+    return _herunterladen(uri, ziel, maxBytes, aufrufer, abbruch, groesseNoetig: groesseNoetig);
   }
 
-  Future<int> _herunterladen(Uri uri, File ziel, int maxBytes, Aufrufer aufrufer, Future<void>? abbruch) async {
+  Future<int> _herunterladen(
+    Uri uri,
+    File ziel,
+    int maxBytes,
+    Aufrufer aufrufer,
+    Future<void>? abbruch, {
+    bool groesseNoetig = true,
+  }) async {
     var abgebrochen = false;
     unawaited(abbruch?.then((_) => abgebrochen = true));
     _pruefePositivliste(aufrufer, 'GET', uri, null, null);
@@ -2242,7 +2252,7 @@ class MoodleZugang {
         );
       }
       final erwartet = res.contentLength;
-      if (erwartet < 0) {
+      if (erwartet < 0 && groesseNoetig) {
         // Ohne angekündigte Größe gibt es keine Prüfung; dann wird nichts übernommen.
         throw MoodleFehler(
           'Moodle nennt die Größe der Datei nicht; nicht übernommen.',
@@ -2260,7 +2270,7 @@ class MoodleZugang {
       final s = senke;
       senke = null;
       await s.close();
-      if (gelesen != erwartet) {
+      if (erwartet >= 0 && gelesen != erwartet) {
         throw MoodleFehler(
           'Die Datei ist unvollständig ($gelesen von $erwartet Bytes).',
         );

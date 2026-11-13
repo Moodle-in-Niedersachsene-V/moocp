@@ -38,16 +38,20 @@
 //
 // Moodle: Ein Plugin liest Seiten und lädt Dateien über die App, mit der
 // Sitzung des Profils des Aufrufs und nur in den Grenzen des lesenden Teils
-// der Positivliste (moodle_lesen.dart). Schreiben geht nur über die
-// eingebauten Werkzeuge. Die Antwort trägt nie Cookies oder Kopfzeilen von
-// Moodle, nur Status, Inhaltstyp, den Pfad nach Umleitungen und den Inhalt.
+// der Positivliste (moodle_lesen.dart). Was die Positivliste erlaubt, ändert
+// es nur über die eingebauten Werkzeuge. Darüber hinaus schreibt es nur über
+// eine seiner Zusatzadressen mit der Art „schreiben“, und nur mit einer
+// Freigabe der Lehrkraft auf jeder Stufe (moodle_schreiben.dart, zwei
+// Schritte: Freigabe, dann Schreiben mit der Kennung). Die Antwort trägt nie
+// Cookies oder Kopfzeilen von Moodle, nur Status, Inhaltstyp, den Pfad nach
+// Umleitungen und den Inhalt.
 //
 // Letzte Sperre (namenssperre.dart, E36): Ein Plugin nennt der App Namen zum
 // Sperren (/v1/namen); von da an prüft sie bis zum Ende der App alles, was
 // von diesem Plugin ins Protokoll ginge, gegen sie: seine Protokollzeilen,
 // den Namen und die Argumente eines eingebauten Werkzeugs, das es aufruft
-// (beide stehen im Protokoll der Hülle), und Pfad und Parameternamen einer
-// Anfrage an Moodle. Bei einem Treffer geht nichts davon ins Protokoll; dort
+// (beide stehen im Protokoll der Hülle), und Pfad, Parameternamen und
+// Feldnamen einer Anfrage an Moodle. Bei einem Treffer geht nichts davon ins Protokoll; dort
 // steht nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort in der
 // Warnung der App. Was die App selbst schreibt (Dialog geöffnet, Ausgang
 // einer Freigabe), prüft sie nicht: Darin steht kein Text des Plugins.
@@ -66,9 +70,11 @@ import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
 import '../protokoll.dart';
+import 'beschreibung.dart' show Zusatzadresse;
 import 'dialoge.dart';
 import 'klartext.dart';
 import 'moodle_lesen.dart';
+import 'moodle_schreiben.dart';
 import 'namenssperre.dart';
 
 export 'klartext.dart' show einzeilig;
@@ -87,6 +93,8 @@ const pfadHinweis = '/v1/dialog/hinweis';
 const pfadFreigabe = '/v1/freigabe';
 const pfadMoodleLesen = '/v1/moodle/lesen';
 const pfadMoodleDatei = '/v1/moodle/datei';
+const pfadZusatzFreigabe = '/v1/moodle/zusatz/freigabe';
+const pfadZusatzSchreiben = '/v1/moodle/zusatz/schreiben';
 const pfadNamen = '/v1/namen';
 
 /// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
@@ -106,12 +114,17 @@ const namenJePluginHoechstens = 100000;
 const protokollzeileHoechstens = 500;
 
 class _Plugin {
-  _Plugin(this.kurzname, this.name, this.schluessel);
+  _Plugin(this.kurzname, this.name, this.schluessel, this.zusatzadressen);
   final String kurzname;
   final String name;
 
   /// Geheim: in keinem Protokoll und keiner Antwort.
   final List<int> schluessel;
+
+  /// Die Zusatzadressen aus dem Stand, dem die Lehrkraft zugestimmt hat (beim
+  /// Entwicklungs-Plugin: aus der Beschreibungsdatei, die der Dialog genannt
+  /// hat). Sie gelten nur für dieses Plugin.
+  final List<Zusatzadresse> zusatzadressen;
 
   /// Wie das Plugin in Protokoll und Freigabe als Aufrufer heißt.
   String get aufrufer => 'Plugin „$name“';
@@ -139,12 +152,41 @@ class _Aufruf {
 
   /// Ob gerade ein Dialog oder eine Freigabe dieses Aufrufs offen ist.
   bool dialogOffen = false;
+
+  /// Die Freigaben zum Schreiben über eine Zusatzadresse, die die Lehrkraft
+  /// in diesem Aufruf erteilt hat und die noch nicht benutzt sind, nach ihrer
+  /// Kennung: woran sie gebunden sind (moodle_schreiben.dart). Sie verfallen
+  /// mit dem Aufruf. Die Kennungen sind geheim wie das Token.
+  final kennungen = <String, ({String pfad, String summe})>{};
+
+  /// Wie viele Schreibvorgänge über eine Zusatzadresse in diesem Aufruf an
+  /// Moodle gesendet sind (auch solche, bei denen unklar ist, ob sie
+  /// ankamen); für die Kennzeichnung der Antwort an die KI.
+  int zusatzSchreibvorgaenge = 0;
+}
+
+/// Ein angemeldeter Aufruf ([AppAdresse.aufrufAnmelden]): [ende] beendet
+/// ihn, und er sagt, ob das Plugin darin über eine Zusatzadresse geschrieben
+/// hat.
+class AngemeldeterAufruf {
+  AngemeldeterAufruf._(this.ende, this._aufruf);
+
+  /// Der Aufruf ist fertig; sein Token und seine Kennungen gelten nicht mehr.
+  final void Function() ende;
+  final _Aufruf? _aufruf;
+
+  /// Wie viele Schreibvorgänge das Plugin in diesem Aufruf über eine
+  /// Zusatzadresse an Moodle gesendet hat.
+  int get zusatzSchreibvorgaenge => _aufruf?.zusatzSchreibvorgaenge ?? 0;
 }
 
 /// Eine Antwort: Status und JSON.
 typedef _Antwort = ({int status, Map<String, Object?> json});
 
 _Antwort _fehler(int status, String text) => (status: status, json: {'fehler': text});
+
+/// Eine geprüfte Anfrage zum Schreiben über eine Zusatzadresse.
+typedef _Geprueft = ({Uri uri, Felder felder, Zusatzadresse zusatzadresse});
 
 /// Die Adresse der App für Plugins: der Server, die angemeldeten Plugins mit
 /// ihren Schlüsseln und die laufenden Aufrufe mit ihren Token.
@@ -191,10 +233,16 @@ class AppAdresse {
   bool _beendet = false;
 
   /// Meldet das Plugin [kurzname] mit seinem [schluessel] an, unter [name]
-  /// für Protokoll und Freigabe. Ein früherer Schlüssel desselben Plugins
-  /// gilt danach nicht mehr.
-  void pluginAnmelden(String kurzname, String name, String schluessel) {
-    _plugins[kurzname] = _Plugin(kurzname, name, utf8.encode(schluessel));
+  /// für Protokoll und Freigabe, mit den [zusatzadressen] seines
+  /// zugestimmten Stands. Ein früherer Schlüssel desselben Plugins gilt danach
+  /// nicht mehr.
+  void pluginAnmelden(
+    String kurzname,
+    String name,
+    String schluessel, {
+    List<Zusatzadresse> zusatzadressen = const [],
+  }) {
+    _plugins[kurzname] = _Plugin(kurzname, name, utf8.encode(schluessel), List.unmodifiable(zusatzadressen));
   }
 
   /// Meldet das Plugin [kurzname] ab, wenn [schluessel] noch der angemeldete
@@ -206,21 +254,22 @@ class AppAdresse {
   }
 
   /// Meldet einen Aufruf des Plugins [kurzname] an: Sein Token gilt von nun
-  /// an für dieses Plugin, bis die zurückgegebene Funktion gerufen wird (der
+  /// an für dieses Plugin, bis [AngemeldeterAufruf.ende] gerufen wird (der
   /// Aufruf ist fertig) oder der Client abbricht. Ohne [WerkzeugAufruf.kontext]
   /// gilt das Token nie.
-  void Function() aufrufAnmelden(String kurzname, WerkzeugAufruf aufruf) {
+  AngemeldeterAufruf aufrufAnmelden(String kurzname, WerkzeugAufruf aufruf) {
     final kontext = aufruf.kontext;
-    if (kontext == null || aufruf.token.isEmpty || _beendet) return () {};
+    if (kontext == null || aufruf.token.isEmpty || _beendet) return AngemeldeterAufruf._(() {}, null);
     final a = _Aufruf(kurzname, aufruf.name, kontext);
     _aufrufe[aufruf.token] = a;
     void ende() {
       a.beenden();
+      a.kennungen.clear();
       if (identical(_aufrufe[aufruf.token], a)) _aufrufe.remove(aufruf.token);
     }
 
     unawaited(aufruf.abbruch.then((_) => ende()));
-    return ende;
+    return AngemeldeterAufruf._(ende, a);
   }
 
   /// Schließt den Server; jedes Token und jeder Schlüssel gilt danach nicht
@@ -230,6 +279,7 @@ class AppAdresse {
     _beendet = true;
     for (final a in _aufrufe.values) {
       a.beenden();
+      a.kennungen.clear();
     }
     _aufrufe.clear();
     _plugins.clear();
@@ -415,6 +465,8 @@ class AppAdresse {
     pfadFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _freigabeAnfragen),
     pfadMoodleLesen: const _Funktion(mitAufruf: true, ausfuehren: _moodleLesen),
     pfadMoodleDatei: const _Funktion(mitAufruf: true, ausfuehren: _moodleDatei),
+    pfadZusatzFreigabe: const _Funktion(mitAufruf: true, ausfuehren: _zusatzFreigabeAnfragen),
+    pfadZusatzSchreiben: const _Funktion(mitAufruf: true, ausfuehren: _zusatzSchreiben),
     pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
   };
 
@@ -658,6 +710,259 @@ class AppAdresse {
       return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
     }
   }
+
+  /// Prüft eine Anfrage zum Schreiben über eine Zusatzadresse
+  /// (moodle_schreiben.dart), für die Freigabe wie für das Schreiben, in
+  /// dieser Reihenfolge: angemeldet, Methode, Pfad, Formularfelder, die
+  /// letzte Sperre gegen Pfad, Parameter- und Feldnamen (sie stehen im
+  /// Protokoll und im Dialog), sesskey vom Plugin, dann die Adresse
+  /// ([ZusatzAufrufer]). Liefert Adresse, Felder und die passende
+  /// Zusatzadresse; sonst die Antwort mit dem Fehler. Moodle wird dabei nicht
+  /// gefragt, und niemand sieht einen Dialog.
+  static Object _zusatzPruefen(AppAdresse a, _Plugin plugin, _Aufruf aufruf, Map<String, Object?> daten) {
+    final moodle = aufruf.kontext.moodle;
+    final basis = moodle.basis;
+    final protokoll = aufruf.kontext.protokoll;
+    if (!moodle.angemeldet || basis == null) return _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
+    if (daten['methode'] != 'POST') {
+      protokoll.eintrag(Art.gesperrt, '${plugin.aufrufer}: Schreiben über eine Zusatzadresse abgewiesen (Methode)');
+      return _fehler(
+        HttpStatus.methodNotAllowed,
+        'methode ist „POST“: Über eine Zusatzadresse schreibt ein Plugin nur mit POST und Formularfeldern. '
+        'Dateien hochladen geht nicht.',
+      );
+    }
+    final Uri uri;
+    final Felder felder;
+    try {
+      uri = pluginAdresse(basis, daten['pfad']);
+      felder = felderAusJson(daten['felder']);
+    } on FormatException catch (x) {
+      protokoll.eintrag(Art.gesperrt, '${plugin.aufrufer}: Schreiben über eine Zusatzadresse abgewiesen (Anfrage ungültig)');
+      return _fehler(HttpStatus.badRequest, x.message);
+    }
+    if (a._gesperrt(
+      plugin,
+      aufruf,
+      [
+        uri.path,
+        _dekodiert(uri.path),
+        for (final n in parameterNamen(uri)) ...[n, _dekodiert(n)],
+        for (final f in felder) f.key,
+      ],
+      SperrStelle.moodle,
+      protokoll,
+    )) {
+      return _sperrAntwort('Der Pfad, ein Parametername oder ein Feldname');
+    }
+    final pruefer = ZusatzAufrufer(moodle, plugin.aufrufer, plugin.zusatzadressen, umleitung: false);
+    final regel = pruefer.gesperrtDurch(uri);
+    if (regel != null) {
+      protokoll.eintrag(Art.gesperrt, pruefer.sperrzeile('POST', uri, regel));
+      return _fehler(HttpStatus.forbidden, pruefer.sperrmeldung(uri, regel));
+    }
+    final zusatzadresse = pruefer.zusatzadresse(uri);
+    if (zusatzadresse == null || !pruefer.erlaubt('POST', uri, felder, null, null)) {
+      protokoll.eintrag(Art.gesperrt, pruefer.ablehnzeile('POST', uri, felder));
+      return _fehler(HttpStatus.forbidden, pruefer.ablehnmeldung('POST', uri));
+    }
+    return (uri: uri, felder: felder, zusatzadresse: zusatzadresse);
+  }
+
+  /// `POST /v1/moodle/zusatz/freigabe` `{"methode": "POST", "pfad": "/…?…",
+  /// "felder": [{"name": …, "wert": …}, …], "titel": …, "zusammenfassung":
+  /// …}`: Schritt 1 eines Schreibvorgangs über eine Zusatzadresse
+  /// (moodle_schreiben.dart). Was nicht erlaubt ist, lehnt die App ohne Dialog
+  /// ab. Sonst fragt sie die Lehrkraft, auf jeder Stufe, mit dem Plugin als
+  /// Aufrufer, und der Testbetrieb gibt nichts frei. Antwort `{"ausgang":
+  /// "freigegeben", "kennung": …}` oder `{"ausgang": "abgelehnt" |
+  /// "abgebrochen"}`. Die Kennung gilt einmal, nur in diesem Aufruf.
+  static Future<_Antwort> _zusatzFreigabeAnfragen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final geprueft = _zusatzPruefen(a, plugin, aufruf!, daten);
+    if (geprueft case final _Antwort fehler) return fehler;
+    final (:uri, :felder, :zusatzadresse) = geprueft as _Geprueft;
+    final t = daten['titel'];
+    final z = daten['zusammenfassung'];
+    final titel = t is String ? einzeilig(t, dialogTitelHoechstens) : '';
+    final zusammenfassung = z is String ? mehrzeilig(z, dialogTextHoechstens) : '';
+    if (titel.isEmpty) return _fehler(HttpStatus.badRequest, 'titel fehlt: eine Zeile Text als Überschrift.');
+    if (zusammenfassung.isEmpty) {
+      return _fehler(HttpStatus.badRequest, 'zusammenfassung fehlt: was geschrieben werden soll, als Text.');
+    }
+    return _einzeln(a, plugin, aufruf, () async {
+      final ausgang = await aufruf.kontext.pluginFreigabe(
+        titel: titel,
+        zusammenfassung: zusammenfassung,
+        // Auf jeder Stufe: Was hinter einer Zusatzadresse geschieht, kann
+        // moocp nicht beurteilen (E36).
+        ab: Bestaetigungen.keine,
+        abbruch: aufruf.ende,
+        aufrufer: plugin.aufrufer,
+        punkte: zusatzFreigabePunkte(uri, felder, zusatzadresse),
+        protokolltitel: 'Schreiben über eine Zusatzadresse eines Plugins',
+      );
+      // Mit „ab: keine“ lässt keine Stufe die Frage aus. Käme doch
+      // `ohneFrage`, gälte das nicht als Freigabe.
+      final erteilt = ausgang == PluginFreigabeAusgang.freigegeben && !aufruf.vorbei;
+      final (wort, ausgangText) = switch (ausgang) {
+        _ when erteilt => ('erteilt', 'freigegeben'),
+        PluginFreigabeAusgang.abgelehnt => ('abgelehnt', 'abgelehnt'),
+        _ => ('abgebrochen', 'abgebrochen'),
+      };
+      a._protokollzeile(
+        plugin,
+        aufruf.kontext.protokoll,
+        'Freigabe zum Schreiben über eine Zusatzadresse (POST ${skriptAdresse(uri)}) -- $wort',
+      );
+      if (!erteilt) return (status: HttpStatus.ok, json: <String, Object?>{'ausgang': ausgangText});
+      final kennung = aufrufToken();
+      aufruf.kennungen[kennung] = (pfad: daten['pfad'] as String, summe: felderSumme(felder));
+      return (status: HttpStatus.ok, json: <String, Object?>{'ausgang': ausgangText, 'kennung': kennung});
+    });
+  }
+
+  /// `POST /v1/moodle/zusatz/schreiben` `{"kennung": …, "methode": "POST",
+  /// "pfad": "/…?…", "felder": [{"name": …, "wert": …}, …]}`: Schritt 2. Die
+  /// Kennung muss zu einer Freigabe dieses Aufrufs gehören, und Methode, Pfad
+  /// und Felder müssen genau dem entsprechen, was freigegeben ist; jeder
+  /// Versuch verbraucht die Kennung. Ohne gültige Kennung sendet die App
+  /// nichts, auf keiner Stufe. Gesendet wird mit der Sitzung des Profils, den
+  /// sesskey setzt die App ein; einer Umleitung folgt sie nach den Regeln in
+  /// moodle_schreiben.dart. Antwort `{"geschrieben": true, "status": …,
+  /// "inhaltstyp": …, "pfad": …, "text": …}`, nie Cookies oder Kopfzeilen;
+  /// dazu `umleitungNichtGelesen`, wenn einer Umleitung nicht gefolgt wurde,
+  /// oder nur `{"geschrieben": true, "hinweis": …}`, wenn die Antwort zu groß
+  /// war. Ein Fehler, nach dem nichts geschrieben ist: 403, 409, 502, 503;
+  /// 502 auch, wenn unklar ist, ob der Schreibvorgang ankam (die Meldung sagt
+  /// es). Wiederholt wird nichts, auch nicht nach einer Neuanmeldung.
+  static Future<_Antwort> _zusatzSchreiben(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final protokoll = aufruf!.kontext.protokoll;
+    final k = daten['kennung'];
+    // Verbraucht, bevor irgendetwas anderes geprüft wird: Auch ein Versuch,
+    // der nicht passt, kostet die Freigabe.
+    final freigabe = k is String ? aufruf.kennungen.remove(k) : null;
+    if (freigabe == null) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Schreiben über eine Zusatzadresse ohne gültige Freigabe abgewiesen',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: Ohne Freigabe der Lehrkraft schreibt moocp nicht über eine Zusatzadresse, auf keiner Stufe. '
+        'Erst $pfadZusatzFreigabe; die Kennung daraus gilt einmal und nur in diesem Aufruf. Nichts gesendet.',
+      );
+    }
+    final geprueft = _zusatzPruefen(a, plugin, aufruf, daten);
+    if (geprueft case final _Antwort fehler) return fehler;
+    final (:uri, :felder, zusatzadresse: _) = geprueft as _Geprueft;
+    if (daten['pfad'] != freigabe.pfad || felderSumme(felder) != freigabe.summe) {
+      protokoll.eintrag(
+        Art.gesperrt,
+        '${plugin.aufrufer}: Schreiben über eine Zusatzadresse abgewiesen: POST ${skriptAdresse(uri)} passt nicht '
+        'zur Freigabe',
+      );
+      return _fehler(
+        HttpStatus.forbidden,
+        'Abgelehnt: Pfad, Parameter oder Formularfelder passen nicht zu dem, was die Lehrkraft freigegeben hat. '
+        'Die Kennung ist verbraucht. Nichts gesendet.',
+      );
+    }
+    if (aufruf.vorbei) return _abgebrochen();
+    final moodle = aufruf.kontext.moodle;
+    final String sesskey;
+    try {
+      sesskey = await moodle.sesskey();
+    } on MoodleFehler catch (x) {
+      return aufruf.vorbei ? _abgebrochen() : _moodleFehler(x);
+    }
+    if (aufruf.vorbei) return _abgebrochen();
+    final schreiber = ZusatzAufrufer(moodle, plugin.aufrufer, plugin.zusatzadressen, umleitung: false);
+    // Ab hier gilt der Schreibvorgang als gesendet, bis feststeht, dass er
+    // Moodle nicht erreicht hat.
+    aufruf.zusatzSchreibvorgaenge++;
+    const verbraucht = 'Die Freigabe ist verbraucht; ein neuer Versuch braucht eine neue.';
+    _Antwort nichtGeschrieben(int status, String text) {
+      aufruf.zusatzSchreibvorgaenge--;
+      return _fehler(status, text);
+    }
+
+    final Antwort r;
+    try {
+      r = await moodle.sendenAls(schreiber, uri, [...felder, MapEntry('sesskey', sesskey)], hoechstens: textHoechstens);
+    } on AntwortZuGross catch (x) {
+      return _geschrieben(aufruf, {
+        'hinweis': 'Geschrieben ist schon: Der Schreibvorgang ist gesendet, Moodle hat geantwortet. ${x.meldung}',
+      });
+    } on SitzungAbgelaufen {
+      return nichtGeschrieben(
+        HttpStatus.serviceUnavailable,
+        'Nicht geschrieben: Die Sitzung war abgelaufen, Moodle hat auf die Anmeldung umgeleitet. moocp hat neu '
+        'angemeldet und wiederholt nichts. $verbraucht',
+      );
+    } on SchutzPruefung catch (x) {
+      return nichtGeschrieben(HttpStatus.badGateway, '${x.meldung} $verbraucht');
+    } on AnfrageGesperrt catch (x) {
+      return nichtGeschrieben(HttpStatus.forbidden, x.meldung);
+    } on NichtAngemeldet catch (x) {
+      return nichtGeschrieben(HttpStatus.serviceUnavailable, x.meldung);
+    } on MoodleNichtErreichbar catch (x) {
+      return _fehler(
+        HttpStatus.badGateway,
+        '${x.meldung} Ob der Schreibvorgang Moodle erreicht hat, ist unklar. moocp wiederholt ihn nicht; das Plugin '
+        'prüft selbst nach. $verbraucht',
+      );
+    } on MoodleFehler catch (x) {
+      // Nach einer Umleitung auf die Anmeldung, wenn die Neuanmeldung
+      // scheiterte: Moodle hat das Formular nicht angenommen.
+      return nichtGeschrieben(HttpStatus.badGateway, 'Nicht geschrieben. ${x.meldung} $verbraucht');
+    }
+    var ende = r;
+    String? nichtGelesen;
+    final ziel = moodle.umleitungsziel(r);
+    if (ziel != null && !aufruf.vorbei) {
+      try {
+        ende = await moodle.lesenAls(
+          ZusatzAufrufer(moodle, plugin.aufrufer, plugin.zusatzadressen, umleitung: true),
+          ziel,
+          hoechstens: textHoechstens,
+        );
+      } on AnfrageGesperrt catch (x) {
+        nichtGelesen =
+            'Geschrieben ist schon: Der Schreibvorgang ist gesendet, Moodle hat mit einer Umleitung geantwortet. '
+            'Deren Ziel durfte moocp nicht lesen. ${x.meldung}';
+      } on MoodleFehler catch (x) {
+        nichtGelesen =
+            'Geschrieben ist schon: Der Schreibvorgang ist gesendet, Moodle hat mit einer Umleitung geantwortet. '
+            'Deren Ziel ließ sich nicht lesen. ${x.meldung}';
+      }
+    }
+    return _geschrieben(aufruf, {
+      'status': ende.status,
+      'inhaltstyp': ende.inhaltstyp,
+      'pfad': '${ende.adresse.path}${MoodleZugang.querySicher(ende.adresse)}',
+      'text': ende.text,
+      'umleitungNichtGelesen': ?nichtGelesen,
+    });
+  }
+
+  /// Die Antwort nach einem gesendeten Schreibvorgang. Ist der Aufruf
+  /// inzwischen zu Ende, sagt sie das und dass schon gesendet ist.
+  static _Antwort _geschrieben(_Aufruf aufruf, Map<String, Object?> json) => aufruf.vorbei
+      ? _fehler(
+          HttpStatus.conflict,
+          'Der Aufruf, zu dem das Token gehört, ist zu Ende oder abgebrochen. Der Schreibvorgang war da schon gesendet.',
+        )
+      : (status: HttpStatus.ok, json: {'geschrieben': true, ...json});
 
   /// Der Dateiname für einen Download: der genannte, wenn er gültig ist,
   /// sonst null; ohne Angabe der letzte Teil des Pfads, mit „_“ statt

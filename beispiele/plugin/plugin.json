@@ -6,7 +6,13 @@
   "programm": "beispiel.exe",
   "herkunft": "Beispiel-Plugin aus dem Repository von moocp",
   "updateQuellen": [],
-  "zusatzadressen": [],
+  "zusatzadressen": [
+    {
+      "muster": "/mod/beispiel/speichern.php",
+      "art": "schreiben",
+      "grund": "Speichert die Notiz, mit der das Werkzeug beispiel_moodle_schreiben zeigt, wie ein Plugin über eine Zusatzadresse schreibt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    }
+  ],
   "wahlSkills": {},
   "ohneAnmeldung": [],
   "entwicklungsPort": 47900

@@ -68,9 +68,10 @@
 // `beispiel_auswahl`, `beispiel_eingabe`, `beispiel_pfad` und
 // `beispiel_hinweis` (je eine Art Dialog), `beispiel_freigabe` (um eine
 // Freigabe bitten), `beispiel_moodle_lesen` (eine erlaubte Seite von Moodle
-// lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt) und
-// `beispiel_namen` (Namen zum Sperren nennen; die letzte Sperre hält danach
-// eine Antwort mit einem davon an).
+// lesen), `beispiel_moodle_gesperrt` (eine Anfrage, die moocp ablehnt),
+// `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
+// Freigabe, und selbst prüfen) und `beispiel_namen` (Namen zum Sperren
+// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
 //
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
@@ -442,8 +443,10 @@ McpServer _server() {
   // erlaubt; jedes Umleitungsziel prüft es genauso. Die Antwort hat `status`,
   // `inhaltstyp`, `pfad` (nach Umleitungen, ohne Rechner) und `text`, nie
   // Cookies. Was nicht erlaubt ist, lehnt moocp ohne Dialog ab und nennt den
-  // Grund im Feld `fehler`. Schreiben geht nicht hier, sondern über die
-  // eingebauten Werkzeuge (`/v1/werkzeug`), mit Freigabe und Rücklesen.
+  // Grund im Feld `fehler`. Schreiben geht nicht hier: Was die Positivliste
+  // erlaubt, über die eingebauten Werkzeuge (`/v1/werkzeug`), mit Freigabe und
+  // Rücklesen; was darüber hinausgeht, über eine Zusatzadresse
+  // (`beispiel_moodle_schreiben`).
   server.registerTool(
     'beispiel_moodle_lesen',
     description:
@@ -485,6 +488,84 @@ McpServer _server() {
       } on MoocpFehler catch (f) {
         // Die Ablehnung ist hier das erwartete Ergebnis.
         return text('Abgelehnt (HTTP ${f.status}): ${f.text}');
+      }
+    },
+  );
+
+  // Über eine Zusatzadresse schreiben: Was über die Positivliste von moocp
+  // hinausgeht, meldet ein Plugin in plugin.json unter `zusatzadressen` an
+  // (Muster, Art „schreiben“, Grund); die Lehrkraft stimmt der Liste mit dem
+  // Plugin zu. Geschrieben wird in zwei Schritten, beide mit dem Token des
+  // Aufrufs:
+  //
+  // 1. `/v1/moodle/zusatz/freigabe` mit `methode` („POST“), `pfad` (mit
+  //    Parametern), `felder` (Liste von `{"name", "wert"}` in der Reihenfolge,
+  //    in der sie gesendet werden), `titel` und `zusammenfassung`. moocp
+  //    fragt die Lehrkraft auf jeder Stufe; freigegeben, kommt eine `kennung`.
+  // 2. `/v1/moodle/zusatz/schreiben` mit der `kennung` und genau denselben
+  //    `methode`, `pfad` und `felder`. Die Kennung gilt einmal und nur in
+  //    diesem Aufruf. Den sesskey setzt moocp ein; ein Plugin schickt ihn nie
+  //    mit. Die Antwort hat `geschrieben`, `status`, `inhaltstyp`, `pfad`
+  //    (nach Umleitungen) und `text`, und `umleitungNichtGelesen`, wenn moocp
+  //    einer Umleitung nicht folgen durfte.
+  //
+  // Zurücklesen und Prüfen ist Sache des Plugins: moocp kennt die Seite nicht.
+  // Vor seine Antwort an die KI setzt moocp, dass das Plugin geprüft hat,
+  // nicht moocp.
+  server.registerTool(
+    'beispiel_moodle_schreiben',
+    description:
+        'Speichert über moocp eine Notiz auf einer erfundenen Seite (/mod/beispiel/speichern.php), mit Freigabe '
+        'der Lehrkraft, und prüft selbst, ob sie danach dort steht. Zeigt das Schreiben über eine Zusatzadresse; '
+        'in einem echten Moodle gibt es die Seite nicht. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'id': JsonSchema.integer(description: 'Die Nummer, die an der Seite steht.'),
+        'notiz': JsonSchema.string(description: 'Die Notiz.'),
+      },
+      required: ['id', 'notiz'],
+    ),
+    annotations: const ToolAnnotations(
+      title: 'Moodle schreiben (Beispiel)',
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    ),
+    callback: (args, extra) async {
+      final notiz = '${args['notiz']}';
+      final schreibvorgang = {
+        'methode': 'POST',
+        'pfad': '/mod/beispiel/speichern.php?id=${(args['id'] as num).toInt()}',
+        'felder': [
+          {'name': 'notiz', 'wert': notiz},
+        ],
+      };
+      try {
+        final freigabe = await anMoocp(adresse(), '/v1/moodle/zusatz/freigabe', {
+          ...schreibvorgang,
+          'titel': 'Notiz speichern?',
+          'zusammenfassung': 'Das Beispiel-Plugin speichert diese Notiz:\n$notiz',
+        }, aufruf: token(extra));
+        if (freigabe['ausgang'] != 'freigegeben') {
+          return text('Nicht geschrieben: Die Lehrkraft hat nicht freigegeben (${freigabe['ausgang']}).');
+        }
+        final antwort = await anMoocp(adresse(), '/v1/moodle/zusatz/schreiben', {
+          ...schreibvorgang,
+          'kennung': freigabe['kennung'],
+        }, aufruf: token(extra));
+        // Selbst prüfen: Steht die Notiz auf der Seite, auf die Moodle nach
+        // dem Speichern führt? Den Inhalt der Seite gibt das Beispiel nicht
+        // weiter; er könnte Namen enthalten.
+        if (antwort['umleitungNichtGelesen'] != null) {
+          return text('Gesendet, aber nicht geprüft: Das Plugin konnte die Seite danach nicht lesen.', fehler: true);
+        }
+        final steht = '${antwort['text']}'.contains('Notiz: ${const HtmlEscape().convert(notiz)}') ||
+            '${antwort['text']}'.contains('Notiz: $notiz');
+        return steht
+            ? text('Geschrieben und vom Plugin geprüft: Die Notiz steht auf der Seite.')
+            : text('Gesendet, aber die Prüfung des Plugins hat die Notiz auf der Seite nicht gefunden.', fehler: true);
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
       }
     },
   );

@@ -456,7 +456,9 @@ class McpDienst implements AufrufKontext {
     required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
-  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null);
+    List<String> punkte = const [],
+    String? protokolltitel,
+  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel);
 
   /// [zaehler] ist der des Werkzeugaufrufs, zu dem die Freigabe gehört
   /// (_KontextImAufruf); er bekommt eine ausgelassene Freigabe mitgezählt.
@@ -470,17 +472,19 @@ class McpDienst implements AufrufKontext {
     Future<void> abbruch,
     String aufrufer,
     AufrufZaehler? zaehler,
+    List<String> punkte,
+    String? protokolltitel,
   ) async {
     final a = FreigabeAnfrage(
       titel: titel,
-      punkte: const [],
+      punkte: punkte,
       vergleich: const [],
       knopf: 'Freigeben',
       ablehnen: 'Ablehnen',
       ohneEntscheidung: 'wird nichts freigegeben',
       ab: ab,
       vomPlugin: zusammenfassung,
-      protokolltitel: 'Freigabe eines Plugins',
+      protokolltitel: protokolltitel ?? 'Freigabe eines Plugins',
     );
     final eigener = AufrufZaehler();
     final ja = await Freigaben.ohneTestfreigabe(
@@ -2531,5 +2535,7 @@ class _KontextImAufruf implements AufrufKontext {
     required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
-  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler);
+    List<String> punkte = const [],
+    String? protokolltitel,
+  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel);
 }

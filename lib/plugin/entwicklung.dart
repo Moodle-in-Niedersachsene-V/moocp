@@ -144,7 +144,12 @@ class AngehaengtesPlugin {
   }) {
     // Derselbe Schlüssel wie für die Verbindung, solange die App läuft: Auch
     // ein neu gestartetes Plugin bekommt ihn von seinem Entwickler wieder.
-    adresse?.pluginAnmelden(plugin.kurzname, plugin.name, plugin._schluessel);
+    adresse?.pluginAnmelden(
+      plugin.kurzname,
+      plugin.name,
+      plugin._schluessel,
+      zusatzadressen: plugin.beschreibung.zusatzadressen,
+    );
   }
 
   final EntwicklungsPlugin plugin;

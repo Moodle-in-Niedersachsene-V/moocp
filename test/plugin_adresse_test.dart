@@ -80,6 +80,8 @@ class _Kontext implements AufrufKontext {
     required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
+    List<String> punkte = const [],
+    String? protokolltitel,
   }) async {
     freigaben.add((titel: titel, zusammenfassung: zusammenfassung, ab: ab, aufrufer: aufrufer));
     return PluginFreigabeAusgang.freigegeben;
@@ -231,7 +233,7 @@ void main() {
 
     test('Schlüssel und Token stehen in keinem Protokoll und keiner Antwort', () async {
       final a = _aufruf(kontext('A'));
-      final ende = adresse.aufrufAnmelden('beispiel', a);
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
       final antworten = [
         await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'eins'}, token: a.token),
         await _post(adresse.adresse, pfadArbeitsordner, token: a.token),
@@ -263,7 +265,7 @@ void main() {
 
     test('nach dem Ende des Aufrufs gilt das Token nicht mehr', () async {
       final a = _aufruf(kontext('A'));
-      final ende = adresse.aufrufAnmelden('beispiel', a);
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
       expect((await _post(adresse.adresse, pfadArbeitsordner, token: a.token)).status, 200);
 
       ende();
@@ -691,7 +693,7 @@ void main() {
 
     test('ohne gültiges Token kein Dialog und keine Freigabe: 403', () async {
       final a = _aufruf(kontext('A'));
-      final ende = adresse.aufrufAnmelden('beispiel', a);
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
       ende();
       for (final pfad in [pfadAuswahl, pfadEingabe, pfadPfadwahl, pfadHinweis, pfadFreigabe]) {
         expect((await _post(adresse.adresse, pfad, daten: {'titel': 'T'})).status, 403, reason: pfad);
@@ -741,7 +743,7 @@ void main() {
       test('$wie, schließt sich der offene Dialog: abgebrochen', () async {
         final abbruch = Completer<void>();
         final a = _aufruf(kontext('A'), abbruch: abbruch.future);
-        final ende = adresse.aufrufAnmelden('beispiel', a);
+        final ende = adresse.aufrufAnmelden('beispiel', a).ende;
 
         final antwort = _post(
           adresse.adresse,
@@ -1027,7 +1029,7 @@ void main() {
 
     test('endet der äußere Aufruf, schließt sich die offene Freigabe: abgebrochen', () async {
       final a = _aufruf(dienst);
-      final ende = adresse.aufrufAnmelden('beispiel', a);
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
       freigaben.addListener(() {
         if (freigaben.aktuell?.offen == true) scheduleMicrotask(ende);
       });
@@ -1126,7 +1128,7 @@ void main() {
 
     test('die Sperre gilt nach dem Ende des Aufrufs weiter, auch ohne Token und nach einem neuen Schlüssel', () async {
       final a = _aufruf(kontext('A'));
-      final ende = adresse.aufrufAnmelden('beispiel', a);
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
       await nennen(a.token, [name]);
       ende();
 

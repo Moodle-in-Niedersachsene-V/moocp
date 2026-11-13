@@ -137,12 +137,17 @@ abstract interface class AufrufKontext {
   /// Protokoll). Der Testbetrieb gibt sie nie automatisch frei. Lässt die
   /// Stufe der Lehrkraft die Frage aus, zählt das für den Aufruf des Plugins
   /// wie jede ausgelassene Freigabe. Erfüllt sich [abbruch], verfällt sie.
+  /// [punkte] sind Zeilen, die moocp selbst dazusetzt (beim Schreiben über
+  /// eine Zusatzadresse: Adresse, Feldnamen, Grund); [protokolltitel] ersetzt
+  /// den Namen der Anfrage im Protokoll.
   Future<PluginFreigabeAusgang> pluginFreigabe({
     required String titel,
     required String zusammenfassung,
     required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
+    List<String> punkte = const [],
+    String? protokolltitel,
   });
 }
 

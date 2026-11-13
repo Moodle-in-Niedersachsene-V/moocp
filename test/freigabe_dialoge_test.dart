@@ -19,7 +19,10 @@ import 'package:moocp/main.dart'
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
+import 'package:moocp/plugin/adressmuster.dart';
+import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/dialoge.dart';
+import 'package:moocp/plugin/moodle_schreiben.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -634,6 +637,48 @@ void main() {
       await tester.pumpAndSettle();
       expect(freigaben.aktuell, isNotNull, reason: 'Return und Leertaste entscheiden nichts');
 
+      await tester.tap(find.text('Freigeben'));
+      await tester.pumpAndSettle();
+      expect(await ausgang, PluginFreigabeAusgang.freigegeben);
+    });
+
+    testWidgets('Schreiben über eine Zusatzadresse: Adresse ohne Werte, Feldnamen, Grund und der Kasten des Plugins', (tester) async {
+      freigaben.stufe = Bestaetigungen.keine;
+      await tester.pumpWidget(_fenster(freigaben));
+      final uri = Uri.parse('https://moodle.schule.example/mod/beispiel/speichern.php?id=7&seite=2');
+      final punkte = zusatzFreigabePunkte(
+        uri,
+        [const MapEntry('notiz', 'Erika'), const MapEntry('farbe', 'rot')],
+        Zusatzadresse(Adressmuster.parsen('/mod/beispiel/speichern.php'), ZugriffsArt.schreiben, 'Speichert die Notiz.'),
+      );
+      final ausgang = dienst.pluginFreigabe(
+        titel: 'Notiz speichern?',
+        zusammenfassung: 'Speichert die Notiz.',
+        ab: Bestaetigungen.keine,
+        abbruch: Completer<void>().future,
+        aufrufer: 'Plugin „Beispiel“',
+        punkte: punkte,
+        protokolltitel: 'Schreiben über eine Zusatzadresse eines Plugins',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Notiz speichern?'), findsOneWidget);
+      expect(find.text('Aufgerufen vom Plugin „Beispiel“, nicht direkt von der KI'), findsOneWidget);
+      expect(
+        find.text('Titel und Beschreibung stammen vom Plugin „Beispiel“; moocp hat sie nicht geprüft:'),
+        findsOneWidget,
+      );
+      expect(find.text('Speichert die Notiz.'), findsOneWidget);
+      expect(
+        find.text('•  Schreibt in Moodle über eine Zusatzadresse des Plugins: POST /mod/beispiel/speichern.php?id=…&seite=…'),
+        findsOneWidget,
+      );
+      expect(find.text('•  Formularfelder (nur die Namen): notiz, farbe'), findsOneWidget);
+      expect(find.textContaining('Grund dieser Zusatzadresse aus der Beschreibungsdatei'), findsOneWidget);
+      expect(find.textContaining('Erika'), findsNothing);
+      expect(find.textContaining('rot'), findsNothing);
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
       await tester.tap(find.text('Freigeben'));
       await tester.pumpAndSettle();
       expect(await ausgang, PluginFreigabeAusgang.freigegeben);

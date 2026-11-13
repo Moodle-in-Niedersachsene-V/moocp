@@ -132,10 +132,10 @@ _Nicht zu verwechseln mit_: ein installiertes Plugin, dem die Lehrkraft zugestim
 Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatzadressen und weitere Angaben, die die App vor jeder Zustimmung liest, ohne Code des Plugins auszuführen.
 
 **Zusatzadresse**
-Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu.
+Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu. Sie hebt die Sperrliste nur für dieses Plugin auf; über eine Zusatzadresse mit „schreiben“ schreibt es nur mit einer Freigabe, auf jeder Stufe.
 
 **Adresse der App (für Plugins)**
-Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge, Freigaben und Lesen in Moodle. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
+Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge, Freigaben, Lesen in Moodle und Schreiben über eine Zusatzadresse. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
 _Nicht zu verwechseln mit_: Zusatzadresse (eine Seite der Moodle-Instanz).
 _Vermeiden_: Host-Schnittstelle, Callback-Server
 
@@ -147,6 +147,10 @@ _Vermeiden_: Fenster des Plugins (ein Plugin öffnet keine Fenster)
 **Aufruf-Token**
 Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.
 _Nicht zu verwechseln mit_: Schlüssel (gilt für das Plugin, solange sein Programm läuft).
+
+**Kennung einer Freigabe**
+Ein zufälliges Geheimnis, das ein Plugin bekommt, wenn die Lehrkraft einen Schreibvorgang über eine seiner Zusatzadressen freigegeben hat. Es gilt für genau diesen Schreibvorgang (Methode, Adresse mit Parametern, Formularfelder), einmal und nur im selben Aufruf.
+_Nicht zu verwechseln mit_: Aufruf-Token (gilt für alles, was das Plugin während eines Aufrufs tut), Kennung eines Instanzprofils.
 
 **Letzte Sperre**
 Die Prüfung der App, die jede Antwort eines Plugins an die KI und jede Zeile, die es ins Protokoll schreibt, gegen alle Namen prüft, die sie seit ihrem Start für dieses Plugin geladen hat. Jeder Teil eines Namens sperrt für sich, als ganzes Wort; bei einem Treffer geht nichts hinaus, die KI erfährt nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort. Gesperrtes lässt sich nicht doch senden.

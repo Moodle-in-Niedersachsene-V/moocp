@@ -51,6 +51,11 @@
 // Werkzeugliste, die nach einem Neustart neu gelesen wird, geht erst durch
 // die Sperre: Ihre Beschreibungen gehen an die KI und in die Einstellungen.
 //
+// Hat das Plugin während des Aufrufs über eine Zusatzadresse an Moodle
+// geschrieben (moodle_schreiben.dart), setzt [aufrufen] einen festen Satz vor
+// alles, was die KI daraus bekommt: geprüft vom Plugin, nicht von moocp. Die
+// letzte Sperre prüft dabei weiter den ganzen Text des Plugins.
+//
 // Ausfall: Je Lauf der App bekommt jedes Plugin genau einen zweiten Start,
 // gleich wofür -- weil es beim Start nicht binnen der Startfrist antwortete
 // oder sich dabei beendete, oder weil sein Programm später unerwartet endete.
@@ -80,6 +85,7 @@ import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'dialoge.dart';
 import 'entwicklung.dart';
+import 'moodle_schreiben.dart' show zusatzKennzeichnung;
 import 'namenssperre.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
@@ -379,7 +385,7 @@ class LaufendePlugins implements WerkzeugQuelle {
     _starts[e.ordner] = (_starts[e.ordner] ?? 0) + 1;
     // Mit dem Schlüssel dieses Starts meldet sich das Plugin an der Adresse
     // der App an; der Schlüssel eines früheren Starts gilt dort nicht mehr.
-    adresse.pluginAnmelden(b.kurzname, e.anzeigename, schluessel);
+    adresse.pluginAnmelden(b.kurzname, e.anzeigename, schluessel, zusatzadressen: b.zusatzadressen);
     final Process prozess;
     try {
       prozess = await starter(
@@ -583,25 +589,47 @@ class LaufendePlugins implements WerkzeugQuelle {
     WerkzeugAufruf aufruf,
     Future<String> Function() f,
   ) async {
-    final ende = _offen?.aufrufAnmelden(kurzname, aufruf);
+    final angemeldet = _offen?.aufrufAnmelden(kurzname, aufruf);
+    // Hat das Plugin in diesem Aufruf über eine Zusatzadresse geschrieben,
+    // steht das vor allem, was die KI daraus bekommt, auch vor einem Fehler
+    // und einer gesperrten Antwort (moodle_schreiben.dart). Der Satz kommt
+    // von moocp, nach der letzten Sperre, die nur den Text des Plugins prüft.
+    String gekennzeichnet(String text) => switch (angemeldet?.zusatzSchreibvorgaenge ?? 0) {
+      0 => text,
+      final n => '${zusatzKennzeichnung(plugin, n)}\n\n$text',
+    };
     try {
       final String text;
       try {
         text = await f();
       } on PluginErgebnisFehler catch (x) {
-        _pruefen(kurzname, plugin, aufruf, x.meldung);
-        rethrow;
+        _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet);
+        if ((angemeldet?.zusatzSchreibvorgaenge ?? 0) == 0) rethrow;
+        throw PluginErgebnisFehler(gekennzeichnet(x.meldung));
+      } on MoodleFehler catch (x) {
+        // Ein Ausfall des Plugins während des Aufrufs: Was moocp dazu sagt,
+        // trägt keinen Text des Plugins.
+        if ((angemeldet?.zusatzSchreibvorgaenge ?? 0) == 0) rethrow;
+        throw MoodleFehler(gekennzeichnet(x.meldung));
       }
-      _pruefen(kurzname, plugin, aufruf, text);
-      return text;
+      _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet);
+      return gekennzeichnet(text);
     } finally {
-      ende?.call();
+      angemeldet?.ende();
     }
   }
 
   /// Wirft den Fehler mit [gesperrtText], wenn [text] einen Namen des Plugins
   /// trifft; vorher eine Zeile ins Protokoll des Profils, ohne das Wort.
-  void _pruefen(String kurzname, String plugin, WerkzeugAufruf aufruf, String text) {
+  /// [kennzeichnen] setzt den Hinweis auf einen Schreibvorgang über eine
+  /// Zusatzadresse davor.
+  void _pruefen(
+    String kurzname,
+    String plugin,
+    WerkzeugAufruf aufruf,
+    String text,
+    String Function(String) kennzeichnen,
+  ) {
     if (!sperre.gesperrt(kurzname, [text], plugin: plugin, werkzeug: aufruf.name, stelle: SperrStelle.ergebnis)) {
       return;
     }
@@ -609,7 +637,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       Art.gesperrt,
       'Plugin „$plugin“, Werkzeug ${aufruf.name}: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)',
     );
-    throw MoodleFehler(gesperrtText(plugin, aufruf.name));
+    throw MoodleFehler(kennzeichnen(gesperrtText(plugin, aufruf.name)));
   }
 
   PluginEintrag? _besitzer(String werkzeug) {

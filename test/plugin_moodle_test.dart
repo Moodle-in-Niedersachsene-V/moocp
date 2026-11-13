@@ -47,6 +47,13 @@ class PluginTestMoodle {
   /// Hält die Antwort auf `/mod/board/view.php?id=99` an, bis sie sich erfüllt.
   Completer<void>? halten;
 
+  /// Der Inhalt jeder Anfrage, in derselben Reihenfolge wie [angefragt].
+  final rumpfe = <String>[];
+
+  /// Was zuletzt an die erfundene Seite `/mod/beispiel/speichern.php`
+  /// gesendet wurde (Feld `notiz`); ihre Ansicht zeigt es.
+  String? notiz;
+
   Future<void> starten() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     basis = Uri.parse('http://127.0.0.1:${server.port}');
@@ -54,7 +61,7 @@ class PluginTestMoodle {
   }
 
   Future<void> _bedienen(HttpRequest req) async {
-    await req.drain<void>();
+    rumpfe.add(await utf8.decoder.bind(req).join());
     angefragt.add('${req.method} ${req.uri}');
     final r = req.response;
     final q = req.uri.queryParameters;
@@ -95,6 +102,34 @@ class PluginTestMoodle {
       eingeloggt = false;
       return weiter('/login/index.php');
     }
+    // Eine erfundene Seite eines Plugins, das über eine Zusatzadresse
+    // schreibt (test/plugin_schreiben_test.dart): Nach dem POST leitet sie um,
+    // je nach id auf sich selbst oder auf Erlaubtes und Unerlaubtes.
+    if (req.uri.path == '/mod/beispiel/speichern.php') {
+      if (req.method != 'POST') return html('<html>Notiz: ${notiz ?? ''}</html>');
+      notiz = Uri.splitQueryString(rumpfe.last)['notiz'];
+      switch (q['id']) {
+        case '12':
+          return weiter('/question/banks.php?courseid=12');
+        case '13':
+          return weiter('/admin/index.php');
+        case '15':
+          return weiter('/course/view.php?id=2');
+        case '19':
+          return weiter('/mod/beispiel/lesen.php?id=1');
+        case '20':
+          return weiter('/mod/beispiel/speichern.php?id=20&sesskey=abc123');
+        case '21':
+          return weiter('/user/profile.php?id=5');
+        case '35':
+          r.headers
+            ..set('cf-mitigated', 'challenge')
+            ..set('cf-ray', 'r2-FRA');
+          return html('<html>Just a moment...</html>', status: 403);
+      }
+      return weiter('/mod/beispiel/speichern.php?id=${q['id']}&gespeichert=1');
+    }
+    if (req.uri.path == '/mod/beispiel/report.php' && req.method == 'POST') return html('<html>Bericht</html>');
     switch ((req.uri.path, q['id'] ?? q['pageid'] ?? q['courseid'])) {
       case ('/question/banks.php', _):
         r.cookies.add(Cookie('weiterer', 'keks-aus-moodle'));
@@ -163,6 +198,8 @@ class _Kontext implements AufrufKontext {
     required Bestaetigungen ab,
     required Future<void> abbruch,
     required String aufrufer,
+    List<String> punkte = const [],
+    String? protokolltitel,
   }) => throw StateError('Ein Plugin, das Moodle liest, bekommt nie einen Dialog.');
 }
 
@@ -226,7 +263,7 @@ void main() {
       abbruch: Completer<void>().future,
       kontext: _Kontext(z ?? zugang, ordner(profil)),
     );
-    return (token: a.token, ende: adresse.aufrufAnmelden('beispiel', a));
+    return (token: a.token, ende: adresse.aufrufAnmelden('beispiel', a).ende);
   }
 
   Future<_Antwort> lesen(String token, Object? pfad, {String? methode}) => _post(adresse.adresse, pfadMoodleLesen, {

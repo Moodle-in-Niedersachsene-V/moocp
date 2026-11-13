@@ -18,6 +18,7 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
+import 'package:moocp/plugin/moodle_schreiben.dart' show zusatzKennzeichnung;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
 import 'package:moocp/plugin/werkzeugliste.dart';
@@ -71,6 +72,7 @@ const _beispielWerkzeuge = [
   'beispiel_freigabe',
   'beispiel_moodle_lesen',
   'beispiel_moodle_gesperrt',
+  'beispiel_moodle_schreiben',
   'beispiel_namen',
 ];
 
@@ -270,7 +272,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (13 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (14 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -371,6 +373,71 @@ void main() {
       expect(zeilen, contains('Plugin „Beispiel“: GET /question/banks.php?courseid=… → 200'));
       expect(zeilen, contains('Plugin „Beispiel“: Gesperrt für Plugins: GET /admin/index.php (Bereich Adminbereich)'));
       expect(zeilen.join('\n'), isNot(contains(sitzungsCookie)));
+    });
+
+    test('Schreiben über eine Zusatzadresse: Freigabe auf jeder Stufe, ein POST, Antwort an die KI gekennzeichnet', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      await zugang.sesskey();
+      moodle.angefragt.clear();
+      final freigaben = Freigaben(protokoll)..stufe = Bestaetigungen.keine;
+      final gezeigt = <FreigabeAnfrage>[];
+      var ja = true;
+      freigaben.addListener(() {
+        final f = freigaben.aktuell;
+        if (f != null && f.offen && !gezeigt.contains(f)) {
+          gezeigt.add(f);
+          scheduleMicrotask(() => freigaben.entscheiden(ja));
+        }
+      });
+      final profil = _profil('standard', 'moodle', await _freierPort());
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l, moodle: zugang, freigaben: freigaben);
+
+      final geschrieben = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Hallo'});
+
+      expect(
+        geschrieben,
+        '${zusatzKennzeichnung('Beispiel', 1)}\n\nGeschrieben und vom Plugin geprüft: Die Notiz steht auf der Seite.',
+      );
+      expect(geschrieben, isNot(contains('verified')));
+      expect(moodle.angefragt, ['POST /mod/beispiel/speichern.php?id=7', 'GET /mod/beispiel/speichern.php?id=7&gespeichert=1']);
+      expect(moodle.rumpfe[moodle.rumpfe.length - 2], 'notiz=Hallo&sesskey=abc123');
+      final f = gezeigt.single;
+      expect(f.ab, Bestaetigungen.keine);
+      expect(f.aufrufer, 'Plugin „Beispiel“');
+      expect(f.vomPlugin, 'Das Beispiel-Plugin speichert diese Notiz:\nHallo');
+      expect(f.punkte, contains(startsWith('Grund dieser Zusatzadresse aus der Beschreibungsdatei')));
+      expect(f.punkte.last, isNot(contains('Hallo')));
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“, Zusatzadresse: POST /mod/beispiel/speichern.php?id=… → 303'));
+      expect(zeilen, contains('Plugin „Beispiel“, Zusatzadresse: GET /mod/beispiel/speichern.php?id=…&gespeichert=… → 200'));
+      expect(zeilen.join('\n'), isNot(contains('abc123')));
+      expect(zeilen.join('\n'), isNot(contains(sitzungsCookie)));
+
+      // Ein Werkzeugfehler des Plugins nach dem Schreiben trägt die
+      // Kennzeichnung ebenso: Die Umleitung auf den Adminbereich liest moocp
+      // nicht, das Plugin kann nicht nachsehen.
+      final ungeprueft = await client.call('tools/call', {
+        'name': 'beispiel_moodle_schreiben',
+        'arguments': {'id': 13, 'notiz': 'Hallo'},
+      });
+      expect(ungeprueft['isError'], true);
+      expect(
+        ((ungeprueft['content'] as List).single as Map)['text'],
+        '${zusatzKennzeichnung('Beispiel', 1)}\n\n'
+        'Gesendet, aber nicht geprüft: Das Plugin konnte die Seite danach nicht lesen.',
+      );
+
+      // Abgelehnt: nichts gesendet, und die Antwort bleibt, wie das Plugin
+      // sie gibt, ohne Kennzeichnung.
+      ja = false;
+      moodle.angefragt.clear();
+      final abgelehnt = await client.tool('beispiel_moodle_schreiben', {'id': 7, 'notiz': 'Nein'});
+      expect(abgelehnt, 'Nicht geschrieben: Die Lehrkraft hat nicht freigegeben (abgelehnt).');
+      expect(moodle.angefragt, isEmpty);
     });
 
     test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
@@ -743,7 +810,7 @@ void main() {
       expect(await _laeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (13 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (14 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }

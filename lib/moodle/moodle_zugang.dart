@@ -285,6 +285,11 @@ abstract class Aufrufer {
   /// Die Protokollzeile einer gestellten Anfrage ohne ihren Status.
   String anfragezeile(String methode, Uri uri, Anhang? anhang);
 
+  /// Der Pfad in einer Fehlerzeile des Protokolls (nicht erreichbar,
+  /// Zeitgrenze, Abbruch). Ein Aufrufer, in dessen Adressen hinter dem
+  /// Skriptnamen Daten stehen können, kürzt ihn (plugin/moodle_schreiben.dart).
+  String pfadImProtokoll(Uri uri) => uri.path;
+
   /// Die Meldung, wenn [gesperrtDurch] die Anfrage mit [regel] sperrt; ohne
   /// Parameterwerte.
   String sperrmeldung(Uri uri, String regel) =>
@@ -1975,6 +1980,20 @@ class MoodleZugang {
     return r;
   }
 
+  /// Sendet ein Formular wie [senden], für [aufrufer] (ein Plugin, das über
+  /// eine Zusatzadresse schreibt, plugin/moodle_schreiben.dart): Dessen Listen
+  /// prüfen die Adresse, seine Zeile steht im Protokoll, und mehr als
+  /// [hoechstens] Bytes Antwort liest es nicht. Folgt keiner Umleitung und
+  /// wiederholt nichts: Ob ein Formular angekommen ist, weiß nach einem Fehler
+  /// niemand. Landet es auf der Anmeldeseite, meldet die App neu an und wirft
+  /// [SitzungAbgelaufen]; gesendet wird dann nichts mehr.
+  Future<Antwort> sendenAls(Aufrufer aufrufer, Uri uri, Felder formular, {int? hoechstens}) async {
+    _pruefeAngemeldet();
+    final r = await _roh('POST', uri, formular: formular, aufrufer: aufrufer, hoechstens: hoechstens);
+    await _pruefeSitzungNachSchreiben(r);
+    return r;
+  }
+
   /// Ruft eine Adresse per GET auf, ohne Umleitungen zu folgen: für Aktionen,
   /// die Moodle als Link mit sesskey anbietet und nach denen es auf eine
   /// Ansichtsseite umleitet (etwa Buchkapitel löschen). Der Umleitung zu
@@ -2099,12 +2118,12 @@ class MoodleZugang {
       fertig = true;
       return gelesen;
     } on SocketException catch (e) {
-      protokoll.eintrag(Art.fehler, 'GET ${uri.path}: nicht erreichbar');
+      protokoll.eintrag(Art.fehler, 'GET ${aufrufer.pfadImProtokoll(uri)}: nicht erreichbar');
       throw MoodleNichtErreichbar('Moodle nicht erreichbar: ${e.message}');
     } on TimeoutException {
       protokoll.eintrag(
         Art.fehler,
-        'GET ${uri.path}: keine Antwort innerhalb der Zeitgrenze',
+        'GET ${aufrufer.pfadImProtokoll(uri)}: keine Antwort innerhalb der Zeitgrenze',
       );
       throw MoodleNichtErreichbar(
         'Moodle antwortet nicht (${uri.path}). Später noch einmal versuchen.',
@@ -2112,7 +2131,7 @@ class MoodleZugang {
     } on IOException catch (e) {
       protokoll.eintrag(
         Art.fehler,
-        'GET ${uri.path}: Verbindung abgebrochen (${e.runtimeType})',
+        'GET ${aufrufer.pfadImProtokoll(uri)}: Verbindung abgebrochen (${e.runtimeType})',
       );
       throw MoodleNichtErreichbar(
         'Verbindung zu Moodle abgebrochen (${e.runtimeType}). Später noch einmal versuchen.',
@@ -2418,12 +2437,12 @@ class MoodleZugang {
       }
       return a;
     } on SocketException catch (e) {
-      protokoll.eintrag(Art.fehler, '$methode ${uri.path}: nicht erreichbar');
+      protokoll.eintrag(Art.fehler, '$methode ${aufrufer.pfadImProtokoll(uri)}: nicht erreichbar');
       throw MoodleNichtErreichbar('Moodle nicht erreichbar: ${e.message}');
     } on TimeoutException {
       protokoll.eintrag(
         Art.fehler,
-        '$methode ${uri.path}: keine Antwort innerhalb der Zeitgrenze',
+        '$methode ${aufrufer.pfadImProtokoll(uri)}: keine Antwort innerhalb der Zeitgrenze',
       );
       throw MoodleNichtErreichbar(
         'Moodle antwortet nicht (${uri.path}, Zeitgrenze '
@@ -2434,7 +2453,7 @@ class MoodleZugang {
       // (HandshakeException): nur der Typ, der Text kann Adressen enthalten.
       protokoll.eintrag(
         Art.fehler,
-        '$methode ${uri.path}: Verbindung abgebrochen (${e.runtimeType})',
+        '$methode ${aufrufer.pfadImProtokoll(uri)}: Verbindung abgebrochen (${e.runtimeType})',
       );
       throw MoodleNichtErreichbar(
         'Verbindung zu Moodle abgebrochen (${e.runtimeType}). Später noch einmal versuchen.',

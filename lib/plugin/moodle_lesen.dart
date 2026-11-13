@@ -60,6 +60,12 @@ class PluginAufrufer extends Aufrufer {
   static const _normalform = 'Normalform';
   static const _nutzer = 'Dateien unter user/';
 
+  /// Ob die Sperrliste der App für [uri] nicht gilt. Hier nie: Ein Plugin
+  /// liest über die Adresse der App nur, was die Sperrliste durchlässt. Nur
+  /// eine Zusatzadresse dieses Plugins hebt sie auf (moodle_schreiben.dart);
+  /// die Schritte 1 bis 3 oben gelten auch dann.
+  bool sperrlisteAufgehoben(Uri uri) => false;
+
   @override
   String? gesperrtDurch(Uri uri) {
     final bereich = sperrbereichDerAdresse(uri.path);
@@ -67,6 +73,7 @@ class PluginAufrufer extends Aufrufer {
     final klar = prozentAufgeloest(uri.path);
     if (pfadNormalisieren(uri.path) != klar) return _normalform;
     if (_nutzerdateien.hasMatch(klar)) return _nutzer;
+    if (sperrlisteAufgehoben(uri)) return null;
     return sperrregel(uri) ??
         sperrregel(Uri(path: klar, query: uri.hasQuery ? prozentAufgeloest(uri.query) : null));
   }

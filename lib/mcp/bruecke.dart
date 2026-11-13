@@ -43,6 +43,7 @@ import 'package:path/path.dart' as p;
 
 import '../einrichtung.dart';
 import '../einstellungen_ort.dart';
+import '../plattform/kindprozess.dart';
 
 /// Aufruf aus bin/moocp_bruecke.dart.
 Future<int> brueckeStarten() async {
@@ -78,7 +79,7 @@ Future<int> brueckeStarten() async {
 Future<bool> moocpStarten(File exe) async {
   if (!exe.existsSync()) return false;
   try {
-    await Process.start(exe.path, const [], mode: ProcessStartMode.detached, workingDirectory: exe.parent.path);
+    await prozessStarten(exe.path, const [], modus: ProcessStartMode.detached, arbeitsordner: exe.parent.path);
     return true;
   } catch (_) {
     return false;
@@ -90,7 +91,7 @@ Future<bool> moocpStarten(File exe) async {
 Future<Werkzeugliste?> werkzeuglisteHolen(File exe) async {
   if (!exe.existsSync()) return null;
   try {
-    final r = await Process.run(exe.path, const [
+    final r = await prozessAusfuehren(exe.path, const [
       werkzeuglisteSchalter,
     ], stdoutEncoding: utf8).timeout(const Duration(seconds: 30));
     if (r.exitCode != 0) return null;

@@ -16,13 +16,8 @@ import 'beschreibung.dart';
 import 'namenssperre.dart';
 import 'schnittstelle.dart';
 
+export '../plattform/kindprozess.dart' show schluesselVariable;
 export 'schnittstelle.dart' show schnittstellenVersion;
-
-/// Die Umgebungsvariable, in der ein Plugin seinen Schlüssel bekommt. Nicht
-/// auf der Kommandozeile: Die steht in jeder Prozessliste, die Umgebung eines
-/// Prozesses nicht (laufende_plugins.dart, gemessen in
-/// test/plugin_start_test.dart).
-const schluesselVariable = 'MOOCP_PLUGIN_SCHLUESSEL';
 
 /// Die Schlüssel in `_meta` eines Werkzeugaufrufs: das Instanzprofil (sein
 /// technischer Name, `Profil.mcpName`) und das Token dieses Aufrufs.

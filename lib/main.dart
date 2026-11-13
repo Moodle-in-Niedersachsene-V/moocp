@@ -36,6 +36,7 @@ import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
+import 'plattform/kindprozess.dart';
 import 'plattform/plattform.dart' show benutzerordner;
 import 'plugin/dialoge.dart';
 import 'plugin/downloads.dart';
@@ -999,6 +1000,7 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         Art.info,
         'KI-Werkzeuge einrichten: Verbindung und Skills aktuell',
       );
+      await _skillFehlerGesehenMerken();
       return true;
     }
     final bereit = await showDialog<bool>(
@@ -1015,8 +1017,35 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         profilname: _profilnameAnzeige,
       ),
     );
-    if (bereit != true) await _beenden();
-    return bereit == true;
+    if (bereit != true) {
+      await _beenden();
+      return false;
+    }
+    await _skillFehlerGesehenMerken();
+    return true;
+  }
+
+  /// Die Stände der unbrauchbaren Skill-Pakete von Plugins aus der letzten
+  /// Prüfung (plugin/skills.dart, PluginSkills.fehlerStand).
+  Set<String> _skillFehlerStand = const {};
+
+  /// Merkt sich, welche unbrauchbaren Skill-Pakete die Lehrkraft gesehen hat:
+  /// genau die der letzten Prüfung. So öffnet derselbe Hinweis den Dialog
+  /// beim nächsten Start nicht wieder; ein neuer oder geänderter schon, und
+  /// einer, der verschwunden war und wiederkommt, auch.
+  Future<void> _skillFehlerGesehenMerken() async {
+    final e = widget.einstellungen;
+    final neu = _skillFehlerStand;
+    if (neu.length == e.skillFehlerGesehen.length && neu.containsAll(e.skillFehlerGesehen)) return;
+    final alt = e.skillFehlerGesehen;
+    e.skillFehlerGesehen = {...neu};
+    try {
+      await e.speichern();
+    } catch (x) {
+      // Gilt für diesen Lauf; der nächste Start zeigt den Hinweis noch einmal.
+      e.skillFehlerGesehen = alt;
+      widget.protokoll.eintrag(Art.fehler, 'Gesehene Hinweise zu Skills nicht gespeichert (${x.runtimeType})');
+    }
   }
 
   /// Die Prüfung der Einrichtung, mit den Skills der App und denen der
@@ -1029,7 +1058,15 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     final e = widget.einstellungen;
     final app = await _skillPakete();
     final appNamen = {for (final s in app) s.name};
-    final plugins = await pluginSkillsLesen(_plugins, appNamen: appNamen);
+    // Das Ja zum Entwicklungs-Plugin zählt für die Einrichtung als Zustimmung
+    // (plugin/skills.dart); ohne Ja oder ohne Parameter bringt es keine Skills.
+    final entwicklung = _entwicklung;
+    final plugins = await pluginSkillsLesen(
+      _plugins,
+      appNamen: appNamen,
+      entwicklung: entwicklung == null ? null : (ordner: entwicklung.ordner, beschreibung: entwicklung.beschreibung),
+    );
+    _skillFehlerStand = plugins.fehlerStand;
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
@@ -1042,6 +1079,7 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
       verwaist: verwaisteSkills(e.pluginSkills, plugins, appNamen),
       skillFehler: plugins.fehler,
+      skillFehlerNeu: !e.skillFehlerGesehen.containsAll(plugins.fehlerStand),
     );
     final gemerkt = pluginSkillsGemerkt(
       gemerkt: e.pluginSkills,
@@ -1265,6 +1303,15 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       laufend.dienst.profil = geaendert;
     }
     widget.einstellungen.profile = profile;
+    // Ein neues Profil schaltet jedes angenommene Plugin ein (E35); seine
+    // Werkzeuge zeigt der Server des Profils sofort, denn die laufenden
+    // Plugins fragen bei jeder Werkzeugliste nach dem Profil.
+    if (hinzugefuegt) {
+      widget.einstellungen.plugins = pluginEntscheidungenMitProfil(
+        widget.einstellungen.plugins,
+        _instanzen.last.dienst.profil.kennung,
+      );
+    }
     try {
       await widget.einstellungen.speichern();
     } catch (e) {
@@ -2772,7 +2819,7 @@ Future<void> imBrowserOeffnen(Uri adresse) async {
       : Platform.isMacOS
       ? ('open', [adresse.toString()])
       : ('xdg-open', [adresse.toString()]);
-  await Process.start(programm, argumente, mode: ProcessStartMode.detached);
+  await prozessStarten(programm, argumente, modus: ProcessStartMode.detached);
 }
 
 /// Öffnet einen Ordner im Dateimanager (Explorer, Finder), damit die
@@ -2785,7 +2832,7 @@ Future<void> imDateimanagerOeffnen(String ordner) async {
       : Platform.isMacOS
       ? 'open'
       : 'xdg-open';
-  await Process.start(programm, [ordner], mode: ProcessStartMode.detached);
+  await prozessStarten(programm, [ordner], modus: ProcessStartMode.detached);
 }
 
 /// Das Protokoll im Fenster, der neueste Eintrag unten. Steht die Liste ganz

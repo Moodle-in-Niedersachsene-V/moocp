@@ -317,6 +317,150 @@ void main() {
     });
   });
 
+  group('Entwicklungs-Plugin', () {
+    /// Ein Entwicklungsordner mit Beschreibungsdatei und Skills des
+    /// Beispiel-Plugins, außerhalb von `plugins/`; [text] steht in jeder
+    /// SKILL.md, damit sich die Herkunft am Inhalt zeigt.
+    EntwicklungsSkills entwicklungAnlegen({String text = 'aus der Entwicklung', List<String>? skills}) {
+      final ordner = Directory(p.join(tmp.path, 'entwicklung'))..createSync(recursive: true);
+      _kopieren(Directory(p.join('beispiele', 'plugin', 'skills')), Directory(p.join(ordner.path, 'skills')));
+      for (final n in ['beispiel', 'beispiel-vorlage']) {
+        File(p.join(ordner.path, 'skills', n, 'SKILL.md')).writeAsStringSync('$n $text');
+      }
+      final m = jsonDecode(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync()) as Map<String, Object?>;
+      if (skills != null) m['skills'] = skills;
+      final text2 = jsonEncode(m);
+      File(p.join(ordner.path, 'plugin.json')).writeAsStringSync(text2);
+      return (ordner: ordner.path, beschreibung: PluginBeschreibung.ausText(text2));
+    }
+
+    Future<Einrichtungsstand> pruefenMit(Plugins? plugins, EntwicklungsSkills? entwicklung,
+        {Set<String> gewaehlt = const {}}) async {
+      final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen, entwicklung: entwicklung);
+      final stand = await einrichtungPruefen(
+        umgebung: umgebung,
+        port: 47811,
+        schluessel: 'abc',
+        skills: ps.pakete,
+        wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
+        gewaehlt: gewaehlt,
+        verwaist: verwaisteSkills(einstellungen.pluginSkills, ps, _appNamen),
+        skillFehler: ps.fehler,
+        gefunden: [codex, lm],
+        python: () async => true,
+      );
+      einstellungen.pluginSkills =
+          pluginSkillsGemerkt(gemerkt: einstellungen.pluginSkills, stand: stand, werkzeuge: [codex, lm]);
+      return stand;
+    }
+
+    test('nach dem Ja: Skills aus dem Entwicklungsordner wie die eines installierten Plugins', () async {
+      final ps = await pluginSkillsLesen(null, appNamen: _appNamen, entwicklung: entwicklungAnlegen());
+      expect(ps.fehler, isEmpty);
+      expect(ps.pakete.map((x) => x.name), ['beispiel', 'beispiel-vorlage']);
+      expect(ps.pakete.every((x) => x.herkunft == SkillHerkunft.plugin && x.plugin == 'Beispiel'), isTrue);
+      expect(utf8.decode(ps.pakete.first.dateien['SKILL.md']!), 'beispiel aus der Entwicklung');
+      expect(ps.wahlSkills.keys, ['beispiel-vorlage']);
+      expect(ps.namen, {'beispiel', 'beispiel-vorlage'});
+    });
+
+    test('abgelehnt oder ohne Parameter: keine Skills', () async {
+      final ps = await pluginSkillsLesen(null, appNamen: _appNamen);
+      expect(ps.pakete, isEmpty);
+      expect(ps.namen, isEmpty);
+    });
+
+    test('dieselben Regeln: ein unbrauchbares Paket nennt das Entwicklungs-Plugin', () async {
+      final ps = await pluginSkillsLesen(null,
+          appNamen: _appNamen, entwicklung: entwicklungAnlegen(skills: ['beispiel', 'moodle', 'beispiel-fehlt']));
+      expect(ps.pakete.map((x) => x.name), ['beispiel', 'beispiel-vorlage']);
+      expect(ps.fehler, hasLength(2));
+      expect(ps.fehler.every((f) => f.startsWith('Entwicklungs-Plugin „Beispiel“: ')), isTrue);
+      expect(ps.fehlerStand, hasLength(1));
+    });
+
+    test('ein installiertes Plugin mit demselben Kurznamen: Es gelten die Skills des Entwicklungsordners', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen, entwicklung: entwicklungAnlegen());
+      expect(ps.pakete.map((x) => x.name), ['beispiel', 'beispiel-vorlage'], reason: 'jeder Skill einmal');
+      expect(ps.pakete.every((x) => utf8.decode(x.dateien['SKILL.md']!).endsWith('aus der Entwicklung')), isTrue);
+    });
+
+    test('installiert und gemerkt; ohne Parameter verwaist, außer ein installiertes Plugin bringt ihn mit', () async {
+      final entwicklung = entwicklungAnlegen();
+      var s = await pruefenMit(null, entwicklung, gewaehlt: {'beispiel-vorlage'});
+      expect(s.gewollt.map((x) => x.name), ['beispiel', 'beispiel-vorlage']);
+      installieren(s);
+      await pruefenMit(null, entwicklung, gewaehlt: {'beispiel-vorlage'});
+      expect(einstellungen.pluginSkills, {'beispiel', 'beispiel-vorlage'});
+      expect(File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md')).readAsStringSync(),
+          'beispiel aus der Entwicklung');
+
+      // Ein installiertes Plugin mit Zustimmung bringt beispiel und
+      // beispiel-vorlage mit, aber nur beispiel als Pflicht: Nichts ist verwaist.
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      s = await pruefenMit(plugins, null, gewaehlt: {'beispiel-vorlage'});
+      expect(s.werkzeuge.every((w) => w.entfernen.isEmpty), isTrue);
+      expect(s.werkzeuge.first.stand['beispiel']!.aktuell, isFalse, reason: 'Inhalt des installierten Plugins');
+
+      // Ohne installiertes Plugin und ohne Parameter: beide verwaist.
+      s = await pruefenMit(null, null, gewaehlt: {'beispiel-vorlage'});
+      expect(s.werkzeuge.map((w) => w.entfernen), [
+        {'beispiel', 'beispiel-vorlage'},
+        {'beispiel', 'beispiel-vorlage'},
+      ]);
+      expect(s.brauchtEtwas, isTrue);
+    });
+  });
+
+  group('Ein unbrauchbares Paket öffnet den Dialog einmal je Stand', () {
+    test('der Stand bleibt gleich, solange sich nichts ändert, und wechselt mit dem Plugin', () async {
+      final ordner = beispielAnlegen(manifest: (m) => {...m, 'skills': ['beispiel', 'beispiel-fehlt']});
+      final a = (await pluginSkillsLesen(await entschieden(zugestimmt: true), appNamen: _appNamen)).fehlerStand;
+      final b = (await pluginSkillsLesen(await laden(), appNamen: _appNamen)).fehlerStand;
+      expect(a, hasLength(1));
+      expect(b, a);
+
+      File(p.join(ordner.path, 'skills', 'beispiel', 'SKILL.md')).writeAsStringSync('neue Version');
+      final c = (await pluginSkillsLesen(await entschieden(zugestimmt: true), appNamen: _appNamen)).fehlerStand;
+      expect(c, hasLength(1));
+      expect(c, isNot(a), reason: 'anderer Stand des Plugins');
+
+      beispielAnlegen(manifest: (m) => m);
+      expect((await pluginSkillsLesen(await entschieden(zugestimmt: true), appNamen: _appNamen)).fehlerStand, isEmpty);
+    });
+
+    test('ungesehen: Der Dialog muss erscheinen, auch wenn sonst alles eingerichtet ist', () async {
+      Future<Einrichtungsstand> stand({required bool neu, List<String> fehler = const ['Plugin „X“: kaputt']}) =>
+          einrichtungPruefen(
+            umgebung: umgebung,
+            port: 47811,
+            schluessel: 'abc',
+            skills: const [],
+            wahlSkills: const {},
+            skillFehler: fehler,
+            skillFehlerNeu: neu,
+            gefunden: [codex],
+            python: () async => true,
+          );
+      await codex.eintragen(47811, 'abc');
+      final gesehen = await stand(neu: false);
+      expect((gesehen.brauchtEinrichtung, gesehen.brauchtEtwas), (false, false));
+      final ungesehen = await stand(neu: true);
+      expect((ungesehen.brauchtEinrichtung, ungesehen.brauchtEtwas, ungesehen.einrichtbar), (false, true, false));
+      expect((await stand(neu: true, fehler: const [])).brauchtEtwas, isFalse, reason: 'ohne Fehler nichts Neues');
+    });
+
+    test('gesehene Stände überstehen das Speichern', () {
+      final e = Einstellungen(schluessel: 'k', skillFehlerGesehen: {'ab', 'cd'});
+      final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
+      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).skillFehlerGesehen, {'ab', 'cd'});
+      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('skillFehlerGesehen'), isFalse);
+    });
+  });
+
   group('Deinstallation und Einstellungen', () {
     test('--claude-entfernen entfernt die gemerkten Skills der Plugins; ein Name, der keiner ist, bildet keinen Pfad',
         () async {

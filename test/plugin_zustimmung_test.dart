@@ -411,10 +411,25 @@ void main() {
       expect(einstellungen.plugins['beispiel']!.profile, isEmpty);
     });
 
-    test('ein Profil, das später dazukommt, ist aus, bis es eingeschaltet wird', () async {
+    test('ein Profil, das später dazukommt, schaltet jedes angenommene Plugin ein, kein abgelehntes', () async {
       final e = plugins.eintraege.single;
       await plugins.entscheiden(e, zugestimmt: true, profile: {'standard'});
+      einstellungen.plugins = {
+        ...einstellungen.plugins,
+        'abgelehnt': const PluginEntscheidung(version: '1', pruefsumme: 'aa', zugestimmt: false),
+      };
+      final alt = einstellungen.plugins;
       einstellungen.profile = [...einstellungen.profile, _profil('neu', 'Moodle Neu')];
+      expect(plugins.aktivIn('neu'), isEmpty, reason: 'das Profil allein schaltet nichts ein');
+
+      einstellungen.plugins = pluginEntscheidungenMitProfil(alt, 'neu');
+
+      expect(plugins.aktivIn('neu').map((s) => s.eintrag.ordner), ['beispiel']);
+      expect(einstellungen.plugins['beispiel']!.profile, {'standard', 'neu'});
+      expect(einstellungen.plugins['abgelehnt']!.profile, isEmpty);
+      expect(alt['beispiel']!.profile, {'standard'}, reason: 'die Eingabe bleibt unverändert');
+      // Abschalten geht weiter im Dialog „Plugins“.
+      await plugins.profilSchalten(e, 'neu', false);
       expect(plugins.aktivIn('neu'), isEmpty);
     });
 

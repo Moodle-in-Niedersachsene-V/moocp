@@ -12,7 +12,9 @@
 // ist, entfernt „Installieren". Die Skills der Plugins, denen zugestimmt ist,
 // stehen hier wie die eigenen (plugin/skills.dart); die eines abgelehnten
 // oder entfernten Plugins entfernt „Installieren", und ein Skill-Paket, das
-// sich nicht installieren lässt, nennt der Dialog nur.
+// sich nicht installieren lässt, nennt der Dialog nur. Ein solches Paket
+// öffnet ihn beim Start, einmal je Stand; steht sonst alles, schließt ihn
+// „Weiter".
 //
 // Die App öffnet den Dialog beim Start, wenn etwas nicht passt, und jederzeit
 // über den Knopf „KI-Werkzeuge einrichten" in der Titelzeile.
@@ -82,8 +84,10 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
   /// Stands. Schlüssel: `<werkzeug>/verbindung` und `<werkzeug>/skills`.
   Map<String, String> _ergebnis = {};
 
-  /// Alles erledigt: Nur noch „Weiter".
-  bool get _fertig => _s != null && !_s!.brauchtEtwas;
+  /// Alles erledigt: Nur noch „Weiter". Ein unbrauchbares Skill-Paket eines
+  /// Plugins öffnet den Dialog zwar beim Start, hält aber nichts auf: Steht
+  /// sonst alles, bleibt es bei „Weiter".
+  bool get _fertig => _s != null && !_s!.brauchtEinrichtung;
 
   /// Mindestens ein Werkzeug ist eingerichtet: Die App kann laufen, auch
   /// wenn bei einem anderen noch etwas fehlt -- eines genügt.
@@ -345,8 +349,10 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
               'den Rest holen Sie später über die Einstellungen nach.'
           : 'Ohne ein eingerichtetes KI-Werkzeug kann niemand mit dieser App arbeiten. „Beenden" schließt die App.';
     }
-    return _installiert
-        ? 'Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'
+    if (_installiert) return 'Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.';
+    return s != null && s.skillFehler.isNotEmpty
+        ? 'Verbindung und Skills sind aktuell. Die oben genannten Skills von Plugins fehlen; '
+            'mit „Weiter" arbeitet die App ohne sie.'
         : 'Verbindung und Skills sind aktuell.';
   }
 

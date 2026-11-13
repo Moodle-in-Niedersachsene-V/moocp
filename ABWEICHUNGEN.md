@@ -32,6 +32,8 @@ Spalte „Prüfen“: woran sich entscheidet, ob die Abweichung ein Showstopper 
 | A11 | #83 | – | Nach Updates von Plugins wird nur gesucht, wo sich moocp selbst aktualisieren kann: nicht im Entwicklerbau, nicht auf dem Mac, nicht mit `--kein-update`. | Im Entwicklerbau lässt sich die Update-Prüfung eines Plugins nicht durchspielen. | Wie wird sie dann in #84 geprüft? | offen |
 | A12 | #83 | – | Der Dialog „Plugin bleibt aus“ erscheint bei jedem Start, solange die Schnittstelle nicht passt. | Lästig, wenn es kein Update gibt; abstellen lässt er sich nur durch Entfernen des Plugins. | Stört das? | offen |
 | A13 | #83 | – | Aus dem Dialog zur Schnittstelle sucht ein Klick einmalig nach einem Update von moocp, auch wenn die tägliche Prüfung aus ist. | Eine Anfrage an GitHub ohne das allgemeine Ja; der Klick gilt als Ja, wie bei „Jetzt nach Updates suchen“. | Mit E19 vereinbar? | offen |
+| A14 | #82 | – | Ist ein Entwicklungs-Plugin angehängt, gelten nur seine Skills; ein installiertes Plugin mit demselben Kurznamen bringt in diesem Lauf keine mit. | Nennt das installierte einen Skill, den der Entwicklungsordner nicht mehr hat, bietet der Einrichtungsdialog ihn zum Entfernen an; beim nächsten Start ohne Parameter wird er wieder installiert. | Lästig für Plugin-Entwickler? | offen |
+| A15 | #82 | – | Ein unbrauchbares Skill-Paket gilt als gesehen, sobald die Lehrkraft den Einrichtungsdialog mit „Weiter“ verlässt, gleich warum er erschien; der gesehene Stand ist je Plugin eine Prüfsumme über Plugin-Stand und Gründe, beim Entwicklungs-Plugin über Kurzname und Gründe. | Ein Entwicklungs-Plugin mit demselben Fehler öffnet den Dialog nach einer Änderung seiner Dateien nicht erneut. | Hinnehmbar? | offen |
 
 ## Grenzen, die die Umsetzung hat
 
@@ -44,6 +46,7 @@ Spalte „Prüfen“: woran sich entscheidet, ob die Abweichung ein Showstopper 
 | G5 | #75 | `status`, über ein Plugin aufgerufen, zeigt „Verbunden über: unbekannt“. | Schönheitsfehler. | – | offen |
 | G6 | #73 | Der Dialog „Plugins“ zeigt während eines Neustarts eines Plugins kurz einen falschen Text. | Schönheitsfehler. | – | offen |
 | G7 | #81, #82 | Die Änderungen am Installer-Skript sind nur am Text geprüft. | Die Deinstallation könnte den Ordner für Downloads oder die Skills der Plugins stehen lassen. | Am gebauten Installer prüfen, wenn ein Bau beauftragt ist. | offen |
+| G8 | #74 | Der Test, dass kein Programm an `lib/plattform/kindprozess.dart` vorbei startet, sieht nur `Process.start`, `Process.run` und `Process.runSync` im Quelltext unter `lib/`; Pakete von Dritten prüft er nicht. | Startete ein Paket selbst ein Programm, erbte es den Schlüssel eines Entwicklungs-Plugins. | Startet eines der Pakete in `pubspec.yaml` Programme? | offen |
 
 ## Zur Behebung vorgeschlagen, noch nicht entschieden
 
@@ -51,7 +54,3 @@ Wird ein Punkt behoben, verschwindet er hier; wird er nicht behoben, wandert er 
 
 | Nr. | Ticket | Abweichung | Vorschlag |
 |---|---|---|---|
-| B1 | #82 | Skills eines Entwicklungs-Plugins werden nicht eingerichtet. | Das Ja im Entwicklungs-Dialog zählt als Zustimmung; ohne den Parameter gelten die Skills als verwaist. |
-| B2 | Zustimmung und Profile | Ein später angelegtes Profil hat ein schon angenommenes Plugin zunächst aus. | Ein neues Profil schaltet angenommene Plugins ein. |
-| B3 | #82 | Ein unbrauchbares Skill-Paket öffnet den Einrichtungsdialog nicht. | Der Dialog erscheint auch aus diesem Grund. |
-| B4 | #74 | Der Schlüssel eines Entwicklungs-Plugins vererbt sich an alle Programme, die moocp startet. | Die Variable beim Starten anderer Programme entfernen. |

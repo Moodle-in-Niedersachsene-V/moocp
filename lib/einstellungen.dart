@@ -35,9 +35,11 @@ class Einstellungen {
     Map<String, PluginEntscheidung>? plugins,
     Map<String, PluginUpdateStand>? pluginUpdates,
     Set<String> pluginSkills = const {},
+    Set<String> skillFehlerGesehen = const {},
   })  : plugins = Map.of(plugins ?? const {}),
         pluginUpdates = Map.of(pluginUpdates ?? const {}),
         pluginSkills = {...pluginSkills},
+        skillFehlerGesehen = {...skillFehlerGesehen},
         profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
   /// Die Moodle-Instanzen, mit denen die App angemeldet sein kann. Das erste
@@ -169,6 +171,12 @@ class Einstellungen {
   /// sein kann: Aus ihm wird ein Pfad zum Löschen.
   Set<String> pluginSkills;
 
+  /// Die unbrauchbaren Skill-Pakete von Plugins, die die Lehrkraft im Dialog
+  /// „KI-Werkzeuge einrichten“ schon gesehen hat, je Plugin ein Stand
+  /// (plugin/skills.dart, PluginSkills.fehlerStand). Ein Stand, der hier
+  /// fehlt, öffnet den Dialog beim Start; ein gesehener nicht noch einmal.
+  Set<String> skillFehlerGesehen;
+
   static File get _datei => einstellungenDatei;
 
   static String neuerSchluessel() {
@@ -253,6 +261,7 @@ class Einstellungen {
       plugins: pluginEntscheidungenAus(j['plugins']),
       pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
       pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
+      skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
   }
 
@@ -272,6 +281,7 @@ class Einstellungen {
         if (pluginUpdates.isNotEmpty)
           'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
         if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
+        if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),
       };
 
   Future<void> speichern() async {

@@ -12,9 +12,17 @@
 // - Angeboten werden nur die Skills von Plugins, denen die Lehrkraft für den
 //   jetzigen Stand zugestimmt hat. Ob ein Plugin in einem Profil eingeschaltet
 //   ist, zählt nicht: Skills liegen je KI-Werkzeug, nicht je Profil, wie die
-//   der App. Ein Entwicklungs-Plugin (entwicklung.dart) bringt keine Skills
-//   mit: Es hat keine gemerkte Zustimmung, und seine Dateien ändern sich
-//   ständig.
+//   der App.
+// - Ein Entwicklungs-Plugin (entwicklung.dart): Das Ja im Dialog beim Start
+//   mit `--plugin-entwicklung` zählt als Zustimmung. Seine Skills kommen aus
+//   dem Entwicklungsordner, nach denselben Regeln, aber ohne Prüfsumme -- der
+//   Dialog tritt bei jedem Start an ihre Stelle. Ein installiertes Plugin mit
+//   demselben Kurznamen bringt in diesem Lauf keine Skills mit; es gelten die
+//   des Entwicklungsordners. Ohne den Parameter nennt kein Plugin diese
+//   Skills mehr, und sie sind verwaist, außer ein installiertes Plugin mit
+//   Zustimmung bringt denselben mit. Gelesen wird einmal je Prüfung; ein
+//   geänderter Skill zeigt sich beim nächsten Start der App als Abweichung,
+//   ein Wiederverbinden des Plugins prüft nichts neu.
 // - Vor dem Lesen bildet die App die Prüfsumme des Plugin-Ordners neu: Wurde
 //   seit dem Start etwas ausgetauscht, galt die Zustimmung einem anderen
 //   Stand, und kein Skill des Plugins wird angeboten.
@@ -28,7 +36,11 @@
 // - Ein Paket, das eine Regel bricht oder sich nicht lesen lässt, wird nicht
 //   installiert; die anderen schon. Der Grund ist ein Satz mit dem Plugin, ohne
 //   Inhalte aus seinen Dateien (E11) -- einen Skill-Namen nennt er nur, wenn
-//   der ein gültiger Skill-Name ist.
+//   der ein gültiger Skill-Name ist. Ein solches Paket öffnet den Dialog
+//   „KI-Werkzeuge einrichten“ beim Start, aber nur einmal je Stand: Je Plugin
+//   mit unbrauchbarem Paket gibt es einen Stand ([PluginSkills.fehlerStand]),
+//   und was die Lehrkraft gesehen hat, merkt sich die App
+//   (Einstellungen.skillFehlerGesehen, main.dart).
 //
 // Welche Plugin-Skills die App installiert hat, merkt sie sich in den
 // Einstellungen (Einstellungen.pluginSkills, einrichtung.dart
@@ -36,14 +48,21 @@
 // gemerkten Skill nicht mehr, ist der Skill verwaist ([verwaisteSkills]), und
 // die Einrichtung bietet ihn zum Entfernen an.
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../einrichtung.dart';
 import 'beschreibung.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
+
+/// Das Entwicklungs-Plugin, soweit die Einrichtung es braucht: sein Ordner
+/// und seine Beschreibungsdatei (entwicklung.dart, EntwicklungsPlugin). Nur
+/// nach dem Ja im Dialog beim Start.
+typedef EntwicklungsSkills = ({String ordner, PluginBeschreibung beschreibung});
 
 /// Was die Einrichtung aus den Plugins an Skills bekommt.
 class PluginSkills {
@@ -52,6 +71,7 @@ class PluginSkills {
     this.wahlSkills = const {},
     this.namen = const {},
     this.fehler = const [],
+    this.fehlerStand = const {},
   });
 
   /// Die lesbaren Pakete der zugestimmten Plugins.
@@ -68,41 +88,91 @@ class PluginSkills {
   /// Je unbrauchbarem Paket (oder Plugin, dessen Ordner sich geändert hat) ein
   /// Satz mit Plugin und Grund.
   final List<String> fehler;
+
+  /// Je Plugin mit einem Satz in [fehler] ein Stand: eine Prüfsumme über den
+  /// Stand des Plugins (seine Prüfsumme; beim Entwicklungs-Plugin der
+  /// Kurzname) und seine Sätze. Gleich, solange sich weder das Plugin noch
+  /// die Gründe ändern; so öffnet ein schon gesehener Hinweis den Dialog nicht
+  /// bei jedem Start (Einstellungen.skillFehlerGesehen).
+  final Set<String> fehlerStand;
 }
 
 /// Liest die Skills aller Plugins in [plugins], denen für den jetzigen Stand
-/// zugestimmt ist. [appNamen] sind die Namen der Skills der App; so darf
-/// kein Skill eines Plugins heißen. Ohne Plugins (null) gibt es nichts.
-Future<PluginSkills> pluginSkillsLesen(Plugins? plugins, {required Set<String> appNamen}) async {
-  if (plugins == null) return const PluginSkills();
+/// zugestimmt ist, und die des angehängten Entwicklungs-Plugins
+/// [entwicklung]. [appNamen] sind die Namen der Skills der App; so darf kein
+/// Skill eines Plugins heißen. Ohne Plugins (null) und ohne
+/// Entwicklungs-Plugin gibt es nichts.
+Future<PluginSkills> pluginSkillsLesen(
+  Plugins? plugins, {
+  required Set<String> appNamen,
+  EntwicklungsSkills? entwicklung,
+}) async {
   final pakete = <SkillPaket>[];
   final wahl = <String, String>{};
   final namen = <String>{};
   final fehler = <String>[];
-  for (final s in plugins.staende) {
+  final fehlerStand = <String>{};
+
+  /// Liest die Skills eines Plugins; [unveraendert] null heißt: ohne Prüfsumme.
+  Future<void> lesen(
+    String pfad,
+    PluginBeschreibung b, {
+    required String satzAnfang,
+    required String anzeigename,
+    required String stand,
+    Future<bool> Function()? unveraendert,
+  }) async {
+    final alle = [...b.skills, ...b.wahlSkills.keys];
+    if (alle.isEmpty) return;
+    namen.addAll(alle);
+    final eigene = <String>[];
+    String satz(String grund) => '$satzAnfang: $grund';
+    if (unveraendert != null && !await unveraendert()) {
+      eigene.add(satz('Der Plugin-Ordner hat sich seit dem Start geändert. Seine Skills werden erst nach dem '
+          'nächsten Start der App angeboten, mit neuer Zustimmung.'));
+    } else {
+      for (final name in alle) {
+        try {
+          pakete.add(pluginSkillLesen(pfad, name, kurzname: b.kurzname, appNamen: appNamen, plugin: anzeigename));
+          final text = b.wahlSkills[name];
+          if (text != null) wahl[name] = text;
+        } on PluginFehler catch (x) {
+          eigene.add(satz(x.grund));
+        }
+      }
+    }
+    if (eigene.isEmpty) return;
+    fehler.addAll(eigene);
+    fehlerStand.add(sha256.convert(utf8.encode([stand, ...eigene].join('\n'))).toString());
+  }
+
+  for (final s in plugins?.staende ?? const <PluginStand>[]) {
     final e = s.eintrag;
     final b = e.beschreibung;
     if (s.zustand != PluginZustand.zugestimmt || b == null) continue;
-    final alle = [...b.skills, ...b.wahlSkills.keys];
-    if (alle.isEmpty) continue;
-    namen.addAll(alle);
-    String satz(String grund) => 'Plugin „${e.anzeigename}“: $grund';
-    if (!await _unveraendert(e)) {
-      fehler.add(satz('Der Plugin-Ordner hat sich seit dem Start geändert. Seine Skills werden erst nach dem '
-          'nächsten Start der App angeboten, mit neuer Zustimmung.'));
-      continue;
-    }
-    for (final name in alle) {
-      try {
-        pakete.add(pluginSkillLesen(e.pfad, name, kurzname: b.kurzname, appNamen: appNamen, plugin: e.anzeigename));
-        final text = b.wahlSkills[name];
-        if (text != null) wahl[name] = text;
-      } on PluginFehler catch (x) {
-        fehler.add(satz(x.grund));
-      }
-    }
+    // Solange ein Entwicklungs-Plugin mit demselben Kurznamen angehängt ist,
+    // gelten dessen Skills.
+    if (entwicklung != null && entwicklung.beschreibung.kurzname == b.kurzname) continue;
+    await lesen(
+      e.pfad,
+      b,
+      satzAnfang: 'Plugin „${e.anzeigename}“',
+      anzeigename: e.anzeigename,
+      stand: 'plugin:${e.ordner}:${e.pruefsumme}',
+      unveraendert: () => _unveraendert(e),
+    );
   }
-  return PluginSkills(pakete: pakete, wahlSkills: wahl, namen: namen, fehler: fehler);
+  if (entwicklung != null) {
+    final b = entwicklung.beschreibung;
+    await lesen(
+      entwicklung.ordner,
+      b,
+      satzAnfang: 'Entwicklungs-Plugin „${b.name}“',
+      anzeigename: b.name,
+      stand: 'entwicklung:${b.kurzname}',
+    );
+  }
+  return PluginSkills(pakete: pakete, wahlSkills: wahl, namen: namen, fehler: fehler, fehlerStand: fehlerStand);
 }
 
 /// Ob der Plugin-Ordner noch der Stand ist, dem zugestimmt wurde.

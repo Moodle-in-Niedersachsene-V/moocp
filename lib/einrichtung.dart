@@ -28,6 +28,7 @@ import 'dart:math';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
+import 'plattform/kindprozess.dart';
 import 'plattform/signatur_mac.dart';
 import 'plattform/signatur_windows.dart';
 
@@ -494,7 +495,7 @@ class ClaudeCode extends KiWerkzeug {
 /// Ausgabe wird gelesen (sonst kann ein voller Puffer den Prozess anhalten)
 /// und verworfen.
 Future<int> _ausfuehren(String programm, List<String> argumente) async {
-  final pr = await Process.start(programm, argumente);
+  final pr = await prozessStarten(programm, argumente);
   unawaited(pr.stdout.drain<void>());
   unawaited(pr.stderr.drain<void>());
   return pr.exitCode.timeout(const Duration(minutes: 1), onTimeout: () {
@@ -1299,6 +1300,7 @@ class Einrichtungsstand {
     this.wahlSkills = const {},
     this.gewaehlt = const {},
     this.skillFehler = const [],
+    this.skillFehlerNeu = false,
   });
 
   /// Je gefundenes KI-Werkzeug ein Stand; leer, wenn keines gefunden wurde.
@@ -1322,6 +1324,11 @@ class Einrichtungsstand {
   /// sie nur.
   final List<String> skillFehler;
 
+  /// Ob unter [skillFehler] etwas ist, das die Lehrkraft noch nicht gesehen
+  /// hat (Einstellungen.skillFehlerGesehen): Dann erscheint der Dialog beim
+  /// Start auch, wenn sonst alles eingerichtet ist.
+  final bool skillFehlerNeu;
+
   /// Was installiert sein soll: jeder Skill, der nicht wählbar ist, und die
   /// gewählten.
   List<SkillPaket> get gewollt => _gewollt(skills, wahlSkills, gewaehlt);
@@ -1333,9 +1340,14 @@ class Einrichtungsstand {
   /// nicht.
   bool get bereit => werkzeuge.any((w) => w.fertig);
 
-  /// Ob der Dialog erscheinen muss. Python allein zählt nicht: Das kann die
-  /// App nicht beheben, der Hinweis stünde sonst bei jedem Start da.
-  bool get brauchtEtwas => !bereit || werkzeuge.any((w) => w.brauchtEtwas);
+  /// Ob an Verbindung oder Skills noch etwas zu tun ist.
+  bool get brauchtEinrichtung => !bereit || werkzeuge.any((w) => w.brauchtEtwas);
+
+  /// Ob der Dialog erscheinen muss: weil etwas zu tun ist oder weil ein
+  /// unbrauchbares Skill-Paket eines Plugins noch nicht gesehen ist
+  /// ([skillFehlerNeu]). Python allein zählt nicht: Das kann die App nicht
+  /// beheben, der Hinweis stünde sonst bei jedem Start da.
+  bool get brauchtEtwas => brauchtEinrichtung || skillFehlerNeu;
 
   /// Ob „Installieren" etwas bewirken kann.
   bool get einrichtbar => werkzeuge.any((w) => w.brauchtEtwas && w.machbar);
@@ -1354,7 +1366,8 @@ List<SkillPaket> _gewollt(List<SkillPaket> skills, Map<String, String> wahlSkill
 /// [verwaist] sind Skills, die die App für ein Plugin installiert hat, das
 /// abgelehnt oder nicht mehr da ist (plugin/skills.dart, verwaisteSkills): Sie
 /// werden in jedem Werkzeug, in dem sie stehen, zum Entfernen angeboten, auch
-/// in einem abgewählten. [skillFehler] reicht der Dialog nur weiter.
+/// in einem abgewählten. [skillFehler] reicht der Dialog nur weiter;
+/// [skillFehlerNeu] sagt, ob darunter Ungesehenes ist.
 Future<Einrichtungsstand> einrichtungPruefen({
   required Map<String, String> umgebung,
   required int port,
@@ -1366,6 +1379,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
   Set<String> gewaehlt = const {},
   Set<String> verwaist = const {},
   List<String> skillFehler = const [],
+  bool skillFehlerNeu = false,
   Future<bool> Function() python = pythonVorhanden,
   List<KiWerkzeug>? gefunden,
 }) async {
@@ -1405,6 +1419,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
     wahlSkills: wahlSkills,
     gewaehlt: gewaehlt,
     skillFehler: skillFehler,
+    skillFehlerNeu: skillFehlerNeu && skillFehler.isNotEmpty,
   );
 }
 

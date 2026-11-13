@@ -671,6 +671,54 @@ void main() {
       expect(find.text('Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'),
           findsOneWidget, reason: 'das unbrauchbare Paket hält nichts auf');
     });
+
+    testWidgets('ein ungesehenes unbrauchbares Paket bei sonst fertiger Einrichtung: nur „Weiter"', (tester) async {
+      await aufbauen(tester);
+      const fehler = 'Plugin „Beispiel“: Der Skill beispiel-fehlt wird nicht installiert: '
+          'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
+      Future<Einrichtungsstand> mitFehler() => einrichtungPruefen(
+            umgebung: env,
+            port: 47811,
+            schluessel: 'abc',
+            skills: [moodle],
+            wahlSkills: const {},
+            skillFehler: const [fehler],
+            skillFehlerNeu: true,
+            gefunden: [codex],
+            python: () async => true,
+          );
+      final stand = await mitFehler();
+      expect(stand.brauchtEtwas, isTrue, reason: 'der Dialog erscheint beim Start');
+      bool? ergebnis;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () async => ergebnis = await showDialog<bool>(
+              context: context,
+              builder: (_) => EinrichtungDialog(
+                stand: stand,
+                pruefen: mitFehler,
+                einstellungen: einstellungen,
+                protokoll: Protokoll(),
+                port: 47811,
+                schluessel: 'abc',
+              ),
+            ),
+            child: const Text('öffnen'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('öffnen'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(fehler), findsOneWidget);
+      expect(find.text('Beenden'), findsNothing);
+      expect(find.text('Installieren'), findsNothing);
+      expect(find.textContaining('mit „Weiter" arbeitet die App ohne sie'), findsOneWidget);
+      await tester.tap(find.text('Weiter'));
+      await tester.pumpAndSettle();
+      expect(ergebnis, isTrue);
+    });
   });
 
   group('Freigabedialog', () {

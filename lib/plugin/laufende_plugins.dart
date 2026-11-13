@@ -80,6 +80,7 @@ import 'dart:math';
 
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
+import '../plattform/kindprozess.dart';
 import '../plattform/plattform.dart';
 import '../profil.dart';
 import '../protokoll.dart';
@@ -95,7 +96,7 @@ import 'pruefsumme.dart';
 import 'schnittstelle.dart';
 import 'verbindung.dart';
 
-/// Startet das Programm eines Plugins; die Vorgabe ist [Process.start].
+/// Startet das Programm eines Plugins; die Vorgabe ist [prozessStarten].
 typedef ProzessStarter =
     Future<Process> Function(
       String programm,
@@ -104,17 +105,15 @@ typedef ProzessStarter =
       required String arbeitsordner,
     });
 
+/// [umgebung] kommt zu der Umgebung der App hinzu, ohne den Schlüssel eines
+/// Entwicklungs-Plugins (plattform/kindprozess.dart); der Schlüssel dieses
+/// Starts steht darin.
 Future<Process> _prozessStarten(
   String programm,
   List<String> argumente, {
   required Map<String, String> umgebung,
   required String arbeitsordner,
-}) => Process.start(
-  programm,
-  argumente,
-  environment: umgebung,
-  workingDirectory: arbeitsordner,
-);
+}) => prozessStarten(programm, argumente, dazu: umgebung, arbeitsordner: arbeitsordner);
 
 /// Wie oft das Programm eines Plugins je Lauf der App starten darf: der
 /// Start und ein zweiter Versuch.
@@ -197,7 +196,7 @@ class LaufendePlugins implements WerkzeugQuelle {
   final PluginDialoge? dialoge;
 
   /// Wie das Programm eines Plugins gestartet wird; die Vorgabe ist
-  /// [Process.start] mit Umgebung und Arbeitsordner.
+  /// [prozessStarten] mit Umgebung und Arbeitsordner.
   final ProzessStarter starter;
 
   /// So lange darf ein Plugin brauchen, bis es auf initialize antwortet und

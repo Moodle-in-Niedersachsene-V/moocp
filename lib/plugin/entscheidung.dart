@@ -33,8 +33,8 @@ class PluginEntscheidung {
 
   /// Die Kennungen (Profil.kennung) der Instanzprofile, in denen das Plugin
   /// eingeschaltet ist. Bei einer Ablehnung leer. Gespeichert wird die
-  /// ausdrückliche Menge: Ein Profil, das später dazukommt, ist nicht darin
-  /// und also aus, bis die Lehrkraft es einschaltet.
+  /// ausdrückliche Menge; ein Profil, das später angelegt wird, kommt bei
+  /// jeder Zustimmung hinzu ([pluginEntscheidungenMitProfil]).
   final Set<String> profile;
 
   /// Die Werkzeuge, die das Plugin beim letzten Start dieses Stands nannte,
@@ -198,6 +198,16 @@ Map<String, PluginUpdateStand> pluginUpdatesAus(Object? j) {
       if (key is String) key: PluginUpdateStand.ausJson(value),
   };
 }
+
+/// Die Entscheidungen mit dem neu angelegten Profil [kennung]: Jedes Plugin,
+/// dem zugestimmt ist, ist dort eingeschaltet, wie bei der Zustimmung in jedem
+/// Profil vorgewählt (E35); abschalten lässt es sich im Dialog „Plugins“. Ein
+/// abgelehntes bleibt aus. [alt] bleibt unverändert, damit der Aufrufer
+/// zurückrollen kann, wenn das Speichern scheitert.
+Map<String, PluginEntscheidung> pluginEntscheidungenMitProfil(Map<String, PluginEntscheidung> alt, String kennung) => {
+      for (final MapEntry(:key, :value) in alt.entries)
+        key: value.zugestimmt ? value.mitProfilen({...value.profile, kennung}) : value,
+    };
 
 /// Die Entscheidungen ohne das gelöschte Profil [kennung]: Die Zustimmung
 /// bleibt, das Plugin ist dort nur nicht mehr eingeschaltet. [alt] bleibt

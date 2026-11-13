@@ -30,6 +30,7 @@ import 'package:path/path.dart' as p;
 
 import '../einstellungen.dart';
 import '../log.dart';
+import '../plattform/kindprozess.dart';
 import '../protokoll.dart';
 import 'updateliste.dart';
 
@@ -428,7 +429,7 @@ typedef InstallerStarter = Future<Process> Function(String pfad, List<String> ar
 
 Future<Process> _prozessStarten(String pfad, List<String> argumente,
         {ProcessStartMode mode = ProcessStartMode.normal}) =>
-    Process.start(pfad, argumente, mode: mode);
+    prozessStarten(pfad, argumente, modus: mode);
 
 /// Startet einen geladenen Installer, sichtbar -- der gemeinsame Weg für
 /// moocp ([updateInstallerStarten]) und für Plugins

@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.11.0
-- Neu: Plugins – zusätzliche Erweiterungen aus eigenen Projekten nehmen Sie in einem eigenen Dialog an oder lehnen sie ab, für jede Version einzeln; ihre Werkzeuge stehen der KI dann neben denen von moocp zur Verfügung, ihre Skills richtet „KI-Werkzeuge einrichten“ mit ein und entfernt sie wieder, und unter dem Zahnrad sehen Sie den Stand und ändern ihn je Moodle-Instanz.
+- Neu: Plugins – zusätzliche Erweiterungen aus eigenen Projekten nehmen Sie in einem eigenen Dialog an oder lehnen sie ab, für jede Version einzeln; ihre Werkzeuge stehen der KI dann neben denen von moocp zur Verfügung, ihre Skills richtet „KI-Werkzeuge einrichten“ mit ein und entfernt sie wieder, und unter dem Zahnrad sehen Sie den Stand und ändern ihn je Moodle-Instanz. Die tägliche Suche nach Updates findet auch neue Versionen der Plugins, abschaltbar je Plugin; passt ein Plugin nicht zu Ihrer Version von moocp, sagt die App, welche Seite zu alt ist, und bietet deren Update an.
 
 ## 0.10.2
 - Updates: moocp findet neue Versionen auch, wenn das Projekt zum Verein Moodle in Niedersachsen e. V. umzieht; gibt es die hinterlegten Update-Adressen nicht mehr, warnt die App bei der täglichen Suche.

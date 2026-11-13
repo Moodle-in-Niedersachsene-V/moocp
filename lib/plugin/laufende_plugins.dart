@@ -92,6 +92,7 @@ import 'moodle_schreiben.dart' show zusatzKennzeichnung;
 import 'namenssperre.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
+import 'schnittstelle.dart';
 import 'verbindung.dart';
 
 /// Startet das Programm eines Plugins; die Vorgabe ist [Process.start].
@@ -378,6 +379,12 @@ class LaufendePlugins implements WerkzeugQuelle {
 
   Future<_Laufend> _starten(PluginEintrag e) async {
     final b = e.beschreibung!;
+    // Die Schnittstelle vor jedem Start, auch vor einem Neustart
+    // (schnittstelle.dart). Ein unpassendes Plugin lädt schon beim Suchen
+    // nicht (plugins.dart); diese Prüfung hält das fest, gleich woher der
+    // Eintrag kommt.
+    final urteil = schnittstelleUrteil(b.schnittstelle);
+    if (urteil != SchnittstellenUrteil.passt) throw PluginFehler(schnittstelleGrund(urteil, b.schnittstelle));
     // Unmittelbar vor dem Start noch einmal, auch vor einem Neustart: Seit der
     // Suche kann jemand Dateien ausgetauscht haben. Weicht die Summe ab,
     // startet das Plugin nicht; beim nächsten Start fragt die Zustimmung neu.

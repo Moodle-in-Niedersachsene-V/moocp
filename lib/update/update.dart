@@ -148,11 +148,21 @@ const String moocpInstallerAnfang = 'moocp_setup';
 String installerName(String version, {String anfang = moocpInstallerAnfang}) =>
     '${anfang}_$version.exe';
 
+/// Der Anfang der geladenen Datei von moocp im Temp-Verzeichnis
+/// ([installerDatei]).
+const String moocpDateiPraefix = 'moocp_update';
+
+/// Der Anfang der geladenen Datei eines Plugins im Temp-Verzeichnis, vor dem
+/// Kurznamen. Er beginnt nicht mit [moocpDateiPraefix]: Ein Plugin mit dem
+/// Kurznamen „update“ bekäme sonst dieselben Dateinamen wie moocp.
+const String pluginDateiPraefix = 'moocp_plugin';
+
 /// Die heruntergeladene Datei liegt im Temp-Verzeichnis, nicht im
 /// Arbeitsordner: Den leert die App beim Beenden -- also genau dann, wenn
-/// der Installer gerade daraus läuft.
-File installerDatei(String version) =>
-    File(p.join(Directory.systemTemp.path, 'moocp_update_$version.exe'));
+/// der Installer gerade daraus läuft. [praefix] trennt moocp
+/// ([moocpDateiPraefix]) von den Plugins.
+File installerDatei(String version, {String praefix = moocpDateiPraefix}) =>
+    File(p.join(Directory.systemTemp.path, '${praefix}_$version.exe'));
 
 /// Sucht im Release die Datei, die zur Version gehört. [anfang] ist der Anfang
 /// des Dateinamens (siehe [installerName]).
@@ -174,19 +184,27 @@ Map<String, dynamic>? releaseDatei(List<dynamic> anhaenge, String version,
 /// [quellen] sind die Herkünfte (Repositorys bei GitHub), aus denen die
 /// Versionen kommen, in der Reihenfolge der Abfrage; ohne Angabe die von
 /// moocp selbst (updateliste.dart). [installerAnfang] ist der Anfang des
-/// Dateinamens des Installers im Release ([installerName]).
+/// Dateinamens des Installers im Release ([installerName]), [dateiPraefix]
+/// der Anfang der geladenen Datei im Temp-Verzeichnis ([installerDatei]) und
+/// [protokollName] das, womit jede Zeile im Protokoll beginnt. Für moocp
+/// gelten überall die Vorgaben; ein Plugin setzt alle vier
+/// (plugin/plugin_update.dart, pluginUpdate).
 class Update {
   Update(
     this.protokoll, {
     this.grenze = abfragegrenze,
     this.quellen = herkuenfte,
     this.installerAnfang = moocpInstallerAnfang,
+    this.dateiPraefix = moocpDateiPraefix,
+    this.protokollName = 'Update',
   });
 
   final Protokoll protokoll;
   final Duration grenze;
   final List<String> quellen;
   final String installerAnfang;
+  final String dateiPraefix;
+  final String protokollName;
 
   HttpClient? _klient;
   bool _abgebrochen = false;
@@ -227,7 +245,7 @@ class Update {
           antwort = await _holen(releaseAbfrage(herkunft), klient, download: false);
           break;
         } on _AdresseWeg {
-          protokoll.eintrag(Art.info, 'Update: kein Release unter $herkunft');
+          protokoll.eintrag(Art.info, '$protokollName: kein Release unter $herkunft');
         }
       }
       if (antwort == null) throw UpdateAdressenWeg();
@@ -241,7 +259,7 @@ class Update {
         throw UpdateFehler('Der Tag „$tag" des Releases passt nicht zum Schema „v0.9.4".');
       }
       if (versionVergleich(version, eigene) <= 0) {
-        protokoll.eintrag(Art.info, 'Update: neueste Version ist $version, läuft bereits ($eigene)');
+        protokoll.eintrag(Art.info, '$protokollName: neueste Version ist $version, läuft bereits ($eigene)');
         return null;
       }
       final anhang = releaseDatei((j['assets'] as List?) ?? const [], version, anfang: installerAnfang);
@@ -252,11 +270,11 @@ class Update {
       final adresse = Uri.parse(anhang['browser_download_url'] as String);
       final grund = updateGesperrt(adresse, download: true, quellen: quellen);
       if (grund != null) {
-        protokoll.eintrag(Art.gesperrt, 'Update gesperrt: ${_kurz(adresse)} ($grund)');
+        protokoll.eintrag(Art.gesperrt, '$protokollName gesperrt: ${_kurz(adresse)} ($grund)');
         throw UpdateFehler('Die Adresse des Installers ist nicht erlaubt ($grund).');
       }
       final pruefsumme = anhang['digest'];
-      protokoll.eintrag(Art.info, 'Update: Version $version verfügbar (läuft: $eigene)');
+      protokoll.eintrag(Art.info, '$protokollName: Version $version verfügbar (läuft: $eigene)');
       return NeueVersion(
         version: version,
         datei: adresse,
@@ -281,7 +299,7 @@ class Update {
   /// [fortschritt] bekommt geladene und (soweit bekannt) gesamte Byte.
   Future<File> herunterladen(NeueVersion neu, void Function(int, int?) fortschritt) async {
     final klient = _neuerKlient();
-    final ziel = installerDatei(neu.version);
+    final ziel = installerDatei(neu.version, praefix: dateiPraefix);
     try {
       final antwort = await _holen(neu.datei, klient, download: true);
       final gesamt = antwort.contentLength >= 0 ? antwort.contentLength : neu.groesse;
@@ -297,7 +315,7 @@ class Update {
         await senke.close();
       }
       _pruefeDatei(ziel, neu);
-      protokoll.eintrag(Art.info, 'Update: ${neu.dateiname} geladen ($geladen Byte, geprüft)');
+      protokoll.eintrag(Art.info, '$protokollName: ${neu.dateiname} geladen ($geladen Byte, geprüft)');
       return ziel;
     } on UpdateFehler {
       wegwerfen(ziel);
@@ -340,7 +358,7 @@ class Update {
     for (var i = 0; i < 5; i++) {
       final grund = updateGesperrt(uri, download: download, quellen: quellen);
       if (grund != null) {
-        protokoll.eintrag(Art.gesperrt, 'Update gesperrt: GET ${_kurz(uri)} ($grund)');
+        protokoll.eintrag(Art.gesperrt, '$protokollName gesperrt: GET ${_kurz(uri)} ($grund)');
         // Ein umgezogenes Repository leitet GitHub innerhalb der API auf eine
         // Adresse mit Nummer um (/repositories/…). Nur das heißt: Diese
         // Herkunft taugt nicht mehr. Ein anderes Ziel kann die Anmeldeseite
@@ -354,7 +372,7 @@ class Update {
       anfrage.followRedirects = false;
       if (!download) anfrage.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
       final antwort = await anfrage.close().timeout(grenze);
-      protokoll.eintrag(Art.info, 'Update: GET ${_kurz(uri)} → ${antwort.statusCode}');
+      protokoll.eintrag(Art.info, '$protokollName: GET ${_kurz(uri)} → ${antwort.statusCode}');
       if (antwort.statusCode >= 300 && antwort.statusCode < 400) {
         final ort = antwort.headers.value(HttpHeaders.locationHeader);
         await antwort.drain<void>();
@@ -384,7 +402,7 @@ class Update {
   /// sagt, was los ist, nicht was die Bibliothek geschrieben hat.
   Exception _fehler(String was, Object e, StackTrace st) {
     if (_abgebrochen) return UpdateAbgebrochen();
-    protokoll.eintrag(Art.fehler, 'Update: $was fehlgeschlagen: ${fehlerBeschreibung(e, st)}');
+    protokoll.eintrag(Art.fehler, '$protokollName: $was fehlgeschlagen: ${fehlerBeschreibung(e, st)}');
     if (e is SocketException || e is HandshakeException) {
       return UpdateFehler('GitHub ist nicht erreichbar.');
     }
@@ -403,15 +421,42 @@ void wegwerfen(File datei) {
   }
 }
 
-/// Startet den geladenen Installer und merkt sich die Version. Danach muss
-/// der Aufrufer die App regulär beenden -- erst dann gibt sie die exe frei,
-/// und nur so leert sie ihren Arbeitsordner.
-Future<void> installerStarten(
-    File installer, String version, Einstellungen einstellungen, Protokoll protokoll) async {
+/// Wie ein Installer gestartet wird; Tests setzen ein Double ein, damit nie ein
+/// echter Installer läuft.
+typedef InstallerStarter = Future<Process> Function(String pfad, List<String> argumente,
+    {ProcessStartMode mode});
+
+Future<Process> _prozessStarten(String pfad, List<String> argumente,
+        {ProcessStartMode mode = ProcessStartMode.normal}) =>
+    Process.start(pfad, argumente, mode: mode);
+
+/// Startet einen geladenen Installer, sichtbar -- der gemeinsame Weg für
+/// moocp ([updateInstallerStarten]) und für Plugins
+/// (plugin/plugin_update.dart). Die Zeile im Protokoll beginnt mit
+/// [protokollName] wie die der Prüfung ([Update.protokollName]).
+Future<Process> installerStarten(
+  File installer,
+  String version, {
+  required Protokoll protokoll,
+  String protokollName = 'Update',
+  List<String> argumente = const [],
+  ProcessStartMode modus = ProcessStartMode.detached,
+  InstallerStarter starter = _prozessStarten,
+}) async {
+  protokoll.eintrag(Art.info, '$protokollName: Installer für Version $version gestartet');
+  return starter(installer.path, argumente, mode: modus);
+}
+
+/// Startet den geladenen Installer von moocp und merkt sich die Version.
+/// Danach muss der Aufrufer die App regulär beenden -- erst dann gibt sie die
+/// exe frei, und nur so leert sie ihren Arbeitsordner.
+Future<void> updateInstallerStarten(
+    File installer, String version, Einstellungen einstellungen, Protokoll protokoll,
+    {InstallerStarter starter = _prozessStarten}) async {
   einstellungen.updateErwartet = version;
   await einstellungen.speichern();
-  protokoll.eintrag(Art.info, 'Update: Installer für Version $version gestartet');
-  await Process.start(installer.path, ['/UPDATE'], mode: ProcessStartMode.detached);
+  await installerStarten(installer, version,
+      protokoll: protokoll, argumente: const ['/UPDATE'], modus: ProcessStartMode.detached, starter: starter);
 }
 
 /// Beim Start: War ein Update angekündigt, sagen, ob es angekommen ist.
@@ -436,15 +481,16 @@ Future<void> updateStandMelden(Einstellungen einstellungen, String eigene, Proto
   }
 }
 
-/// Reste früherer Updates aus dem Temp-Verzeichnis räumen. Was noch in
-/// Benutzung ist -- der Installer, der die App gerade neu gestartet hat --
-/// bleibt liegen und ist beim nächsten Start weg.
+/// Reste früherer Updates von moocp und von Plugins aus dem Temp-Verzeichnis
+/// räumen. Was noch in Benutzung ist -- der Installer, der die App gerade neu
+/// gestartet hat -- bleibt liegen und ist beim nächsten Start weg.
 void resteWegraeumen() {
   try {
     for (final e in Directory.systemTemp.listSync(followLinks: false)) {
       if (e is! File) continue;
       final name = p.basename(e.path);
-      if (name.startsWith('moocp_update_') && name.endsWith('.exe')) wegwerfen(e);
+      final eigene = name.startsWith('${moocpDateiPraefix}_') || name.startsWith('${pluginDateiPraefix}_');
+      if (eigene && name.endsWith('.exe')) wegwerfen(e);
     }
   } catch (_) {
     // Temp nicht lesbar: dann eben nicht.

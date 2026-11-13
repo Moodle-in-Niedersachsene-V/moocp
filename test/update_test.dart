@@ -149,4 +149,35 @@ void main() {
       expect(code.contains('cookie'), isFalse, reason: 'keine Cookies an GitHub');
     });
   });
+
+  group('Keine Adresse an der Positivliste vorbei', () {
+    String ohneKommentare(String pfad) =>
+        File(pfad).readAsLinesSync().where((z) => !z.trimLeft().startsWith('//')).join('\n');
+
+    test('update.dart fragt an genau einer Stelle an, und dort erst nach der Positivliste', () {
+      final code = ohneKommentare('lib/update/update.dart');
+      expect(RegExp(r'\.getUrl\(').allMatches(code).length, 1, reason: 'nur _holen fragt an');
+      expect(RegExp(r'\.(openUrl|postUrl|putUrl|get|post|open)\(').hasMatch(code), isFalse);
+      final holen = code.indexOf('Future<HttpClientResponse> _holen(');
+      final pruefung = code.indexOf('updateGesperrt(uri', holen);
+      final anfrage = code.indexOf('.getUrl(', holen);
+      expect(holen, greaterThan(0));
+      expect(pruefung, greaterThan(holen));
+      expect(anfrage, greaterThan(pruefung), reason: 'erst die Liste, dann die Anfrage; ebenso für jedes Umleitungsziel');
+      expect(code.contains('followRedirects = false'), isTrue, reason: 'Umleitungen nur von Hand, jede geprüft');
+    });
+
+    test('die Prüfung der Plugins hat keine eigene Verbindung, sondern nimmt die von update.dart', () {
+      final code = ohneKommentare('lib/plugin/plugin_update.dart');
+      for (final verboten in ['HttpClient', 'getUrl', 'Uri.parse', 'Uri.https', 'package:http', 'HttpOverrides']) {
+        expect(code.contains(verboten), isFalse, reason: verboten);
+      }
+      expect(code.toLowerCase().contains('cookie'), isFalse);
+      expect(code.contains('moodle_zugang'), isFalse);
+      // Veränderlich sind nur die Repositorys (quellen) aus der
+      // Beschreibungsdatei; Rechner und Form der Adressen stehen in
+      // updateliste.dart.
+      expect(code.contains('quellen: b.updateQuellen'), isTrue);
+    });
+  });
 }

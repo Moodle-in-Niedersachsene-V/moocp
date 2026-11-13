@@ -9,7 +9,7 @@
 // keine.
 //
 // Unbekannte Felder werden überlesen. Ob die Schnittstellenversion zu dieser
-// App passt, beurteilt dieser Schritt nicht.
+// App passt, beurteilt dieser Schritt nicht (schnittstelle.dart).
 
 import 'dart:convert';
 
@@ -87,7 +87,9 @@ class PluginBeschreibung {
   /// Wer das Plugin herausgibt; steht im Dialog der Zustimmung.
   final String herkunft;
 
-  /// GitHub-Repositorys `Besitzer/Name` in fester Reihenfolge.
+  /// GitHub-Repositorys `Besitzer/Name` in fester Reihenfolge, aus denen die
+  /// Updates des Plugins kommen (plugin_update.dart); jedes ist eine gültige
+  /// Herkunft der Update-Prüfung (updateliste.dart, herkunftGueltig).
   final List<String> updateQuellen;
   final List<Zusatzadresse> zusatzadressen;
 

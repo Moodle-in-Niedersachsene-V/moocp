@@ -37,6 +37,7 @@ import 'package:moocp/plugin/entscheidung.dart';
 import 'package:moocp/plugin/entwicklung.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
+import 'package:moocp/plugin/schnittstelle.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -114,24 +115,30 @@ PluginEintrag _pluginEintrag({
   String ordner = 'beispiel',
   String version = '1.0',
   List<Zusatzadresse> adressen = const [],
+  List<String> quellen = const [],
   String? fehler,
-}) =>
-    fehler != null
-        ? PluginEintrag(ordner: ordner, pfad: 'plugins/$ordner', fehler: fehler)
-        : PluginEintrag(
-            ordner: ordner,
-            pfad: 'plugins/$ordner',
-            pruefsumme: 'summe-$version',
-            beschreibung: PluginBeschreibung(
-              name: 'Beispiel-Plugin',
-              kurzname: 'beispiel',
-              version: version,
-              schnittstelle: 1,
-              programm: 'beispiel.exe',
-              herkunft: 'Beispiel-Projekt',
-              zusatzadressen: adressen,
-            ),
-          );
+  int schnittstelle = 1,
+}) {
+  if (fehler != null) return PluginEintrag(ordner: ordner, pfad: 'plugins/$ordner', fehler: fehler);
+  final urteil = schnittstelleUrteil(schnittstelle);
+  return PluginEintrag(
+    ordner: ordner,
+    pfad: 'plugins/$ordner',
+    pruefsumme: 'summe-$version',
+    beschreibung: PluginBeschreibung(
+      name: 'Beispiel-Plugin',
+      kurzname: 'beispiel',
+      version: version,
+      schnittstelle: schnittstelle,
+      programm: 'beispiel.exe',
+      herkunft: 'Beispiel-Projekt',
+      zusatzadressen: adressen,
+      updateQuellen: quellen,
+    ),
+    fehler: urteil == SchnittstellenUrteil.passt ? null : schnittstelleGrund(urteil, schnittstelle),
+    unpassend: urteil == SchnittstellenUrteil.passt ? null : urteil,
+  );
+}
 
 final _lesen = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/*'), ZugriffsArt.lesen, 'Liest die Seiten der Aktivität.');
 final _schreiben = Zusatzadresse(Adressmuster.parsen('/mod/beispiel/save.php'), ZugriffsArt.schreiben, 'Speichert die Einstellungen.');
@@ -1004,6 +1011,53 @@ void main() {
       expect(find.text('Die Beschreibungsdatei plugin.json fehlt.'), findsOneWidget);
       expect(find.text('Zustimmung ändern …'), findsNothing);
       expect(find.text('Entscheiden …'), findsNothing);
+    });
+
+    testWidgets('je Plugin lässt sich die Update-Prüfung abschalten, gespeichert in den Einstellungen', (tester) async {
+      final a = await starten(tester, [standard],
+          plugins: [_pluginEintrag(quellen: ['beispiel-org/beispiel-plugin'])],
+          entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung})});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      final schalter = find.byKey(const Key('plugin-update-beispiel'));
+      expect(tester.widget<CheckboxListTile>(schalter).value, isTrue, reason: 'vorgegeben ist an');
+      expect(find.textContaining('beispiel-org/beispiel-plugin'), findsOneWidget);
+      final vorher = a.einstellungen.gespeichert;
+      await tester.tap(schalter);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxListTile>(schalter).value, isFalse);
+      expect(a.einstellungen.pluginUpdates['beispiel']?.aus, isTrue);
+      expect(a.einstellungen.gespeichert, vorher + 1);
+      expect(find.text('Plugin zulassen'), findsNothing, reason: 'der Schalter fragt nicht nach der Zustimmung');
+    });
+
+    testWidgets('ohne Update-Quellen gibt es keinen Schalter', (tester) async {
+      await starten(tester, [standard],
+          plugins: [_pluginEintrag()], entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung})});
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('plugin-update-beispiel')), findsNothing);
+    });
+
+    testWidgets('passt die Schnittstelle nicht, sagt es ein Dialog vor der Zustimmung; das Plugin bleibt aus', (tester) async {
+      final ablauf = <String>[];
+      final a = await starten(tester, [standard], plugins: [_pluginEintrag(schnittstelle: 2)], ablauf: ablauf);
+      expect(find.text('Plugin „Beispiel-Plugin“ bleibt aus'), findsOneWidget);
+      expect(find.descendant(of: find.byType(AlertDialog), matching: find.textContaining('moocp ist zu alt')),
+          findsOneWidget);
+      expect(find.text('Plugin zulassen'), findsNothing);
+      expect(ablauf, ['plugins'], reason: 'die Einrichtung wartet');
+
+      await tester.tap(find.text('Ohne das Plugin weiter'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plugin zulassen'), findsNothing, reason: 'ein unpassendes Plugin wird nicht gefragt');
+      expect(ablauf, ['plugins', 'einrichtung']);
+      expect(a.einstellungen.plugins, isEmpty);
     });
   });
 

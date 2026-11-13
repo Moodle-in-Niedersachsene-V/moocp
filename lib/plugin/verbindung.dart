@@ -14,9 +14,9 @@ import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import 'beschreibung.dart';
 import 'namenssperre.dart';
+import 'schnittstelle.dart';
 
-/// Die Version der Plugin-Schnittstelle, die diese App bietet.
-const schnittstellenVersion = 1;
+export 'schnittstelle.dart' show schnittstellenVersion;
 
 /// Die Umgebungsvariable, in der ein Plugin seinen Schlüssel bekommt. Nicht
 /// auf der Kommandozeile: Die steht in jeder Prozessliste, die Umgebung eines

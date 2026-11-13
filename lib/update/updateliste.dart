@@ -16,7 +16,10 @@
 //
 // Veränderlich ist an einer Adresse nur das Repository (die Herkunft): Die
 // erlaubten Rechner und die Form der Adresse stehen fest. Wer prüft, nennt die
-// Herkünfte als Liste (`quellen`); ohne Angabe gilt die von moocp selbst.
+// Herkünfte als Liste (`quellen`); ohne Angabe gilt die von moocp selbst. Die
+// Update-Prüfung eines Plugins (plugin/plugin_update.dart) nennt die
+// Repositorys aus seiner Beschreibungsdatei -- sie sind das Einzige, was ein
+// Plugin an dieser Liste ändert, und gelten nur für seine eigene Prüfung.
 
 /// Die Repositorys auf GitHub, aus denen die Versionen von moocp kommen, in
 /// der Reihenfolge der Abfrage. Eine spätere Herkunft wird nur gefragt, wenn es
@@ -78,7 +81,7 @@ String? updateGesperrt(Uri uri, {required bool download, List<String> quellen = 
   if (uri.host == 'github.com') {
     return gueltige.any((h) => uri.path.startsWith('/$h/releases/download/'))
         ? null
-        : 'kein Download eines Releases von moocp';
+        : 'kein Download eines Releases aus den hinterlegten Repositorys';
   }
   // Die Speicherdienste, auf die GitHub weiterleitet (objects…,
   // release-assets…). Der Punkt vor dem Namen gehört dazu: Sonst passte

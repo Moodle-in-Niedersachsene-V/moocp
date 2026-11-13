@@ -33,8 +33,10 @@ class Einstellungen {
     this.updateZuletzt,
     this.updateErwartet,
     Map<String, PluginEntscheidung>? plugins,
+    Map<String, PluginUpdateStand>? pluginUpdates,
     Set<String> pluginSkills = const {},
   })  : plugins = Map.of(plugins ?? const {}),
+        pluginUpdates = Map.of(pluginUpdates ?? const {}),
         pluginSkills = {...pluginSkills},
         profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
@@ -153,6 +155,12 @@ class Einstellungen {
   /// Speicherfehler zurückrollen).
   Map<String, PluginEntscheidung> plugins;
 
+  /// Die Update-Prüfung je Plugin-Ordner (plugin/entscheidung.dart,
+  /// PluginUpdateStand): ob sie abgeschaltet ist und wann zuletzt geprüft
+  /// wurde. Ob überhaupt geprüft wird, entscheidet zuerst [updatePruefen]; ein
+  /// eigenes Ja je Plugin gibt es nicht.
+  Map<String, PluginUpdateStand> pluginUpdates;
+
   /// Die Skills von Plugins, die die App in den KI-Werkzeugen installiert hat
   /// (einrichtung.dart, pluginSkillsGemerkt). Nur diese entfernt sie, wenn das
   /// Plugin abgelehnt oder fort ist, und bei der Deinstallation
@@ -243,6 +251,7 @@ class Einstellungen {
       updateZuletzt: j['updateZuletzt'] as String?,
       updateErwartet: j['updateErwartet'] as String?,
       plugins: pluginEntscheidungenAus(j['plugins']),
+      pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
       pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
     );
   }
@@ -260,6 +269,8 @@ class Einstellungen {
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
         if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
+        if (pluginUpdates.isNotEmpty)
+          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
         if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
       };
 

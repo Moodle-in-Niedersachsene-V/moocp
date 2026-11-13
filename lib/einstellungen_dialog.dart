@@ -757,6 +757,11 @@ class _PluginsDialogState extends State<PluginsDialog> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _updateSchalten(PluginEintrag e, bool an) async {
+    await widget.plugins.updateSchalten(e, an);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -822,6 +827,21 @@ class _PluginsDialogState extends State<PluginsDialog> {
                   ],
                 ),
             },
+            if (e.beschreibung?.updateQuellen.isNotEmpty ?? false)
+              CheckboxListTile(
+                key: Key('plugin-update-${e.ordner}'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: widget.plugins.updateEingeschaltet(e),
+                onChanged: (an) => _updateSchalten(e, an == true),
+                title: const Text('Bei der täglichen Suche auch nach Updates dieses Plugins sehen'),
+                subtitle: Text(
+                  'Nur wenn moocp täglich nach Updates sucht (Einstellungen, „Updates“), und nur, solange Sie dem '
+                  'Plugin zugestimmt haben. Gefragt wird bei GitHub: ${e.beschreibung!.updateQuellen.join(', ')}.',
+                  style: klein,
+                ),
+              ),
             if (e.ladbar)
               Padding(
                 padding: const EdgeInsets.only(top: 8),

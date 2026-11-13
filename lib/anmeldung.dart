@@ -53,26 +53,35 @@ enum StartAusgang {
 /// 1. [update] der App. Liefert true, wenn ein Installer läuft; dann endet der
 ///    Start. Ein Update bringt auch neue Skills, und die Einrichtung soll nicht
 ///    die Version einrichten, die gleich ersetzt wird.
-/// 2. [pluginZustimmung]: die Lehrkraft entscheidet über Plugins, die neu
+/// 2. [pluginPruefung]: je Plugin Schnittstelle und Update
+///    (plugin/plugin_update.dart), nach dem Update der App, weil eine neue App
+///    eine andere Schnittstelle bieten kann, und vor der Zustimmung, damit sie
+///    nach einem Update des Plugins gleich dem neuen Stand gilt. Liefert true,
+///    wenn der Installer von moocp läuft (ein Plugin verlangte eine neuere
+///    Schnittstelle); dann endet der Start.
+/// 3. [pluginZustimmung]: die Lehrkraft entscheidet über Plugins, die neu
 ///    oder geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
 ///    mitbringen, die die Einrichtung behandelt, und vor der Anmeldung, weil
 ///    ein Plugin ohne Anmeldung arbeiten kann.
-/// 3. [pluginsStarten]: die angenommenen Plugins starten, einmal je App. Vor
+/// 4. [pluginsStarten]: die angenommenen Plugins starten, einmal je App. Vor
 ///    der Einrichtung und vor dem MCP-Server, damit jede Sitzung ihre
 ///    Werkzeuge schon vorfindet.
-/// 4. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
+/// 5. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
 ///    Einrichtung der KI-Werkzeuge, dann die Anmeldung.
 ///
 /// [weiter] sagt vor jedem Schritt nach dem ersten, ob die Oberfläche noch da
 /// ist; sonst stünde ein Dialog vor einem Fenster, das nicht mehr besteht.
 Future<StartAusgang> startBisAnmeldung({
   required Future<bool> Function() update,
+  required Future<bool> Function() pluginPruefung,
   required Future<void> Function() pluginZustimmung,
   required Future<void> Function() pluginsStarten,
   required Future<bool> Function() einrichtungUndAnmeldung,
   required bool Function() weiter,
 }) async {
   if (await update()) return StartAusgang.beenden;
+  if (!weiter()) return StartAusgang.abgebrochen;
+  if (await pluginPruefung()) return StartAusgang.beenden;
   if (!weiter()) return StartAusgang.abgebrochen;
   await pluginZustimmung();
   if (!weiter()) return StartAusgang.abgebrochen;

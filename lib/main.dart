@@ -42,6 +42,7 @@ import 'plugin/downloads.dart';
 import 'plugin/entscheidung.dart';
 import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
+import 'plugin/plugin_update.dart';
 import 'plugin/skills.dart';
 import 'plugin/plugins.dart';
 import 'plugin/werkzeugliste.dart';
@@ -559,8 +560,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     }
   }
 
-  /// Der Start in fester Reihenfolge: Updates, Zustimmung zu Plugins, ihr
-  /// Start, KI-Werkzeuge einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
+  /// Der Start in fester Reihenfolge: Update der App, Prüfung je Plugin
+  /// (Schnittstelle, Update), Zustimmung zu Plugins, ihr Start, KI-Werkzeuge
+  /// einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
   /// Reihenfolge der ersten Schritte steht in startBisAnmeldung. Nur
   /// ausdrücklich gebundene Debug-Testprofile melden sich vor einem wartenden
   /// Einrichtungsdialog an, damit ihr MCP-Server für den Live-Test bereitsteht.
@@ -591,6 +593,7 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     );
     final ausgang = await startBisAnmeldung(
       update: _updateSchritt,
+      pluginPruefung: _pluginPruefSchritt,
       pluginZustimmung: _pluginSchritt,
       pluginsStarten: _pluginsStarten,
       einrichtungUndAnmeldung: () => testprofilVorEinrichtungStarten(
@@ -633,10 +636,55 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     );
   }
 
-  /// Sucht die Plugins und fragt die Lehrkraft nach denen, über die noch nicht
-  /// entschieden ist (einstellungen_dialog.dart, pluginSchritt). Ohne Plugin
-  /// im Ordner -- und ohne Suche, wenn die App keine einsetzt -- geschieht
-  /// nichts, auch kein Eintrag im Protokoll. Nichts davon startet ein Plugin.
+  /// Sucht die Plugins und prüft je Plugin Schnittstelle und Update
+  /// (plugin/plugin_update.dart). Ist der Installer eines Plugins gelaufen,
+  /// liest die App die Plugins neu und prüft die aktualisierten noch einmal;
+  /// die Zustimmung danach fragt nach ihrem neuen Stand. Liefert true, wenn
+  /// der Installer von moocp läuft. Ohne Plugin im Ordner -- und ohne Suche,
+  /// wenn die App keine einsetzt -- geschieht nichts, auch kein Eintrag im
+  /// Protokoll. Nichts davon startet ein Plugin.
+  Future<bool> _pluginPruefSchritt() async {
+    final laden = widget.pluginsLaden;
+    if (laden == null) return false;
+    Future<Plugins?> lesen() async {
+      try {
+        return await laden();
+      } catch (e) {
+        widget.protokoll.eintrag(Art.fehler, 'Plugins nicht gelesen (${e.runtimeType})');
+        return null;
+      }
+    }
+
+    final plugins = _plugins = await lesen();
+    if (plugins == null || plugins.eintraege.isEmpty || !mounted) return false;
+    Future<PluginPruefErgebnis> pruefen(Plugins p, {Set<String>? nur}) => pluginsPruefen(
+          plugins: p,
+          einstellungen: widget.einstellungen,
+          protokoll: widget.protokoll,
+          updatefaehig: widget.updatefaehig,
+          moocpUpdateMoeglich: widget.updatefaehig && _version.isNotEmpty,
+          dialoge: PluginPruefDialogeUi(
+            context,
+            einstellungen: widget.einstellungen,
+            protokoll: widget.protokoll,
+            eigene: _version,
+          ),
+          nur: nur,
+          weiter: () => mounted,
+        );
+    final ergebnis = await pruefen(plugins);
+    if (ergebnis.beenden) return true;
+    if (ergebnis.aktualisiert.isEmpty || !mounted) return false;
+    final neu = _plugins = await lesen();
+    if (neu == null || !mounted) return false;
+    // Den Tag der Suche haben die aktualisierten schon: Gesucht wird nicht
+    // noch einmal, nur die Schnittstelle des neuen Stands geprüft.
+    return (await pruefen(neu, nur: ergebnis.aktualisiert)).beenden;
+  }
+
+  /// Fragt die Lehrkraft nach den Plugins, über deren jetzigen Stand noch
+  /// nicht entschieden ist (einstellungen_dialog.dart, pluginSchritt); gesucht
+  /// hat sie schon _pluginPruefSchritt. Nichts davon startet ein Plugin.
   ///
   /// Mit `--plugin-entwicklung` kommt davor die Frage nach dem
   /// Entwicklungs-Plugin (einstellungen_dialog.dart, entwicklungSchritt); hängt
@@ -647,17 +695,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     if (vorbereiten != null && mounted) {
       _entwicklung = await entwicklungSchritt(context, vorbereiten: vorbereiten, protokoll: widget.protokoll);
     }
-    final laden = widget.pluginsLaden;
-    if (laden == null) return;
-    final Plugins plugins;
-    try {
-      plugins = await laden();
-    } catch (e) {
-      widget.protokoll.eintrag(Art.fehler, 'Plugins nicht gelesen (${e.runtimeType})');
-      return;
-    }
-    _plugins = plugins;
-    if (!mounted) return;
+    final plugins = _plugins;
+    if (plugins == null || !mounted) return;
     await pluginSchritt(context, plugins: plugins, profile: _alleProfile, ohneKurzname: _entwicklung?.kurzname);
   }
 

@@ -156,6 +156,49 @@ Map<String, PluginEntscheidung> pluginEntscheidungenAus(Object? j) {
   return ergebnis;
 }
 
+/// Die Update-Prüfung eines Plugins (plugin_update.dart), je Plugin-Ordner in
+/// den Einstellungen unter `pluginUpdates`. Anders als [PluginEntscheidung]
+/// hängt sie nicht an einem Stand: Wer die Prüfung für ein Plugin abschaltet,
+/// will das auch nach dessen nächstem Update noch, und der Tag der letzten
+/// Prüfung gilt für das Plugin, nicht für eine Version.
+class PluginUpdateStand {
+  const PluginUpdateStand({this.aus = false, this.zuletzt});
+
+  /// Die Lehrkraft hat die Prüfung für dieses Plugin abgeschaltet (Dialog
+  /// „Plugins“).
+  final bool aus;
+
+  /// Tag der letzten Prüfung (`2026-10-03`), wie `updateZuletzt` für moocp:
+  /// gesetzt auch nach einem Fehlversuch.
+  final String? zuletzt;
+
+  PluginUpdateStand mit({bool? aus, String? zuletzt}) =>
+      PluginUpdateStand(aus: aus ?? this.aus, zuletzt: zuletzt ?? this.zuletzt);
+
+  Map<String, Object?> toJson() => {
+        if (aus) 'aus': true,
+        if (zuletzt != null) 'zuletzt': zuletzt,
+      };
+
+  /// Beschädigtes fällt auf die Vorgabe zurück: Prüfung an, noch nie geprüft.
+  /// Mehr als eine Anfrage an GitHub am Tag, die die Lehrkraft erlaubt hat,
+  /// kann daraus nicht werden.
+  static PluginUpdateStand ausJson(Object? j) {
+    if (j is! Map) return const PluginUpdateStand();
+    final zuletzt = j['zuletzt'];
+    return PluginUpdateStand(aus: j['aus'] == true, zuletzt: zuletzt is String ? zuletzt : null);
+  }
+}
+
+/// Liest den Abschnitt `pluginUpdates` der Einstellungen.
+Map<String, PluginUpdateStand> pluginUpdatesAus(Object? j) {
+  if (j is! Map) return {};
+  return {
+    for (final MapEntry(:key, :value) in j.entries)
+      if (key is String) key: PluginUpdateStand.ausJson(value),
+  };
+}
+
 /// Die Entscheidungen ohne das gelöschte Profil [kennung]: Die Zustimmung
 /// bleibt, das Plugin ist dort nur nicht mehr eingeschaltet. [alt] bleibt
 /// unverändert, damit der Aufrufer zurückrollen kann, wenn das Speichern

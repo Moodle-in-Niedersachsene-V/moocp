@@ -57,6 +57,7 @@ import 'app_adresse.dart';
 import 'beschreibung.dart';
 import 'namenssperre.dart';
 import 'plugins.dart';
+import 'schnittstelle.dart';
 import 'verbindung.dart';
 
 /// Der Schalter auf der Kommandozeile; danach steht der Ordner des Plugins.
@@ -104,7 +105,8 @@ class EntwicklungsPlugin {
 /// [entwicklungsOrdnerAus]) und den Schlüssel aus [umgebung]. Wirft
 /// [PluginFehler] mit einem Satz für die Lehrkraft, ohne Inhalte der Datei
 /// (E11) und ohne den Schlüssel: Ordner fehlt, Beschreibungsdatei unlesbar
-/// oder ungültig, kein Entwicklungsport, kein Schlüssel.
+/// oder ungültig, Schnittstelle passt nicht, kein Entwicklungsport, kein
+/// Schlüssel.
 EntwicklungsPlugin entwicklungVorbereiten(String ordner, Map<String, String> umgebung) {
   if (ordner.isEmpty) {
     throw const PluginFehler('Nach $pluginEntwicklungSchalter fehlt der Ordner des Plugins.');
@@ -114,6 +116,13 @@ EntwicklungsPlugin entwicklungVorbereiten(String ordner, Map<String, String> umg
     throw PluginFehler('Den Ordner „$pfad“ gibt es nicht.');
   }
   final beschreibung = beschreibungLesen(pfad);
+  // Die Schnittstelle gilt wie für ein installiertes Plugin
+  // (schnittstelle.dart); nach einem Update sucht die App für ein
+  // Entwicklungs-Plugin nie, das baut sein Entwickler selbst.
+  final urteil = schnittstelleUrteil(beschreibung.schnittstelle);
+  if (urteil != SchnittstellenUrteil.passt) {
+    throw PluginFehler(schnittstelleGrund(urteil, beschreibung.schnittstelle));
+  }
   final port = beschreibung.entwicklungsPort;
   if (port == null) {
     throw const PluginFehler('Die Beschreibungsdatei nennt keinen Entwicklungsport (Feld „entwicklungsPort“).');

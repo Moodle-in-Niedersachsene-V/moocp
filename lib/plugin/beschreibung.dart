@@ -63,6 +63,7 @@ class PluginBeschreibung {
     required this.herkunft,
     this.updateQuellen = const [],
     this.zusatzadressen = const [],
+    this.skills = const [],
     this.wahlSkills = const {},
     this.ohneAnmeldung = const [],
     this.entwicklungsPort,
@@ -90,7 +91,15 @@ class PluginBeschreibung {
   final List<String> updateQuellen;
   final List<Zusatzadresse> zusatzadressen;
 
-  /// Wählbare Skills: Name und Beschreibung, wie bei `appWahlSkills`.
+  /// Die Skills, die immer dabei sind, mit ihrem Namen; jeder liegt im
+  /// Plugin-Ordner unter `skills/<name>/` (plugin/skills.dart). Ob ein Name
+  /// den Regeln für Skills folgt (Kurzname vorn, kein Name eines Skills der
+  /// App), prüft erst die Einrichtung: Ein falscher Name macht nur dieses
+  /// Paket unbrauchbar, nicht das Plugin.
+  final List<String> skills;
+
+  /// Wählbare Skills: Name und Beschreibung, wie bei `appWahlSkills`; sie
+  /// liegen wie [skills] unter `skills/<name>/`. Kein Name steht in beiden.
   final Map<String, String> wahlSkills;
 
   /// Die Werkzeuge, die ohne Moodle-Anmeldung arbeiten. Gegen nichts geprüft.
@@ -128,6 +137,11 @@ class PluginBeschreibung {
         'Der Kurzname besteht nur aus Kleinbuchstaben und Ziffern und beginnt mit einem Buchstaben.',
       );
     }
+    final skills = _skills(json['skills']);
+    final wahlSkills = _wahlSkills(json['wahlSkills']);
+    if (skills.any(wahlSkills.containsKey)) {
+      throw const PluginFehler('Ein Skill steht in „skills“ und in „wahlSkills“; er ist entweder immer dabei oder wählbar.');
+    }
     return PluginBeschreibung(
       name: _pflichtText(json, 'name'),
       kurzname: kurzname,
@@ -137,7 +151,8 @@ class PluginBeschreibung {
       herkunft: _pflichtText(json, 'herkunft'),
       updateQuellen: _updateQuellen(json['updateQuellen']),
       zusatzadressen: _zusatzadressen(json['zusatzadressen']),
-      wahlSkills: _wahlSkills(json['wahlSkills']),
+      skills: skills,
+      wahlSkills: wahlSkills,
       ohneAnmeldung: _ohneAnmeldung(json['ohneAnmeldung']),
       entwicklungsPort: _port(json['entwicklungsPort']),
     );
@@ -222,6 +237,19 @@ Zusatzadresse _zusatzadresse(Object? w) {
   final art = ZugriffsArt.ausText(_pflichtText(w, 'art'));
   if (art == null) throw const PluginFehler('Das Feld „art“ ist „lesen“ oder „schreiben“.');
   return Zusatzadresse(muster, art, _pflichtText(w, 'grund'));
+}
+
+List<String> _skills(Object? w) {
+  if (w == null) return const [];
+  const regel = 'Das Feld „skills“ ist eine Liste von Skill-Namen.';
+  if (w is! List) throw const PluginFehler(regel);
+  final namen = <String>[];
+  for (final n in w) {
+    if (n is! String || n.isEmpty || _hatSteuerzeichen(n)) throw const PluginFehler(regel);
+    if (namen.contains(n)) throw const PluginFehler('Das Feld „skills“ nennt einen Skill zweimal.');
+    namen.add(n);
+  }
+  return namen;
 }
 
 Map<String, String> _wahlSkills(Object? w) {

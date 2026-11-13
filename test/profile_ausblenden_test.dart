@@ -613,6 +613,57 @@ void main() {
       expect(skillOrdner('lernsituation').existsSync(), isFalse);
       expect(File(p.join(skillOrdner('moodle').path, 'SKILL.md')).existsSync(), isTrue, reason: 'der feste bleibt');
     });
+
+    testWidgets('Skills eines Plugins: wählbar mit Plugin und Beschreibung, Verwaistes wird entfernt, '
+        'ein unbrauchbares Paket nur genannt', (tester) async {
+      await aufbauen(tester);
+      final pflicht = SkillPaket('beispiel', {'SKILL.md': utf8.encode('Beispiel')},
+          herkunft: SkillHerkunft.plugin, plugin: 'Beispiel');
+      final wahl = SkillPaket('beispiel-vorlage', {'SKILL.md': utf8.encode('Vorlage')},
+          herkunft: SkillHerkunft.plugin, plugin: 'Beispiel');
+      expect(skillInstallieren(SkillPaket('alt-skill', {'SKILL.md': utf8.encode('Alt')}, herkunft: SkillHerkunft.plugin),
+          skillOrdner('alt-skill')), isEmpty);
+      const fehler = 'Plugin „Beispiel“: Der Skill beispiel-fehlt wird nicht installiert: '
+          'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
+      Future<Einrichtungsstand> mitPlugin() => einrichtungPruefen(
+            umgebung: env,
+            port: 47811,
+            schluessel: 'abc',
+            skills: [moodle, lernsituation, pflicht, wahl],
+            wahlSkills: {...appWahlSkills, 'beispiel-vorlage': 'Eine Vorlage zum Ausprobieren.'},
+            gewaehlt: einstellungen.wahlSkills ?? const {},
+            verwaist: const {'alt-skill'},
+            skillFehler: const [fehler],
+            gefunden: [codex],
+            python: () async => true,
+          );
+      await tester.pumpWidget(MaterialApp(
+        home: EinrichtungDialog(
+          stand: await mitPlugin(),
+          pruefen: mitPlugin,
+          einstellungen: einstellungen,
+          protokoll: Protokoll(),
+          port: 47811,
+          schluessel: 'abc',
+        ),
+      ));
+
+      final pluginHaken = find.widgetWithText(CheckboxListTile, 'Skill beispiel-vorlage (Plugin „Beispiel“)');
+      expect(pluginHaken, findsOneWidget);
+      expect(find.text('Eine Vorlage zum Ausprobieren.'), findsOneWidget);
+      expect(tester.widget<CheckboxListTile>(pluginHaken).value, isFalse);
+      expect(find.text(fehler), findsOneWidget);
+      expect(find.text('nicht installiert: beispiel; werden entfernt: alt-skill'), findsOneWidget);
+
+      await tester.tap(find.text('Installieren'));
+      await abwarten(tester);
+      expect(File(p.join(skillOrdner('beispiel').path, 'SKILL.md')).existsSync(), isTrue);
+      expect(skillOrdner('beispiel-vorlage').existsSync(), isFalse);
+      expect(skillOrdner('alt-skill').existsSync(), isFalse);
+      expect(find.text('Verbindung und Skills sind aktuell.'), findsNothing);
+      expect(find.text('Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'),
+          findsOneWidget, reason: 'das unbrauchbare Paket hält nichts auf');
+    });
   });
 
   group('Freigabedialog', () {

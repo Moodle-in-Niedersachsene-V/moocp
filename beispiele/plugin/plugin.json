@@ -23,7 +23,10 @@
       "grund": "Lädt den Export einer Aktivität herunter, mit dem das Werkzeug beispiel_download zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse herunterlädt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
     }
   ],
-  "wahlSkills": {},
+  "skills": ["beispiel"],
+  "wahlSkills": {
+    "beispiel-vorlage": "Vorlage für einen wählbaren Skill eines Plugins; zeigt, wie ein Skill mit Haken aussieht."
+  },
   "ohneAnmeldung": [],
   "entwicklungsPort": 47900
 }

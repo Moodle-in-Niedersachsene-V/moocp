@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'einrichtung.dart' show skillNameGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
 import 'plugin/entscheidung.dart';
@@ -32,7 +33,9 @@ class Einstellungen {
     this.updateZuletzt,
     this.updateErwartet,
     Map<String, PluginEntscheidung>? plugins,
+    Set<String> pluginSkills = const {},
   })  : plugins = Map.of(plugins ?? const {}),
+        pluginSkills = {...pluginSkills},
         profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
   /// Die Moodle-Instanzen, mit denen die App angemeldet sein kann. Das erste
@@ -150,6 +153,14 @@ class Einstellungen {
   /// Speicherfehler zurückrollen).
   Map<String, PluginEntscheidung> plugins;
 
+  /// Die Skills von Plugins, die die App in den KI-Werkzeugen installiert hat
+  /// (einrichtung.dart, pluginSkillsGemerkt). Nur diese entfernt sie, wenn das
+  /// Plugin abgelehnt oder fort ist, und bei der Deinstallation
+  /// (`--claude-entfernen`) -- die Plugins selbst sind dann vielleicht schon
+  /// nicht mehr lesbar. Beim Lesen fällt jeder Name weg, der kein Skill-Name
+  /// sein kann: Aus ihm wird ein Pfad zum Löschen.
+  Set<String> pluginSkills;
+
   static File get _datei => einstellungenDatei;
 
   static String neuerSchluessel() {
@@ -232,6 +243,7 @@ class Einstellungen {
       updateZuletzt: j['updateZuletzt'] as String?,
       updateErwartet: j['updateErwartet'] as String?,
       plugins: pluginEntscheidungenAus(j['plugins']),
+      pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
     );
   }
 
@@ -248,6 +260,7 @@ class Einstellungen {
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
         if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
+        if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
       };
 
   Future<void> speichern() async {

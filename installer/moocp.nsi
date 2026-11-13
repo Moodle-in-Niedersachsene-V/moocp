@@ -327,8 +327,9 @@ Section "Uninstall"
 
   ; Die Einrichtung in den KI-Werkzeugen entfernt die App selbst: Sie weiß,
   ; wo claude.exe liegt und wie die Einträge von Codex und LM Studio
-  ; aussehen (lib/einrichtung.dart, einrichtungEntfernen). Exit-Code: Bit 1
-  ; ein Eintrag „moodle" steht noch, Bit 2 Dateien der Skills sind noch da.
+  ; aussehen (lib/einrichtung.dart, einrichtungEntfernen), und welche Skills
+  ; der Plugins sie installiert hat (Einstellungen.pluginSkills). Exit-Code:
+  ; Bit 1 ein Eintrag „moodle" steht noch, Bit 2 Dateien der Skills sind noch da.
   DetailPrint "Entferne die Einrichtung in den KI-Werkzeugen …"
   ClearErrors
   ExecWait '"$INSTDIR\${EXE}" --claude-entfernen' $0
@@ -342,7 +343,7 @@ Section "Uninstall"
   ${EndIf}
   IntOp $2 $0 & 2
   ${If} $2 <> 0
-    StrCpy $1 "$1$\n$\n• Dateien der Skills. Das KI-Werkzeug beenden und unter %USERPROFILE%\.claude\skills, %USERPROFILE%\.codex\skills und %USERPROFILE%\.lmstudio\skills die Ordner moodle, moodle-fragen und lernsituation löschen, soweit vorhanden."
+    StrCpy $1 "$1$\n$\n• Dateien der Skills. Das KI-Werkzeug beenden und unter %USERPROFILE%\.claude\skills, %USERPROFILE%\.codex\skills und %USERPROFILE%\.lmstudio\skills die Ordner moodle, moodle-fragen und lernsituation und die Skills der Plugins löschen, soweit vorhanden."
   ${EndIf}
   ${If} $1 != ""
     MessageBox MB_OK|MB_ICONEXCLAMATION "Nicht alles ließ sich entfernen:$1" /SD IDOK
@@ -371,6 +372,9 @@ Section "Uninstall"
   ; in windows/runner/Runner.rc), der Arbeitsordner (lib/arbeitsordner.dart).
   ; Beides liegt unter %APPDATA%\moocp: CompanyName ist dort ebenfalls moocp.
   ; Dazu der Ordner für Downloads der Plugins (lib/plugin/downloads.dart).
+  ; Die Plugins selbst liegen unter %APPDATA%\moocp\plugins und gehen hier mit;
+  ; ein Update fasst den Ordner nicht an. Erst nach --claude-entfernen oben,
+  ; das die gemerkten Skills der Plugins aus den Einstellungen liest.
   RMDir /r "$APPDATA\moocp"
   RMDir /r "$TEMP\moocp_arbeitsordner"
   RMDir /r "$TEMP\moocp_plugin_downloads"

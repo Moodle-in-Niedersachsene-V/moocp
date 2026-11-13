@@ -73,6 +73,7 @@ void main() {
       expect(b.updateQuellen, isEmpty);
       expect(b.zusatzadressen, isEmpty);
       expect(b.wahlSkills, isEmpty);
+      expect(b.skills, isEmpty);
       expect(b.ohneAnmeldung, isEmpty);
       expect(b.entwicklungsPort, isNull);
     });
@@ -267,6 +268,21 @@ void main() {
       expect(_grund(_mit(_minimal(), 'wahlSkills', ['a'])), contains('„wahlSkills“'));
       expect(_grund(_mit(_minimal(), 'wahlSkills', {'a': 1})), contains('„wahlSkills“'));
       expect(_grund(_mit(_minimal(), 'wahlSkills', {'a': ''})), contains('„wahlSkills“'));
+    });
+
+    test('Skills, die immer dabei sind: eine Liste von Namen, ohne Doppel und nicht zugleich wählbar', () {
+      expect(_grund(_mit(_minimal(), 'skills', ['beispiel', 'beispiel-mehr'])), isNull);
+      expect(PluginBeschreibung.ausJson(_mit(_minimal(), 'skills', ['beispiel'])).skills, ['beispiel']);
+      expect(PluginBeschreibung.ausJson(_minimal()).skills, isEmpty);
+      expect(_grund(_mit(_minimal(), 'skills', 'beispiel')), contains('„skills“'));
+      expect(_grund(_mit(_minimal(), 'skills', [1])), contains('„skills“'));
+      expect(_grund(_mit(_minimal(), 'skills', [''])), contains('„skills“'));
+      expect(_grund(_mit(_minimal(), 'skills', ['a${String.fromCharCode(10)}b'])), contains('„skills“'));
+      expect(_grund(_mit(_minimal(), 'skills', ['beispiel', 'beispiel'])), contains('zweimal'));
+      final beides = _mit(_mit(_minimal(), 'skills', ['beispiel-x']), 'wahlSkills', {'beispiel-x': 'Text'});
+      final grund = _grund(beides);
+      expect(grund, contains('„wahlSkills“'));
+      expect(grund, isNot(contains('beispiel-x')), reason: 'der Grund nennt keine Inhalte');
     });
 
     test('Werkzeuge ohne Anmeldung: eine Liste von Namen, gegen nichts geprüft', () {

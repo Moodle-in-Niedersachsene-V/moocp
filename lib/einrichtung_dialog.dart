@@ -9,7 +9,10 @@
 // Skill, der nicht zur App passt, ruft Werkzeuge falsch auf. Haken gibt es
 // bei den Werkzeugen und bei den wählbaren Skills (Einrichtungsstand.wahlSkills,
 // einrichtung.dart); was gewählt ist, wird streng geprüft, was abgewählt
-// ist, entfernt „Installieren".
+// ist, entfernt „Installieren". Die Skills der Plugins, denen zugestimmt ist,
+// stehen hier wie die eigenen (plugin/skills.dart); die eines abgelehnten
+// oder entfernten Plugins entfernt „Installieren", und ein Skill-Paket, das
+// sich nicht installieren lässt, nennt der Dialog nur.
 //
 // Die App öffnet den Dialog beim Start, wenn etwas nicht passt, und jederzeit
 // über den Knopf „KI-Werkzeuge einrichten" in der Titelzeile.
@@ -316,7 +319,7 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
       controlAffinity: ListTileControlAffinity.leading,
       value: s.gewaehlt.contains(name),
       onChanged: _laeuft ? null : (v) => _skillWaehlen(name, v ?? false),
-      title: Text('Skill $name'),
+      title: Text(paket.plugin == null ? 'Skill $name' : 'Skill $name (Plugin „${paket.plugin}“)'),
       subtitle: Text(s.wahlSkills[name]!),
     );
   }
@@ -393,6 +396,9 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
                 for (final paket in s.skills)
                   if (s.wahlSkills.containsKey(paket.name)) _wahlZeile(s, paket),
               ],
+              // Skills von Plugins, die nicht installiert werden: Sie halten
+              // nichts auf, die Lehrkraft soll aber wissen, dass sie fehlen.
+              for (final f in s.skillFehler) _hinweis(f),
             ],
             if (s == null) _hinweis('Die Prüfung ist fehlgeschlagen; Einzelheiten stehen im Protokoll.'),
             if (s != null && !s.python && s.gewaehlt.contains('lernsituation'))

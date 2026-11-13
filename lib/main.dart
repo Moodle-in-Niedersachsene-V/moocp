@@ -42,6 +42,7 @@ import 'plugin/downloads.dart';
 import 'plugin/entscheidung.dart';
 import 'plugin/entwicklung.dart';
 import 'plugin/laufende_plugins.dart';
+import 'plugin/skills.dart';
 import 'plugin/plugins.dart';
 import 'plugin/werkzeugliste.dart';
 import 'profil.dart';
@@ -243,10 +244,16 @@ Instanz _instanzFuer(
 Future<int> _claudeEntfernen() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
+    final gespeichert = await _gespeicherteEinstellungen();
     return (await einrichtungEntfernen(
       umgebung: Platform.environment,
-      skills: [for (final s in await _skillPakete()) s.name],
-      mcpNamen: await _gespeicherteMcpNamen(),
+      // Die Skills der App und die der Plugins, die die App installiert hat;
+      // die Plugins selbst liest sie dafür nicht.
+      skills: [
+        for (final s in await _skillPakete()) s.name,
+        ...?gespeichert?.pluginSkills,
+      ],
+      mcpNamen: _gespeicherteMcpNamen(gespeichert),
     )).code;
   } catch (_) {
     return 3; // unbekannt, was geblieben ist: beides melden
@@ -266,25 +273,27 @@ Future<List<SkillPaket>> _skillPakete() async {
   );
 }
 
-/// Die MCP-Namen aller gespeicherten Profile, immer mit `moodle`. Liest die
-/// Einstellungsdatei nur und schreibt sie nicht (anders als
-/// [Einstellungen.laden]): Die Deinstallation legt nichts neu an. Fehlt die
-/// Datei oder ist sie kaputt, bleibt es beim Namen `moodle`.
-Future<List<String>> _gespeicherteMcpNamen() async {
-  final namen = <String>{mcpName};
+/// Die gespeicherten Einstellungen für die Deinstallation. Liest die Datei nur
+/// und schreibt sie nicht (anders als [Einstellungen.laden]): Die
+/// Deinstallation legt nichts neu an. null, wenn die Datei fehlt oder kaputt
+/// ist.
+Future<Einstellungen?> _gespeicherteEinstellungen() async {
   try {
     final j = jsonDecode(
       await einstellungenDatei.readAsString(),
     ) as Map<String, dynamic>;
-    final standard = Einstellungen(moodleAdresse: '', schluessel: '');
-    namen.addAll(
-      Einstellungen.aus(j, standard).profile.map((pr) => pr.mcpName),
-    );
+    return Einstellungen.aus(j, Einstellungen(moodleAdresse: '', schluessel: ''));
   } catch (_) {
-    // Nichts zu lesen: nur der Standardname.
+    return null;
   }
-  return namen.toList();
 }
+
+/// Die MCP-Namen aller gespeicherten Profile, immer mit `moodle`. Ohne
+/// lesbare Einstellungen bleibt es beim Namen `moodle`.
+List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) => {
+      mcpName,
+      ...?gespeichert?.profile.map((pr) => pr.mcpName),
+    }.toList();
 
 /// `moocp.exe --werkzeugliste`, für die Brücke (mcp/bruecke.dart), wenn die
 /// App nicht angemeldet ist oder nicht läuft: die Werkzeugliste als eine
@@ -933,6 +942,11 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         widget.protokoll.eintrag(Art.info, 'Claude Code: claude.exe nicht gefunden; ${k.suchbericht.join('; ')}');
       }
     }
+    // Ein Skill-Paket eines Plugins, das sich nicht installieren lässt, hält
+    // nichts auf; das Protokoll nennt Plugin und Grund, der Dialog auch.
+    for (final f in stand?.skillFehler ?? const <String>[]) {
+      widget.protokoll.eintrag(Art.fehler, 'KI-Werkzeuge einrichten: $f');
+    }
     if (stand != null &&
         !stand.python &&
         stand.gewaehlt.contains('lernsituation')) {
@@ -966,20 +980,47 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     return bereit == true;
   }
 
+  /// Die Prüfung der Einrichtung, mit den Skills der App und denen der
+  /// Plugins, denen zugestimmt ist (plugin/skills.dart). Danach hält sie fest,
+  /// welche Plugin-Skills die App installiert hat (pluginSkillsGemerkt), damit
+  /// sie sie entfernen kann, wenn das Plugin fort ist, und bei der
+  /// Deinstallation.
   Future<Einrichtungsstand> _einrichtungsstand() async {
     if (widget.einrichtungsstand != null) return widget.einrichtungsstand!();
-    return einrichtungPruefen(
+    final e = widget.einstellungen;
+    final app = await _skillPakete();
+    final appNamen = {for (final s in app) s.name};
+    final plugins = await pluginSkillsLesen(_plugins, appNamen: appNamen);
+    final wahl = {...appWahlSkills, ...plugins.wahlSkills};
+    final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
       port: _dienst.profil.port,
       name: _dienst.profil.mcpName,
-      schluessel: widget.einstellungen.schluesselFuer(_dienst.profil),
-      skills: await _skillPakete(),
-      wahlSkills: appWahlSkills,
-      abgewaehlt: widget.einstellungen.werkzeugeAbgewaehlt,
-      gewaehlt:
-          widget.einstellungen.wahlSkills ??
-          gewaehltVorgabe(Platform.environment, appWahlSkills.keys),
+      schluessel: e.schluesselFuer(_dienst.profil),
+      skills: [...app, ...plugins.pakete],
+      wahlSkills: wahl,
+      abgewaehlt: e.werkzeugeAbgewaehlt,
+      gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
+      verwaist: verwaisteSkills(e.pluginSkills, plugins, appNamen),
+      skillFehler: plugins.fehler,
     );
+    final gemerkt = pluginSkillsGemerkt(
+      gemerkt: e.pluginSkills,
+      stand: stand,
+      werkzeuge: alleWerkzeuge(Platform.environment),
+    );
+    if (gemerkt.length != e.pluginSkills.length || !gemerkt.containsAll(e.pluginSkills)) {
+      final alt = e.pluginSkills;
+      e.pluginSkills = gemerkt;
+      try {
+        await e.speichern();
+      } catch (x) {
+        // Bleibt für diesen Lauf gemerkt; der nächste Start versucht es wieder.
+        widget.protokoll.eintrag(Art.fehler, 'Skills der Plugins nicht gemerkt (${x.runtimeType})');
+        e.pluginSkills = alt.union(gemerkt);
+      }
+    }
+    return stand;
   }
 
   @override

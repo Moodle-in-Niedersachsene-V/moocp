@@ -1,6 +1,6 @@
 // Die Protokollansicht: der neueste Eintrag unten; sie folgt nur, solange sie
 // ganz unten steht.
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/main.dart';
 import 'package:moocp/protokoll.dart';

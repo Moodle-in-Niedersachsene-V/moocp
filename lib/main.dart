@@ -8,14 +8,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
-import 'package:zwischenablage_html/zwischenablage_html.dart';
 
 import 'anmeldedaten.dart';
 import 'anmeldung.dart';
@@ -38,6 +36,7 @@ import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
 import 'plattform/kindprozess.dart';
 import 'plattform/plattform.dart' show benutzerordner;
+import 'plattform/zwischenablage.dart';
 import 'plugin/dialoge.dart';
 import 'plugin/downloads.dart';
 import 'plugin/entscheidung.dart';
@@ -54,10 +53,21 @@ import 'update/update.dart';
 import 'testschalter.dart';
 import 'update/update_dialoge.dart';
 
-export 'anmeldung.dart' show Instanz, AnmeldeAuftrag, gespeicherteAnmeldedatenVerwenden;
+export 'anmeldung.dart'
+    show Instanz, AnmeldeAuftrag, gespeicherteAnmeldedatenVerwenden;
 export 'nur_maus.dart' show Sperrzeit;
 
 part 'plugin_dialoge.dart';
+
+/// Das Fenster der App. Null, wo es keines gibt oder der Zugriff scheitert;
+/// die Aufrufer lassen das Fenster dann, wie es ist.
+Window? _appFenster() {
+  try {
+    return WindowManager.instance.getCurrent();
+  } catch (_) {
+    return null;
+  }
+}
 
 Future<void> main(List<String> argumente) async {
   // Keine Ausgabe auf die Konsole, von niemandem: debugPrint schweigt -- auch
@@ -77,7 +87,6 @@ Future<void> main(List<String> argumente) async {
   if (!kReleaseMode) loggingEinrichten(stufe: Level.ALL);
   mcpLogsUmleiten();
   WidgetsFlutterBinding.ensureInitialized();
-  await windowManager.ensureInitialized();
   // Vor allem, was Einstellungen und Arbeitsordner anfasst: Eine zweite App
   // holt hier nur die laufende nach vorn (einzelstart.dart). Unter Windows
   // hat windows/runner/main.cpp das schon geprüft und gibt immer eine Sperre
@@ -111,8 +120,6 @@ Future<void> main(List<String> argumente) async {
         ? 'Arbeitsordner geleert: ${arbeitsordner.pfad}'
         : 'Arbeitsordner: ${arbeitsordner.pfad} -- $geblieben Einträge in Benutzung, nicht gelöscht',
   );
-  // Schließen läuft über _beenden, damit der Arbeitsordner geleert wird.
-  await windowManager.setPreventClose(true);
   // Je Instanzprofil ein Zugang, eine Freigabe und ein MCP-Server mit eigenem
   // Port und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
   // Anmeldung die Oberfläche zeigt.
@@ -183,11 +190,15 @@ Future<void> main(List<String> argumente) async {
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
       pluginUpdatefaehig: pluginUpdateMoeglich(argumente),
-      pluginsLaden: () => Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
+      pluginsLaden: () =>
+          Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
       laufendePlugins: laufendePlugins,
       entwicklungVorbereiten: entwicklungsOrdner == null
           ? null
-          : () => entwicklungVorbereiten(entwicklungsOrdner, Platform.environment),
+          : () => entwicklungVorbereiten(
+              entwicklungsOrdner,
+              Platform.environment,
+            ),
       fokus: einzel.fokus,
     ),
   );
@@ -219,10 +230,7 @@ Instanz _instanzFuer(
           p.join(arbeitsordner.pfad, pr.kennung),
         )..createSync(recursive: true)).path
       : arbeitsordner.pfad;
-  final freigaben = Freigaben(
-    ansicht,
-    stufe: pr.bestaetigungen,
-  );
+  final freigaben = Freigaben(ansicht, stufe: pr.bestaetigungen);
   return Instanz(
     zugang,
     freigaben,
@@ -285,7 +293,10 @@ Future<Einstellungen?> _gespeicherteEinstellungen() async {
     final j = jsonDecode(
       await einstellungenDatei.readAsString(),
     ) as Map<String, dynamic>;
-    return Einstellungen.aus(j, Einstellungen(moodleAdresse: '', schluessel: ''));
+    return Einstellungen.aus(
+      j,
+      Einstellungen(moodleAdresse: '', schluessel: ''),
+    );
   } catch (_) {
     return null;
   }
@@ -293,10 +304,8 @@ Future<Einstellungen?> _gespeicherteEinstellungen() async {
 
 /// Die MCP-Namen aller gespeicherten Profile, immer mit `moodle`. Ohne
 /// lesbare Einstellungen bleibt es beim Namen `moodle`.
-List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) => {
-      mcpName,
-      ...?gespeichert?.profile.map((pr) => pr.mcpName),
-    }.toList();
+List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) =>
+    {mcpName, ...?gespeichert?.profile.map((pr) => pr.mcpName)}.toList();
 
 /// `moocp.exe --werkzeugliste`, für die Brücke (mcp/bruecke.dart), wenn die
 /// App nicht angemeldet ist oder nicht läuft: die Werkzeugliste als eine
@@ -475,7 +484,7 @@ class Hauptseite extends StatefulWidget {
   State<Hauptseite> createState() => _HauptseiteState();
 }
 
-class _HauptseiteState extends State<Hauptseite> with WindowListener {
+class _HauptseiteState extends State<Hauptseite> {
   late final List<Instanz> _instanzen = [
     Instanz(widget.moodle, widget.freigaben, widget.dienst),
     ...widget.weitere,
@@ -526,6 +535,13 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// Gesetzt, sobald _beenden läuft.
   bool _beendet = false;
 
+  /// Gesetzt, wenn _beenden aufgeräumt hat: Erst dann geht ein Schließwunsch
+  /// an das Fenster durch (_fensterEreignis).
+  bool _schliessen = false;
+
+  /// Die Anmeldung von _fensterEreignis am Fenster, zum Abmelden.
+  ListenerId? _fensterAbo;
+
   /// Die laufende Version („0.9.4"), für die Update-Prüfung und die
   /// Einstellungen; leer, wenn sie sich nicht lesen lässt.
   String _version = '';
@@ -553,7 +569,7 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
+    _fensterAbo = _appFenster()?.addListener(_fensterEreignis);
     widget.protokoll.addListener(_aktualisieren);
     _fokusAbo = widget.fokus?.listen((_) => _fensterZeigen());
     WidgetsBinding.instance.addPostFrameCallback((_) => _starten());
@@ -564,8 +580,11 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// nicht oben, sondern verhält sich wie jedes andere Fenster.
   Future<void> _fensterZeigen() async {
     try {
-      await windowManager.show();
-      await windowManager.focus();
+      final fenster = _appFenster();
+      if (fenster == null) return;
+      if (fenster.isMinimized) fenster.restore();
+      fenster.show();
+      fenster.focus();
     } catch (_) {
       // Ohne Fensterzugriff bleibt das Fenster, wie es ist.
     }
@@ -662,14 +681,18 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       try {
         return await laden();
       } catch (e) {
-        widget.protokoll.eintrag(Art.fehler, 'Plugins nicht gelesen (${e.runtimeType})');
+        widget.protokoll.eintrag(
+          Art.fehler,
+          'Plugins nicht gelesen (${e.runtimeType})',
+        );
         return null;
       }
     }
 
     final plugins = _plugins = await lesen();
     if (plugins == null || plugins.eintraege.isEmpty || !mounted) return false;
-    Future<PluginPruefErgebnis> pruefen(Plugins p, {Set<String>? nur}) => pluginsPruefen(
+    Future<PluginPruefErgebnis> pruefen(Plugins p, {Set<String>? nur}) =>
+        pluginsPruefen(
           plugins: p,
           einstellungen: widget.einstellungen,
           protokoll: widget.protokoll,
@@ -706,11 +729,20 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   Future<void> _pluginSchritt() async {
     final vorbereiten = widget.entwicklungVorbereiten;
     if (vorbereiten != null && mounted) {
-      _entwicklung = await entwicklungSchritt(context, vorbereiten: vorbereiten, protokoll: widget.protokoll);
+      _entwicklung = await entwicklungSchritt(
+        context,
+        vorbereiten: vorbereiten,
+        protokoll: widget.protokoll,
+      );
     }
     final plugins = _plugins;
     if (plugins == null || !mounted) return;
-    await pluginSchritt(context, plugins: plugins, profile: _alleProfile, ohneKurzname: _entwicklung?.kurzname);
+    await pluginSchritt(
+      context,
+      plugins: plugins,
+      profile: _alleProfile,
+      ohneKurzname: _entwicklung?.kurzname,
+    );
   }
 
   /// Startet die Plugins, denen die Lehrkraft zugestimmt hat
@@ -723,7 +755,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     final entwicklung = _entwicklung;
     if (laufende == null || (plugins == null && entwicklung == null)) return;
     final eingebaut = await widget.dienst.eingebauteWerkzeugnamen();
-    if (entwicklung != null) await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
+    if (entwicklung != null) {
+      await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
+    }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
   }
 
@@ -787,12 +821,20 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     if (plugins == null) return;
     await showDialog<void>(
       context: context,
-      builder: (_) => PluginsDialog(plugins: plugins, profile: _alleProfile, laufende: widget.laufendePlugins),
+      builder: (_) => PluginsDialog(
+        plugins: plugins,
+        profile: _alleProfile,
+        laufende: widget.laufendePlugins,
+      ),
     );
   }
 
   Future<void> _profilLoeschen() async {
-    if (_beschaeftigt || widget.einstellungen.profile.length < 2 || _profil.istStandard) return;
+    if (_beschaeftigt ||
+        widget.einstellungen.profile.length < 2 ||
+        _profil.istStandard) {
+      return;
+    }
     final profil = _profil;
     final bestaetigt = await showDialog<bool>(
       context: context,
@@ -830,7 +872,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     // Zustimmung bleibt, das Plugin ist dort nur nicht mehr eingeschaltet.
     final altePlugins = widget.einstellungen.plugins;
     widget.einstellungen.profile = neueProfile;
-    widget.einstellungen.plugins = pluginEntscheidungenOhneProfil(altePlugins, profil.kennung);
+    widget.einstellungen.plugins = pluginEntscheidungenOhneProfil(
+      altePlugins,
+      profil.kennung,
+    );
     try {
       await widget.einstellungen.speichern();
     } catch (e) {
@@ -951,7 +996,11 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// Startet den MCP-Server, sobald die App eingerichtet und angemeldet ist
   /// (mcpServerStarten).
   Future<void> _mcpStarten() async {
-    await mcpServerStarten([..._instanzen], eingerichtet: _eingerichtet, protokoll: widget.protokoll);
+    await mcpServerStarten(
+      [..._instanzen],
+      eingerichtet: _eingerichtet,
+      protokoll: widget.protokoll,
+    );
     if (_eingerichtet && mounted) setState(() => _mcpVersucht = true);
   }
 
@@ -976,7 +1025,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     for (final w in stand?.werkzeuge ?? const <Werkzeugstand>[]) {
       final k = w.werkzeug;
       if (k is ClaudeCode && !k.bedienbar && k.suchbericht.isNotEmpty) {
-        widget.protokoll.eintrag(Art.info, 'Claude Code: claude.exe nicht gefunden; ${k.suchbericht.join('; ')}');
+        widget.protokoll.eintrag(
+          Art.info,
+          'Claude Code: claude.exe nicht gefunden; ${k.suchbericht.join('; ')}',
+        );
       }
     }
     // Ein Skill-Paket eines Plugins, das sich nicht installieren lässt, hält
@@ -1033,7 +1085,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   Future<void> _skillFehlerGesehenMerken() async {
     final e = widget.einstellungen;
     final neu = _skillFehlerStand;
-    if (neu.length == e.skillFehlerGesehen.length && neu.containsAll(e.skillFehlerGesehen)) return;
+    if (neu.length == e.skillFehlerGesehen.length &&
+        neu.containsAll(e.skillFehlerGesehen)) {
+      return;
+    }
     final alt = e.skillFehlerGesehen;
     e.skillFehlerGesehen = {...neu};
     try {
@@ -1041,7 +1096,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     } catch (x) {
       // Gilt für diesen Lauf; der nächste Start zeigt den Hinweis noch einmal.
       e.skillFehlerGesehen = alt;
-      widget.protokoll.eintrag(Art.fehler, 'Gesehene Hinweise zu Skills nicht gespeichert (${x.runtimeType})');
+      widget.protokoll.eintrag(
+        Art.fehler,
+        'Gesehene Hinweise zu Skills nicht gespeichert (${x.runtimeType})',
+      );
     }
   }
 
@@ -1061,7 +1119,12 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     final plugins = await pluginSkillsLesen(
       _plugins,
       appNamen: appNamen,
-      entwicklung: entwicklung == null ? null : (ordner: entwicklung.ordner, beschreibung: entwicklung.beschreibung),
+      entwicklung: entwicklung == null
+          ? null
+          : (
+              ordner: entwicklung.ordner,
+              beschreibung: entwicklung.beschreibung,
+            ),
     );
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
@@ -1072,8 +1135,13 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       skills: [...app, ...plugins.pakete],
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
-      gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
-      verwaist: verwaisteSkills(skillNamen(e.pluginSkillOrdner), plugins, appNamen),
+      gewaehlt:
+          e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
+      verwaist: verwaisteSkills(
+        skillNamen(e.pluginSkillOrdner),
+        plugins,
+        appNamen,
+      ),
       pluginSkills: e.pluginSkillOrdner,
       fremd: e.fremdeSkillOrdner,
       gesehen: e.skillFehlerGesehen,
@@ -1090,7 +1158,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       try {
         await e.speichern();
       } catch (x) {
-        widget.protokoll.eintrag(Art.fehler, 'Fremde Skill-Ordner nicht gemerkt (${x.runtimeType})');
+        widget.protokoll.eintrag(
+          Art.fehler,
+          'Fremde Skill-Ordner nicht gemerkt (${x.runtimeType})',
+        );
         e.fremdeSkillOrdner = alt.union(stand.fremdeOrdner);
       }
     }
@@ -1100,22 +1171,33 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       stand: stand,
       werkzeuge: alleWerkzeuge(Platform.environment),
     );
-    if (gemerkt.length != e.pluginSkillOrdner.length || !gemerkt.containsAll(e.pluginSkillOrdner)) {
+    if (gemerkt.length != e.pluginSkillOrdner.length ||
+        !gemerkt.containsAll(e.pluginSkillOrdner)) {
       final alt = e.pluginSkillOrdner;
       e.pluginSkillOrdner = gemerkt;
       try {
         await e.speichern();
       } catch (x) {
         // Bleibt für diesen Lauf gemerkt; der nächste Start versucht es wieder.
-        widget.protokoll.eintrag(Art.fehler, 'Skills der Plugins nicht gemerkt (${x.runtimeType})');
+        widget.protokoll.eintrag(
+          Art.fehler,
+          'Skills der Plugins nicht gemerkt (${x.runtimeType})',
+        );
         e.pluginSkillOrdner = alt.union(gemerkt);
       }
     }
     return stand;
   }
 
-  @override
-  void onWindowClose() => unawaited(_beenden());
+  /// Schließen läuft über _beenden, damit der Arbeitsordner geleert wird:
+  /// Der Schließwunsch (Knopf im Fensterrahmen, Alt+F4) wird angehalten, bis
+  /// _beenden aufgeräumt hat und das Fenster selbst schließt. Angehalten wird
+  /// sofort, noch in diesem Aufruf; später nähme das Fenster es nicht mehr an.
+  void _fensterEreignis(WindowEvent ereignis) {
+    if (ereignis is! WindowCloseRequestedEvent || _schliessen) return;
+    ereignis.request.cancel();
+    unawaited(_beenden());
+  }
 
   /// Der einzige Weg aus der App, über das Fenster wie über den Dialog
   /// „KI-Werkzeuge einrichten": Arbeitsordner leeren, dann schließen. Was sich
@@ -1123,14 +1205,14 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   ///
   /// Geschlossen wird auf dem Weg, den Windows selbst nimmt (WM_CLOSE, dann
   /// WM_DESTROY): Die Engine baut sich ab, solange die Nachrichtenschleife
-  /// noch läuft. windowManager.destroy() beendet dagegen nur die Schleife;
+  /// noch läuft. Wer stattdessen nur die Schleife beendet, erreicht das nicht:
   /// windows/runner/main.cpp ruft dann CoUninitialize, und erst danach baut
   /// sich die Engine ab. Das endet mit einer Zugriffsverletzung in
   /// flutter_windows.dll, und für den Fehlerbericht hält Windows das Fenster
   /// gut fünf Sekunden stehen. Auf dem Weg über WM_CLOSE ist die App nach
   /// einer halben Sekunde zu, ohne Absturz (gemessen).
   Future<void> _beenden() async {
-    // close() unten meldet das Schließen noch einmal (onWindowClose).
+    // close() unten meldet das Schließen noch einmal (_fensterEreignis).
     if (_beendet) return;
     _beendet = true;
     try {
@@ -1150,8 +1232,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         'Arbeitsordner leeren: ${fehlerBeschreibung(e, st)}',
       );
     } finally {
-      await windowManager.setPreventClose(false);
-      await windowManager.close();
+      _schliessen = true;
+      _appFenster()?.close();
     }
   }
 
@@ -1286,7 +1368,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     if (index < 0) {
       // Höchstens 17 Zeichen, damit jedes Werkzeug eines Plugins in diesem
       // Profil in die 64 Zeichen passt (profil.dart).
-      final name = Profil.neuerMcpName(geaendert.mcpName, {for (final p in profile) p.mcpName});
+      final name = Profil.neuerMcpName(geaendert.mcpName, {
+        for (final p in profile) p.mcpName,
+      });
       var naechsterPort = standardPort;
       while (_instanzen.any((i) => i.dienst.profil.port == naechsterPort) ||
           profile.any((p) => p.port == naechsterPort)) {
@@ -1345,12 +1429,15 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
 
   Future<void> _nachVorn(bool an) async {
     try {
+      final fenster = _appFenster();
+      if (fenster == null) return;
       if (an) {
-        await windowManager.show();
-        await windowManager.setAlwaysOnTop(true);
-        await windowManager.focus();
+        if (fenster.isMinimized) fenster.restore();
+        fenster.show();
+        fenster.isAlwaysOnTop = true;
+        fenster.focus();
       } else {
-        await windowManager.setAlwaysOnTop(false);
+        fenster.isAlwaysOnTop = false;
       }
     } catch (_) {
       // Ohne Fensterzugriff bleibt der Dialog trotzdem offen.
@@ -1359,7 +1446,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
+    final abo = _fensterAbo;
+    if (abo != null) _appFenster()?.removeListener(abo);
     widget.protokoll.removeListener(_aktualisieren);
     _fokusAbo?.cancel();
     _adresse.dispose();
@@ -1506,11 +1594,19 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         // Die Dialoge der Plugins, für alle Profile zusammen: Ein Plugin
         // läuft einmal je App.
         if (widget.laufendePlugins?.dialoge case final dialoge?)
-          PluginDialogAnzeige(dialoge: dialoge, nachVorn: _fensterZeigen, child: const SizedBox.shrink()),
+          PluginDialogAnzeige(
+            dialoge: dialoge,
+            nachVorn: _fensterZeigen,
+            child: const SizedBox.shrink(),
+          ),
         // Die Warnungen der letzten Sperre gegen Namen, ebenso für alle
         // Profile zusammen.
         if (widget.laufendePlugins?.sperrHinweise case final hinweise?)
-          SperrHinweisAnzeige(hinweise: hinweise, nachVorn: _fensterZeigen, child: const SizedBox.shrink()),
+          SperrHinweisAnzeige(
+            hinweise: hinweise,
+            nachVorn: _fensterZeigen,
+            child: const SizedBox.shrink(),
+          ),
         _seite(context),
       ],
     );
@@ -1522,14 +1618,22 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _mehrere ? '$appName — ${_profil.name} (${_profil.mcpName})' : appName,
+          _mehrere
+              ? '$appName — ${_profil.name} (${_profil.mcpName})'
+              : appName,
         ),
         actions: [
           // Unabhängig vom gewählten Profil; neu gezeichnet wird mit dem
           // Protokoll, in das jeder Ausfall eine Zeile schreibt.
           if (widget.laufendePlugins?.entwicklung case final e?)
-            Flexible(child: EntwicklungsPluginAnzeige(name: e.name, verbunden: e.verbunden)),
-          if (widget.laufendePlugins?.ausgefalleneNamen case final namen? when namen.isNotEmpty)
+            Flexible(
+              child: EntwicklungsPluginAnzeige(
+                name: e.name,
+                verbunden: e.verbunden,
+              ),
+            ),
+          if (widget.laufendePlugins?.ausgefalleneNamen case final namen?
+              when namen.isNotEmpty)
             Flexible(child: PluginAusfallAnzeige(namen: namen)),
           BestaetigungenFeld(stufe: _freigaben.stufe, aendern: _stufeAendern),
           IconButton(
@@ -1806,7 +1910,11 @@ String entwicklungsPluginText(String name, {required bool verbunden}) =>
 /// Programm von außerhalb der Installation mitarbeitet. Ohne Verbindung rot.
 /// Sie schrumpft mit der Titelzeile; der Tooltip sagt, was das heißt.
 class EntwicklungsPluginAnzeige extends StatelessWidget {
-  const EntwicklungsPluginAnzeige({required this.name, required this.verbunden, super.key});
+  const EntwicklungsPluginAnzeige({
+    required this.name,
+    required this.verbunden,
+    super.key,
+  });
 
   final String name;
   final bool verbunden;
@@ -1815,7 +1923,9 @@ class EntwicklungsPluginAnzeige extends StatelessWidget {
   Widget build(BuildContext context) {
     final farbe = Theme.of(context).colorScheme;
     final text = entwicklungsPluginText(name, verbunden: verbunden);
-    final (hinten, vorn) = verbunden ? (farbe.tertiary, farbe.onTertiary) : (farbe.error, farbe.onError);
+    final (hinten, vorn) = verbunden
+        ? (farbe.tertiary, farbe.onTertiary)
+        : (farbe.error, farbe.onError);
     return Padding(
       padding: const EdgeInsets.only(left: 8),
       child: Tooltip(
@@ -1884,13 +1994,20 @@ class PluginAusfallAnzeige extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.extension_off_outlined, size: 18, color: farbe.onError),
+                Icon(
+                  Icons.extension_off_outlined,
+                  size: 18,
+                  color: farbe.onError,
+                ),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
                     text,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: farbe.onError, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: farbe.onError,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -2530,12 +2647,15 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
               if (anfrage.vomPlugin case final text?) ...[
                 Text(
                   'Titel und Beschreibung stammen vom ${anfrage.aufrufer ?? 'Plugin'}; moocp hat sie nicht geprüft:',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Flexible(
                   child: DecoratedBox(
-                    decoration: BoxDecoration(border: Border.all(color: Colors.black26)),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black26),
+                    ),
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(8),
                       child: Text(text),
@@ -2802,7 +2922,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                   style: knoepfe
                       ? FilledButton.styleFrom(backgroundColor: orange)
                       : null,
-                  onPressed: bereit && (!(knoepfe || bestaetigen) || _allesGetan)
+                  onPressed:
+                      bereit && (!(knoepfe || bestaetigen) || _allesGetan)
                       ? () => Navigator.of(context).pop(true)
                       : null,
                   child: Text(anfrage.knopf),

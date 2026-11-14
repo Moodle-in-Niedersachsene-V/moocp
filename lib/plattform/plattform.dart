@@ -39,6 +39,12 @@ abstract interface class PlattformBrowser {
 /// Die einzige Stelle, die nach dem Betriebssystem fragt.
 final PlattformBrowser plattformBrowser = Platform.isMacOS ? MacBrowser() : WindowsBrowser();
 
+/// Ob die Zwischenablage hier HTML neben dem Text trägt (zwischenablage.dart):
+/// unter Windows und macOS ja, sonst liegt nur der Quelltext als Text darin.
+/// Hier statt dort, damit der Kern (lib/moodle/) danach fragen kann, ohne
+/// Flutter und die native Bibliothek einzubinden.
+bool get zwischenablageMitHtml => Platform.isWindows || Platform.isMacOS;
+
 /// Beendet [prozess] hart, unter Windows samt den Prozessen, die er selbst
 /// gestartet hat (windows.dart, prozessbaumBeendenWindows). Auf dem Mac nur
 /// den Prozess selbst: Dart startet ihn nicht in einer eigenen

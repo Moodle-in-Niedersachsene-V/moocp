@@ -1,5 +1,7 @@
-# Bauergebnis von bauen.ps1 und bauen.sh
+# Bauergebnis von bauen.ps1, bauen.sh und create_installer.bat
 /build/
+# Der gebaute Installer (create_installer.bat)
+/installer/*.exe
 
 # Dart
 .dart_tool/

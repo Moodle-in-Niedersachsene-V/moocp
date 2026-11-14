@@ -220,8 +220,24 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
             ...jetzt.entfernen,
           ];
           if (offen.isEmpty) {
-            ergebnis[sk] = 'erledigt';
-            _protokoll(Art.info, '${w.name}: Skills erledigt');
+            // Was geschehen ist, nicht nur „erledigt": Vorher stand in der
+            // Zeile, was fehlt, abweicht oder weg soll; danach steht dort,
+            // was daraus geworden ist.
+            final neuDa = [
+              for (final x in vorher.skills)
+                if (vorher.stand[x.name]!.ordnerFehlt) x.name,
+            ];
+            final erneuert = [
+              for (final x in vorher.skills)
+                if (!vorher.stand[x.name]!.aktuell && !vorher.stand[x.name]!.ordnerFehlt) x.name,
+            ];
+            final getan = [
+              if (neuDa.isNotEmpty) 'installiert: ${neuDa.join(', ')}',
+              if (erneuert.isNotEmpty) 'aktualisiert: ${erneuert.join(', ')}',
+              if (vorher.entfernen.isNotEmpty) 'entfernt: ${vorher.entfernen.join(', ')}',
+            ];
+            ergebnis[sk] = getan.isEmpty ? 'erledigt' : 'erledigt – ${getan.join('; ')}';
+            _protokoll(Art.info, '${w.name}: Skills ${ergebnis[sk]}');
           } else {
             final weg = geblieben[w.id] ?? const <String>[];
             ergebnis[sk] = fehler[sk] ??

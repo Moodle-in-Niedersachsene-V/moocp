@@ -626,6 +626,7 @@ void main() {
       await tester.tap(find.text('Aktualisieren'));
       await abwarten(tester);
       expect(File(p.join(skillOrdner('lernsituation').path, 'SKILL.md')).existsSync(), isTrue);
+      expect(find.text('erledigt – installiert: lernsituation'), findsOneWidget, reason: 'die Zeile sagt, was geschehen ist');
       expect(find.text('Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'),
           findsOneWidget);
 
@@ -638,6 +639,7 @@ void main() {
       await tester.tap(find.text('Aktualisieren'));
       await abwarten(tester);
       expect(skillOrdner('lernsituation').existsSync(), isFalse);
+      expect(find.text('erledigt – entfernt: lernsituation'), findsOneWidget);
       expect(File(p.join(skillOrdner('moodle').path, 'SKILL.md')).existsSync(), isTrue, reason: 'der feste bleibt');
     });
 

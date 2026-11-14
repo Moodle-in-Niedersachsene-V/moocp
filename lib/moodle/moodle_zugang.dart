@@ -1855,7 +1855,7 @@ class MoodleZugang {
 
   Future<void> _anmelden() async {
     if (_benutzer == null || _passwort == null) {
-      throw MoodleFehler('Nicht angemeldet. Bitte in der App anmelden.');
+      throw NichtAngemeldet();
     }
     _cookies.clear();
     _sesskey = null;

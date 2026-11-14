@@ -2358,7 +2358,8 @@ class MoodleZugang {
 
   Future<Antwort> _mitUmleitungen(Uri start, Aufrufer aufrufer, int? hoechstens) async {
     var uri = start;
-    for (var i = 0; i < 8; i++) {
+    // Die erste Anfrage und danach höchstens [umleitungenHoechstens] Ziele.
+    for (var i = 0; i <= umleitungenHoechstens; i++) {
       final r = await _roh('GET', uri, aufrufer: aufrufer, hoechstens: hoechstens);
       final ziel = _umleitung(r);
       if (ziel == null) return r;

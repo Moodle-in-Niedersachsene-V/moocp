@@ -136,8 +136,16 @@ String _fristText(Duration d) => d.inSeconds % 60 == 0 && d.inMinutes > 0
 /// Name und Version eines Plugins für das Protokoll.
 String _name(PluginEintrag e) => '„${e.anzeigename}“ ${e.beschreibung!.version}';
 
-/// Was die KI von jedem Werkzeug eines ausgefallenen Plugins bekommt, und
-/// von dem Aufruf, der beim Absturz lief.
+/// Was die KI von dem Aufruf bekommt, der beim Absturz lief. Er sagt nicht,
+/// das Plugin sei ausgefallen: Das steht erst nach dem Neustart fest, und
+/// meist arbeitet es einen Augenblick später wieder.
+String _absturzText(PluginEintrag e) =>
+    'Das Plugin „${e.anzeigename}“ hat sich während dieses Aufrufs unerwartet beendet. '
+    'Der Aufruf ist nicht zu Ende gelaufen und wird nicht wiederholt; ob davor schon '
+    'etwas geschehen ist, ist offen. moocp startet das Plugin neu; gelingt das nicht, '
+    'melden seine Werkzeuge den Ausfall.';
+
+/// Was die KI von jedem Werkzeug eines ausgefallenen Plugins bekommt.
 String _ausfallText(PluginEintrag e) =>
     'Das Plugin „${e.anzeigename}“ ist ausgefallen. Seine Werkzeuge stehen erst '
     'wieder zur Verfügung, wenn moocp neu gestartet wird.';
@@ -786,7 +794,7 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// der Fehler des Ausfalls sofort; der Aufruf wird nicht wiederholt, auch
   /// wenn der Neustart gelingt.
   Future<String> _aufrufenBei(_Laufend l, WerkzeugAufruf aufruf) async {
-    final text = _ausfallText(l.eintrag);
+    final text = _absturzText(l.eintrag);
     try {
       return await Future.any([
         l.verbindung.aufrufen(aufruf),

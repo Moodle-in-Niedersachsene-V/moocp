@@ -991,6 +991,16 @@ void main() {
       expect(text(r), contains('moocp neu gestartet'));
     }
 
+    // Der Aufruf, der beim Absturz lief: Er sagt, was geschehen ist, und nicht,
+    // das Plugin sei ausgefallen -- moocp startet es ja gleich neu.
+    void absturzMeldung(Map r) {
+      expect(r['isError'], true);
+      expect(text(r), contains('„Beispiel“'));
+      expect(text(r), contains('unerwartet beendet'));
+      expect(text(r), contains('nicht wiederholt'));
+      expect(text(r), isNot(contains('ist ausgefallen')));
+    }
+
     test('ein Absturz: der laufende Aufruf bekommt sofort den Fehler, ein Neustart mit neuem Port und Schlüssel, danach arbeitet es wieder', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
@@ -999,7 +1009,7 @@ void main() {
       final r = await absturz(g.client);
       uhr.stop();
 
-      ausfallMeldung(r);
+      absturzMeldung(r);
       expect(uhr.elapsed, lessThan(const Duration(seconds: 5)), reason: 'sofort, nicht erst nach einem Zeitlimit');
       // Ein neuer Aufruf wartet auf den Neustart und geht dann durch.
       expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
@@ -1037,7 +1047,7 @@ void main() {
       final client = await verbinden(profil, l);
       expect(pluginLaufHinweis(l, e), isNull, reason: 'es läuft');
 
-      ausfallMeldung(await absturz(client));
+      absturzMeldung(await absturz(client));
       for (var i = 0; i < 50 && !l.startetNeu(e); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
@@ -1060,7 +1070,7 @@ void main() {
       final alt = g.starts.single.split(' ').last;
       expect(await _protokollzeile(adresse, alt, 'vorher'), 200);
 
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
       expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
 
       final neu = g.starts.last.split(' ').last;
@@ -1077,7 +1087,7 @@ void main() {
       final g = await gestartet(profil, neustartFrist: Duration.zero);
 
       for (var i = 0; i < 3; i++) {
-        ausfallMeldung(await absturz(g.client));
+        absturzMeldung(await absturz(g.client));
       }
 
       expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
@@ -1093,8 +1103,8 @@ void main() {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
 
-      ausfallMeldung(await absturz(g.client));
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
 
       final e = g.plugins.eintraege.single;
       expect(g.laufende.ausgefallen(e), isTrue);
@@ -1147,7 +1157,7 @@ void main() {
       // Start 0 läuft, Start 1 (der Neustart) antwortet nicht, Start 2 läuft.
       final g = await mitHaenger(profil, {1});
 
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
 
       expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
       final e = g.plugins.eintraege.single;
@@ -1167,7 +1177,7 @@ void main() {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await mitHaenger(profil, {1, 2});
 
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
       ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
 
       final e = g.plugins.eintraege.single;
@@ -1185,7 +1195,7 @@ void main() {
       final e = g.plugins.eintraege.single;
       File(p.join(e.pfad, 'neu.txt')).writeAsStringSync('dazugekommen');
 
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
       ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
 
       expect(g.starts, hasLength(1), reason: 'kein Neustart');
@@ -1203,7 +1213,7 @@ void main() {
       final r = await g.client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
       expect(r['isError'], true);
 
-      ausfallMeldung(await absturz(g.client));
+      absturzMeldung(await absturz(g.client));
       final danach = await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Erika'}});
 
       expect(g.starts, hasLength(2), reason: 'neu gestartet');
@@ -1265,7 +1275,7 @@ Future<void> main(List<String> a) async {
       final client = await verbinden(profil, l);
       expect((await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}}))['isError'], true);
 
-      ausfallMeldung(await absturz(client));
+      absturzMeldung(await absturz(client));
       ausfallMeldung(await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
 
       final e = plugins.eintraege.single;

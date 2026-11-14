@@ -48,7 +48,7 @@ enum StartAusgang {
   bereit,
 }
 
-/// Die Schritte des Starts vor der Anmeldung in fester Reihenfolge (E13, E35):
+/// Die Schritte des Starts bis zur Anmeldung in fester Reihenfolge (E13, E35):
 ///
 /// 1. [update] der App. Liefert true, wenn ein Installer läuft; dann endet der
 ///    Start. Ein Update bringt auch neue Skills, und die Einrichtung soll nicht
@@ -61,8 +61,7 @@ enum StartAusgang {
 ///    Schnittstelle); dann endet der Start.
 /// 3. [pluginZustimmung]: die Lehrkraft entscheidet über Plugins, die neu
 ///    oder geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
-///    mitbringen, die die Einrichtung behandelt, und vor der Anmeldung, weil
-///    ein Plugin ohne Anmeldung arbeiten kann.
+///    mitbringen, die die Einrichtung behandelt.
 /// 4. [pluginsStarten]: die angenommenen Plugins starten, einmal je App. Vor
 ///    der Einrichtung und vor dem MCP-Server, damit jede Sitzung ihre
 ///    Werkzeuge schon vorfindet.
@@ -90,26 +89,33 @@ Future<StartAusgang> startBisAnmeldung({
   return await einrichtungUndAnmeldung() ? StartAusgang.bereit : StartAusgang.abgebrochen;
 }
 
-/// Der MCP-Server eines Profils, den der Start vor der Anmeldung starten
-/// könnte: [ohneAnmeldung] sagt, ob in diesem Profil ein Plugin mit
-/// Werkzeugen ohne Anmeldung eingeschaltet ist und sein Server noch nicht
-/// läuft; [starten] startet ihn vor der Anmeldung.
-typedef ServerVorAnmeldung = ({bool Function() ohneAnmeldung, Future<void> Function() starten});
-
-/// Der Start nach der Einrichtung (E13, E35): Zuerst startet der MCP-Server
-/// jedes Profils, in dem ein Plugin mit Werkzeugen ohne Anmeldung
-/// eingeschaltet ist, dann kommt die Anmeldung ([anmelden]), nach der die
-/// übrigen Server starten (main.dart, _mcpStarten). Ohne ein solches Plugin
-/// bleibt es bei Einrichtung, Anmeldung, Server. Ein Server, der vor der
-/// Anmeldung startet, bleibt danach an, wie jeder andere.
-Future<void> nachEinrichtung({
-  required List<ServerVorAnmeldung> server,
-  required Future<void> Function() anmelden,
+/// Der letzte Schritt des Starts (E13, E31): Der MCP-Server eines Profils
+/// startet erst, wenn die App eingerichtet ist ([eingerichtet]) und dieses
+/// Profil angemeldet ist – ohne Ausnahme, auch wenn dort ein Plugin
+/// eingeschaltet ist. Aufgerufen nach jeder Anmeldung (main.dart,
+/// _mcpStarten); ein Server, der schon läuft, bleibt, wie er ist. Danach
+/// bleibt er an, auch nach „Abmelden“: Ein Stopp risse laufenden Sitzungen
+/// der KI-Werkzeuge die Verbindung ab; die Werkzeuge melden dann „Nicht
+/// angemeldet“. Ein Server, der nicht startet, steht mit dem Typ des Fehlers
+/// in [protokoll] und hält die übrigen nicht auf.
+Future<void> mcpServerStarten(
+  List<Instanz> instanzen, {
+  required bool eingerichtet,
+  required Protokoll protokoll,
 }) async {
-  for (final s in server) {
-    if (s.ohneAnmeldung()) await s.starten();
+  if (!eingerichtet) return;
+  for (final i in instanzen) {
+    if (!i.moodle.angemeldet || i.dienst.laeuft) continue;
+    try {
+      await i.dienst.starten();
+    } catch (e) {
+      protokoll.eintrag(
+        Art.fehler,
+        'MCP-Server (${i.dienst.profil.name}) startet nicht auf Port '
+        '${i.dienst.profil.port}: ${e.runtimeType}',
+      );
+    }
   }
-  await anmelden();
 }
 
 /// Hält den normalen Start bei der Einrichtung an; nur eine explizite

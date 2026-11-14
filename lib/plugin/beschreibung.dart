@@ -67,7 +67,6 @@ class PluginBeschreibung {
     this.zusatzadressen = const [],
     this.skills = const [],
     this.wahlSkills = const {},
-    this.ohneAnmeldung = const [],
     this.entwicklungsPort,
   });
 
@@ -105,11 +104,6 @@ class PluginBeschreibung {
   /// Wählbare Skills: Name und Beschreibung, wie bei `appWahlSkills`; sie
   /// liegen wie [skills] unter `skills/<name>/`. Kein Name steht in beiden.
   final Map<String, String> wahlSkills;
-
-  /// Die Werkzeuge, die ohne Moodle-Anmeldung arbeiten. Hier wird nur die Form
-  /// geprüft; dass das Plugin jedes davon hat, prüft die Verbindung beim Start
-  /// (verbindung.dart, ohneAnmeldungPruefen), sonst lädt es nicht.
-  final List<String> ohneAnmeldung;
 
   /// Der feste Port, auf dem das Plugin im Debugger seines Entwicklers läuft.
   final int? entwicklungsPort;
@@ -159,7 +153,6 @@ class PluginBeschreibung {
       zusatzadressen: _zusatzadressen(json['zusatzadressen']),
       skills: skills,
       wahlSkills: wahlSkills,
-      ohneAnmeldung: _ohneAnmeldung(json['ohneAnmeldung']),
       entwicklungsPort: _port(json['entwicklungsPort']),
     );
   }
@@ -306,18 +299,6 @@ Map<String, String> _wahlSkills(Object? w) {
     ergebnis[key] = value.trim();
   }
   return ergebnis;
-}
-
-List<String> _ohneAnmeldung(Object? w) {
-  if (w == null) return const [];
-  const regel = 'Das Feld „ohneAnmeldung“ ist eine Liste von Werkzeugnamen.';
-  if (w is! List) throw const PluginFehler(regel);
-  final namen = <String>[];
-  for (final n in w) {
-    if (n is! String || n.trim().isEmpty || _hatSteuerzeichen(n)) throw const PluginFehler(regel);
-    namen.add(n.trim());
-  }
-  return namen;
 }
 
 int? _port(Object? w) {

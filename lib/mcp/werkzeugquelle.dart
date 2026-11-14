@@ -24,7 +24,6 @@ class WerkzeugBeschreibung {
     this.titel,
     this.nurLesen = false,
     this.zerstoerend = false,
-    this.ohneAnmeldung = false,
   });
 
   /// Der Name, unter dem die KI das Werkzeug aufruft; auf dem Server eindeutig.
@@ -45,25 +44,6 @@ class WerkzeugBeschreibung {
   /// Werkzeugen: nicht nur lesend, nicht zerstörend.
   final bool nurLesen;
   final bool zerstoerend;
-
-  /// Ob das Werkzeug ohne Moodle-Anmeldung arbeitet: Das Plugin nennt es in
-  /// `ohneAnmeldung` seiner Beschreibungsdatei (plugin/verbindung.dart setzt
-  /// es). Nur solche Werkzeuge laufen, solange der MCP-Server vor der
-  /// Anmeldung gestartet ist (mcp_dienst.dart). Kein Teil der Werkzeugliste,
-  /// die ein Client sieht, und nicht gemerkt: Es kommt jedes Mal aus der
-  /// Beschreibungsdatei.
-  final bool ohneAnmeldung;
-
-  /// Dieselbe Beschreibung mit [ohneAnmeldung].
-  WerkzeugBeschreibung mitOhneAnmeldung(bool ohne) => WerkzeugBeschreibung(
-    name: name,
-    beschreibung: beschreibung,
-    eingabeSchema: eingabeSchema,
-    titel: titel,
-    nurLesen: nurLesen,
-    zerstoerend: zerstoerend,
-    ohneAnmeldung: ohne,
-  );
 }
 
 /// Ein Aufruf eines Werkzeugs einer [WerkzeugQuelle], so wie er über den

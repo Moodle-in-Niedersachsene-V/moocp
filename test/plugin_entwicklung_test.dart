@@ -169,11 +169,6 @@ void main() {
       ordner = (Directory(p.join(wurzel.path, 'entwicklung'))..createSync()).path;
       final m = jsonDecode(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync()) as Map;
       m['entwicklungsPort'] = port;
-      // Viele Tests stellen an die Stelle des Beispiels einen Server mit
-      // anderen Werkzeugen; ohneAnmeldung nennt deshalb keines (sonst ließe
-      // die App ihn nicht zu). Die Tests dazu setzen sie selbst
-      // (ohneAnmeldungSetzen).
-      m['ohneAnmeldung'] = <String>[];
       File(p.join(ordner, 'plugin.json')).writeAsStringSync(jsonEncode(m));
       einstellungen = EinstellungenOhneDatei(profile: [
         beispielProfil('standard', 'moodle', await freierPort()),
@@ -315,47 +310,6 @@ void main() {
       expect(zeilen(), contains('Plugin „Beispiel“: aus der Entwicklung'));
       expect(zeilen(), contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
       expect(zeilen().join('\n'), isNot(contains(_schluessel)));
-    });
-
-    /// Schreibt die Beschreibungsdatei im Ordner des Entwicklers mit
-    /// [ohneAnmeldung] neu.
-    void ohneAnmeldungSetzen(List<String> ohneAnmeldung) {
-      final datei = File(p.join(ordner, 'plugin.json'));
-      final m = jsonDecode(datei.readAsStringSync()) as Map;
-      datei.writeAsStringSync(jsonEncode({...m, 'ohneAnmeldung': ohneAnmeldung}));
-    }
-
-    test('Werkzeuge ohne Anmeldung: der Server startet vor der Anmeldung, schon bevor das Plugin verbunden ist', () async {
-      ohneAnmeldungSetzen(['beispiel_echo', 'beispiel_protokoll']);
-      final l = neueLaufende();
-      await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-      expect(l.entwicklung?.verbunden, isFalse);
-      expect(l.ohneAnmeldungIn(einstellungen.profile[0]), isTrue, reason: 'nach der Beschreibungsdatei');
-      expect(l.ohneAnmeldungIn(einstellungen.profile[1]), isTrue, reason: 'in jedem Profil eingeschaltet');
-
-      await pluginStarten();
-      await _bis(() => l.entwicklung?.verbunden == true);
-      expect(
-        [for (final w in l.werkzeuge(einstellungen.profile.first)) if (w.ohneAnmeldung) w.name],
-        ['beispiel_echo', 'beispiel_protokoll'],
-      );
-    });
-
-    test('nennt ohneAnmeldung ein Werkzeug, das das Plugin nicht hat, verbindet sich die App nicht', () async {
-      ohneAnmeldungSetzen(['beispiel_echo', 'beispiel_gibtesnicht']);
-      await pluginStarten();
-      final l = neueLaufende();
-      await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-
-      expect(l.entwicklung, (name: 'Beispiel', verbunden: false));
-      expect(l.werkzeuge(einstellungen.profile.first), isEmpty);
-      expect(
-        zeilen(),
-        contains(
-          'Entwicklungs-Plugin „Beispiel“ nicht verbunden: Das Feld „ohneAnmeldung“ nennt das Werkzeug '
-          '„beispiel_gibtesnicht“, das das Plugin nicht hat.',
-        ),
-      );
     });
 
     test('mit einem anderen Schlüssel beim Plugin keine Verbindung', () async {

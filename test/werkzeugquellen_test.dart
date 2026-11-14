@@ -15,7 +15,6 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 
-import 'hilfen/zugang.dart';
 import 'mcp_client.dart';
 
 /// Die eingebauten Werkzeuge in der Reihenfolge der Werkzeugliste. Ein neues
@@ -524,106 +523,6 @@ void main() {
       expect(freigaben.aktuell, isNull);
       client.http.close(force: true);
       await verworfen;
-    });
-  });
-
-  group('Server vor der Anmeldung', () {
-    late SchaltbarerZugang zugang;
-    late _Quelle quelle;
-    late McpDienst dienst;
-    late McpTestClient client;
-
-    setUp(() async {
-      zugang = SchaltbarerZugang(protokoll);
-      quelle = _Quelle([
-        _werkzeug('probe_ohne').mitOhneAnmeldung(true),
-        _werkzeug('probe_mit'),
-      ], (name, args) async => 'ausgeführt: $name');
-      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = s.port;
-      await s.close();
-      dienst = McpDienst(
-        Einstellungen(schluessel: 'test'),
-        zugang,
-        protokoll,
-        freigaben,
-        '',
-        profil: profil(port),
-        werkzeugquellen: [quelle],
-      );
-      dienste.add(dienst);
-      await dienst.starten(vorAnmeldung: true);
-      client = McpTestClient(port);
-      clients.add(client);
-      await client.initialize();
-    });
-
-    Future<Map> aufrufen(String name, [Map<String, Object?> args = const {'name': 'x'}]) =>
-        client.call('tools/call', {'name': name, 'arguments': args});
-
-    String text(Map antwort) => ((antwort['content'] as List).single as Map)['text'] as String;
-
-    test('listet alle Werkzeuge; nur das ohne Anmeldung arbeitet, jedes andere bekommt den festen Satz', () async {
-      final namen = [for (final t in (await client.call('tools/list'))['tools'] as List) (t as Map)['name']];
-      expect(namen, [..._eingebaut, 'probe_ohne', 'probe_mit']);
-
-      final ohne = await aufrufen('probe_ohne');
-      final mit = await aufrufen('probe_mit');
-      final status = await aufrufen('status', const {});
-      final kurse = await aufrufen('meine_kurse', const {});
-
-      expect(ohne['isError'], isNot(true));
-      expect(text(ohne), 'ausgeführt: probe_ohne');
-      for (final a in [mit, status, kurse]) {
-        expect(a['isError'], true);
-        expect(text(a), 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.');
-        expect(a['_meta'], {'moocp/anmeldung': 'fehlt'}, reason: 'woran die Brücke es erkennt');
-      }
-      expect(quelle.aufrufe.map((a) => a.name), ['probe_ohne'], reason: 'nichts anderes ausgeführt');
-      expect(zugang.anmeldeversuche, 0, reason: 'kein Aufruf löst eine Anmeldung aus');
-      final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains(startsWith('MCP-Server vor der Anmeldung gestartet')));
-      expect(zeilen, contains('status: vor der Anmeldung nicht ausgeführt'));
-    });
-
-    test('nach der Anmeldung arbeiten alle in derselben Sitzung, auch nach einem späteren Abmelden wie bisher', () async {
-      expect(dienst.wartetAufAnmeldung, isTrue);
-      zugang.an = true;
-      dienst.anmeldungErfolgt();
-
-      final mit = await aufrufen('probe_mit');
-      final status = await aufrufen('status', const {});
-      expect(dienst.wartetAufAnmeldung, isFalse);
-      expect(text(mit), 'ausgeführt: probe_mit');
-      expect(text(status), contains('Angemeldet: ja'));
-
-      // Abmelden: Es gilt wieder, was für einen laufenden Server ohne
-      // Anmeldung gilt -- status antwortet, wie es das sonst tut.
-      zugang.an = false;
-      final danach = await aufrufen('status', const {});
-      expect(danach['isError'], isNot(true));
-      expect(text(danach), contains('Angemeldet: nein -- bitte in der App anmelden'));
-    });
-
-    test('meldet die Lehrkraft sich an, bevor main.dart es dem Server sagt, merkt es der nächste Aufruf', () async {
-      zugang.an = true;
-      expect(text(await aufrufen('probe_mit')), 'ausgeführt: probe_mit');
-    });
-
-    test('ein Plugin, das ein eingebautes Werkzeug aufruft, bekommt vor der Anmeldung denselben Satz', () async {
-      final r = await dienst.eingebautAufrufen('status', const {}, abbruch: Completer<void>().future, aufrufer: 'Plugin „Probe“');
-      expect(r.fehlgeschlagen, isTrue);
-      expect(r.text, 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.');
-    });
-
-    test('die Werkzeugliste für die Brücke nennt die Werkzeuge ohne Anmeldung, ohne sie fehlt der Eintrag', () async {
-      expect((await dienst.werkzeugliste())['ohneAnmeldung'], ['probe_ohne']);
-      expect((await dienstMit([_Quelle([_werkzeug('probe_mit')])]).werkzeugliste()).containsKey('ohneAnmeldung'), isFalse);
-    });
-
-    test('ohne vorAnmeldung gestartet, wartet kein Server auf die Anmeldung', () async {
-      final d = dienstMit([quelle]);
-      expect(d.wartetAufAnmeldung, isFalse);
     });
   });
 }

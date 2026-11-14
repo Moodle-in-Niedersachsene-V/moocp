@@ -169,9 +169,7 @@ Future<void> main(List<String> argumente) async {
   // gerade neu gestartet hat, läuft noch und bleibt bis zum nächsten Start.
   resteWegraeumen();
   // Gestartet wird der MCP-Server erst, wenn die App eingerichtet und
-  // angemeldet ist (_HauptseiteState._mcpStarten), mit einem Plugin, das
-  // Werkzeuge ohne Anmeldung hat, schon nach der Einrichtung
-  // (_HauptseiteState._mcpVorAnmeldung).
+  // angemeldet ist (_HauptseiteState._mcpStarten).
   final haupt = instanzen.first;
   runApp(
     MoocpApp(
@@ -568,9 +566,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   /// Der Start in fester Reihenfolge: Update der App, Prüfung je Plugin
   /// (Schnittstelle, Update), Zustimmung zu Plugins, ihr Start, KI-Werkzeuge
   /// einrichten, anmelden, dann der MCP-Server (_mcpStarten); die
-  /// Reihenfolge der ersten Schritte steht in startBisAnmeldung, die nach der
-  /// Einrichtung in nachEinrichtung: Ein Profil mit einem Plugin, das
-  /// Werkzeuge ohne Anmeldung hat, startet seinen Server vor der Anmeldung. Nur
+  /// Reihenfolge der ersten Schritte steht in startBisAnmeldung, der Start
+  /// der Server in mcpServerStarten. Nur
   /// ausdrücklich gebundene Debug-Testprofile melden sich vor einem wartenden
   /// Einrichtungsdialog an, damit ihr MCP-Server für den Live-Test bereitsteht.
   /// Die Einrichtung selbst bleibt erforderlich und wird nicht automatisch
@@ -623,40 +620,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     }
     if (!mounted) return;
     setState(() => _eingerichtet = true);
-    await nachEinrichtung(
-      server: [
-        for (final i in [..._instanzen])
-          (
-            ohneAnmeldung: () =>
-                mounted &&
-                !i.dienst.laeuft &&
-                !i.moodle.angemeldet &&
-                (widget.laufendePlugins?.ohneAnmeldungIn(i.dienst.profil) ?? false),
-            starten: () => _mcpVorAnmeldung(i),
-          ),
-      ],
-      anmelden: () async {
-        if (mounted && Testzugang.fuer(_profil) == null) {
-          await _gespeichertAnmelden();
-        }
-      },
-    );
-  }
-
-  /// Startet den MCP-Server von [i] vor der Anmeldung (nachEinrichtung): In
-  /// seinem Profil ist ein Plugin mit Werkzeugen ohne Anmeldung
-  /// eingeschaltet. Bis zur Anmeldung arbeiten nur diese (McpDienst).
-  Future<void> _mcpVorAnmeldung(Instanz i) async {
-    try {
-      await i.dienst.starten(vorAnmeldung: true);
-    } catch (e) {
-      widget.protokoll.eintrag(
-        Art.fehler,
-        'MCP-Server (${i.dienst.profil.name}) startet nicht auf Port '
-        '${i.dienst.profil.port}: ${e.runtimeType}',
-      );
+    if (mounted && Testzugang.fuer(_profil) == null) {
+      await _gespeichertAnmelden();
     }
-    if (mounted) setState(() {});
   }
 
   /// Das Update der App beim Start. Liefert true, wenn ein Installer läuft und
@@ -974,29 +940,10 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
   }
 
   /// Startet den MCP-Server, sobald die App eingerichtet und angemeldet ist
-  /// (ein Profil mit Plugin-Werkzeugen ohne Anmeldung startet ihn schon davor,
-  /// _mcpVorAnmeldung). Danach bleibt er an, auch nach „Abmelden": Ein Stopp risse laufenden
-  /// Sitzungen der KI-Werkzeuge die Verbindung ab; die Werkzeuge melden dann „Nicht
-  /// angemeldet".
+  /// (mcpServerStarten).
   Future<void> _mcpStarten() async {
-    if (!_eingerichtet) return;
-    // Jedes Profil startet seinen Server, sobald es angemeldet ist (E31). Ein
-    // Server, der schon vor der Anmeldung lief, lässt von nun an alle
-    // Werkzeuge arbeiten.
-    for (final i in [..._instanzen]) {
-      if (i.moodle.angemeldet && i.dienst.laeuft) i.dienst.anmeldungErfolgt();
-      if (!i.moodle.angemeldet || i.dienst.laeuft) continue;
-      try {
-        await i.dienst.starten();
-      } catch (e) {
-        widget.protokoll.eintrag(
-          Art.fehler,
-          'MCP-Server (${i.dienst.profil.name}) startet nicht auf Port '
-          '${i.dienst.profil.port}: ${e.runtimeType}',
-        );
-      }
-    }
-    if (mounted) setState(() => _mcpVersucht = true);
+    await mcpServerStarten([..._instanzen], eingerichtet: _eingerichtet, protokoll: widget.protokoll);
+    if (_eingerichtet && mounted) setState(() => _mcpVersucht = true);
   }
 
   /// Prüft Verbindung und Skills (einrichtung.dart). Beim Start erscheint der

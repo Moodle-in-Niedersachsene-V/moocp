@@ -10,7 +10,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/mcp/bruecke.dart';
-import 'package:moocp/mcp/vor_anmeldung.dart';
 
 /// Ein MCP-Server, wie ihn die App über HTTP anbietet, so weit die Brücke ihn
 /// braucht. Merkt sich jede Anfrage.
@@ -22,12 +21,6 @@ class Attrappe {
   final aufgerufen = <String?>[];
   final sitzungen = <String>{};
   var _naechste = 0;
-
-  /// Wie die App, deren Server vor der Anmeldung läuft (mcp_dienst.dart):
-  /// Solange [angemeldet] false ist, antwortet jedes Werkzeug außer denen in
-  /// [ohneAnmeldung] mit dem festen Satz und der Angabe in `_meta`.
-  var angemeldet = true;
-  var ohneAnmeldung = <String>{};
 
   Uri get adresse => Uri.parse('http://127.0.0.1:${_server.port}/mcp');
 
@@ -80,19 +73,6 @@ class Attrappe {
     if (id == null) {
       r.statusCode = 202;
       return r.close();
-    }
-    if (n['method'] == 'tools/call' && !angemeldet && !ohneAnmeldung.contains((n['params'] as Map?)?['name'])) {
-      return _json(r, {
-        'jsonrpc': '2.0',
-        'id': id,
-        'result': {
-          'content': [
-            {'type': 'text', 'text': anmeldungFehltText},
-          ],
-          'isError': true,
-          '_meta': {anmeldungFehltMeta: anmeldungFehltWert},
-        },
-      });
     }
     if (n['method'] == 'langsam') await Future<void>.delayed(const Duration(milliseconds: 300));
     if (n['method'] == 'sse') {
@@ -161,7 +141,6 @@ void main() {
     Future<Werkzeugliste?> Function()? listeHolen,
     Future<bool> Function()? appStarten,
     Duration aufAppWarten = const Duration(seconds: 5),
-    Duration anmeldungsTakt = const Duration(milliseconds: 50),
   }) async {
     final aus = <Map>[];
     final ein = StreamController<List<int>>();
@@ -171,7 +150,6 @@ void main() {
       listeHolen: listeHolen ?? () async => werkzeugliste(),
       appStarten: appStarten ?? () async => fail('die App darf hier nicht starten'),
       aufAppWarten: aufAppWarten,
-      anmeldungsTakt: anmeldungsTakt,
       ausgabe: (z) {
         expect(z, isNot(contains('\n')), reason: 'über stdio eine Nachricht je Zeile');
         aus.add(jsonDecode(z) as Map);
@@ -408,102 +386,8 @@ void main() {
     test('die Werkzeugliste aus JSON, wie main.dart sie schreibt', () {
       final l = werkzeugliste();
       expect(Werkzeugliste.ausJson(jsonDecode(jsonEncode(l.toJson())))!.toJson(), l.toJson());
-      expect(l.toJson().containsKey('ohneAnmeldung'), isFalse, reason: 'ohne solche Werkzeuge wie bisher');
       expect(Werkzeugliste.ausJson({'versionen': []}), isNull);
       expect(Werkzeugliste.ausJson('kaputt'), isNull);
     });
-
-    test('Werkzeug ohne Anmeldung, die App wird nicht bereit: der Hinweis spricht nicht von der Anmeldung', () async {
-      final r = await laufen(
-        [
-          anmelden(1),
-          initialisiert,
-          anfrage(2, 'tools/call', {'name': 'beispiel_echo', 'arguments': <String, Object?>{}}),
-        ],
-        adresse: aus,
-        listeHolen: () async => _mitOhneAnmeldung(),
-        appStarten: () async => true,
-        aufAppWarten: const Duration(milliseconds: 400),
-      );
-      final text = r.last['result']['content'].single['text'] as String;
-      expect(text, contains('noch nicht bereit'));
-      expect(text, isNot(contains('anmelden')));
-    });
   });
-
-  group('Server vor der Anmeldung (Plugin mit Werkzeugen ohne Anmeldung)', () {
-    setUp(() {
-      app
-        ..angemeldet = false
-        ..ohneAnmeldung = {'beispiel_echo'};
-    });
-
-    Map aufruf(Object id, String name) => anfrage(id, 'tools/call', {'name': name, 'arguments': <String, Object?>{}});
-
-    test('die Liste trägt die Werkzeuge ohne Anmeldung; der Client sieht davon nichts', () async {
-      final l = _mitOhneAnmeldung();
-      expect(Werkzeugliste.ausJson(jsonDecode(jsonEncode(l.toJson())))!.ohneAnmeldung, {'beispiel_echo'});
-      expect(Werkzeugliste.ausJson({...l.toJson(), 'ohneAnmeldung': 'kaputt'})!.ohneAnmeldung, isEmpty);
-      final r = await laufen([anmelden(1), initialisiert, anfrage(2, 'tools/list')], listeHolen: () async => l);
-      expect(r.first['result'].containsKey('ohneAnmeldung'), isFalse);
-      expect(r.last['result'], l.tools);
-    });
-
-    test('ein Werkzeug ohne Anmeldung geht sofort, einmal an die App', () async {
-      final r = await laufen([anmelden(1), initialisiert, aufruf(2, 'beispiel_echo')], listeHolen: () async => _mitOhneAnmeldung());
-      expect(r.last, {'jsonrpc': '2.0', 'id': 2, 'result': 'tools/call'});
-      expect(app.aufgerufen, ['beispiel_echo']);
-    });
-
-    test('jedes andere wartet auf die Anmeldung, fragt wieder und geht danach in derselben Sitzung', () async {
-      Timer(const Duration(milliseconds: 300), () => app.angemeldet = true);
-      final r = await laufen([anmelden(1), initialisiert, aufruf(2, 'status')], listeHolen: () async => _mitOhneAnmeldung());
-      expect(r.last, {'jsonrpc': '2.0', 'id': 2, 'result': 'tools/call'});
-      expect(app.aufgerufen.length, greaterThan(1), reason: 'wiederholt gefragt, solange die Anmeldung fehlte');
-      expect(app.aufgerufen.toSet(), {'status'});
-      expect(app.anfragen.where((a) => a.$2 == 'initialize'), hasLength(1), reason: 'keine neue Sitzung');
-    });
-
-    test('kommt die Anmeldung nicht, bekommt der Client nach der Frist die Antwort der App', () async {
-      final r = await laufen(
-        [anmelden(1), initialisiert, aufruf(2, 'status')],
-        listeHolen: () async => _mitOhneAnmeldung(),
-        aufAppWarten: const Duration(milliseconds: 300),
-      );
-      expect(r.last['id'], 2);
-      expect(r.last['result']['isError'], isTrue);
-      expect(r.last['result']['content'].single['text'], anmeldungFehltText);
-    });
-
-    test('ein Aufruf, den der Client beim Warten auf die Anmeldung abbricht, wird nicht mehr gestellt', () async {
-      final r = await laufen(
-        [
-          anmelden(1),
-          initialisiert,
-          aufruf(2, 'status'),
-          {
-            'jsonrpc': '2.0',
-            'method': 'notifications/cancelled',
-            'params': {'requestId': 2, 'reason': 'Zeitlimit'},
-          },
-          () => app.angemeldet = true,
-        ],
-        listeHolen: () async => _mitOhneAnmeldung(),
-        anmeldungsTakt: const Duration(milliseconds: 100),
-      );
-      final gestellt = app.aufgerufen.length;
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-      expect(r.map((n) => n['id']), [1], reason: 'keine Antwort auf den abgebrochenen Aufruf');
-      expect(app.aufgerufen.length, gestellt);
-    });
-  });
-}
-
-/// Die Werkzeugliste mit einem Plugin-Werkzeug, das ohne Anmeldung arbeitet.
-Werkzeugliste _mitOhneAnmeldung() {
-  final l = werkzeugliste([
-    {'name': 'status'},
-    {'name': 'beispiel_echo'},
-  ]);
-  return Werkzeugliste(versionen: l.versionen, initialize: l.initialize, tools: l.tools, ohneAnmeldung: {'beispiel_echo'});
 }

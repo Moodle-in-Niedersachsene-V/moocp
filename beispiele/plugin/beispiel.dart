@@ -77,16 +77,6 @@
 // Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
 // nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
 //
-// Ohne Anmeldung: `beispiel_echo`, `beispiel_protokoll` und `beispiel_datei`
-// brauchen Moodle nicht und stehen deshalb in plugin.json unter
-// `ohneAnmeldung`. Ist das Plugin in einem Instanzprofil eingeschaltet,
-// startet moocp den MCP-Server dieses Profils schon vor der Anmeldung; bis
-// dahin laufen nur diese drei, und jedes andere Werkzeug, auch die von moocp,
-// bekommt von moocp die Antwort, dass sich die Lehrkraft zuerst anmelden muss.
-// Ein Werkzeug ohne Anmeldung, das trotzdem Moodle anfragt, bekommt diese
-// Antwort von der Adresse der App. Jeder Name in `ohneAnmeldung` muss ein
-// Werkzeug des Plugins sein, sonst lädt moocp das Plugin nicht.
-//
 // Übersetzen für die Installation: `dart compile exe beispiel.dart -o
 // beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
 // Beispiel benutzt die Pakete von moocp und hat deshalb keine eigene

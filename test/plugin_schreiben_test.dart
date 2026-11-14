@@ -473,7 +473,7 @@ void main() {
       final ohne = aufruf(z: MoodleZugang(protokoll));
       final r = await freigabe(ohne.token, anfrage('/mod/beispiel/speichern.php?id=7'));
       expect(r.status, 503);
-      expect(r.json, {'fehler': 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.'});
+      expect(r.json, {'fehler': NichtAngemeldet().meldung});
     });
 
     test('ein gesperrter Name in Pfad, Parameter- oder Feldname: 422, kein Name im Protokoll', () async {

@@ -77,7 +77,6 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import '../freigabe.dart' show Bestaetigungen, testfreigabeHinweis;
-import '../mcp/vor_anmeldung.dart';
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
@@ -641,11 +640,12 @@ class AppAdresse {
     return (status: HttpStatus.ok, json: <String, Object?>{});
   }
 
-  /// Moodle braucht die Anmeldung, und die App ist nicht angemeldet: 503 mit
-  /// demselben Satz, den vor der Anmeldung jedes Werkzeug bekommt, das eine
-  /// braucht (vor_anmeldung.dart). Moodle wird dabei nicht gefragt, und
-  /// angemeldet wird auch nicht (A2, E7).
-  static _Antwort _nichtAngemeldet() => _fehler(HttpStatus.serviceUnavailable, anmeldungFehltText);
+  /// Moodle braucht die Anmeldung, und das Profil ist nicht angemeldet
+  /// (praktisch: nach einem Abmelden, denn vorher läuft kein MCP-Server und
+  /// damit kein Aufruf, E13): 503 mit dem Satz, den dann auch die eingebauten
+  /// Werkzeuge melden ([NichtAngemeldet]) -- ein Wortlaut aus einer Quelle.
+  /// Moodle wird dabei nicht gefragt, und angemeldet wird auch nicht (A2, E7).
+  static _Antwort _nichtAngemeldet() => _fehler(HttpStatus.serviceUnavailable, NichtAngemeldet().meldung);
 
   static _Antwort _abgebrochen() => _fehler(
     HttpStatus.conflict,
@@ -1095,8 +1095,8 @@ class AppAdresse {
       return nichtGeschrieben(HttpStatus.badGateway, '${x.meldung} $verbraucht');
     } on AnfrageGesperrt catch (x) {
       return nichtGeschrieben(HttpStatus.forbidden, x.meldung);
-    } on NichtAngemeldet {
-      return nichtGeschrieben(HttpStatus.serviceUnavailable, anmeldungFehltText);
+    } on NichtAngemeldet catch (x) {
+      return nichtGeschrieben(HttpStatus.serviceUnavailable, x.meldung);
     } on MoodleNichtErreichbar catch (x) {
       return _fehler(
         HttpStatus.badGateway,

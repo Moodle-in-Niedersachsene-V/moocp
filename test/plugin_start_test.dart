@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:moocp/anmeldung.dart' show Instanz, mcpServerStarten;
 import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
@@ -130,17 +131,11 @@ void main() {
   });
 
   /// Legt das übersetzte Beispiel-Plugin unter `plugins/beispiel` an und
-  /// stimmt ihm zu, eingeschaltet in [aktiv]. Mit [ohneAnmeldung] steht diese
-  /// Liste statt der aus dem Repository in seiner Beschreibungsdatei.
-  Future<Plugins> beispielAngenommen(List<Profil> profile, {Set<String>? aktiv, List<String>? ohneAnmeldung}) async {
+  /// stimmt ihm zu, eingeschaltet in [aktiv].
+  Future<Plugins> beispielAngenommen(List<Profil> profile, {Set<String>? aktiv}) async {
     final ordner = Directory(p.join(wurzel.path, 'plugins', 'beispiel'))..createSync(recursive: true);
     for (final f in vorlage.listSync().whereType<File>()) {
       f.copySync(p.join(ordner.path, p.basename(f.path)));
-    }
-    if (ohneAnmeldung != null) {
-      final datei = File(p.join(ordner.path, 'plugin.json'));
-      final j = jsonDecode(datei.readAsStringSync()) as Map<String, dynamic>;
-      datei.writeAsStringSync(jsonEncode({...j, 'ohneAnmeldung': ohneAnmeldung}));
     }
     einstellungen = EinstellungenOhneDatei(profile: profile);
     final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
@@ -166,7 +161,6 @@ void main() {
     String arbeitsordner = '',
     Freigaben? freigaben,
     MoodleZugang? moodle,
-    bool vorAnmeldung = false,
     Testzugang? testzugang,
   }) async {
     final d = McpDienst(
@@ -180,7 +174,7 @@ void main() {
       werkzeugquellen: [quelle],
     );
     dienste.add(d);
-    await d.starten(vorAnmeldung: vorAnmeldung);
+    await d.starten();
     final c = McpTestClient(profil.port);
     clients.add(c);
     await c.initialize();
@@ -229,59 +223,41 @@ void main() {
       expect(l.appAdresse?.host, '127.0.0.1');
     });
 
-    test('vor der Anmeldung: die Werkzeuge ohne Anmeldung gehen, die übrigen und die eingebauten erst danach, in derselben Sitzung', () async {
+    test('mit eingeschaltetem Plugin startet der MCP-Server erst nach Einrichtung und Anmeldung und bleibt dann an', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
-      final ohne = beispielProfil('weiteres', 'moodle-weiteres', await freierPort());
-      final l = await starten(await beispielAngenommen([profil, ohne], aktiv: {'standard'}));
-      expect(l.ohneAnmeldungIn(profil), isTrue);
-      expect(l.ohneAnmeldungIn(ohne), isFalse, reason: 'dort ist das Plugin nicht eingeschaltet');
+      final l = await starten(await beispielAngenommen([profil]));
+      expect(l.werkzeuge(profil), isNotEmpty, reason: 'das Plugin läuft und ist in diesem Profil eingeschaltet');
       final zugang = SchaltbarerZugang(protokoll);
-      final ordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
-      final client = await verbinden(profil, l, arbeitsordner: ordner.path, moodle: zugang, vorAnmeldung: true);
-      const hinweis = 'Bitte melden Sie sich zuerst in moocp an (Fenster der App); danach geht dieser Aufruf.';
-      Future<Map> aufrufen(String name, [Map<String, Object?> args = const {}]) =>
-          client.call('tools/call', {'name': name, 'arguments': args});
-      String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+      final freigaben = Freigaben(protokoll);
+      final d = McpDienst(einstellungen, zugang, protokoll, freigaben, '', profil: profil, werkzeugquellen: [l]);
+      dienste.add(d);
+      final instanzen = [Instanz(zugang, freigaben, d)];
+      Future<void> serverStarten({bool eingerichtet = true}) =>
+          mcpServerStarten(instanzen, eingerichtet: eingerichtet, protokoll: protokoll);
 
-      expect(await werkzeugnamen(client), containsAll([...beispielWerkzeuge, 'status', 'meine_kurse']));
-      expect(await client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
-      expect(await client.tool('beispiel_protokoll', {'text': 'vorher'}), 'Die Zeile steht im Protokoll von moocp.');
-      expect(await client.tool('beispiel_datei', {'text': 'vorher'}), startsWith('Datei abgelegt: '));
-      for (final name in ['status', 'meine_kurse', 'beispiel_status', 'beispiel_moodle_lesen']) {
-        final r = await aufrufen(name, name == 'beispiel_moodle_lesen' ? {'kurs': 12} : const {});
-        expect(r['isError'], true, reason: name);
-        expect(text(r), hinweis, reason: name);
-      }
-      expect(zugang.anmeldeversuche, 0);
-
+      // Eingerichtet, aber nicht angemeldet: kein Server, auch mit Plugin.
+      await serverStarten();
+      expect(d.laeuft, isFalse);
+      await expectLater(Socket.connect('127.0.0.1', profil.port), throwsA(isA<SocketException>()));
+      // Angemeldet, aber nicht eingerichtet: ebenso nicht.
       zugang.an = true;
-      final status = await aufrufen('status');
-      final ueberPlugin = await aufrufen('beispiel_status');
-      expect(status['isError'], isNot(true));
-      expect(text(status), contains('Angemeldet: ja'));
-      expect(ueberPlugin['isError'], isNot(true));
-      expect(text(ueberPlugin), contains('Angemeldet: ja'));
-      expect(client.session, isNotNull);
-      final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“: vorher'));
-      expect(zeilen, contains('beispiel_status: vor der Anmeldung nicht ausgeführt'));
-    });
+      await serverStarten(eingerichtet: false);
+      expect(d.laeuft, isFalse);
 
-    test('nennt ohneAnmeldung ein Werkzeug, das das Plugin nicht hat, lädt es nicht', () async {
-      final profil = beispielProfil('standard', 'moodle', await freierPort());
-      final plugins = await beispielAngenommen([profil], ohneAnmeldung: ['beispiel_echo', 'beispiel_gibtesnicht']);
-      final l = await starten(plugins);
-      final e = plugins.eintraege.single;
+      await serverStarten();
+      expect(d.laeuft, isTrue);
+      final client = McpTestClient(profil.port);
+      clients.add(client);
+      await client.initialize();
+      expect(await werkzeugnamen(client), containsAll([...beispielWerkzeuge, 'status']));
 
-      expect(l.laeuft(e), isFalse);
-      expect(l.startfehler(e), 'Das Feld „ohneAnmeldung“ nennt das Werkzeug „beispiel_gibtesnicht“, das das Plugin nicht hat.');
-      expect(l.werkzeuge(profil), isEmpty);
-      expect(l.ohneAnmeldungIn(profil), isFalse);
-      final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(
-        zeilen,
-        contains('Plugin „Beispiel“ nicht gestartet: Das Feld „ohneAnmeldung“ nennt das Werkzeug „beispiel_gibtesnicht“, das das Plugin nicht hat.'),
-      );
+      // Nach dem Abmelden bleibt er an, und die Sitzung des KI-Werkzeugs hält.
+      zugang.an = false;
+      await serverStarten();
+      expect(d.laeuft, isTrue);
+      expect(await client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
+      expect(zugang.anmeldeversuche, 0, reason: 'der Start der Server meldet nie selbst an');
+      expect([for (final e in protokoll.eintraege) e.text].where((z) => z.startsWith('MCP-Server läuft auf')), hasLength(1));
     });
 
     test('Dialoge und Freigabe: jede Art über die Adresse der App, die Antwort kommt beim Plugin an', () async {
@@ -1171,9 +1147,7 @@ Future<void> main(List<String> a) async {
           return prozess;
         },
       );
-      // Das Programm des Neustarts hat nur beispiel_echo; ohneAnmeldung nennt
-      // darum nur das, sonst hielte schon diese Prüfung den Neustart auf.
-      final plugins = await beispielAngenommen([profil], ohneAnmeldung: ['beispiel_echo']);
+      final plugins = await beispielAngenommen([profil]);
       await starten(plugins, mit: l);
       final client = await verbinden(profil, l);
       expect((await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}}))['isError'], true);

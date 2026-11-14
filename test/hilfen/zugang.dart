@@ -1,5 +1,5 @@
-// Ein Moodle-Zugang für Tests, die die Anmeldung schalten, ohne Moodle:
-// test/plugin_start_test.dart und test/werkzeugquellen_test.dart.
+// Ein Moodle-Zugang für Tests, die die Anmeldung schalten, ohne Moodle
+// (test/plugin_start_test.dart).
 import 'package:moocp/moodle/moodle_zugang.dart';
 
 /// Ein Zugang, dessen Anmeldung der Test schaltet ([an]), ohne Moodle; er

@@ -20,7 +20,6 @@ Map<String, Object?> _vollstaendig() => {
         {'muster': '/mod/beispiel/save.php', 'art': 'schreiben', 'grund': 'Speichert die Einstellungen.'},
       ],
       'wahlSkills': {'beispiel-skill': 'Ein wählbarer Skill.'},
-      'ohneAnmeldung': ['beispiel_pruefen'],
       'entwicklungsPort': 47900,
     };
 
@@ -64,7 +63,6 @@ void main() {
       expect(b.zusatzadressen[0].grund, 'Liest die Seiten der Aktivität.');
       expect(b.zusatzadressen[1].art, ZugriffsArt.schreiben);
       expect(b.wahlSkills, {'beispiel-skill': 'Ein wählbarer Skill.'});
-      expect(b.ohneAnmeldung, ['beispiel_pruefen']);
       expect(b.entwicklungsPort, 47900);
     });
 
@@ -74,7 +72,6 @@ void main() {
       expect(b.zusatzadressen, isEmpty);
       expect(b.wahlSkills, isEmpty);
       expect(b.skills, isEmpty);
-      expect(b.ohneAnmeldung, isEmpty);
       expect(b.entwicklungsPort, isNull);
     });
 
@@ -311,7 +308,7 @@ void main() {
     });
   });
 
-  group('Skills, Werkzeuge ohne Anmeldung, Entwicklungsport', () {
+  group('Skills, Entwicklungsport', () {
     test('wählbare Skills: Name und Beschreibung, beide Text', () {
       expect(_grund(_mit(_minimal(), 'wahlSkills', {'a': 'b'})), isNull);
       expect(_grund(_mit(_minimal(), 'wahlSkills', ['a'])), contains('„wahlSkills“'));
@@ -332,13 +329,6 @@ void main() {
       final grund = _grund(beides);
       expect(grund, contains('„wahlSkills“'));
       expect(grund, isNot(contains('beispiel-x')), reason: 'der Grund nennt keine Inhalte');
-    });
-
-    test('Werkzeuge ohne Anmeldung: eine Liste von Namen; ob es sie gibt, prüft erst der Start', () {
-      expect(_grund(_mit(_minimal(), 'ohneAnmeldung', ['irgendeins', 'noch_eins'])), isNull);
-      expect(_grund(_mit(_minimal(), 'ohneAnmeldung', 'x')), contains('„ohneAnmeldung“'));
-      expect(_grund(_mit(_minimal(), 'ohneAnmeldung', [1])), contains('„ohneAnmeldung“'));
-      expect(_grund(_mit(_minimal(), 'ohneAnmeldung', [''])), contains('„ohneAnmeldung“'));
     });
 
     test('Entwicklungsport: eine Portnummer', () {

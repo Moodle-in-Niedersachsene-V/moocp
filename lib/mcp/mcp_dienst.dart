@@ -165,7 +165,6 @@ class McpDienst implements AufrufKontext {
       args,
       aufruf,
     ),
-    anmeldungFehlt: () => wartetAufAnmeldung,
   );
 
   StreamableMcpServer? _server;
@@ -173,35 +172,9 @@ class McpDienst implements AufrufKontext {
   /// Ob der Server lauscht.
   bool get laeuft => _server != null;
 
-  /// Gesetzt, wenn der Server vor der Anmeldung gestartet ist ([starten] mit
-  /// `vorAnmeldung`), bis die Lehrkraft sich das erste Mal angemeldet hat.
-  bool _vorAnmeldung = false;
-
-  /// Ob der Server vor der Anmeldung läuft und die Lehrkraft sich seitdem
-  /// noch nicht angemeldet hat. Bis dahin arbeiten nur die Werkzeuge ohne
-  /// Anmeldung (WerkzeugBeschreibung.ohneAnmeldung); jedes andere antwortet
-  /// mit dem festen Satz aus vor_anmeldung.dart (werkzeug_aufrufe.dart). Sieht
-  /// es den Zugang angemeldet, gilt das nicht mehr, auch nicht nach einem
-  /// späteren Abmelden: Dann gilt, was für jeden laufenden Server ohne
-  /// Anmeldung gilt.
-  bool get wartetAufAnmeldung {
-    if (_vorAnmeldung && moodle.angemeldet) _vorAnmeldung = false;
-    return _vorAnmeldung;
-  }
-
-  /// Die Lehrkraft hat sich angemeldet (main.dart, nach jeder Anmeldung):
-  /// Von nun an laufen alle Werkzeuge, auch wenn sie sich vor dem nächsten
-  /// Aufruf wieder abmeldet.
-  void anmeldungErfolgt() {
-    if (moodle.angemeldet) _vorAnmeldung = false;
-  }
-
-  /// Startet den Server. Mit [vorAnmeldung] startet er, bevor die Lehrkraft
-  /// sich angemeldet hat, weil in diesem Profil ein Plugin mit Werkzeugen
-  /// ohne Anmeldung eingeschaltet ist (E13, E35): Er listet alle Werkzeuge,
-  /// aber bis zur Anmeldung arbeiten nur diese ([wartetAufAnmeldung]). Ist
-  /// der Zugang schon angemeldet, ist das ein gewöhnlicher Start.
-  Future<void> starten({bool vorAnmeldung = false}) async {
+  /// Startet den Server. Wann, entscheidet der Start der App: erst nach
+  /// Einrichtung und Anmeldung (anmeldung.dart, mcpServerStarten; E13).
+  Future<void> starten() async {
     if (_server != null) return;
     _testbetrieb.beginnen();
     final s = StreamableMcpServer(
@@ -215,18 +188,10 @@ class McpDienst implements AufrufKontext {
     );
     await s.start();
     _server = s;
-    _vorAnmeldung = vorAnmeldung && !moodle.angemeldet;
     protokoll.eintrag(
       Art.info,
       'MCP-Server läuft auf http://127.0.0.1:${profil.port}/mcp (${profil.mcpName})',
     );
-    if (_vorAnmeldung) {
-      protokoll.eintrag(
-        Art.info,
-        'MCP-Server vor der Anmeldung gestartet: Bis zur Anmeldung arbeiten nur die Werkzeuge, '
-        'die ein Plugin als ohne Anmeldung nennt',
-      );
-    }
   }
 
   /// Die Werkzeugliste für die Brücke (bruecke.dart, Werkzeugliste;
@@ -236,20 +201,7 @@ class McpDienst implements AufrufKontext {
   /// statt über HTTP -- so steht darin genau, was ein Client bekäme, ohne dass
   /// der Server lauschen oder die App angemeldet sein muss: Die Werkzeuge
   /// hängen von keinem der beiden ab.
-  ///
-  /// Dazu unter `ohneAnmeldung` die Namen der Werkzeuge der [werkzeugquellen],
-  /// die ohne Anmeldung arbeiten, wenn es welche gibt: Bei ihnen wartet die
-  /// Brücke nur auf den Server, nicht auf die Anmeldung. Ohne solche Werkzeuge
-  /// fehlt der Eintrag, und die Liste bleibt, wie sie ohne ihn war.
-  Future<Map<String, dynamic>> werkzeugliste() async {
-    final liste = await _werkzeugliste(_erzeugen(protokollieren: false));
-    final ohne = [
-      for (final q in werkzeugquellen)
-        for (final w in q.werkzeuge(profil))
-          if (w.ohneAnmeldung) w.name,
-    ];
-    return {...liste, if (ohne.isNotEmpty) 'ohneAnmeldung': ohne};
-  }
+  Future<Map<String, dynamic>> werkzeugliste() async => _werkzeugliste(_erzeugen(protokollieren: false));
 
   /// Die Namen der eingebauten Werkzeuge, ohne die der [werkzeugquellen]:
   /// Gegen sie prüft der Start eines Plugins dessen Werkzeugnamen.
@@ -326,7 +278,6 @@ class McpDienst implements AufrufKontext {
     _testbetrieb.beenden();
     await _server?.stop();
     _server = null;
-    _vorAnmeldung = false;
     protokoll.eintrag(Art.info, 'MCP-Server gestoppt');
   }
 

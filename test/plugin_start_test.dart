@@ -1,6 +1,6 @@
 // Ein angenommenes Plugin starten und seine Werkzeuge anbieten (E35): so, wie
 // ein KI-Werkzeug es sieht -- über den MCP-Server der App, mit dem
-// Beispiel-Plugin (beispiele/plugin/) als echtem Kindprozess auf der anderen
+// Beispiel-Plugin (example/example-plugin/) als echtem Kindprozess auf der anderen
 // Seite. Wo kein echter Prozess nötig ist (Namensregeln, Abbruch), steht ein
 // kleiner MCP-Server im Test an seiner Stelle. Alles in Temp-Ordnern, nie im
 // Einstellungsordner der App.
@@ -89,16 +89,8 @@ void main() {
   // läuft der Weg über `programm` wie bei einem installierten Plugin.
   setUpAll(() async {
     vorlage = Directory.systemTemp.createTempSync('moocp_beispiel_');
-    final ziel = p.join(vorlage.path, 'beispiel.exe');
-    final r = await Process.run(dartDesSdk(), [
-      'compile',
-      'exe',
-      p.join('beispiele', 'plugin', 'beispiel.dart'),
-      '-o',
-      ziel,
-    ]);
-    expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
-    File(p.join('beispiele', 'plugin', 'plugin.json')).copySync(p.join(vorlage.path, 'plugin.json'));
+    await beispielUebersetzen(p.join(vorlage.path, 'beispiel.exe'));
+    File(p.join(beispielOrdner, 'plugin.json')).copySync(p.join(vorlage.path, 'plugin.json'));
     eingebaut = await eingebauteWerkzeuge();
   });
   tearDownAll(() => vorlage.deleteSync(recursive: true));
@@ -1362,7 +1354,7 @@ Future<void> main(List<String> a) async {
       final l = await starten(await beispielAngenommen([profil]));
       await l.beenden();
       File(p.join(wurzel.path, 'plugins', 'beispiel', 'plugin.json'))
-          .writeAsStringSync(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync().replaceFirst('1.0.0', '1.0.1'));
+          .writeAsStringSync(File(p.join(beispielOrdner, 'plugin.json')).readAsStringSync().replaceFirst('1.0.0', '1.0.1'));
 
       final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
       final neu = await starten(plugins);

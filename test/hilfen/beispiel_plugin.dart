@@ -1,5 +1,5 @@
-// Gemeinsames für die Tests, die das Beispiel-Plugin (beispiele/plugin/) als
-// echten Prozess starten oder anhängen: test/plugin_start_test.dart und
+// Gemeinsames für die Tests, die das Beispiel-Plugin (example/example-plugin/)
+// als echten Prozess starten oder anhängen: test/plugin_start_test.dart und
 // test/plugin_entwicklung_test.dart. Alles mit erfundenen Angaben.
 import 'dart:io';
 
@@ -31,6 +31,53 @@ const beispielWerkzeuge = [
   'beispiel_download',
   'beispiel_namen',
 ];
+
+/// Der Projektordner des Beispiel-Plugins, relativ zur Wurzel des
+/// Repositorys (dort laufen die Tests).
+final beispielOrdner = p.join('example', 'example-plugin');
+
+/// Übersetzt das Beispiel-Plugin nach [exe], wie ein Plugin-Autor es tut
+/// (`dart compile exe`), mit dem `dart` des Flutter-SDK und ohne Netz.
+///
+/// Das Beispiel ist ein eigenes Dart-Projekt mit eigener pubspec.yaml. Ohne
+/// aufgelöste Pakete holte `dart compile exe` sie selbst, und zwar aus dem
+/// Netz. Deshalb löst der Test sie vorher mit `dart pub get --offline` aus
+/// dem Pub-Cache auf, den `flutter pub get` für die App schon gefüllt hat
+/// (mcp_dart ist auch ein Paket der App). Das geschieht in einer Kopie in
+/// einem Temp-Ordner, ohne die pubspec.lock des Beispiels: Im Arbeitsbaum
+/// entsteht nichts, zwei Testdateien kommen sich nicht in die Quere, und es
+/// genügen die Versionen, die die App gerade benutzt.
+Future<void> beispielUebersetzen(String exe) async {
+  final projekt = Directory.systemTemp.createTempSync('moocp_beispiel_projekt_');
+  try {
+    File(p.join(beispielOrdner, 'pubspec.yaml')).copySync(p.join(projekt.path, 'pubspec.yaml'));
+    for (final unter in ['bin', 'lib']) {
+      final quelle = Directory(p.join(beispielOrdner, unter));
+      if (!quelle.existsSync()) continue;
+      for (final f in quelle.listSync(recursive: true).whereType<File>()) {
+        final ziel = File(p.join(projekt.path, p.relative(f.path, from: beispielOrdner)));
+        ziel.parent.createSync(recursive: true);
+        f.copySync(ziel.path);
+      }
+    }
+    final holen = await Process.run(dartDesSdk(), ['pub', 'get', '--offline'], workingDirectory: projekt.path);
+    if (holen.exitCode != 0) {
+      throw StateError('dart pub get --offline ist gescheitert: ${holen.stdout}${holen.stderr}');
+    }
+    final r = await Process.run(dartDesSdk(), [
+      'compile',
+      'exe',
+      p.join('bin', 'beispiel.dart'),
+      '-o',
+      p.absolute(exe),
+    ], workingDirectory: projekt.path);
+    if (r.exitCode != 0) {
+      throw StateError('dart compile exe ist gescheitert: ${r.stdout}${r.stderr}');
+    }
+  } finally {
+    projekt.deleteSync(recursive: true);
+  }
+}
 
 /// Einstellungen, die nie in eine Datei geschrieben werden; sie zählen, wie
 /// oft die App sie geschrieben hätte.

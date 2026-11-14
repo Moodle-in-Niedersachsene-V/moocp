@@ -2,7 +2,7 @@
 // <Ordner>` auf der Kommandozeile, die Beschreibungsdatei aus diesem Ordner,
 // der Schlüssel aus der Umgebung, und die Verbindung zu einem Plugin, das
 // schon läuft. Auf der anderen Seite steht das Beispiel-Plugin
-// (beispiele/plugin/) als Prozess, den der Test selbst startet, wie ein
+// (example/example-plugin/) als Prozess, den der Test selbst startet, wie ein
 // Entwickler es täte; wo eine andere Werkzeugliste gebraucht wird, ein kleiner
 // MCP-Server im Test. Den Dialog davor prüft test/profile_ausblenden_test.dart.
 // Alles in Temp-Ordnern, nie im Einstellungsordner der App.
@@ -143,8 +143,7 @@ void main() {
     setUpAll(() async {
       vorlage = Directory.systemTemp.createTempSync('moocp_beispiel_');
       exe = p.join(vorlage.path, 'beispiel.exe');
-      final r = await Process.run(dartDesSdk(), ['compile', 'exe', p.join('beispiele', 'plugin', 'beispiel.dart'), '-o', exe]);
-      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+      await beispielUebersetzen(exe);
       eingebaut = await eingebauteWerkzeuge();
     });
     tearDownAll(() => vorlage.deleteSync(recursive: true));
@@ -167,7 +166,7 @@ void main() {
       // Der Ordner des Entwicklers: Beschreibungsdatei mit freiem
       // Entwicklungsport, kein Programm darin -- es läuft schon.
       ordner = (Directory(p.join(wurzel.path, 'entwicklung'))..createSync()).path;
-      final m = jsonDecode(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync()) as Map;
+      final m = jsonDecode(File(p.join(beispielOrdner, 'plugin.json')).readAsStringSync()) as Map;
       m['entwicklungsPort'] = port;
       File(p.join(ordner, 'plugin.json')).writeAsStringSync(jsonEncode(m));
       einstellungen = EinstellungenOhneDatei(profile: [
@@ -500,7 +499,7 @@ void main() {
       await pluginStarten();
       final installiert = Directory(p.join(wurzel.path, 'plugins', 'beispiel'))..createSync(recursive: true);
       File(exe).copySync(p.join(installiert.path, 'beispiel.exe'));
-      File(p.join('beispiele', 'plugin', 'plugin.json')).copySync(p.join(installiert.path, 'plugin.json'));
+      File(p.join(beispielOrdner, 'plugin.json')).copySync(p.join(installiert.path, 'plugin.json'));
       final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
       await plugins.entscheiden(plugins.eintraege.single, zugestimmt: true, profile: {'standard'});
       final vorher = jsonEncode(einstellungen.zuJson());

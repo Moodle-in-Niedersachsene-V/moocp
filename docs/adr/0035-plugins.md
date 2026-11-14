@@ -38,7 +38,7 @@ Ein Plugin ist eine zusätzlich installierbare Erweiterung aus einem eigenen Pro
 
 Läuft die App schon, holt ein zweiter Start nur ihr Fenster nach vorn (E5), und der Parameter wirkt nicht: Einer laufenden App lässt sich so kein Plugin unterschieben. Die Adresse, unter der die App für das Plugin erreichbar ist, nennt sie beim Aufbau der Verbindung, bei einem angehängten Plugin wie bei einem gestarteten.
 
-**Beispiel-Plugin.** Im Repository liegt ein Beispiel-Plugin (`beispiele/plugin/`), das jeden Weg der Schnittstelle einmal zeigt und sonst nichts kann. Es ist Vorlage für Plugin-Entwickler und zugleich das Plugin, gegen das die Tests der App laufen. Der Installer der App liefert es nicht mit.
+**Beispiel-Plugin.** Im Repository liegt ein Beispiel-Plugin (`example/example-plugin/`), das jeden Weg der Schnittstelle einmal zeigt und sonst nichts kann. Es ist ein eigenständiges Dart-Projekt mit eigener `pubspec.yaml` und eigenen Skripten zum Bauen und Entwickeln, damit ein Plugin-Autor es so kopieren kann, wie es ist, und sieht, dass ein Plugin nichts aus moocp braucht. Es ist Vorlage für Plugin-Entwickler und zugleich das Plugin, gegen das die Tests der App laufen. Der Installer der App liefert es nicht mit.
 
 Die eingebauten Werkzeuge bleiben fester Code der App. Sie laufen nicht über die Schnittstelle der Plugins und lassen sich nicht abschalten.
 

@@ -1,0 +1,5 @@
+# Bauergebnis von bauen.ps1 und bauen.sh
+/build/
+
+# Dart
+.dart_tool/

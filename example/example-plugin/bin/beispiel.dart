@@ -77,11 +77,11 @@
 // Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
 // nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
 //
-// Übersetzen für die Installation: `dart compile exe beispiel.dart -o
-// beispiel.exe` (der Name, den `programm` in plugin.json nennt). Dieses
-// Beispiel benutzt die Pakete von moocp und hat deshalb keine eigene
-// pubspec.yaml; ein echtes Plugin bringt seine eigene mit und kann in jeder
-// Sprache geschrieben sein.
+// Übersetzen für die Installation: bauen.ps1 (Windows) und bauen.sh (Mac)
+// übersetzen das Programm mit `dart compile exe` unter dem Namen, den
+// `programm` in plugin.json nennt, und legen es mit plugin.json und skills/
+// in einen fertigen Plugin-Ordner. Ein Plugin kann auch in jeder anderen
+// Sprache geschrieben sein; es muss nur die Punkte oben erfüllen.
 
 import 'dart:async';
 import 'dart:convert';

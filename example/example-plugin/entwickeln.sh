@@ -3,10 +3,11 @@
 # (README, Teil 4, „Ein Plugin entwickeln“). Auf dem Mac; unter Windows tut
 # entwickeln.ps1 dasselbe.
 #
-#   bash beispiele/plugin/entwickeln.sh [Pfad zum Programm von moocp]
+#   bash example/example-plugin/entwickeln.sh [Pfad zum Programm von moocp]
 #
 # Auf dem Mac gibt es moocp nur aus dem Entwicklungsbau (tool/mac_bau.sh);
-# Vorgabe ist deshalb das Programm in dessen Bau im Repository.
+# Vorgabe ist deshalb das Programm in dessen Bau im Repository von moocp,
+# zwei Ordner über diesem.
 #
 # Was das Skript tut, tut jeder Plugin-Entwickler auf seine Weise:
 #
@@ -30,10 +31,7 @@
 set -euo pipefail
 
 ORDNER="$(cd "$(dirname "$0")" && pwd)"
-# Das Beispiel benutzt die Pakete von moocp; dart findet sie von der Wurzel
-# des Repositorys aus.
-WURZEL="$(cd "$ORDNER/../.." && pwd)"
-MOOCP="${1:-$WURZEL/build/macos/Build/Products/Debug/moocp.app/Contents/MacOS/moocp}"
+MOOCP="${1:-$ORDNER/../../build/macos/Build/Products/Debug/moocp.app/Contents/MacOS/moocp}"
 
 if [[ ! -x "$MOOCP" ]]; then
   echo "moocp ist nicht zu finden: $MOOCP (erster Parameter)" >&2
@@ -51,13 +49,15 @@ fi
 MOOCP_PLUGIN_SCHLUESSEL="$(head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_')"
 export MOOCP_PLUGIN_SCHLUESSEL
 
-cd "$WURZEL"
+# Im Projektordner: dart run findet dort pubspec.yaml und holt beim ersten
+# Mal die Pakete.
+cd "$ORDNER"
 PLUGIN=""
 trap '[[ -n "$PLUGIN" ]] && kill "$PLUGIN" 2>/dev/null; exit 130' INT TERM
 trap '[[ -n "$PLUGIN" ]] && kill "$PLUGIN" 2>/dev/null || true' EXIT
 MOOCP_GESTARTET=""
 while true; do
-  dart run "$ORDNER/beispiel.dart" --port "$PORT" --entwicklung &
+  dart run bin/beispiel.dart --port "$PORT" --entwicklung &
   PLUGIN=$!
   if [[ -z "$MOOCP_GESTARTET" ]]; then
     echo "Beispiel-Plugin läuft auf 127.0.0.1:$PORT. moocp startet und fragt, ob es das Plugin anhängen soll."

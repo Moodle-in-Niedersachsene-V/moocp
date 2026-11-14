@@ -2,7 +2,7 @@
 # moocp an (README, Teil 4, „Ein Plugin entwickeln“). Unter Windows; auf dem
 # Mac tut entwickeln.sh dasselbe.
 #
-#   powershell -ExecutionPolicy Bypass -File beispiele\plugin\entwickeln.ps1 [-Moocp <Pfad zur moocp.exe>]
+#   powershell -ExecutionPolicy Bypass -File example\example-plugin\entwickeln.ps1 [-Moocp <Pfad zur moocp.exe>]
 #
 # Was das Skript tut, tut jeder Plugin-Entwickler auf seine Weise:
 #
@@ -42,9 +42,6 @@ $ErrorActionPreference = 'Stop'
 $Dart = (Get-Command $Dart -CommandType Application | Select-Object -First 1).Source
 
 $ordner = $PSScriptRoot
-# Das Beispiel benutzt die Pakete von moocp; dart findet sie von der Wurzel
-# des Repositorys aus.
-$wurzel = (Resolve-Path (Join-Path $ordner '..\..')).Path
 
 if (-not (Test-Path -LiteralPath $Moocp -PathType Leaf)) {
     Write-Error "moocp ist nicht zu finden: $Moocp (Parameter -Moocp)"
@@ -66,11 +63,12 @@ $env:MOOCP_PLUGIN_SCHLUESSEL = [Convert]::ToBase64String($bytes).TrimEnd('=').Re
 try {
     # Start-Process setzt die Argumente nur mit Leerzeichen zusammen; Pfade
     # mit Leerzeichen brauchen deshalb eigene Anführungszeichen.
-    $quelle = Join-Path $ordner 'beispiel.dart'
+    # Im Projektordner: dart run findet dort pubspec.yaml und holt beim
+    # ersten Mal die Pakete.
     $moocpGestartet = $false
     while ($true) {
-        $plugin = Start-Process -FilePath $Dart -ArgumentList @('run', "`"$quelle`"", '--port', "$port", '--entwicklung') `
-            -WorkingDirectory $wurzel -NoNewWindow -PassThru
+        $plugin = Start-Process -FilePath $Dart -ArgumentList @('run', 'bin\beispiel.dart', '--port', "$port", '--entwicklung') `
+            -WorkingDirectory $ordner -NoNewWindow -PassThru
         if (-not $moocpGestartet) {
             Write-Host "Beispiel-Plugin läuft auf 127.0.0.1:$port. moocp startet und fragt, ob es das Plugin anhängen soll."
             Start-Process -FilePath $Moocp -ArgumentList @('--plugin-entwicklung', "`"$ordner`"")

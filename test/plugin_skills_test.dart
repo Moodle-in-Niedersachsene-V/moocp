@@ -6,8 +6,8 @@
 //
 // Alles läuft in temporären Ordnern: Plugin-Ordner, Einstellungen (ohne
 // Datei) und die Skill-Ordner der KI-Werkzeuge. Das Beispiel-Plugin
-// (beispiele/plugin/) liefert Beschreibungsdatei und Skills; sein Programm
-// wird nicht gebraucht und durch eine leere Datei ersetzt.
+// (example/example-plugin/) liefert Beschreibungsdatei und Skills; sein
+// Programm wird nicht gebraucht und durch eine leere Datei ersetzt.
 library;
 
 import 'dart:convert';
@@ -22,6 +22,10 @@ import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/skills.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
+
+/// Der Projektordner des Beispiel-Plugins, relativ zur Wurzel des
+/// Repositorys.
+final _beispiel = p.join('example', 'example-plugin');
 
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei() : super(schluessel: 'schluessel');
@@ -68,8 +72,8 @@ void main() {
   /// Beschreibungsdatei (verändert durch [manifest]) und seinen Skills.
   Directory beispielAnlegen({Map<String, Object?> Function(Map<String, Object?>)? manifest}) {
     final ordner = Directory(p.join(pluginsOrdner.path, 'beispiel'))..createSync();
-    _kopieren(Directory(p.join('beispiele', 'plugin', 'skills')), Directory(p.join(ordner.path, 'skills')));
-    final m = jsonDecode(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync()) as Map<String, Object?>;
+    _kopieren(Directory(p.join(_beispiel,'skills')), Directory(p.join(ordner.path, 'skills')));
+    final m = jsonDecode(File(p.join(_beispiel,'plugin.json')).readAsStringSync()) as Map<String, Object?>;
     File(p.join(ordner.path, 'plugin.json')).writeAsStringSync(jsonEncode(manifest == null ? m : manifest(m)));
     File(p.join(ordner.path, 'beispiel.exe')).writeAsStringSync('');
     return ordner;
@@ -137,11 +141,11 @@ void main() {
   group('Lesen aus dem Plugin-Ordner', () {
     test('das Beispiel-Plugin bringt einen Skill, der immer dabei ist, und einen wählbaren', () async {
       final manifest =
-          PluginBeschreibung.ausText(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync());
+          PluginBeschreibung.ausText(File(p.join(_beispiel,'plugin.json')).readAsStringSync());
       expect(manifest.skills, ['beispiel']);
       expect(manifest.wahlSkills.keys, ['beispiel-vorlage']);
       for (final n in [...manifest.skills, ...manifest.wahlSkills.keys]) {
-        expect(File(p.join('beispiele', 'plugin', 'skills', n, 'SKILL.md')).existsSync(), isTrue, reason: n);
+        expect(File(p.join(_beispiel,'skills', n, 'SKILL.md')).existsSync(), isTrue, reason: n);
       }
 
       beispielAnlegen();
@@ -549,11 +553,11 @@ void main() {
     /// SKILL.md, damit sich die Herkunft am Inhalt zeigt.
     EntwicklungsSkills entwicklungAnlegen({String text = 'aus der Entwicklung', List<String>? skills}) {
       final ordner = Directory(p.join(tmp.path, 'entwicklung'))..createSync(recursive: true);
-      _kopieren(Directory(p.join('beispiele', 'plugin', 'skills')), Directory(p.join(ordner.path, 'skills')));
+      _kopieren(Directory(p.join(_beispiel,'skills')), Directory(p.join(ordner.path, 'skills')));
       for (final n in ['beispiel', 'beispiel-vorlage']) {
         File(p.join(ordner.path, 'skills', n, 'SKILL.md')).writeAsStringSync('$n $text');
       }
-      final m = jsonDecode(File(p.join('beispiele', 'plugin', 'plugin.json')).readAsStringSync()) as Map<String, Object?>;
+      final m = jsonDecode(File(p.join(_beispiel,'plugin.json')).readAsStringSync()) as Map<String, Object?>;
       if (skills != null) m['skills'] = skills;
       final text2 = jsonEncode(m);
       File(p.join(ordner.path, 'plugin.json')).writeAsStringSync(text2);

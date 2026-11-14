@@ -251,17 +251,47 @@ void main() {
       expect(einstellungen.plugins['beispiel']!.werkzeuge, isNull, reason: 'bis das neue Plugin gestartet ist');
     });
 
-    test('ein Plugin, das es nicht mehr gibt, verliert seine Liste', () async {
+    // Wer ein Plugin deinstalliert, zieht seine Zustimmung zurück: Nach einer
+    // Neuinstallation fragt die App wieder, auch bei unverändertem Stand.
+    test('ein Plugin, dessen Ordner fehlt, verliert die ganze Entscheidung; neu installiert ist es wieder offen', () async {
       var plugins = await laden();
       await annehmen(plugins, 'beispiel', werkzeuge: [_werkzeug('beispiel_echo')]);
-      Directory(p.join(pluginOrdner.path, 'beispiel')).deleteSync(recursive: true);
+      final ordner = Directory(p.join(pluginOrdner.path, 'beispiel'));
+      final dateien = {
+        for (final f in ordner.listSync(recursive: true).whereType<File>())
+          p.relative(f.path, from: ordner.path): f.readAsBytesSync(),
+      };
+      ordner.deleteSync(recursive: true);
       plugins = await laden();
       expect(plugins.eintraege, isEmpty);
 
       await plugins.werkzeugeAufraeumen();
 
-      expect(einstellungen.plugins['beispiel']!.werkzeuge, isNull);
-      expect(einstellungen.plugins['beispiel']!.zugestimmt, isTrue, reason: 'die Zustimmung bleibt, wie sie war');
+      expect(einstellungen.plugins.containsKey('beispiel'), isFalse);
+      expect(
+        protokoll.eintraege.map((e) => e.text),
+        contains('Plugin im Ordner „beispiel“: Ordner fehlt, Entscheidung vergessen'),
+      );
+
+      // Dieselben Dateien wieder da, also derselbe Stand: trotzdem offen.
+      for (final MapEntry(:key, :value) in dateien.entries) {
+        File(p.join(ordner.path, key))
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(value);
+      }
+      plugins = await laden();
+      expect(plugins.stand(eintrag(plugins, 'beispiel')).zustand, isNot(PluginZustand.zugestimmt));
+    });
+
+    test('auch eine Ablehnung ist vergessen, wenn der Ordner fehlt', () async {
+      var plugins = await laden();
+      await plugins.entscheiden(eintrag(plugins, 'beispiel'), zugestimmt: false, profile: const {});
+      Directory(p.join(pluginOrdner.path, 'beispiel')).deleteSync(recursive: true);
+      plugins = await laden();
+
+      await plugins.werkzeugeAufraeumen();
+
+      expect(einstellungen.plugins.containsKey('beispiel'), isFalse);
     });
 
     test('ein Plugin, das nicht mehr lädt, verliert seine Liste', () async {
@@ -287,7 +317,7 @@ void main() {
       expect(einstellungen.gespeichert, vorher);
     });
 
-    test('der Start der Plugins räumt auf: Ein Plugin, das fort ist, verliert seine Liste', () async {
+    test('der Start der Plugins räumt auf: Ein Plugin, das fort ist, ist vergessen', () async {
       var plugins = await laden();
       await annehmen(plugins, 'beispiel', werkzeuge: [_werkzeug('beispiel_echo')]);
       Directory(p.join(pluginOrdner.path, 'beispiel')).deleteSync(recursive: true);
@@ -295,7 +325,7 @@ void main() {
 
       await LaufendePlugins(protokoll).starten(plugins, eingebaut: const {});
 
-      expect(einstellungen.plugins['beispiel']!.werkzeuge, isNull);
+      expect(einstellungen.plugins.containsKey('beispiel'), isFalse);
     });
 
     test('scheitert das Speichern, gilt die Liste für diesen Lauf, und das Protokoll nennt nur den Typ', () async {

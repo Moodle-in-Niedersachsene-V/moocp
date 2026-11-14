@@ -306,14 +306,23 @@ class Plugins {
   /// Verwirft jede gemerkte Werkzeugliste, die zu keinem zugestimmten Stand
   /// mehr gehört: Das Plugin gibt es nicht mehr oder lädt nicht, es ist
   /// abgelehnt, oder sein Stand (Version, Prüfsumme) ist ein anderer als der,
-  /// dem zugestimmt war. Die Zustimmung selbst bleibt unberührt. Ohne etwas zu
-  /// verwerfen wird nichts geschrieben.
+  /// dem zugestimmt war. Die Zustimmung selbst bleibt dabei unberührt, mit
+  /// einer Ausnahme: Gibt es den Ordner des Plugins nicht mehr, vergisst die
+  /// App die ganze Entscheidung (Zustimmung oder Ablehnung, Profile). Wer ein
+  /// Plugin deinstalliert, zieht seine Zustimmung zurück; nach einer
+  /// Neuinstallation fragt die App wieder, auch bei unverändertem Stand. Ohne
+  /// etwas zu verwerfen wird nichts geschrieben.
   Future<void> werkzeugeAufraeumen() async {
     final verworfen = <String>[];
+    final vergessen = <String>[];
     final neu = <String, PluginEntscheidung>{};
     for (final MapEntry(:key, :value) in _einstellungen.plugins.entries) {
       final eintrag = eintraege.where((e) => e.ordner == key).firstOrNull;
-      final gilt = eintrag != null && stand(eintrag).zustand == PluginZustand.zugestimmt;
+      if (eintrag == null) {
+        vergessen.add(key);
+        continue;
+      }
+      final gilt = stand(eintrag).zustand == PluginZustand.zugestimmt;
       if (gilt || value.werkzeuge == null) {
         neu[key] = value;
       } else {
@@ -321,10 +330,13 @@ class Plugins {
         verworfen.add(key);
       }
     }
-    if (verworfen.isEmpty) return;
+    if (verworfen.isEmpty && vergessen.isEmpty) return;
     _einstellungen.plugins = neu;
     for (final ordner in verworfen) {
       _protokoll.eintrag(Art.info, 'Plugin im Ordner „$ordner“: Werkzeugliste verworfen');
+    }
+    for (final ordner in vergessen) {
+      _protokoll.eintrag(Art.info, 'Plugin im Ordner „$ordner“: Ordner fehlt, Entscheidung vergessen');
     }
     await _speichern('Werkzeugliste eines Plugins');
   }

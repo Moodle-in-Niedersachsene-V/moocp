@@ -553,6 +553,10 @@ class _HauptseiteState extends State<Hauptseite> {
   /// Die Anmeldung von _fensterEreignis am Fenster, zum Abmelden.
   ListenerId? _fensterAbo;
 
+  /// Das zuletzt begonnene Speichern der Anmeldedaten; _beenden wartet
+  /// darauf, bevor das Fenster schließt.
+  Future<void>? _anmeldedatenSpeichern;
+
   /// Die laufende Version („0.9.4"), für die Update-Prüfung und die
   /// Einstellungen; leer, wenn sie sich nicht lesen lässt.
   String _version = '';
@@ -1264,6 +1268,13 @@ class _HauptseiteState extends State<Hauptseite> {
         'Arbeitsordner leeren: ${fehlerBeschreibung(e, st)}',
       );
     } finally {
+      try {
+        // Ein laufendes Speichern der Anmeldedaten zu Ende bringen; kurz
+        // begrenzt, damit ein hängender Speicher das Schließen nicht aufhält.
+        await _anmeldedatenSpeichern?.timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // Der Fehler steht schon bei der Anmeldung; hier zählt nur das Warten.
+      }
       _schliessen = true;
       _appFenster()?.close();
     }
@@ -1531,12 +1542,16 @@ class _HauptseiteState extends State<Hauptseite> {
       _meldung = 'Angemeldet.';
       if (merken) {
         try {
-          await Anmeldedaten.speichern(
+          // _beenden wartet darauf: Schließt die Lehrkraft das Fenster gleich
+          // nach der Anmeldung, endete der Prozess sonst mitten im Schreiben,
+          // und das gespeicherte Passwort wäre danach nicht mehr lesbar.
+          final speichern = _anmeldedatenSpeichern = Anmeldedaten.speichern(
             benutzer,
             passwort,
             kennung: profil.kennung,
             adresse: adresse,
           );
+          await speichern;
           widget.protokoll.eintrag(
             Art.anmeldung,
             Anmeldedaten.testzugangAktivFuer(profil.copyWith(adresse: adresse))

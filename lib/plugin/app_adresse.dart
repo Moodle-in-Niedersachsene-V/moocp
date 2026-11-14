@@ -1330,8 +1330,10 @@ class AppAdresse {
   /// Ordner für Downloads (downloads.dart), nie in den Arbeitsordner: in den
   /// Unterordner dieses Plugins und des Profils des Aufrufs, unter einem
   /// Namen, den die App vergibt. Grenzen wie beim Download der eingebauten
-  /// Werkzeuge (höchstens 200 MB, keine Seite statt einer Datei, keine
-  /// Umleitung), nur darf die Größe ungenannt sein. Antwort `{"datei": …,
+  /// Werkzeuge (höchstens 200 MB, keine Seite statt einer Datei), nur darf die
+  /// Größe ungenannt sein, und Umleitungen folgt er, jedes Ziel geprüft wie
+  /// die Adresse selbst; ein Ziel, das nicht passt, ist ein Fehler, ohne dass
+  /// etwas abgelegt wird. Antwort `{"datei": …,
   /// "bytes": …}`: Den Pfad bekommt nur das Plugin; er steht in keinem
   /// Protokoll, und die letzte Sperre hält jeden Text an, der ihn nennt. Endet
   /// der Lauf, löscht er die Datei; endet er oder der Aufruf während des
@@ -1395,6 +1397,11 @@ class AppAdresse {
       ziel,
       abbruch: Future.any([aufruf.ende, lauf.ende]),
       groesseNoetig: false,
+      // Skripte, die eine Datei erzeugen, leiten oft erst auf sie um. Jedes
+      // Ziel prüft ZusatzLeser wie die Adresse selbst: Zusatzadresse „lesen“
+      // dieses Plugins oder lesender Teil der Positivliste, hinter den
+      // gesperrten Bereichen und passend zum Lauf.
+      umleitungenFolgen: true,
     );
     // Wurde die Datei im selben Augenblick fertig, in dem Lauf oder Aufruf
     // endeten, bleibt sie nicht liegen.

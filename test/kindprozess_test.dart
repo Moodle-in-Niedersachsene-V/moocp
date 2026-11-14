@@ -96,6 +96,14 @@ Future<void> main(List<String> a) async {
   test('kein Process.start oder Process.run in lib/ an kindprozess.dart vorbei', () {
     // Ohne die Kommentare: Die nennen die Aufrufe gerade, um zu sagen, wo sie
     // stehen dürfen.
+    //
+    // Der Test sieht nur den Quelltext unter lib/, nicht die Pakete von
+    // Dritten. Unter denen in pubspec.yaml starten nur Teile Programme, die die
+    // App nicht benutzt: der stdio-Client von mcp_dart (die App spricht MCP
+    // nur über HTTP) und die Linux-Teile von package_info_plus und
+    // xdg_directories (die App läuft unter Windows und macOS, E24). Wer ein
+    // Paket aufnimmt, sieht nach, ob es selbst Programme startet: Ein solches
+    // Programm erbte den Schlüssel eines Entwicklungs-Plugins.
     final aufruf = RegExp(r'\bProcess\s*\.\s*(start|run|runSync)\b');
     final vorbei = <String>[];
     for (final f in Directory('lib').listSync(recursive: true).whereType<File>()) {

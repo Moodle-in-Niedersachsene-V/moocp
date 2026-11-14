@@ -1123,6 +1123,70 @@ void main() {
       expect(zeilen, contains(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: ')));
     });
 
+    /// Startet das Beispiel-Plugin; der Starter gibt für die Starts, deren
+    /// Nummer (ab 0) in [haengt] steht, ein Programm zurück, das läuft, aber
+    /// nie lauscht.
+    Future<({LaufendePlugins laufende, McpTestClient client, Plugins plugins, List<Process> prozesse})> mitHaenger(
+      Profil profil,
+      Set<int> haengt,
+    ) async {
+      final warten = File(p.join(wurzel.path, 'warten.dart'))
+        ..writeAsStringSync('Future<void> main() => Future<void>.delayed(const Duration(minutes: 5));\n');
+      final prozesse = <Process>[];
+      final l = LaufendePlugins(
+        protokoll,
+        startfrist: const Duration(seconds: 2),
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          final prozess = haengt.contains(prozesse.length)
+              ? await Process.start(dartDesSdk(), [warten.path])
+              : await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
+          prozesse.add(prozess);
+          return prozess;
+        },
+      );
+      final plugins = await beispielAngenommen([profil]);
+      await starten(plugins, mit: l);
+      expect(l.laeuft(plugins.eintraege.single), isTrue);
+      return (laufende: l, client: await verbinden(profil, l), plugins: plugins, prozesse: prozesse);
+    }
+
+    test('scheitert der Neustart nach einem Absturz, bekommt er einen zweiten Versuch', () async {
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      // Start 0 läuft, Start 1 (der Neustart) antwortet nicht, Start 2 läuft.
+      final g = await mitHaenger(profil, {1});
+
+      ausfallMeldung(await absturz(g.client));
+
+      expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
+      final e = g.plugins.eintraege.single;
+      expect(g.laufende.laeuft(e), isTrue);
+      expect(g.laufende.ausgefalleneNamen, isEmpty);
+      expect(g.prozesse, hasLength(3));
+      expect(await prozessLaeuft(g.prozesse[1].pid), isFalse, reason: 'der hängende Versuch ist beendet');
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(
+        zeilen,
+        contains(allOf(startsWith('Plugin „Beispiel“ nicht neu gestartet: '), endsWith('moocp versucht es noch einmal.'))),
+      );
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
+    });
+
+    test('scheitert auch der zweite Versuch des Neustarts, ist es ausgefallen', () async {
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      final g = await mitHaenger(profil, {1, 2});
+
+      ausfallMeldung(await absturz(g.client));
+      ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+
+      final e = g.plugins.eintraege.single;
+      expect(g.prozesse, hasLength(3), reason: 'der Start und genau zwei Versuche des Neustarts');
+      expect(g.laufende.ausgefallen(e), isTrue);
+      expect(g.laufende.startfehler(e), contains('nicht binnen 2 Sekunden'));
+      for (final prozess in g.prozesse) {
+        expect(await prozessLaeuft(prozess.pid), isFalse);
+      }
+    });
+
     test('haben sich seine Dateien vor dem Neustart geändert, startet es nicht neu und ist ausgefallen', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);

@@ -2204,7 +2204,12 @@ class MoodleZugang {
   /// Erfüllt sich [abbruch], hört das Laden beim nächsten Stück auf, und der
   /// Teil verschwindet. Mit [groesseNoetig] false nimmt es auch eine Datei
   /// ohne angekündigte Größe an (ein Skript, das eine Datei erzeugt, nennt
-  /// sie oft nicht); [maxBytes] zählt dann beim Laden mit.
+  /// sie oft nicht); [maxBytes] zählt dann beim Laden mit. Mit
+  /// [umleitungenFolgen] folgt es Umleitungen, höchstens
+  /// [umleitungenHoechstens], und prüft jedes Ziel vor dem Senden mit den
+  /// Listen des [aufrufer], wie die Adresse selbst; ein Ziel, das sie nicht
+  /// zulassen, oder die Anmeldeseite beendet den Download als Fehler, bevor
+  /// etwas abgelegt ist. Ohne folgt es keiner, wie [herunterladen].
   Future<int> herunterladenAls(
     Aufrufer aufrufer,
     Uri uri,
@@ -2212,10 +2217,24 @@ class MoodleZugang {
     int maxBytes = archivGrenzeStandard,
     Future<void>? abbruch,
     bool groesseNoetig = true,
+    bool umleitungenFolgen = false,
   }) async {
     _pruefeAngemeldet();
-    return _herunterladen(uri, ziel, maxBytes, aufrufer, abbruch, groesseNoetig: groesseNoetig);
+    return _herunterladen(
+      uri,
+      ziel,
+      maxBytes,
+      aufrufer,
+      abbruch,
+      groesseNoetig: groesseNoetig,
+      umleitungen: umleitungenFolgen ? umleitungenHoechstens : 0,
+    );
   }
+
+  /// Wie vielen Umleitungen ein Download mit `umleitungenFolgen` höchstens
+  /// folgt; so viele wie das Lesen ([_mitUmleitungen]) und das Schreiben
+  /// eines Plugins über eine Zusatzadresse.
+  static const umleitungenHoechstens = 8;
 
   Future<int> _herunterladen(
     Uri uri,
@@ -2224,6 +2243,7 @@ class MoodleZugang {
     Aufrufer aufrufer,
     Future<void>? abbruch, {
     bool groesseNoetig = true,
+    int umleitungen = 0,
   }) async {
     var abgebrochen = false;
     unawaited(abbruch?.then((_) => abgebrochen = true));
@@ -2237,12 +2257,28 @@ class MoodleZugang {
       ..connectionTimeout = verbindungsgrenze;
     IOSink? senke;
     var fertig = false;
+    // Die Adresse der Anfrage, die gerade läuft; nach einer Umleitung das Ziel.
+    var aktuell = uri;
     try {
-      final req = await client.getUrl(uri);
-      req.followRedirects = false;
-      _cookies.forEach((k, v) => req.cookies.add(Cookie(k, v)));
-      final res = await req.close().timeout(antwortgrenze);
-      _protokolliere(aufrufer, Art.moodle, 'GET', uri, res.statusCode);
+      HttpClientResponse res;
+      for (var gefolgt = 0;; gefolgt++) {
+        final req = await client.getUrl(aktuell);
+        req.followRedirects = false;
+        _cookies.forEach((k, v) => req.cookies.add(Cookie(k, v)));
+        res = await req.close().timeout(antwortgrenze);
+        _protokolliere(aufrufer, Art.moodle, 'GET', aktuell, res.statusCode);
+        final ort = res.statusCode >= 300 && res.statusCode < 400 ? res.headers.value(HttpHeaders.locationHeader) : null;
+        if (umleitungen == 0 || ort == null) break;
+        await res.drain<void>().timeout(antwortgrenze);
+        if (gefolgt >= umleitungen) throw MoodleFehler('Zu viele Umleitungen ab ${aufrufer.pfadImProtokoll(uri)}; nichts übernommen.');
+        final naechste = aktuell.resolve(ort);
+        if (_istAnmeldeseite(naechste)) {
+          throw MoodleFehler('Der Download leitet auf die Anmeldeseite um (Sitzung abgelaufen?); nichts übernommen.');
+        }
+        // Jedes Ziel wie die Adresse selbst, bevor es gefragt wird.
+        _pruefePositivliste(aufrufer, 'GET', naechste, null, null);
+        aktuell = naechste;
+      }
       if (res.statusCode != 200) {
         throw MoodleFehler('Download abgelehnt (HTTP ${res.statusCode}).');
       }
@@ -2280,12 +2316,12 @@ class MoodleZugang {
       fertig = true;
       return gelesen;
     } on SocketException catch (e) {
-      protokoll.eintrag(Art.fehler, 'GET ${aufrufer.pfadImProtokoll(uri)}: nicht erreichbar');
+      protokoll.eintrag(Art.fehler, 'GET ${aufrufer.pfadImProtokoll(aktuell)}: nicht erreichbar');
       throw MoodleNichtErreichbar('Moodle nicht erreichbar: ${e.message}');
     } on TimeoutException {
       protokoll.eintrag(
         Art.fehler,
-        'GET ${aufrufer.pfadImProtokoll(uri)}: keine Antwort innerhalb der Zeitgrenze',
+        'GET ${aufrufer.pfadImProtokoll(aktuell)}: keine Antwort innerhalb der Zeitgrenze',
       );
       throw MoodleNichtErreichbar(
         'Moodle antwortet nicht (${uri.path}). Später noch einmal versuchen.',
@@ -2293,7 +2329,7 @@ class MoodleZugang {
     } on IOException catch (e) {
       protokoll.eintrag(
         Art.fehler,
-        'GET ${aufrufer.pfadImProtokoll(uri)}: Verbindung abgebrochen (${e.runtimeType})',
+        'GET ${aufrufer.pfadImProtokoll(aktuell)}: Verbindung abgebrochen (${e.runtimeType})',
       );
       throw MoodleNichtErreichbar(
         'Verbindung zu Moodle abgebrochen (${e.runtimeType}). Später noch einmal versuchen.',

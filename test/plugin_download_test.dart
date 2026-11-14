@@ -293,12 +293,62 @@ void main() {
       expect(_dateien(ordnerDerDownloads()), isEmpty);
     });
 
-    test('einer Umleitung folgt der Download nicht: Fehler, keine Datei', () async {
+    test('einer Umleitung auf eine erlaubte Adresse folgt der Download; jede Anfrage im Protokoll ohne Werte', () async {
       final a = await imLauf();
+      moodle.angefragt.clear();
+      protokoll.leeren();
       final r = await laden(a.token, '/mod/beispiel/export.php?id=501&umleitung=1');
-      expect(r.status, 502);
-      expect(r.json['fehler'], contains('HTTP 303'));
-      expect(_dateien(ordnerDerDownloads()), isEmpty);
+
+      expect(r.status, 200, reason: r.roh);
+      expect(r.json['bytes'], exportGroesse);
+      final datei = File(r.json['datei'] as String);
+      expect(p.isWithin(p.join(downloads.wurzel, 'beispiel', 'A'), datei.path), isTrue);
+      expect(datei.lengthSync(), exportGroesse);
+      expect(moodle.angefragt, ['GET /mod/beispiel/export.php?id=501&umleitung=1', 'GET /mod/beispiel/export.php?id=501']);
+      expect(zeilen(), [
+        'moodle: Plugin „Beispiel“, Zusatzadresse: GET /mod/beispiel/export.php?id=…&umleitung=… → 303',
+        'moodle: Plugin „Beispiel“, Zusatzadresse: GET /mod/beispiel/export.php?id=… → 200',
+      ]);
+      ohnePfad(zeilen().join('\n'));
+      expect(_dateien(Directory(p.join(wurzel.path, 'arbeitsordner'))), isEmpty);
+    });
+
+    test('auch auf eine andere Zusatzadresse „lesen“; das Protokoll endet am Skriptnamen', () async {
+      final a = await imLauf();
+      protokoll.leeren();
+      final r = await laden(a.token, '/mod/beispiel/export.php?id=501&umleitung=8');
+      expect(r.status, 200, reason: r.roh);
+      expect(zeilen().last, 'moodle: Plugin „Beispiel“, Zusatzadresse: GET /pluginfile.php?forcedownload=… → 200');
+      expect(zeilen().join('\n'), isNot(contains('950')));
+      expect(zeilen().join('\n'), isNot(contains('Liste_Klasse')));
+    });
+
+    test('ein Umleitungsziel, das nicht passt, beendet den Download als Fehler; keine Datei, Moodle sieht das Ziel nie', () async {
+      final a = await imLauf();
+      for (final (umleitung, status, grund) in [
+        ('2', 403, 'nicht angemeldet'),
+        ('3', 403, 'gesperrter Bereich'),
+        ('4', 403, 'andere Aktivität'),
+        ('5', 403, 'anderer Kontext'),
+        ('6', 403, 'fremder Rechner'),
+        ('7', 502, 'zu viele Umleitungen'),
+        ('9', 502, 'Anmeldeseite'),
+      ]) {
+        moodle.angefragt.clear();
+        protokoll.leeren();
+        final r = await laden(a.token, '/mod/beispiel/export.php?id=501&umleitung=$umleitung');
+        expect(r.status, status, reason: '$grund: ${r.roh}');
+        expect(r.json.keys, ['fehler'], reason: grund);
+        expect(_dateien(ordnerDerDownloads()), isEmpty, reason: grund);
+        if (umleitung != '7') {
+          expect(moodle.angefragt, ['GET /mod/beispiel/export.php?id=501&umleitung=$umleitung'], reason: grund);
+        }
+        final text = zeilen().join('\n');
+        ohnePfad(text);
+        expect(text, isNot(contains('501')), reason: 'keine Werte: $grund');
+        expect(text, isNot(contains('502')), reason: 'keine Werte: $grund');
+        expect(text, isNot(contains('951')), reason: 'keine Werte: $grund');
+      }
     });
 
     test('ohne Ordner für Downloads (keine Oberfläche, Tests) gibt es keinen Download', () async {
@@ -398,6 +448,13 @@ void main() {
       jsonEncode({'datei': p.join(pfad, 'beispiel', 'A', '3.bin')}),
       'file:///${pfad.replaceAll(r'\', '/')}/beispiel/A/3.bin',
       'Gelesen: ${p.join(pfad, 'beispiel', 'A', '3.bin')} (1234 Bytes)',
+      // Einfach kodiert (namenssperre.dart, kodierungenAufgeloest).
+      Uri.encodeComponent(pfad),
+      Uri.encodeComponent(Uri.encodeComponent(pfad)),
+      // Unicode-Escapes wie in JSON, zusammengesetzt, damit kein Werkzeug sie
+      // im Quelltext auflöst.
+      pfad.replaceAll(r'\', '${r'\'}u005c').replaceAll('/', '${r'\'}u002f'),
+      pfad.replaceAll(r'\', '&#92;').replaceAll('/', '&#x2F;'),
     ];
 
     test('die letzte Sperre hält jeden Text mit dem Pfad an, für jedes Plugin, auch ohne Namen', () {

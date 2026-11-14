@@ -103,13 +103,8 @@ void main() {
       wahlSkills: wahl,
       abgewaehlt: abgewaehlt,
       gewaehlt: gewaehlt ?? gewaehltVorgabe(umgebung, wahl.keys),
-      verwaist: verwaisteSkills(
-        {...einstellungen.pluginSkills, ...skillNamen(einstellungen.pluginSkillOrdner)},
-        ps,
-        _appNamen,
-      ),
+      verwaist: verwaisteSkills(skillNamen(einstellungen.pluginSkillOrdner), ps, _appNamen),
       pluginSkills: einstellungen.pluginSkillOrdner,
-      pluginSkillsAlt: einstellungen.pluginSkills,
       fremd: einstellungen.fremdeSkillOrdner,
       skillFehler: ps.fehler,
       gefunden: [codex, lm],
@@ -117,11 +112,9 @@ void main() {
     );
     einstellungen.pluginSkillOrdner = pluginSkillsGemerkt(
       gemerkt: einstellungen.pluginSkillOrdner,
-      alt: einstellungen.pluginSkills,
       stand: stand,
       werkzeuge: [codex, lm],
     );
-    einstellungen.pluginSkills = {};
     einstellungen.fremdeSkillOrdner = stand.fremdeOrdner;
     return stand;
   }
@@ -439,27 +432,6 @@ void main() {
       expect(skillOrdner(lm, 'beispiel').existsSync(), isFalse);
     });
 
-    test('ein früherer Stand je Name gilt weiter, wo der Ordner steht, und wird je Werkzeug überführt', () async {
-      beispielAnlegen();
-      final plugins = await entschieden(zugestimmt: true);
-      // Von einer früheren moocp in Codex installiert, inzwischen veraltet.
-      final veraltet = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
-        ..parent.createSync(recursive: true)
-        ..writeAsStringSync('veraltet');
-      einstellungen.pluginSkills = {'beispiel'};
-
-      final s = await pruefen(plugins);
-
-      expect(s.skillFehler, isEmpty, reason: 'nach dem früheren Stand stammt er von moocp');
-      expect(s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex').skills.map((x) => x.name), contains('beispiel'));
-      expect(einstellungen.pluginSkillOrdner, {'codex/beispiel'}, reason: 'nur, wo er steht');
-      expect(einstellungen.pluginSkills, isEmpty, reason: 'überführt');
-      installieren(s);
-      expect(veraltet.readAsStringSync(), isNot('veraltet'));
-      await pruefen(plugins);
-      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel'}));
-    });
-
     test('ein fremder Ordner öffnet den Dialog einmal und bleibt bei der Deinstallation stehen', () async {
       beispielAnlegen();
       final plugins = await entschieden(zugestimmt: true);
@@ -703,7 +675,7 @@ void main() {
   });
 
   group('Deinstallation und Einstellungen', () {
-    test('--claude-entfernen entfernt die gemerkten Skills der Plugins; ein Name, der keiner ist, bildet keinen Pfad',
+    test('--claude-entfernen entfernt die genannten Skills in jedem Werkzeug; ein Name, der keiner ist, bildet keinen Pfad',
         () async {
       for (final w in [codex, lm]) {
         File(p.join(skillOrdner(w, 'beispiel').path, 'SKILL.md'))
@@ -716,16 +688,6 @@ void main() {
       expect(skillOrdner(codex, 'beispiel').existsSync(), isFalse);
       expect(skillOrdner(lm, 'beispiel').existsSync(), isFalse);
       expect(daneben.existsSync(), isTrue);
-    });
-
-    test('die gemerkten Skills überstehen das Speichern; was kein Skill-Name ist, fällt beim Lesen weg', () {
-      final e = Einstellungen(schluessel: 'k', pluginSkills: {'beispiel', 'beispiel-vorlage'});
-      final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
-      expect(j['pluginSkills'], ['beispiel', 'beispiel-vorlage']);
-      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkills, {'beispiel', 'beispiel-vorlage'});
-      j['pluginSkills'] = ['beispiel', '..', r'a\b', 'C:', 3];
-      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkills, {'beispiel'});
-      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('pluginSkills'), isFalse);
     });
 
     test('die gemerkten Ordner je Werkzeug überstehen das Speichern; was nicht Werkzeug/Skill ist, fällt weg', () {

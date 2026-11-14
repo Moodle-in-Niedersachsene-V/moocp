@@ -68,8 +68,10 @@
 // beschäftigte die App sonst in einer Schleife, und die KI schickte Aufruf um
 // Aufruf ins Leere; eines, das nur ab und zu abstürzt, bleibt nutzbar. Jeder
 // Neustart ist ein ganz neuer: neuer Port, neuer Schlüssel, und die
-// Prüfsumme des Ordners wird wieder gegen die Zustimmung geprüft. Scheitert
-// ein Neustart, ist das Plugin ebenfalls ausgefallen. Ein Aufruf,
+// Prüfsumme des Ordners wird wieder gegen die Zustimmung geprüft. Antwortet
+// das Plugin beim Neustart nicht oder endet es dabei, gibt es wie beim Start
+// einen zweiten Versuch; scheitert auch der oder bricht der Neustart eine
+// Regel, ist das Plugin ebenfalls ausgefallen. Ein Aufruf,
 // der beim Absturz lief, wird nicht wiederholt: Ein Schreibvorgang könnte
 // schon halb gelaufen sein. Die Werkzeuge eines ausgefallenen Plugins bleiben
 // in der Werkzeugliste und antworten mit einem Fehler, der das Plugin nennt:
@@ -119,9 +121,10 @@ Future<Process> _prozessStarten(
   required String arbeitsordner,
 }) => prozessStarten(programm, argumente, dazu: umgebung, arbeitsordner: arbeitsordner);
 
-/// Wie oft die App beim Start versucht, ein Plugin zu starten: der Start und
-/// ein zweiter Versuch. Neustarts nach einem Absturz zählen nicht dazu
-/// ([LaufendePlugins.neustartFrist]).
+/// Wie oft die App versucht, ein Plugin zu starten, beim Start der App wie
+/// beim Neustart nach einem Absturz: der Versuch und ein zweiter. Die beiden
+/// Versuche eines Starts sind ein Start; als Neustart nach einem Absturz
+/// ([LaufendePlugins.neustartFrist]) zählt keiner von ihnen.
 const _startversuche = 2;
 
 /// Eine Frist als Text für Protokoll und Dialog: „einer Minute“, „2 Minuten“,
@@ -407,6 +410,10 @@ class LaufendePlugins implements WerkzeugQuelle {
     // Unmittelbar vor dem Start noch einmal, auch vor einem Neustart: Seit der
     // Suche kann jemand Dateien ausgetauscht haben. Weicht die Summe ab,
     // startet das Plugin nicht; beim nächsten Start fragt die Zustimmung neu.
+    // Zwischen dieser Summe und dem Start des Programms bleibt ein kurzes
+    // Zeitfenster; ein Programm, das genau dann getauscht wird, liefe.
+    // Hingenommen: Wer das kann, schreibt ohnehin im Benutzerprofil der
+    // Lehrkraft und erreicht dort mehr als den Plugin-Ordner.
     final String summe;
     try {
       summe = await pluginPruefsumme(Directory(e.pfad));
@@ -551,9 +558,24 @@ class LaufendePlugins implements WerkzeugQuelle {
     // Erst nach einem Schritt, damit _abgestuerzt den Neustart eingetragen
     // hat, bevor er ihn wieder austrägt.
     await Future<void>.delayed(Duration.zero);
-    final _Laufend l;
+    _Laufend? gestartet;
     try {
-      l = await _starten(e);
+      // Wie beim Start der App ([starten]): Antwortet das Plugin nicht binnen
+      // der Startfrist oder endet es dabei, gibt es einen zweiten Versuch; ein
+      // Plugin, das nach einem Absturz einmal langsam hochkommt, soll nicht bis
+      // zum Neustart der App ausfallen. Regelverstöße (Prüfsumme,
+      // Werkzeugnamen, letzte Sperre) bekommen keinen.
+      for (var versuche = 1; gestartet == null; versuche++) {
+        try {
+          gestartet = await _starten(e);
+        } on PluginStartFehler catch (f) {
+          if (_beendet || versuche >= _startversuche) rethrow;
+          _protokoll.eintrag(
+            Art.fehler,
+            'Plugin „${e.anzeigename}“ nicht neu gestartet: ${f.grund} moocp versucht es noch einmal.',
+          );
+        }
+      }
     } on PluginFehler catch (f) {
       _neustart.remove(e.ordner);
       if (!_beendet) _ausfallen(e, vorher, f.grund);
@@ -563,6 +585,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       if (!_beendet) _ausfallen(e, vorher, 'Der Neustart ist gescheitert (${x.runtimeType}).');
       return;
     }
+    final l = gestartet;
     _neustart.remove(e.ordner);
     _seitNeustart[e.ordner] = Stopwatch()..start();
     _einsetzen(l);

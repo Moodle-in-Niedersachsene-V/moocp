@@ -523,7 +523,9 @@ McpServer _server() {
   // Datei ist ein Fehler, nichts wird überschrieben (mit `dateiname` lässt
   // sich ein anderer Name wählen). Was dort liegt, kann die KI lesen; die
   // letzte Sperre prüft Dateien nicht. Für Dateien hinter einer Zusatzadresse
-  // gibt es den eigenen Weg in einem Lauf (`beispiel_download`).
+  // gibt es den eigenen Weg in einem Lauf (`beispiel_download`). In
+  // plugin.json steht dafür nichts: Die Beschreibungsdatei nennt keine
+  // Werkzeuge, und was die Positivliste erlaubt, braucht keine Zusatzadresse.
   server.registerTool(
     'beispiel_moodle_datei',
     description:

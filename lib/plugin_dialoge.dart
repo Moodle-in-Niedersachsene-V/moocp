@@ -421,7 +421,8 @@ class _PluginDialogFensterState extends State<PluginDialogFenster> {
 // Hat moocp eine Antwort, eine Protokollzeile oder einen Aufruf eines Plugins
 // angehalten, weil ein Wort einer der Namen sein könnte, die für das Plugin
 // gesperrt sind, sieht die Lehrkraft hier Plugin, Werkzeug, Stelle und das
-// Wort, so wie es im Text stand -- nur hier, nie im Protokoll und nie bei der
+// Wort, so wie es im Text stand (bei einem kodierten Text in aufgelöster
+// Form, namenssperre.dart) -- nur hier, nie im Protokoll und nie bei der
 // KI. Hat der Pfad des Ordners für Downloads getroffen, steht statt des Worts,
 // dass es dieser Pfad war. Die Warnung ist ein Hinweis: Der Aufruf ist schon beendet, und es gibt
 // nichts zu entscheiden. Einen Knopf, das Gesperrte doch zu senden, gibt es

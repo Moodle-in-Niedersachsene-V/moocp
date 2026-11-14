@@ -1,12 +1,18 @@
 // Die Regel der letzten Sperre gegen Namen (E36, lib/plugin/namenssperre.dart):
 // Namensteile, ganze Wörter, kurze Namen, Groß- und Kleinschreibung, Umlaute
 // und Akzente in beide Richtungen, Doppelnamen, Satzzeichen, Zeilenwechsel,
-// Namen in JSON, HTML und Pfaden, leere Eingaben und viele Namen. Alle Namen
-// sind erfunden.
+// Namen in JSON, HTML und Pfaden, einfach kodierte Namen und Pfade
+// (Prozentkodierung, Unicode-Escapes, HTML-Zeichenreferenzen), leere Eingaben
+// und viele Namen. Alle Namen sind erfunden. Unsichtbare Zeichen stehen nur
+// als Escape im Quelltext, nie wörtlich.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/plugin/namenssperre.dart';
 
 Namenssperre _sperre(List<String> namen) => Namenssperre()..hinzufuegen(namen);
+
+/// Ein Unicode-Escape wie in JSON, als Text: Backslash, `u` und [hex]. So
+/// zusammengesetzt, damit kein Werkzeug den Escape im Quelltext auflöst.
+String _u(String hex) => '${r'\'}u$hex';
 
 void main() {
   group('Namensteile', () {
@@ -180,9 +186,64 @@ void main() {
       expect(s.treffer('https://moodle.schule.example/user/view.php?name=erika'), 'erika');
     });
 
-    test('was kodiert ist, ist nicht abgedeckt', () {
-      expect(s.treffer('&#69;rika'), isNull);
-      expect(s.treffer('Erik%61'), isNull);
+    test('Prozentkodierung, auch mit + als Leerzeichen und in UTF-8', () {
+      expect(s.treffer('Erik%61'), 'Erika', reason: 'das Wort, wie es aufgelöst dasteht');
+      expect(s.treffer('%45RIKA'), 'ERIKA');
+      expect(s.treffer('name=Erika%20Mustermann'), 'Erika');
+      expect(s.treffer('q=x+Musterman%6E+y'), 'Mustermann');
+      expect(_sperre(['Lotte Müller']).treffer('M%C3%BCller'), 'Müller');
+      expect(_sperre(['Lotte Müller']).treffer('M%c3%bcller'), 'Müller');
+    });
+
+    test('mehrfach prozentkodiert, bis zu einer festen Tiefe', () {
+      expect(s.treffer('Erik%2561'), 'Erika', reason: 'doppelt');
+      expect(s.treffer('Erik%252561'), 'Erika', reason: 'dreifach');
+    });
+
+    test('ungültige Prozentfolgen: kein Fehler, die gültigen werden aufgelöst, die Rohform zählt weiter', () {
+      expect(s.treffer('100% von Erika%'), 'Erika');
+      expect(s.treffer('Erik%61 %zz %4'), 'Erika');
+      expect(s.treffer('%E0%A4%A Erika'), 'Erika');
+      expect(s.treffer('%C3%28 %FF %'), isNull);
+      expect(s.treffer('%zzErika'), isNull, reason: 'ohne Trennung im Wort, roh wie aufgelöst');
+    });
+
+    test('Unicode-Escapes wie in JSON und JavaScript', () {
+      expect(s.treffer('${_u('0045')}rika'), 'Erika');
+      expect(s.treffer('Must${_u('0065')}rmann'), 'Mustermann');
+      expect(_sperre(['Lotte Müller']).treffer('M${_u('00fc')}ller'), 'Müller');
+      expect(_sperre(['Lotte Müller']).treffer('M${_u('00FC')}ller'), 'Müller');
+      expect(s.treffer(r'\u{45}rika'), 'Erika');
+      expect(s.treffer(r'\u{000045}rika'), 'Erika');
+      // Ein Escape, das kein Zeichen ist, trennt; nichts wirft.
+      expect(s.treffer('${_u('d800')}Erika'), 'Erika', reason: 'einzelnes Ersatzzeichen');
+      expect(s.treffer(r'\u{110000}Erika'), 'Erika', reason: 'jenseits von Unicode');
+      expect(s.treffer('${_u('00')} ${_u('{}')} ${_u('ZZZZ')}'), isNull);
+      // Ein Ersatzpaar ergibt ein Zeichen (hier ein Smiley, kein Buchstabe).
+      expect(s.treffer('${_u('d83d')}${_u('de00')}Erika'), 'Erika');
+    });
+
+    test('HTML-Zeichenreferenzen: dezimal, hexadezimal und benannt', () {
+      expect(s.treffer('&#69;rika'), 'Erika');
+      expect(s.treffer('&#x45;rika'), 'Erika');
+      expect(s.treffer('&#X45;rika'), 'Erika');
+      expect(s.treffer('&#69rika'), isNull, reason: 'ohne Semikolon keine Referenz');
+      expect(_sperre(['Lotte Müller']).treffer('M&uuml;ller'), 'Müller');
+      expect(_sperre(['Lotte Müller']).treffer('M&Uuml;LLER'), 'MÜLLER');
+      expect(_sperre(['Gerd Strauß']).treffer('Strau&szlig;'), 'Strauß');
+      expect(_sperre(['René Muster']).treffer('Ren&eacute;'), 'René');
+      expect(_sperre(['Ana Muster']).treffer('A&ntilde;a'), 'Aña', reason: 'Akzente zählen nicht');
+      expect(s.treffer('&#1114112;Erika &#xD800; &#;'), 'Erika', reason: 'ungültige Referenzen werfen nicht');
+    });
+
+    test('kombiniert und verschachtelt: Prozent über Escape, Entität über Entität', () {
+      expect(s.treffer('%5Cu0045rika'), 'Erika');
+      expect(s.treffer('&amp;#69;rika'), 'Erika');
+      expect(s.treffer('%26%2369%3Brika'), 'Erika');
+    });
+
+    test('Base64 bleibt außen vor', () {
+      expect(s.treffer('RXJpa2E='), isNull);
     });
 
     test('texteIn liefert jeden Schlüssel und Wert einzeln, auch mit Zeilenwechsel', () {
@@ -223,6 +284,29 @@ void main() {
       expect(gemeldet.single.plugin, 'A');
       expect(gemeldet.single.werkzeug, 'a_x');
       expect(gemeldet.single.toString(), isNot(contains('Erika')));
+    });
+  });
+
+  group('Pfad des Ordners für Downloads, kodiert', () {
+    const pfad = r'C:\Temp\moocp_plugin_downloads';
+    final l = LetzteSperre()..pfadSperren(pfad);
+
+    test('prozentkodiert, auch doppelt, als Unicode-Escape und als HTML-Referenz', () {
+      for (final t in [
+        Uri.encodeComponent(pfad),
+        Uri.encodeComponent(Uri.encodeComponent(pfad)),
+        'file:///C:/Temp/moocp%5Fplugin%5Fdownloads/beispiel/A/1.pdf',
+        'C:${_u('005c')}Temp${_u('005C')}moocp_plugin_downloads${_u('005c')}1.pdf',
+        r'C:\u{5C}Temp\u{5c}moocp_plugin_downloads',
+        'C:&#92;Temp&#x5C;moocp&#95;plugin&#95;downloads',
+      ]) {
+        expect(l.treffer('beispiel', [t]), pfad, reason: t);
+      }
+    });
+
+    test('ein ähnlicher Pfad und Base64 gehen durch', () {
+      expect(l.treffer('beispiel', [Uri.encodeComponent(r'C:\Temp\moocp_arbeit')]), isNull);
+      expect(l.treffer('beispiel', ['QzpcVGVtcFxtb29jcF9wbHVnaW5fZG93bmxvYWRz']), isNull);
     });
   });
 

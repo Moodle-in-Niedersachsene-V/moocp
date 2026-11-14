@@ -281,7 +281,26 @@ class PluginTestMoodle {
     if (req.uri.path == '/mod/beispiel/export.php' ||
         req.uri.path.startsWith('/pluginfile.php/950/mod_beispiel/export/')) {
       if (q['warten'] == '1') await haltenBericht?.future;
-      if (q['umleitung'] == '1') return weiter('/mod/beispiel/export.php?id=501');
+      switch (q['umleitung']) {
+        case '1':
+          return weiter('/mod/beispiel/export.php?id=501');
+        case '2':
+          return weiter('/mod/beispiel/anders.php?id=501');
+        case '3':
+          return weiter('/admin/index.php');
+        case '4':
+          return weiter('/mod/beispiel/export.php?id=502');
+        case '5':
+          return weiter('/pluginfile.php/951/mod_beispiel/export/0/a.csv');
+        case '6':
+          return weiter('https://fremd.example/mod/beispiel/export.php?id=501');
+        case '7':
+          return weiter('/mod/beispiel/export.php?id=501&umleitung=7');
+        case '8':
+          return weiter('/pluginfile.php/950/mod_beispiel/export/0/Liste_Klasse_7b.csv?forcedownload=1');
+        case '9':
+          return weiter('/login/index.php');
+      }
       r.headers.set('content-disposition', 'attachment; filename="Erika_Mustermann.csv"');
       if (q['ohnegroesse'] == '1') {
         r.headers.contentType = ContentType('text', 'csv');

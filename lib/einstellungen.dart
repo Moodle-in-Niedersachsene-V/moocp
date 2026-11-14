@@ -13,7 +13,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'einrichtung.dart' show skillNameGueltig, werkzeugSkillGueltig;
+import 'einrichtung.dart' show werkzeugSkillGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
 import 'plugin/entscheidung.dart';
@@ -34,14 +34,12 @@ class Einstellungen {
     this.updateErwartet,
     Map<String, PluginEntscheidung>? plugins,
     Map<String, PluginUpdateStand>? pluginUpdates,
-    Set<String> pluginSkills = const {},
     Set<String> pluginSkillOrdner = const {},
     Set<String> fremdeSkillOrdner = const {},
     Set<String> skillFehlerGesehen = const {},
     Set<String> schnittstelleGesehen = const {},
   })  : plugins = Map.of(plugins ?? const {}),
         pluginUpdates = Map.of(pluginUpdates ?? const {}),
-        pluginSkills = {...pluginSkills},
         pluginSkillOrdner = {...pluginSkillOrdner},
         schnittstelleGesehen = {...schnittstelleGesehen},
         fremdeSkillOrdner = {...fremdeSkillOrdner},
@@ -179,12 +177,6 @@ class Einstellungen {
   /// Form hat: Aus ihm wird ein Pfad zum Löschen.
   Set<String> pluginSkillOrdner;
 
-  /// Der frühere Stand von [pluginSkillOrdner]: je Name, für alle Werkzeuge.
-  /// Die App liest ihn weiter und überführt ihn bei der nächsten Prüfung der
-  /// Einrichtung (pluginSkillsGemerkt); danach ist er leer. Beim Lesen fällt
-  /// jeder Name weg, der kein Skill-Name sein kann.
-  Set<String> pluginSkills;
-
   /// Ordner in den Skill-Ordnern der KI-Werkzeuge, die den Namen eines
   /// Plugin-Skills tragen, aber nicht von moocp stammen, je `<Werkzeug>/<Name>`
   /// (einrichtung.dart, einrichtungPruefen, fremderOrdner). Die Einrichtung
@@ -287,7 +279,6 @@ class Einstellungen {
       updateErwartet: j['updateErwartet'] as String?,
       plugins: pluginEntscheidungenAus(j['plugins']),
       pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
-      pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
       pluginSkillOrdner:
           (j['pluginSkillOrdner'] as List?)?.whereType<String>().where(werkzeugSkillGueltig).toSet() ?? const {},
       fremdeSkillOrdner: (j['fremdeSkillOrdner'] as List?)?.whereType<String>().toSet() ?? const {},
@@ -311,7 +302,6 @@ class Einstellungen {
         if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
         if (pluginUpdates.isNotEmpty)
           'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
-        if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
         if (pluginSkillOrdner.isNotEmpty) 'pluginSkillOrdner': (pluginSkillOrdner.toList()..sort()),
         if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
         if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),

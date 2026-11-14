@@ -28,7 +28,11 @@
 //   ein Wiederverbinden des Plugins prüft nichts neu.
 // - Vor dem Lesen bildet die App die Prüfsumme des Plugin-Ordners neu: Wurde
 //   seit dem Start etwas ausgetauscht, galt die Zustimmung einem anderen
-//   Stand, und kein Skill des Plugins wird angeboten.
+//   Stand, und kein Skill des Plugins wird angeboten. Zwischen dieser
+//   Prüfsumme und dem Lesen der Dateien bleibt ein kurzes Zeitfenster; eine
+//   Datei, die genau dann getauscht wird, würde installiert. Hingenommen:
+//   Wer das kann, schreibt ohnehin im Benutzerprofil der Lehrkraft, auch in
+//   die Skill-Ordner der KI-Werkzeuge selbst.
 // - Ein Skill heißt wie der Kurzname des Plugins oder beginnt mit
 //   `<kurzname>-`, und nie wie ein Skill der App. Da Kurznamen nur aus
 //   Buchstaben und Ziffern bestehen und eindeutig sind, überschreibt so kein

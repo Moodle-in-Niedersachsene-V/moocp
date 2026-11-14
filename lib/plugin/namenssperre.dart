@@ -38,13 +38,24 @@
 // - Falsche Treffer sind in Kauf genommen: Ein Max in der Klasse sperrt auch
 //   „max. 10 Punkte“. Deshalb sieht die Lehrkraft das Wort, das getroffen hat.
 // - Leere Teile und reine Satzzeichen sperren nichts.
+// - Einfache Kodierungen zählen nicht ([kodierungenAufgeloest]): Geprüft wird
+//   der Text, wie er ist, und dazu in den Formen, die sich durch Auflösen von
+//   Prozentkodierung (mit `+` als Leerzeichen), Unicode-Escapes (Backslash,
+//   `u` und vier Hexadezimalziffern wie in JSON, `\u{fc}` wie in JavaScript)
+//   und HTML-Zeichenreferenzen (`&#252;`, `&#xfc;`, `&uuml;`)
+//   ergeben, auch ineinander geschachtelt bis zu einer festen Tiefe. Was sich
+//   nicht auflösen lässt, bleibt stehen, wie es ist; ungültige Kodierung
+//   wirft nie und lässt nie etwas durch, denn die Rohform zählt immer mit.
+//   Das Wort für die Warnung ist das, wie es aufgelöst dasteht.
 //
 // Nicht abgedeckt: Namen, die ohne Trennung in einem längeren Wort stecken
 // („ErikaMustermann“, „Erikas“), Schreibweisen über das hinaus, was die
 // Tabelle unten kennt (Vollbreitenbuchstaben, Ligaturen wie „ﬁ“, Buchstaben
 // außerhalb der lateinischen Schrift bleiben, wie sie sind, und treffen nur
-// sich selbst), Kodierungen (HTML-Entitäten wie `&#69;`, `ü` in JSON,
-// Prozentkodierung, Base64) und Tippfehler.
+// sich selbst), andere Kodierungen (Base64, Kompression, eigene Formate),
+// tiefer geschachtelte Kodierungen und Tippfehler. Base64 bleibt mit
+// Absicht draußen: Jede Folge von Buchstaben ließe sich als Base64 lesen, und
+// die Sperre träfe beliebige Wörter.
 //
 // Schnell auch bei vielen Namen und langen Texten: Jedes Wort des Texts wird
 // einmal in seine Vergleichsform gebracht und in einer Menge nachgeschlagen;
@@ -55,8 +66,131 @@
 // Antwort. Darum hat keine Klasse hier ein toString, das sie nennt, und es gibt
 // keinen Weg, sie abzufragen oder zu entfernen.
 
+import 'dart:convert';
+
 /// Ein Wort im Sinn der Sperre (siehe oben).
 final _wort = RegExp(r'[\p{L}\p{N}\p{M}\p{Cf}]+', unicode: true);
+
+/// Wie oft die Sperre Kodierungen ineinander auflöst: genug für eine dreifach
+/// prozentkodierte Folge oder eine prozentkodierte HTML-Referenz, und klein
+/// genug, dass ein langer Text schnell geprüft ist (höchstens 15 Formen).
+const _kodierTiefe = 3;
+
+/// [text], wie er ist, und danach jede verschiedene Form, die sich durch
+/// Auflösen von Prozentkodierung ([_prozentAufgeloest]) oder von
+/// Unicode-Escapes und HTML-Zeichenreferenzen ([_escapesAufgeloest])
+/// ergibt, Stufe für Stufe bis zur [_kodierTiefe]. Faul: Wer schon in der
+/// Rohform trifft, löst nichts auf.
+Iterable<String> kodierungenAufgeloest(String text) sync* {
+  yield text;
+  final gesehen = <String>{text};
+  var stufe = [text];
+  for (var i = 0; i < _kodierTiefe && stufe.isNotEmpty; i++) {
+    final naechste = <String>[];
+    for (final t in stufe) {
+      for (final neu in [_prozentAufgeloest(t), _escapesAufgeloest(t)]) {
+        if (identical(neu, t) || !gesehen.add(neu)) continue;
+        naechste.add(neu);
+        yield neu;
+      }
+    }
+    stufe = naechste;
+  }
+}
+
+/// Der Wert einer Hexadezimalziffer (Code-Einheit [c]); -1, wenn [c] keine ist.
+int _hexwert(int c) => switch (c) {
+  >= 0x30 && <= 0x39 => c - 0x30,
+  >= 0x41 && <= 0x46 => c - 0x41 + 10,
+  >= 0x61 && <= 0x66 => c - 0x61 + 10,
+  _ => -1,
+};
+
+/// [s] mit aufgelöster Prozentkodierung und `+` als Leerzeichen, wie ein
+/// Formular oder eine Adresse es meint. Folgen von `%HH` gelten als UTF-8;
+/// was darin kein gültiges UTF-8 ist, wird zum Ersatzzeichen U+FFFD, und ein
+/// `%` ohne zwei Hexadezimalziffern bleibt stehen. Ohne `%` und `+` kommt
+/// [s] selbst zurück.
+String _prozentAufgeloest(String s) {
+  if (!s.contains('%') && !s.contains('+')) return s;
+  final aus = StringBuffer();
+  final bytes = <int>[];
+  void leeren() {
+    if (bytes.isEmpty) return;
+    aus.write(utf8.decode(bytes, allowMalformed: true));
+    bytes.clear();
+  }
+
+  for (var i = 0; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if (c == 0x25 && i + 2 < s.length) {
+      final hoch = _hexwert(s.codeUnitAt(i + 1));
+      final tief = _hexwert(s.codeUnitAt(i + 2));
+      if (hoch >= 0 && tief >= 0) {
+        bytes.add(hoch << 4 | tief);
+        i += 2;
+        continue;
+      }
+    }
+    leeren();
+    aus.write(c == 0x2b ? ' ' : s[i]);
+  }
+  leeren();
+  return aus.toString();
+}
+
+/// Unicode-Escapes wie in JSON und JavaScript (`\uXXXX`, `\u{X…}`) und
+/// HTML-Zeichenreferenzen (`&#…;`, `&#x…;`, benannte aus [_benannt]).
+final _escape = RegExp(
+  r'\\u\{([0-9A-Fa-f]{1,8})\}|\\u([0-9A-Fa-f]{4})|&#[xX]([0-9A-Fa-f]{1,8});|&#([0-9]{1,10});|&([A-Za-z][A-Za-z0-9]{1,7});',
+);
+
+/// Die benannten HTML-Zeichenreferenzen, die die Sperre kennt: die
+/// Buchstaben aus Latin-1 (U+00C0 bis U+00FF, in dieser Reihenfolge, mit
+/// `times` und `divide` an ihren Plätzen), einige aus Latin Extended-A und die
+/// Zeichen, die selbst kodieren (`&amp;`, damit `&amp;#69;` aufgeht).
+final Map<String, String> _benannt = () {
+  const latin1 =
+      'Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml '
+      'ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig '
+      'agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml '
+      'eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml';
+  final namen = latin1.split(' ');
+  return {
+    for (var i = 0; i < namen.length; i++) namen[i]: String.fromCharCode(0xC0 + i),
+    'OElig': String.fromCharCode(0x152),
+    'oelig': String.fromCharCode(0x153),
+    'Scaron': String.fromCharCode(0x160),
+    'scaron': String.fromCharCode(0x161),
+    'Yuml': String.fromCharCode(0x178),
+    'amp': '&',
+    'lt': '<',
+    'gt': '>',
+    'quot': '"',
+    'apos': "'",
+    'nbsp': ' ',
+  };
+}();
+
+/// Ein Zeichen aus seinem Code-Punkt; jenseits von Unicode das Ersatzzeichen
+/// U+FFFD, das wie jedes Nicht-Buchstabenzeichen trennt. Ein einzelnes
+/// Ersatzzeichen-Halbteil (Surrogat) bleibt eine Code-Einheit: Zwei
+/// nebeneinander (`\ud83d\ude00`) ergeben so ein Zeichen, eines allein trennt.
+String _zeichen(int wert) => wert > 0x10FFFF ? String.fromCharCode(0xFFFD) : String.fromCharCode(wert);
+
+/// [s] mit aufgelösten Unicode-Escapes und HTML-Zeichenreferenzen. Unbekannte
+/// benannte Referenzen bleiben stehen. Ohne `\u` und `&` kommt [s] selbst
+/// zurück.
+String _escapesAufgeloest(String s) {
+  if (!s.contains(r'\u') && !s.contains('&')) return s;
+  return s.replaceAllMapped(_escape, (m) {
+    if (m[1] case final h?) return _zeichen(int.parse(h, radix: 16));
+    if (m[2] case final h?) return _zeichen(int.parse(h, radix: 16));
+    if (m[3] case final h?) return _zeichen(int.parse(h, radix: 16));
+    if (m[4] case final d?) return _zeichen(int.parse(d));
+    return _benannt[m[5]!] ?? m[0]!;
+  });
+}
 
 /// Zeichen, die beim Vergleich wegfallen: kombinierende Zeichen und
 /// unsichtbare Formatzeichen.
@@ -188,15 +322,18 @@ class Namenssperre {
     }
   }
 
-  /// Das erste Wort in [text], das einen Namensteil trifft, so wie es im
-  /// Text steht; null ohne Treffer.
+  /// Das erste Wort in [text] oder einer seiner aufgelösten Formen
+  /// ([kodierungenAufgeloest]), das einen Namensteil trifft, so wie es dort
+  /// steht; null ohne Treffer.
   String? treffer(String text) {
     if (_teile.isEmpty || text.isEmpty) return null;
-    for (final m in _wort.allMatches(text)) {
-      final w = m[0]!;
-      final (mitE, ohne) = _formen(w);
-      if (mitE.isEmpty) continue;
-      if (_teile.contains(mitE) || _teile.contains(ohne)) return w;
+    for (final form in kodierungenAufgeloest(text)) {
+      for (final m in _wort.allMatches(form)) {
+        final w = m[0]!;
+        final (mitE, ohne) = _formen(w);
+        if (mitE.isEmpty) continue;
+        if (_teile.contains(mitE) || _teile.contains(ohne)) return w;
+      }
     }
     return null;
   }
@@ -273,8 +410,10 @@ class LetzteSperre {
   /// als Teil des Texts, ohne Rücksicht auf Groß- und Kleinschreibung, mit
   /// `\` und `/` als gleichwertigen Trennern, auch doppelt (`\\` in JSON) oder
   /// gemischt. So trifft auch eine Datei darin und eine Adresse mit
-  /// `file:///`. Nicht erkannt werden andere Kodierungen (Prozentkodierung,
-  /// Unicode-Escapes, Base64) und Kurznamen für einen anderen Teil des Pfads als den
+  /// `file:///`. Wie bei Namen zählen die aufgelösten Formen des Texts mit
+  /// ([kodierungenAufgeloest]: Prozentkodierung, Unicode-Escapes,
+  /// HTML-Zeichenreferenzen). Nicht erkannt werden andere Kodierungen
+  /// (Base64) und Kurznamen für einen anderen Teil des Pfads als den
   /// gesperrten; die Sperre bleibt die letzte, nicht die erste.
   void pfadSperren(String pfad) {
     var f = _pfadform(pfad);
@@ -289,16 +428,18 @@ class LetzteSperre {
 
   static String _pfadform(String s) => s.toLowerCase().replaceAll(RegExp(r'[\\/]+'), '/');
 
-  /// Der gesperrte Pfad, den [text] nennt, so wie er gesperrt wurde; sonst
-  /// null.
+  /// Der gesperrte Pfad, den [text] oder eine seiner aufgelösten Formen
+  /// ([kodierungenAufgeloest]) nennt, so wie er gesperrt wurde; sonst null.
   String? _pfadIn(String text) {
     if (_pfade.isEmpty || text.isEmpty) return null;
-    final klein = text.toLowerCase();
-    String? form;
-    for (final MapEntry(key: f, value: (:pfad, :letzter)) in _pfade.entries) {
-      if (!klein.contains(letzter)) continue;
-      form ??= _pfadform(text);
-      if (form.contains(f)) return pfad;
+    for (final t in kodierungenAufgeloest(text)) {
+      final klein = t.toLowerCase();
+      String? form;
+      for (final MapEntry(key: f, value: (:pfad, :letzter)) in _pfade.entries) {
+        if (!klein.contains(letzter)) continue;
+        form ??= _pfadform(t);
+        if (form.contains(f)) return pfad;
+      }
     }
     return null;
   }

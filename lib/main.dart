@@ -251,12 +251,8 @@ Future<int> _claudeEntfernen() async {
     return (await einrichtungEntfernen(
       umgebung: Platform.environment,
       // Die Skills der App und die der Plugins, die die App installiert hat
-      // (je Werkzeug, nach dem früheren Stand je Name); die Plugins selbst
-      // liest sie dafür nicht.
-      skills: [
-        for (final s in await _skillPakete()) s.name,
-        ...?gespeichert?.pluginSkills,
-      ],
+      // (je Werkzeug); die Plugins selbst liest sie dafür nicht.
+      skills: [for (final s in await _skillPakete()) s.name],
       pluginOrdner: gespeichert?.pluginSkillOrdner ?? const {},
       mcpNamen: _gespeicherteMcpNamen(gespeichert),
       // Ordner gleichen Namens, die nicht von moocp stammen, bleiben.
@@ -1077,9 +1073,8 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
       gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
-      verwaist: verwaisteSkills({...e.pluginSkills, ...skillNamen(e.pluginSkillOrdner)}, plugins, appNamen),
+      verwaist: verwaisteSkills(skillNamen(e.pluginSkillOrdner), plugins, appNamen),
       pluginSkills: e.pluginSkillOrdner,
-      pluginSkillsAlt: e.pluginSkills,
       fremd: e.fremdeSkillOrdner,
       gesehen: e.skillFehlerGesehen,
       skillFehler: plugins.fehler,
@@ -1099,27 +1094,21 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         e.fremdeSkillOrdner = alt.union(stand.fremdeOrdner);
       }
     }
-    // Je Werkzeug gemerkt; ein früherer Stand je Name geht dabei darin auf.
+    // Je Werkzeug gemerkt.
     final gemerkt = pluginSkillsGemerkt(
       gemerkt: e.pluginSkillOrdner,
-      alt: e.pluginSkills,
       stand: stand,
       werkzeuge: alleWerkzeuge(Platform.environment),
     );
-    if (e.pluginSkills.isNotEmpty ||
-        gemerkt.length != e.pluginSkillOrdner.length ||
-        !gemerkt.containsAll(e.pluginSkillOrdner)) {
+    if (gemerkt.length != e.pluginSkillOrdner.length || !gemerkt.containsAll(e.pluginSkillOrdner)) {
       final alt = e.pluginSkillOrdner;
-      final altJeName = e.pluginSkills;
       e.pluginSkillOrdner = gemerkt;
-      e.pluginSkills = {};
       try {
         await e.speichern();
       } catch (x) {
         // Bleibt für diesen Lauf gemerkt; der nächste Start versucht es wieder.
         widget.protokoll.eintrag(Art.fehler, 'Skills der Plugins nicht gemerkt (${x.runtimeType})');
         e.pluginSkillOrdner = alt.union(gemerkt);
-        e.pluginSkills = altJeName;
       }
     }
     return stand;

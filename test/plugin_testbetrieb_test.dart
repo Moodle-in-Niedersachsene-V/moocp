@@ -561,6 +561,78 @@ void main() {
       expect(text, isNot(contains(testfreigabeHinweis)));
       expect(gezeigt, isEmpty);
     });
+
+    /// Ein MCP-Dienst, dessen Plugin-Werkzeug erst anlegt und dann mit einem
+    /// Fehler endet; geliefert wird, was die KI vom Aufruf bekommt.
+    Future<Map> anlegenDannFehler({Set<int> kurse = const {12}}) async {
+      final frei = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = frei.port;
+      await frei.close();
+      final d = dienst(
+        zugang,
+        kurse: kurse,
+        port: port,
+        quellen: [
+          _Quelle(adresse, (token, _) async {
+            await anlegen(token);
+            throw MoodleFehler('Danach gescheitert.');
+          }),
+        ],
+      );
+      await d.starten();
+      final client = McpTestClient(port);
+      addTearDown(() async {
+        client.http.close(force: true);
+        await d.stoppen();
+      });
+      await client.initialize();
+      return client.call('tools/call', {'name': 'beispiel_test', 'arguments': <String, Object?>{}});
+    }
+
+    String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+
+    test('über MCP: endet das Werkzeug des Plugins mit einem Fehler, nennt die Fehlerantwort die automatische Freigabe', () async {
+      final r = await anlegenDannFehler();
+
+      expect(r['isError'], true);
+      expect(text(r), startsWith('Danach gescheitert.'));
+      expect(text(r), contains(testfreigabeHinweis));
+      expect(freigaben.testfreigaben, 1);
+    });
+
+    test('über MCP: endet das Werkzeug des Plugins mit einem Fehler, nennt die Fehlerantwort die ausgelassene Freigabe', () async {
+      freigaben.stufe = Bestaetigungen.keine;
+
+      final r = await anlegenDannFehler(kurse: {34});
+
+      expect(r['isError'], true);
+      expect(text(r), startsWith('Danach gescheitert.'));
+      expect(text(r), contains('Ohne Freigabe ausgeführt (1 Vorgang, Aufrufer: Plugin „Beispiel“)'));
+      expect(text(r), isNot(contains(testfreigabeHinweis)));
+    });
+
+    test('status über ein Plugin nennt das Plugin als Verbindung, über MCP das KI-Werkzeug', () async {
+      final frei = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = frei.port;
+      await frei.close();
+      final d = dienst(zugang, port: port);
+      final a = aufruf(d);
+
+      final r = await _post(adresse.adresse, pfadWerkzeug, {'name': 'status'}, token: a.token);
+
+      expect(r.json['text'], contains('Verbunden über: Plugin „Beispiel“\n'));
+      await d.starten();
+      final client = McpTestClient(port);
+      addTearDown(() async {
+        client.http.close(force: true);
+        await d.stoppen();
+      });
+      await client.initialize();
+      final status = await client.tool('status', const {});
+      expect(status, contains('Verbunden über: '));
+      expect(status, isNot(contains('Plugin „Beispiel“')));
+      expect(status, isNot(contains('Verbunden über: unbekannt')));
+    });
   });
 
   group('Vorbereitete Dialogantworten', () {

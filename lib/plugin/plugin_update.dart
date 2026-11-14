@@ -6,11 +6,17 @@
 //  1. Passt die Schnittstellenversion nicht (schnittstelle.dart), sagt ein
 //     Dialog, welche Seite zu alt ist, und bietet deren Update an: von moocp,
 //     wenn moocp zu alt ist, vom Plugin, wenn das Plugin zu alt ist. Ohne
-//     Update bleibt das Plugin aus; die App läuft ohne es weiter.
+//     Update bleibt das Plugin aus; die App läuft ohne es weiter. Ohne
+//     Angebot eines Updates erscheint dieser Dialog einmal je Stand des
+//     Plugins (Version, Prüfsumme) und Version der App
+//     (Einstellungen.schnittstelleGesehen); danach steht der Grund nur noch
+//     im Dialog „Plugins“ und bei jedem Start im Protokoll. Mit einem Angebot
+//     erscheint er, wann immer die Suche eines findet.
 //  2. Sonst wird nach einem Update des Plugins gesucht, nach denselben Regeln
 //     wie für moocp: nur nach dem Ja zur täglichen Suche (dieselbe Einstellung
-//     wie für moocp, kein eigenes Ja), nur wo sich moocp selbst ersetzen kann
-//     (updateMoeglich, also nicht auf dem Mac und nicht mit --kein-update),
+//     wie für moocp, kein eigenes Ja), nicht auf dem Mac und nicht mit
+//     --kein-update (pluginUpdateMoeglich) -- aber auch dort, wo sich moocp
+//     nicht selbst ersetzen kann, etwa im Entwicklerbau --,
 //     höchstens einmal am Tag je Plugin, und nur für ein Plugin, dessen
 //     jetzigem Stand die Lehrkraft zugestimmt hat. Die Repositorys stehen in
 //     seiner Beschreibungsdatei, und die zählt erst mit der Zustimmung: Ein
@@ -72,8 +78,17 @@ Update pluginUpdate(PluginBeschreibung b, Protokoll protokoll) => Update(
       protokollName: pluginUpdateName(b),
     );
 
+/// Ob nach Updates von Plugins gesucht werden darf: unter Windows und ohne
+/// `--kein-update`. Anders als bei moocp selbst (update.dart, updateMoeglich)
+/// zählt nicht, ob die App aus dem Installationsverzeichnis läuft: Der
+/// Installer eines Plugins ersetzt das Plugin, nicht die App, also auch im
+/// Entwicklerbau. Auf dem Mac nicht: Für Plugins gibt es dort kein
+/// Installer-Format (E24). [windows] nur für Tests.
+bool pluginUpdateMoeglich(List<String> argumente, {bool? windows}) =>
+    (windows ?? Platform.isWindows) && !argumente.contains(keinUpdateSchalter);
+
 /// Warum für [e] jetzt nicht nach einem Update gesucht wird; null: es wird
-/// gesucht. [updatefaehig] ist updateMoeglich der App (update.dart).
+/// gesucht. [updatefaehig] ist [pluginUpdateMoeglich].
 String? pluginUpdateAusgelassen(
   Plugins plugins,
   PluginEintrag e,
@@ -83,7 +98,7 @@ String? pluginUpdateAusgelassen(
 }) {
   final b = e.beschreibung;
   if (b == null) return 'Das Plugin wird nicht geladen.';
-  if (!updatefaehig) return 'Diese Version von moocp sucht keine Updates.';
+  if (!updatefaehig) return 'moocp sucht hier keine Updates von Plugins.';
   if (einstellungen.updatePruefen != true) return 'Die tägliche Suche nach Updates ist ausgeschaltet.';
   if (!plugins.zugestimmtFuerStand(e)) return 'Dem jetzigen Stand des Plugins ist nicht zugestimmt.';
   if (b.updateQuellen.isEmpty) return 'Das Plugin nennt keine Update-Quellen.';
@@ -91,6 +106,13 @@ String? pluginUpdateAusgelassen(
   if (einstellungen.pluginUpdates[e.ordner]?.zuletzt == tagesdatum(jetzt)) return 'Heute schon gesucht.';
   return null;
 }
+
+/// Der Stand, zu dem der Dialog „Plugin bleibt aus“ einmal erscheint: Ordner,
+/// Version und Prüfsumme des Plugins und Version der App, je in einer Zeile
+/// (Einstellungen.schnittstelleGesehen). Ein Update von moocp oder des
+/// Plugins ändert ihn.
+String schnittstelleStand(PluginEintrag e, String appVersion) =>
+    [e.ordner, e.beschreibung?.version ?? '', e.pruefsumme ?? '', appVersion].join('\n');
 
 /// Das Ergebnis der Suche für ein Plugin.
 class PluginUpdatePruefung {
@@ -227,13 +249,15 @@ class PluginPruefErgebnis {
 /// [Plugins.eintraege]: erst die Schnittstelle, dann das Update. [nur]
 /// beschränkt die Prüfung auf diese Plugin-Ordner (nach einem Update eines
 /// Plugins: nur die aktualisierten). [moocpUpdateMoeglich]: Die App kann sich
-/// selbst aktualisieren und kennt ihre Version.
+/// selbst aktualisieren und kennt ihre Version. [appVersion] ist die
+/// laufende Version der App, für [schnittstelleStand].
 Future<PluginPruefErgebnis> pluginsPruefen({
   required Plugins plugins,
   required Einstellungen einstellungen,
   required Protokoll protokoll,
   required bool updatefaehig,
   required bool moocpUpdateMoeglich,
+  required String appVersion,
   required PluginPruefDialoge dialoge,
   DateTime Function() uhr = DateTime.now,
   Update Function(PluginBeschreibung b, Protokoll protokoll) erzeugen = pluginUpdate,
@@ -251,6 +275,28 @@ Future<PluginPruefErgebnis> pluginsPruefen({
         erzeugen: erzeugen,
       );
 
+  // Ob der Dialog zur Schnittstelle für diesen Stand schon erschienen ist;
+  // [gesehen] merkt ihn, sobald er erschienen ist.
+  final stand = {for (final e in plugins.eintraege) e.ordner: schnittstelleStand(e, appVersion)};
+  bool schonGesehen(PluginEintrag e) => einstellungen.schnittstelleGesehen.contains(stand[e.ordner]);
+  Future<void> gesehen(PluginEintrag e) async {
+    final s = stand[e.ordner]!;
+    if (einstellungen.schnittstelleGesehen.contains(s)) return;
+    final alt = einstellungen.schnittstelleGesehen;
+    // Je Plugin nur der letzte Stand: Ein früherer kommt nicht wieder.
+    einstellungen.schnittstelleGesehen = {
+      for (final x in alt)
+        if (!x.startsWith('${e.ordner}\n')) x,
+      s,
+    };
+    try {
+      await einstellungen.speichern();
+    } catch (x) {
+      // Gilt für diesen Lauf; der nächste Start zeigt den Dialog noch einmal.
+      protokoll.eintrag(Art.fehler, 'Gesehener Hinweis zu einem Plugin nicht gespeichert (${x.runtimeType})');
+    }
+  }
+
   for (final e in plugins.eintraege) {
     if (!weiter()) break;
     if (nur != null && !nur.contains(e.ordner)) continue;
@@ -260,14 +306,21 @@ Future<PluginPruefErgebnis> pluginsPruefen({
       switch (e.unpassend) {
         case SchnittstellenUrteil.moocpZuAlt:
           protokoll.eintrag(Art.fehler, 'Plugin „${b.name}“ bleibt aus: ${e.fehler}');
-          if (await dialoge.schnittstelle(e, moocpUpdate: moocpUpdateMoeglich) && moocpUpdateMoeglich) {
+          if (schonGesehen(e)) break;
+          final ja = await dialoge.schnittstelle(e, moocpUpdate: moocpUpdateMoeglich);
+          await gesehen(e);
+          if (ja && moocpUpdateMoeglich) {
             if (await dialoge.moocpAktualisieren()) return PluginPruefErgebnis(beenden: true, aktualisiert: aktualisiert);
           }
         case SchnittstellenUrteil.pluginZuAlt:
           protokoll.eintrag(Art.fehler, 'Plugin „${b.name}“ bleibt aus: ${e.fehler}');
           final p = await suchen(e);
           if (!weiter()) break;
-          if (await dialoge.schnittstelle(e, pruefung: p) && p?.neu != null) {
+          // Mit einem Angebot erscheint er, wann immer die Suche eines findet.
+          if (p?.neu == null && schonGesehen(e)) break;
+          final ja = await dialoge.schnittstelle(e, pruefung: p);
+          await gesehen(e);
+          if (ja && p?.neu != null) {
             if (await dialoge.angebot(p!)) aktualisiert.add(e.ordner);
           }
         case SchnittstellenUrteil.passt:

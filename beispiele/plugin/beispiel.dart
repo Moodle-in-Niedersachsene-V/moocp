@@ -29,11 +29,11 @@
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
 // 7. Damit rechnen, nach einem Absturz neu gestartet zu werden: Endet das
-//    Programm, ohne dass moocp es beendet hat, startet moocp es einmal neu,
-//    mit neuem Port und neuem Schlüssel. Was das Plugin für sich behält,
-//    muss es deshalb beim Start neu aufbauen; ein Aufruf, der beim Absturz
-//    lief, wird nicht wiederholt. Endet es danach noch einmal, gilt es bis
-//    zum nächsten Start von moocp als ausgefallen.
+//    Programm, ohne dass moocp es beendet hat, startet moocp es neu, mit
+//    neuem Port und neuem Schlüssel. Was das Plugin für sich behält, muss es
+//    deshalb beim Start neu aufbauen; ein Aufruf, der beim Absturz lief, wird
+//    nicht wiederholt. Endet es binnen einer Minute nach einem Neustart noch
+//    einmal, gilt es bis zum nächsten Start von moocp als ausgefallen.
 //
 // Entwickeln (README, Teil 4, „Ein Plugin entwickeln“): Wer ein Plugin
 // entwickelt, startet es selbst, im Debugger, auf dem Port aus
@@ -199,7 +199,8 @@ McpServer _server() {
     'beispiel_absturz',
     description:
         'Beendet das Beispiel-Plugin sofort, ohne zu antworten. Zeigt, wie '
-        'moocp einen Absturz behandelt: ein Neustart, danach ausgefallen.',
+        'moocp einen Absturz behandelt: ein Neustart; ein zweiter Absturz binnen einer Minute danach, '
+        'und es ist ausgefallen.',
     inputSchema: JsonSchema.object(properties: {}),
     annotations: const ToolAnnotations(
       title: 'Absturz (Beispiel)',

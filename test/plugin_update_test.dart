@@ -206,8 +206,12 @@ void main() {
       expect(grund(), isNull);
     });
 
-    test('nur wo moocp sich selbst aktualisiert (nicht auf dem Mac, nicht mit --kein-update)', () {
+    test('nicht auf dem Mac und nicht mit --kein-update, aber unabhängig davon, ob moocp sich selbst ersetzen kann', () {
       expect(grund(updatefaehig: false), isNotNull);
+      expect(pluginUpdateMoeglich(const [], windows: true), isTrue, reason: 'auch im Entwicklerbau');
+      expect(pluginUpdateMoeglich(const ['--irgendwas'], windows: true), isTrue);
+      expect(pluginUpdateMoeglich(const [keinUpdateSchalter], windows: true), isFalse);
+      expect(pluginUpdateMoeglich(const [], windows: false), isFalse, reason: 'kein Installer-Format auf dem Mac');
     });
 
     test('nur nach dem Ja zur täglichen Suche, ohne eigenes Ja je Plugin', () {
@@ -322,12 +326,14 @@ void main() {
       Set<String>? nur,
       bool moocpUpdateMoeglich = true,
       List<String>? erzeugt,
+      String appVersion = '0.11.0',
     }) => pluginsPruefen(
       plugins: plugins,
       einstellungen: einstellungen,
       protokoll: protokoll,
       updatefaehig: true,
       moocpUpdateMoeglich: moocpUpdateMoeglich,
+      appVersion: appVersion,
       dialoge: dialoge,
       uhr: () => DateTime(2026, 11, 13, 8),
       erzeugen: (b, pr) {
@@ -450,6 +456,69 @@ void main() {
       expect(erzeugt, isEmpty);
       expect(dialoge.ablauf, ['schnittstelle a']);
       expect(dialoge.schnittstellenPruefungen.single, isNull);
+    });
+
+    test('„Plugin bleibt aus“ ohne Update-Angebot: einmal je Stand des Plugins und Version der App', () async {
+      _plugin(wurzel, 'a', _manifest(name: 'Alpha', kurzname: 'alpha', schnittstelle: 2));
+      var plugins = await laden();
+      final dialoge = _Dialoge()..schnittstelleJa = false;
+
+      await pruefen(plugins, dialoge, {});
+      await pruefen(plugins, dialoge, {});
+      expect(dialoge.ablauf, ['schnittstelle a'], reason: 'beim zweiten Start nicht noch einmal');
+      expect(einstellungen.schnittstelleGesehen, hasLength(1));
+      expect(
+        protokoll.eintraege.where((z) => z.text.startsWith('Plugin „Alpha“ bleibt aus')),
+        hasLength(2),
+        reason: 'das Protokoll nennt es bei jedem Start',
+      );
+
+      // Eine andere Version der App: wieder einmal.
+      await pruefen(plugins, dialoge, {}, appVersion: '0.12.0');
+      expect(dialoge.ablauf, ['schnittstelle a', 'schnittstelle a']);
+
+      // Ein anderer Stand des Plugins: wieder einmal.
+      File(p.join(wurzel.path, 'a', 'plugin.exe')).writeAsStringSync('anders');
+      plugins = await laden();
+      await pruefen(plugins, dialoge, {}, appVersion: '0.12.0');
+      await pruefen(plugins, dialoge, {}, appVersion: '0.12.0');
+      expect(dialoge.ablauf, ['schnittstelle a', 'schnittstelle a', 'schnittstelle a']);
+      expect(einstellungen.schnittstelleGesehen, hasLength(1), reason: 'je Plugin nur der letzte Stand');
+
+      final gelesen = Einstellungen.aus(
+        jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>,
+        Einstellungen(schluessel: 'x'),
+      );
+      expect(gelesen.schnittstelleGesehen, einstellungen.schnittstelleGesehen);
+    });
+
+    test('„Plugin bleibt aus“ mit Update-Angebot erscheint weiter nach den Regeln der Update-Prüfung', () async {
+      _plugin(wurzel, 'a', _manifest(name: 'Alpha', kurzname: 'alpha'));
+      await laden(zustimmen: {'a'});
+      final spaeter = Plugins(einstellungen, protokoll, await pluginsFinden(wurzel, angeboten: {2}));
+      final dialoge = _Dialoge()
+        ..schnittstelleJa = false;
+      var tag = DateTime(2026, 11, 13, 8);
+      Future<void> pruefenAm() => pluginsPruefen(
+        plugins: spaeter,
+        einstellungen: einstellungen,
+        protokoll: protokoll,
+        updatefaehig: true,
+        moocpUpdateMoeglich: false,
+        appVersion: '0.11.0',
+        dialoge: dialoge,
+        uhr: () => tag,
+        erzeugen: (b, pr) => _Update(pr, () => _neu('2.0.0', 'alpha')),
+      );
+
+      await pruefenAm();
+      expect(dialoge.ablauf, ['schnittstelle a']);
+      await pruefenAm();
+      expect(dialoge.ablauf, ['schnittstelle a'], reason: 'heute schon gesucht: kein Angebot, und gesehen');
+      tag = DateTime(2026, 11, 14, 8);
+      await pruefenAm();
+      expect(dialoge.ablauf, ['schnittstelle a', 'schnittstelle a'], reason: 'am nächsten Tag wieder mit Angebot');
+      expect(dialoge.schnittstellenPruefungen.last?.neu?.version, '2.0.0');
     });
 
     test('nach einem Update nur die aktualisierten Plugins', () async {

@@ -1184,14 +1184,16 @@ class Entfernt {
 
 /// Entfernt, was die App in den KI-Werkzeugen eingerichtet hat: die
 /// Einträge [mcpNamen] (je Instanzprofil einer, E31) und die Skills
-/// [skills] -- die der App und die gemerkten der Plugins
-/// ([pluginSkillsGemerkt]) --, in jedem Werkzeug. Danach wird nachgesehen,
-/// statt dem Ergebnis zu glauben. Ein Name, der kein Skill-Name sein kann
-/// ([skillNameGueltig]), bildet keinen Pfad und wird übergangen, ebenso ein
-/// fremder Ordner aus [auslassen] ([fremderOrdner]).
+/// [skills] in jedem Werkzeug -- die der App und die gemerkten der Plugins
+/// nach dem früheren Stand je Name --, dazu die gemerkten Ordner der Plugins
+/// [pluginOrdner] ([pluginSkillsGemerkt]) nur in ihrem Werkzeug. Danach wird
+/// nachgesehen, statt dem Ergebnis zu glauben. Ein Name, der kein Skill-Name
+/// sein kann ([skillNameGueltig]), bildet keinen Pfad und wird übergangen,
+/// ebenso ein fremder Ordner aus [auslassen] ([fremderOrdner]).
 Future<Entfernt> einrichtungEntfernen({
   required Map<String, String> umgebung,
   required List<String> skills,
+  Set<String> pluginOrdner = const {},
   List<String> mcpNamen = const [mcpName],
   List<KiWerkzeug>? werkzeuge,
   Set<String> auslassen = const {},
@@ -1205,7 +1207,12 @@ Future<Entfernt> einrichtungEntfernen({
         eintraege.add(mcpNamen.length > 1 ? '${w.id} ($eintrag)' : w.id);
       }
     }
-    for (final name in skills.where(skillNameGueltig)) {
+    final hier = {
+      ...skills,
+      for (final e in pluginOrdner)
+        if (werkzeugSkillGueltig(e) && e.split('/')[0] == w.id) e.split('/')[1],
+    };
+    for (final name in hier.where(skillNameGueltig)) {
       if (auslassen.contains(fremderOrdner(w.id, name))) continue;
       geblieben.addAll(skillEntfernen(Directory(p.join(w.skillOrdner.path, name))).map((f) => '${w.id}: $name/$f'));
     }
@@ -1417,11 +1424,13 @@ List<SkillPaket> _gewollt(List<SkillPaket> skills, Map<String, String> wahlSkill
 /// angelegt hat. Ihn überschreibt die Einrichtung nicht und räumt ihn nicht
 /// auf; der Dialog nennt ihn, ohne die Einrichtung aufzuhalten, wie ein
 /// unbrauchbares Paket. Fremd ist ein Ordner, wenn er vom Paket abweicht und
-/// moocp den Namen nicht als Plugin-Skill gemerkt hat ([pluginSkills]), oder
-/// wenn er in diesem Werkzeug schon einmal fremd war ([fremd], die Liste aus
-/// der letzten Prüfung): Gemerkt ist ein Name für alle Werkzeuge, sobald moocp
-/// ihn in einem installiert hat. Eine Verknüpfung an seiner Stelle ist immer
-/// fremd; die App folgt ihr nicht. Fremd ist er nicht mehr, wenn er fehlt
+/// moocp ihn nicht in genau diesem Werkzeug installiert hat ([pluginSkills],
+/// je Werkzeug, [werkzeugSkill]; nach dem früheren Stand je Name
+/// [pluginSkillsAlt], [pluginSkillsGemerkt]), oder wenn er in diesem Werkzeug
+/// schon einmal fremd war ([fremd], die Liste aus der letzten Prüfung). Ein
+/// verwaister Skill kommt nur dort zum Entfernen, wo moocp ihn installiert
+/// hat. Eine Verknüpfung an seiner Stelle ist immer fremd; die App folgt ihr
+/// nicht. Fremd ist er nicht mehr, wenn er fehlt
 /// oder genau dem Paket entspricht. Für die Skills der App ändert sich nichts.
 /// [gesehen] sind die Stände, die die Lehrkraft gesehen hat
 /// (Einstellungen.skillFehlerGesehen); ein neuer fremder Ordner öffnet den
@@ -1437,6 +1446,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
   Set<String> gewaehlt = const {},
   Set<String> verwaist = const {},
   Set<String> pluginSkills = const {},
+  Set<String> pluginSkillsAlt = const {},
   Set<String> fremd = const {},
   Set<String> gesehen = const {},
   List<String> skillFehler = const [],
@@ -1460,6 +1470,9 @@ Future<Einrichtungsstand> einrichtungPruefen({
   final fremdeOrdner = <String>{};
   final konflikte = <String>[];
   final werkzeuge = <Werkzeugstand>[];
+  // Ob moocp den Ordner [n] in [w] für ein Plugin installiert hat: je
+  // Werkzeug gemerkt, oder nach dem früheren Stand je Name.
+  bool eigen(String w, String n) => pluginSkills.contains(werkzeugSkill(w, n)) || pluginSkillsAlt.contains(n);
   for (final w in liste) {
     final stand = {for (final s in skills) s.name: skillVergleichen(s, Directory(p.join(w.skillOrdner.path, s.name)))};
     bool istFremd(SkillPaket s) {
@@ -1469,7 +1482,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
       if (typ == FileSystemEntityType.notFound) return false;
       if (typ != FileSystemEntityType.directory) return true;
       if (stand[s.name]!.aktuell) return false;
-      return !pluginSkills.contains(s.name) || fremd.contains(fremderOrdner(w.id, s.name));
+      return !eigen(w.id, s.name) || fremd.contains(fremderOrdner(w.id, s.name));
     }
 
     final fremdHier = {for (final s in skills) if (istFremd(s)) s.name};
@@ -1493,10 +1506,12 @@ Future<Einrichtungsstand> einrichtungPruefen({
                 skillInstalliert(w, s.name) &&
                 (!gewaehlteWerkzeuge.contains(w.id) || !gewollt.contains(s)))
               s.name,
-          // Verwaiste Plugin-Skills nur aus einem echten Ordner, der nicht
-          // als fremd bekannt ist.
+          // Verwaiste Plugin-Skills nur aus einem echten Ordner, den moocp in
+          // diesem Werkzeug installiert hat und der nicht als fremd bekannt
+          // ist.
           for (final n in weg)
             if (skillInstalliert(w, n) &&
+                eigen(w.id, n) &&
                 _echterOrdner(p.join(w.skillOrdner.path, n)) &&
                 !fremd.contains(fremderOrdner(w.id, n)))
               n,
@@ -1518,28 +1533,64 @@ Future<Einrichtungsstand> einrichtungPruefen({
   );
 }
 
-/// Wie ein fremder Ordner ([einrichtungPruefen]) in den Einstellungen steht:
-/// Werkzeug und Skill-Name (Einstellungen.fremdeSkillOrdner).
-String fremderOrdner(String werkzeug, String skill) => '$werkzeug/$skill';
+/// Ein Ordner im Skill-Ordner eines KI-Werkzeugs, wie er in den Einstellungen
+/// steht: Werkzeug und Skill-Name, `<Werkzeug>/<Name>`
+/// (Einstellungen.pluginSkillOrdner, Einstellungen.fremdeSkillOrdner).
+String werkzeugSkill(String werkzeug, String skill) => '$werkzeug/$skill';
 
-/// Die Skills von Plugins, die die App als von ihr installiert führt
-/// (Einstellungen.pluginSkills), nach der Prüfung [stand]: Dazu kommt jeder
-/// Skill eines Plugins, der in einem Werkzeug genau so steht wie im Paket --
-/// so installiert ihn die Einrichtung --, und es bleibt jeder gemerkte, der in
-/// einem der [werkzeuge] noch installiert ist. Vergessen wird ein Name erst,
-/// wenn er nirgends mehr steht. Nur was hier steht, entfernt die App später
-/// ungefragt bei der Deinstallation oder bietet es zum Entfernen an, wenn das
-/// Plugin fort ist: Ein fremder Ordner gleichen Namens, der vom Paket
-/// abweicht, kommt nicht hinein.
+/// Wie ein fremder Ordner ([einrichtungPruefen]) in den Einstellungen steht
+/// ([werkzeugSkill]).
+String fremderOrdner(String werkzeug, String skill) => werkzeugSkill(werkzeug, skill);
+
+/// Ob [eintrag] die Form von [werkzeugSkill] hat: eine Werkzeug-Kennung aus
+/// Kleinbuchstaben und Ziffern und ein gültiger Skill-Name. Aus einem solchen
+/// Eintrag wird ein Pfad zum Löschen; anderes fällt beim Lesen weg.
+bool werkzeugSkillGueltig(String eintrag) {
+  final teile = eintrag.split('/');
+  return teile.length == 2 && RegExp(r'^[a-z0-9]+$').hasMatch(teile[0]) && skillNameGueltig(teile[1]);
+}
+
+/// Die Skill-Namen in Einträgen der Form [werkzeugSkill].
+Set<String> skillNamen(Iterable<String> eintraege) => {
+  for (final e in eintraege)
+    if (werkzeugSkillGueltig(e)) e.split('/')[1],
+};
+
+/// Die Ordner von Plugin-Skills, die die App in den KI-Werkzeugen installiert
+/// hat, je Werkzeug ([werkzeugSkill], Einstellungen.pluginSkillOrdner), nach
+/// der Prüfung [stand]: Dazu kommt jeder Skill eines Plugins, der in einem
+/// Werkzeug genau so steht wie im Paket -- so installiert ihn die
+/// Einrichtung --, und es bleibt jeder gemerkte, der in seinem Werkzeug noch
+/// installiert ist. Vergessen wird ein Eintrag erst, wenn der Ordner dort
+/// fehlt. Nur was hier steht, entfernt die App später ungefragt bei der
+/// Deinstallation oder bietet es zum Entfernen an, wenn das Plugin fort ist,
+/// und nur in diesem Werkzeug: Ein fremder Ordner gleichen Namens, der vom
+/// Paket abweicht, kommt nicht hinein, auch wenn moocp denselben Skill in
+/// einem anderen Werkzeug installiert hat.
+///
+/// [alt] ist der frühere Stand der Einstellung, je Name statt je Werkzeug
+/// (Einstellungen.pluginSkills): Ein Name daraus galt für jedes Werkzeug. Er
+/// wird schonend überführt: Für jedes Werkzeug, in dem ein solcher Ordner
+/// steht und nicht als fremd bekannt ist ([Einrichtungsstand.fremdeOrdner]),
+/// gilt er weiter als von moocp installiert -- so, wie der frühere Stand ihn
+/// behandelt hätte.
 Set<String> pluginSkillsGemerkt({
   required Set<String> gemerkt,
+  Set<String> alt = const {},
   required Einrichtungsstand stand,
   required List<KiWerkzeug> werkzeuge,
 }) =>
     {
-      for (final s in stand.skills)
-        if (s.herkunft == SkillHerkunft.plugin && stand.werkzeuge.any((w) => w.stand[s.name]?.aktuell ?? false))
-          s.name,
-      for (final n in gemerkt)
-        if (skillNameGueltig(n) && werkzeuge.any((w) => skillInstalliert(w, n))) n,
+      for (final ws in stand.werkzeuge)
+        for (final s in stand.skills)
+          if (s.herkunft == SkillHerkunft.plugin && (ws.stand[s.name]?.aktuell ?? false))
+            werkzeugSkill(ws.werkzeug.id, s.name),
+      for (final e in gemerkt)
+        if (werkzeugSkillGueltig(e) &&
+            werkzeuge.any((w) => w.id == e.split('/')[0] && skillInstalliert(w, e.split('/')[1])))
+          e,
+      for (final n in alt)
+        if (skillNameGueltig(n))
+          for (final w in werkzeuge)
+            if (skillInstalliert(w, n) && !stand.fremdeOrdner.contains(fremderOrdner(w.id, n))) werkzeugSkill(w.id, n),
     };

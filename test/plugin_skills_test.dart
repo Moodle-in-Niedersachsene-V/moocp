@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/mcp/werkzeugquelle.dart' show WerkzeugBeschreibung;
 import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/skills.dart';
@@ -84,10 +85,15 @@ void main() {
 
   Directory skillOrdner(KiWerkzeug w, String name) => Directory(p.join(w.skillOrdner.path, name));
 
+  /// Die Einträge für [namen] in Codex und LM Studio (Einstellungen.pluginSkillOrdner).
+  Set<String> inBeiden(Set<String> namen) => {
+    for (final w in ['codex', 'lmstudio'])
+      for (final n in namen) werkzeugSkill(w, n),
+  };
+
   /// Die Prüfung, wie die App sie beim Start macht (main.dart,
   /// _einrichtungsstand), danach das Merken der Plugin-Skills.
-  Future<Einrichtungsstand> pruefen(Plugins? plugins, {Set<String>? gewaehlt, Set<String> abgewaehlt = const {}}) async {
-    final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen);
+  Future<Einrichtungsstand> pruefenMitSkills(PluginSkills ps, {Set<String>? gewaehlt, Set<String> abgewaehlt = const {}}) async {
     final wahl = {...appWahlSkills, ...ps.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: umgebung,
@@ -97,18 +103,31 @@ void main() {
       wahlSkills: wahl,
       abgewaehlt: abgewaehlt,
       gewaehlt: gewaehlt ?? gewaehltVorgabe(umgebung, wahl.keys),
-      verwaist: verwaisteSkills(einstellungen.pluginSkills, ps, _appNamen),
-      pluginSkills: einstellungen.pluginSkills,
+      verwaist: verwaisteSkills(
+        {...einstellungen.pluginSkills, ...skillNamen(einstellungen.pluginSkillOrdner)},
+        ps,
+        _appNamen,
+      ),
+      pluginSkills: einstellungen.pluginSkillOrdner,
+      pluginSkillsAlt: einstellungen.pluginSkills,
       fremd: einstellungen.fremdeSkillOrdner,
       skillFehler: ps.fehler,
       gefunden: [codex, lm],
       python: () async => true,
     );
-    einstellungen.pluginSkills =
-        pluginSkillsGemerkt(gemerkt: einstellungen.pluginSkills, stand: stand, werkzeuge: [codex, lm]);
+    einstellungen.pluginSkillOrdner = pluginSkillsGemerkt(
+      gemerkt: einstellungen.pluginSkillOrdner,
+      alt: einstellungen.pluginSkills,
+      stand: stand,
+      werkzeuge: [codex, lm],
+    );
+    einstellungen.pluginSkills = {};
     einstellungen.fremdeSkillOrdner = stand.fremdeOrdner;
     return stand;
   }
+
+  Future<Einrichtungsstand> pruefen(Plugins? plugins, {Set<String>? gewaehlt, Set<String> abgewaehlt = const {}}) async =>
+      pruefenMitSkills(await pluginSkillsLesen(plugins, appNamen: _appNamen), gewaehlt: gewaehlt, abgewaehlt: abgewaehlt);
 
   /// Tut, was „Installieren" im Dialog mit den Skills tut.
   void installieren(Einrichtungsstand s) {
@@ -149,6 +168,21 @@ void main() {
       expect(ps.pakete, isEmpty);
       expect(ps.namen, isEmpty);
       expect((await pluginSkillsLesen(null, appNamen: _appNamen)).pakete, isEmpty, reason: 'ohne Plugins');
+    });
+
+    test('nur, solange es in mindestens einem Instanzprofil eingeschaltet ist', () async {
+      beispielAnlegen();
+      final plugins = await laden();
+      final e = plugins.eintraege.single;
+      await plugins.entscheiden(e, zugestimmt: true, profile: {'standard', 'a1b2c3d4'});
+      await plugins.profilSchalten(e, 'standard', false);
+      expect((await pluginSkillsLesen(plugins, appNamen: _appNamen)).pakete, hasLength(2), reason: 'noch in einem');
+
+      await plugins.profilSchalten(e, 'a1b2c3d4', false);
+      final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen);
+      expect(ps.pakete, isEmpty);
+      expect(ps.namen, isEmpty, reason: 'gemerkte Skills sind dann verwaist');
+      expect(ps.wahlSkills, isEmpty);
     });
 
     test('nach der Zustimmung geändert: kein Skill, und der Grund nennt das Plugin', () async {
@@ -234,7 +268,7 @@ void main() {
       expect(s.gewollt.map((x) => x.name), ['beispiel'], reason: 'wählbar und nicht installiert: aus');
       expect(s.wahlSkills['beispiel-vorlage'], contains('Vorlage'));
       expect(s.brauchtEtwas, isTrue);
-      expect(einstellungen.pluginSkills, isEmpty, reason: 'noch nichts installiert');
+      expect(einstellungen.pluginSkillOrdner, isEmpty, reason: 'noch nichts installiert');
 
       installieren(s);
       s = await pruefen(plugins);
@@ -242,7 +276,7 @@ void main() {
         expect(File(p.join(skillOrdner(w, 'beispiel').path, 'SKILL.md')).existsSync(), isTrue);
         expect(skillOrdner(w, 'beispiel-vorlage').existsSync(), isFalse);
       }
-      expect(einstellungen.pluginSkills, {'beispiel'});
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel'}));
 
       // Mit Haken: installiert, gemerkt; die Vorgabe sieht ihn danach als gewählt.
       s = await pruefen(plugins, gewaehlt: {'beispiel-vorlage'});
@@ -252,7 +286,7 @@ void main() {
       // Die Verbindung ist hier nicht eingetragen; bei den Skills ist nichts mehr zu tun.
       expect(s.werkzeuge.every((w) => w.skills.every((x) => w.stand[x.name]!.aktuell) && w.entfernen.isEmpty), isTrue);
       expect(File(p.join(skillOrdner(codex, 'beispiel-vorlage').path, 'references', 'hinweis.md')).existsSync(), isTrue);
-      expect(einstellungen.pluginSkills, {'beispiel', 'beispiel-vorlage'});
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel', 'beispiel-vorlage'}));
       expect(gewaehltVorgabe(umgebung, ['beispiel-vorlage']), {'beispiel-vorlage'});
 
       // Haken weg: entfernt, und vergessen, sobald er nirgends mehr steht.
@@ -264,17 +298,17 @@ void main() {
       installieren(s);
       await pruefen(plugins, gewaehlt: {});
       expect(skillOrdner(codex, 'beispiel-vorlage').existsSync(), isFalse);
-      expect(einstellungen.pluginSkills, {'beispiel'});
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel'}));
     });
 
-    for (final fall in ['abgelehnt', 'entfernt']) {
+    for (final fall in ['abgelehnt', 'entfernt', 'in allen Profilen ausgeschaltet']) {
       test('Plugin $fall: seine Skills kommen in jedem Werkzeug zum Entfernen, auch im abgewählten', () async {
         final ordner = beispielAnlegen();
         var plugins = await entschieden(zugestimmt: true);
         var s = await pruefen(plugins, gewaehlt: {'beispiel-vorlage'});
         installieren(s);
         await pruefen(plugins, gewaehlt: {'beispiel-vorlage'});
-        expect(einstellungen.pluginSkills, {'beispiel', 'beispiel-vorlage'});
+        expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel', 'beispiel-vorlage'}));
         // Ein fremder Ordner, den die App nicht installiert hat, bleibt.
         File(p.join(skillOrdner(codex, 'beispiel-fremd').path, 'SKILL.md'))
           ..parent.createSync(recursive: true)
@@ -282,6 +316,8 @@ void main() {
 
         if (fall == 'abgelehnt') {
           await plugins.entscheiden(plugins.eintraege.single, zugestimmt: false);
+        } else if (fall.contains('ausgeschaltet')) {
+          await plugins.profilSchalten(plugins.eintraege.single, 'standard', false);
         } else {
           ordner.deleteSync(recursive: true);
           plugins = await laden();
@@ -296,10 +332,40 @@ void main() {
         installieren(s);
         s = await pruefen(plugins, gewaehlt: {'beispiel-vorlage'}, abgewaehlt: {'lmstudio'});
         expect(s.werkzeuge.every((w) => w.entfernen.isEmpty), isTrue);
-        expect(einstellungen.pluginSkills, isEmpty, reason: 'nirgends mehr installiert: vergessen');
+        expect(einstellungen.pluginSkillOrdner, isEmpty, reason: 'nirgends mehr installiert: vergessen');
         expect(File(p.join(skillOrdner(codex, 'beispiel-fremd').path, 'SKILL.md')).existsSync(), isTrue);
       });
     }
+
+    test('passt die Schnittstelle nicht mehr: gemerkte Werkzeugliste verworfen, Skills zum Entfernen', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      await plugins.werkzeugeMerken(plugins.eintraege.single, const [
+        WerkzeugBeschreibung(name: 'beispiel_echo', beschreibung: 'Echo.', eingabeSchema: {'type': 'object'}),
+      ]);
+      installieren(await pruefen(plugins));
+      await pruefen(plugins);
+      expect(einstellungen.plugins['beispiel']!.werkzeuge, isNotNull);
+      expect(skillOrdner(codex, 'beispiel').existsSync(), isTrue);
+
+      // Eine spätere moocp bietet die Schnittstelle des Plugins nicht mehr:
+      // derselbe Stand, dieselbe Zustimmung, aber es lädt nicht.
+      final spaeter = Plugins(einstellungen, Protokoll(), await pluginsFinden(pluginsOrdner, angeboten: {99}));
+      final e = spaeter.eintraege.single;
+      expect(e.unpassend, isNotNull);
+      expect(spaeter.zugestimmtFuerStand(e), isTrue);
+      await spaeter.werkzeugeAufraeumen();
+      expect(einstellungen.plugins['beispiel']!.werkzeuge, isNull);
+      expect(einstellungen.plugins['beispiel']!.zugestimmt, isTrue, reason: 'die Zustimmung bleibt');
+
+      final s = await pruefen(spaeter);
+      expect(s.skills, isEmpty);
+      expect(s.werkzeuge.map((w) => w.entfernen), [
+        {'beispiel'},
+        {'beispiel'},
+      ]);
+      expect(s.brauchtEtwas, isTrue);
+    });
 
     test('ein fremder Ordner mit dem Namen eines Plugin-Skills wird nicht gemerkt', () async {
       beispielAnlegen();
@@ -308,7 +374,7 @@ void main() {
         ..parent.createSync(recursive: true)
         ..writeAsStringSync('von jemand anderem');
       await pruefen(plugins, abgewaehlt: {'codex', 'lmstudio'});
-      expect(einstellungen.pluginSkills, isEmpty);
+      expect(einstellungen.pluginSkillOrdner, isEmpty);
     });
 
     test('ein fremder Ordner gleichen Namens wird nicht überschrieben; der Dialog nennt ihn, ohne aufzuhalten', () async {
@@ -335,9 +401,63 @@ void main() {
       // Nichts hält auf: Bei den Skills ist in beiden Werkzeugen nichts mehr zu tun.
       expect(s.werkzeuge.every((w) => w.skills.every((x) => w.stand[x.name]!.aktuell) && w.entfernen.isEmpty), isTrue);
       expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')), hasLength(1));
-      // Gemerkt ist er, weil moocp ihn in LM Studio installiert hat; in Codex
-      // bleibt der fremde Ordner trotzdem, solange moocp ihn nicht kennt.
-      expect(einstellungen.pluginSkills, {'beispiel'});
+      // Gemerkt ist er nur in LM Studio, wo moocp ihn installiert hat; in
+      // Codex bleibt der fremde Ordner.
+      expect(einstellungen.pluginSkillOrdner, {'lmstudio/beispiel'});
+    });
+
+    test('gemerkt je Werkzeug: ein später angelegter fremder Ordner in einem anderen Werkzeug bleibt fremd', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      // Nur in LM Studio installiert; Codex ist abgewählt.
+      installieren(await pruefen(plugins, abgewaehlt: {'codex'}));
+      await pruefen(plugins, abgewaehlt: {'codex'});
+      expect(einstellungen.pluginSkillOrdner, {'lmstudio/beispiel'});
+
+      // Danach legt jemand in Codex einen eigenen Ordner gleichen Namens an,
+      // und Codex wird wieder gewählt.
+      final fremd = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('später von jemand anderem');
+      final s = await pruefen(plugins);
+      final codexStand = s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex');
+      expect(codexStand.skills.map((x) => x.name), isNot(contains('beispiel')));
+      expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')).single, contains('Codex CLI'));
+      installieren(s);
+      expect(fremd.readAsStringSync(), 'später von jemand anderem');
+      await pruefen(plugins);
+      expect(einstellungen.pluginSkillOrdner, {'lmstudio/beispiel'});
+
+      // Die Deinstallation entfernt nur, was moocp installiert hat.
+      await einrichtungEntfernen(
+        umgebung: umgebung,
+        skills: const [],
+        pluginOrdner: einstellungen.pluginSkillOrdner,
+        werkzeuge: [codex, lm],
+      );
+      expect(fremd.readAsStringSync(), 'später von jemand anderem');
+      expect(skillOrdner(lm, 'beispiel').existsSync(), isFalse);
+    });
+
+    test('ein früherer Stand je Name gilt weiter, wo der Ordner steht, und wird je Werkzeug überführt', () async {
+      beispielAnlegen();
+      final plugins = await entschieden(zugestimmt: true);
+      // Von einer früheren moocp in Codex installiert, inzwischen veraltet.
+      final veraltet = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('veraltet');
+      einstellungen.pluginSkills = {'beispiel'};
+
+      final s = await pruefen(plugins);
+
+      expect(s.skillFehler, isEmpty, reason: 'nach dem früheren Stand stammt er von moocp');
+      expect(s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex').skills.map((x) => x.name), contains('beispiel'));
+      expect(einstellungen.pluginSkillOrdner, {'codex/beispiel'}, reason: 'nur, wo er steht');
+      expect(einstellungen.pluginSkills, isEmpty, reason: 'überführt');
+      installieren(s);
+      expect(veraltet.readAsStringSync(), isNot('veraltet'));
+      await pruefen(plugins);
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel'}));
     });
 
     test('ein fremder Ordner öffnet den Dialog einmal und bleibt bei der Deinstallation stehen', () async {
@@ -368,7 +488,8 @@ void main() {
       expect(einstellungen.fremdeSkillOrdner, {'codex/beispiel'});
       await einrichtungEntfernen(
         umgebung: umgebung,
-        skills: [...einstellungen.pluginSkills],
+        skills: const [],
+        pluginOrdner: einstellungen.pluginSkillOrdner,
         werkzeuge: [codex, lm],
         auslassen: einstellungen.fremdeSkillOrdner,
       );
@@ -394,7 +515,7 @@ void main() {
       final plugins = await entschieden(zugestimmt: true);
       installieren(await pruefen(plugins));
       await pruefen(plugins);
-      expect(einstellungen.pluginSkills, {'beispiel'});
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel'}));
       final datei = File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md'))..writeAsStringSync('veraltet');
 
       final s = await pruefen(plugins);
@@ -468,27 +589,11 @@ void main() {
     }
 
     Future<Einrichtungsstand> pruefenMit(Plugins? plugins, EntwicklungsSkills? entwicklung,
-        {Set<String> gewaehlt = const {}}) async {
-      final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen, entwicklung: entwicklung);
-      final stand = await einrichtungPruefen(
-        umgebung: umgebung,
-        port: 47811,
-        schluessel: 'abc',
-        skills: ps.pakete,
-        wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
-        gewaehlt: gewaehlt,
-        verwaist: verwaisteSkills(einstellungen.pluginSkills, ps, _appNamen),
-        pluginSkills: einstellungen.pluginSkills,
-        fremd: einstellungen.fremdeSkillOrdner,
-        skillFehler: ps.fehler,
-        gefunden: [codex, lm],
-        python: () async => true,
-      );
-      einstellungen.pluginSkills =
-          pluginSkillsGemerkt(gemerkt: einstellungen.pluginSkills, stand: stand, werkzeuge: [codex, lm]);
-      einstellungen.fremdeSkillOrdner = stand.fremdeOrdner;
-      return stand;
-    }
+        {Set<String> gewaehlt = const {}}) async =>
+        pruefenMitSkills(
+          await pluginSkillsLesen(plugins, appNamen: _appNamen, entwicklung: entwicklung),
+          gewaehlt: gewaehlt,
+        );
 
     test('nach dem Ja: Skills aus dem Entwicklungsordner wie die eines installierten Plugins', () async {
       final ps = await pluginSkillsLesen(null, appNamen: _appNamen, entwicklung: entwicklungAnlegen());
@@ -529,7 +634,7 @@ void main() {
       expect(s.gewollt.map((x) => x.name), ['beispiel', 'beispiel-vorlage']);
       installieren(s);
       await pruefenMit(null, entwicklung, gewaehlt: {'beispiel-vorlage'});
-      expect(einstellungen.pluginSkills, {'beispiel', 'beispiel-vorlage'});
+      expect(einstellungen.pluginSkillOrdner, inBeiden({'beispiel', 'beispiel-vorlage'}));
       expect(File(p.join(skillOrdner(codex, 'beispiel').path, 'SKILL.md')).readAsStringSync(),
           'beispiel aus der Entwicklung');
 
@@ -621,6 +726,36 @@ void main() {
       j['pluginSkills'] = ['beispiel', '..', r'a\b', 'C:', 3];
       expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkills, {'beispiel'});
       expect(Einstellungen(schluessel: 'k').zuJson().containsKey('pluginSkills'), isFalse);
+    });
+
+    test('die gemerkten Ordner je Werkzeug überstehen das Speichern; was nicht Werkzeug/Skill ist, fällt weg', () {
+      final e = Einstellungen(schluessel: 'k', pluginSkillOrdner: {'lmstudio/beispiel', 'codex/beispiel-vorlage'});
+      final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
+      expect(j['pluginSkillOrdner'], ['codex/beispiel-vorlage', 'lmstudio/beispiel']);
+      expect(
+        Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkillOrdner,
+        {'lmstudio/beispiel', 'codex/beispiel-vorlage'},
+      );
+      j['pluginSkillOrdner'] = ['codex/beispiel', 'codex/..', 'codex', 'a/b/c', '../beispiel', 'Codex/beispiel', 3];
+      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkillOrdner, {'codex/beispiel'});
+      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('pluginSkillOrdner'), isFalse);
+    });
+
+    test('--claude-entfernen entfernt einen gemerkten Ordner nur in seinem Werkzeug', () async {
+      for (final w in [codex, lm]) {
+        File(p.join(skillOrdner(w, 'beispiel').path, 'SKILL.md'))
+          ..parent.createSync(recursive: true)
+          ..writeAsStringSync('Skill');
+      }
+      await einrichtungEntfernen(
+        umgebung: umgebung,
+        skills: const [],
+        pluginOrdner: {'codex/beispiel', 'codex/..', 'lmstudio/..'},
+        werkzeuge: [codex, lm],
+      );
+      expect(skillOrdner(codex, 'beispiel').existsSync(), isFalse);
+      expect(skillOrdner(lm, 'beispiel').existsSync(), isTrue);
+      expect(lm.skillOrdner.existsSync(), isTrue);
     });
 
     test('die fremden Ordner überstehen das Speichern', () {

@@ -26,8 +26,9 @@ const metaAufruf = 'moocp/aufruf';
 
 /// Höchstlänge eines Werkzeugnamens: Mit `mcp__<Profil>__` davor bleibt der
 /// Name, den ein KI-Werkzeug sieht, bei einem Profilnamen bis 17 Zeichen (etwa
-/// `moodle`) in den 64 Zeichen, die Claude Code zulässt. Bei einem längeren
-/// Profilnamen prüft [werkzeugnameZuLang] je Werkzeug.
+/// `moodle`; so lang ist höchstens der eines neuen Profils,
+/// Profil.neuerMcpNameHoechstens) in den 64 Zeichen, die Claude Code zulässt.
+/// Bei einem längeren Profilnamen prüft [werkzeugnameZuLang] je Werkzeug.
 const werkzeugnameHoechstens = 40;
 
 /// Die Zeichen eines Werkzeugnamens: Buchstaben, Ziffern, „_“ und „-“. MCP
@@ -124,9 +125,10 @@ const mcpWerkzeugnameHoechstens = 64;
 
 /// Ob das Werkzeug [werkzeug] im Server des Profils mit dem technischen Namen
 /// [mcpName] zu lang wäre ([mcpWerkzeugnameHoechstens]). Der Kurzname eines
-/// Plugins ist so begrenzt, dass es beim Profil `moodle` immer passt; ein
-/// längerer Profilname kann es sprengen. Den Profilnamen begrenzt die App
-/// nicht; ein zu langes Werkzeug fehlt in diesem Profil (laufende_plugins.dart,
+/// Plugins ist so begrenzt, dass es bei einem Profilnamen bis 17 Zeichen immer
+/// passt; so lang ist höchstens der technische Name eines neuen Profils
+/// (Profil.neuerMcpName). Ein Profil, das schon einen längeren hat, behält
+/// ihn; dort fehlt ein zu langes Werkzeug (laufende_plugins.dart,
 /// werkzeugliste.dart).
 bool werkzeugnameZuLang(String mcpName, String werkzeug) =>
     'mcp__${mcpName}__$werkzeug'.length > mcpWerkzeugnameHoechstens;

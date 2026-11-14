@@ -13,7 +13,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'einrichtung.dart' show skillNameGueltig;
+import 'einrichtung.dart' show skillNameGueltig, werkzeugSkillGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
 import 'plugin/entscheidung.dart';
@@ -35,11 +35,15 @@ class Einstellungen {
     Map<String, PluginEntscheidung>? plugins,
     Map<String, PluginUpdateStand>? pluginUpdates,
     Set<String> pluginSkills = const {},
+    Set<String> pluginSkillOrdner = const {},
     Set<String> fremdeSkillOrdner = const {},
     Set<String> skillFehlerGesehen = const {},
+    Set<String> schnittstelleGesehen = const {},
   })  : plugins = Map.of(plugins ?? const {}),
         pluginUpdates = Map.of(pluginUpdates ?? const {}),
         pluginSkills = {...pluginSkills},
+        pluginSkillOrdner = {...pluginSkillOrdner},
+        schnittstelleGesehen = {...schnittstelleGesehen},
         fremdeSkillOrdner = {...fremdeSkillOrdner},
         skillFehlerGesehen = {...skillFehlerGesehen},
         profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
@@ -165,20 +169,34 @@ class Einstellungen {
   /// eigenes Ja je Plugin gibt es nicht.
   Map<String, PluginUpdateStand> pluginUpdates;
 
-  /// Die Skills von Plugins, die die App in den KI-Werkzeugen installiert hat
-  /// (einrichtung.dart, pluginSkillsGemerkt). Nur diese entfernt sie, wenn das
-  /// Plugin abgelehnt oder fort ist, und bei der Deinstallation
-  /// (`--claude-entfernen`) -- die Plugins selbst sind dann vielleicht schon
-  /// nicht mehr lesbar. Beim Lesen fällt jeder Name weg, der kein Skill-Name
-  /// sein kann: Aus ihm wird ein Pfad zum Löschen.
+  /// Die Ordner von Plugin-Skills, die die App in den KI-Werkzeugen
+  /// installiert hat, je `<Werkzeug>/<Name>` (einrichtung.dart,
+  /// pluginSkillsGemerkt, werkzeugSkill). Nur diese entfernt sie, wenn das
+  /// Plugin abgelehnt, ausgeschaltet oder fort ist, und bei der
+  /// Deinstallation (`--claude-entfernen`) -- die Plugins selbst sind dann
+  /// vielleicht schon nicht mehr lesbar --, und nur im Werkzeug, in dem sie
+  /// sie installiert hat. Beim Lesen fällt jeder Eintrag weg, der nicht diese
+  /// Form hat: Aus ihm wird ein Pfad zum Löschen.
+  Set<String> pluginSkillOrdner;
+
+  /// Der frühere Stand von [pluginSkillOrdner]: je Name, für alle Werkzeuge.
+  /// Die App liest ihn weiter und überführt ihn bei der nächsten Prüfung der
+  /// Einrichtung (pluginSkillsGemerkt); danach ist er leer. Beim Lesen fällt
+  /// jeder Name weg, der kein Skill-Name sein kann.
   Set<String> pluginSkills;
 
   /// Ordner in den Skill-Ordnern der KI-Werkzeuge, die den Namen eines
   /// Plugin-Skills tragen, aber nicht von moocp stammen, je `<Werkzeug>/<Name>`
   /// (einrichtung.dart, einrichtungPruefen, fremderOrdner). Die Einrichtung
-  /// überschreibt und entfernt sie nicht, auch wenn moocp denselben Skill in
-  /// einem anderen Werkzeug installiert und darum in [pluginSkills] gemerkt hat.
+  /// überschreibt und entfernt sie nicht.
   Set<String> fremdeSkillOrdner;
+
+  /// Die Dialoge „Plugin bleibt aus“ (unpassende Schnittstelle), die die
+  /// Lehrkraft schon gesehen hat: je Plugin-Ordner ein Eintrag aus Ordner,
+  /// Version und Prüfsumme des Plugins und Version der App
+  /// (plugin/plugin_update.dart, schnittstelleStand). Ein gesehener erscheint
+  /// nicht noch einmal, außer er bietet ein Update an.
+  Set<String> schnittstelleGesehen;
 
   /// Die unbrauchbaren Skill-Pakete von Plugins, die die Lehrkraft im Dialog
   /// „KI-Werkzeuge einrichten“ schon gesehen hat, je Plugin ein Stand
@@ -270,8 +288,11 @@ class Einstellungen {
       plugins: pluginEntscheidungenAus(j['plugins']),
       pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
       pluginSkills: (j['pluginSkills'] as List?)?.whereType<String>().where(skillNameGueltig).toSet() ?? const {},
+      pluginSkillOrdner:
+          (j['pluginSkillOrdner'] as List?)?.whereType<String>().where(werkzeugSkillGueltig).toSet() ?? const {},
       fremdeSkillOrdner: (j['fremdeSkillOrdner'] as List?)?.whereType<String>().toSet() ?? const {},
       skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
+      schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
   }
 
@@ -291,8 +312,10 @@ class Einstellungen {
         if (pluginUpdates.isNotEmpty)
           'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
         if (pluginSkills.isNotEmpty) 'pluginSkills': (pluginSkills.toList()..sort()),
+        if (pluginSkillOrdner.isNotEmpty) 'pluginSkillOrdner': (pluginSkillOrdner.toList()..sort()),
         if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
         if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),
+        if (schnittstelleGesehen.isNotEmpty) 'schnittstelleGesehen': (schnittstelleGesehen.toList()..sort()),
       };
 
   Future<void> speichern() async {

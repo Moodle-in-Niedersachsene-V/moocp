@@ -1,6 +1,6 @@
 // Die laufenden Plugins (E35): starten, was die Lehrkraft angenommen hat,
 // ihre Werkzeuge in den MCP-Servern der Profile anbieten, in denen sie
-// eingeschaltet sind, nach einem Absturz einmal neu starten und beim Beenden
+// eingeschaltet sind, nach einem Absturz neu starten und beim Beenden
 // der App wieder beenden.
 //
 // Ein Plugin läuft einmal je App, auch mit mehreren Instanzprofilen; jeder
@@ -59,14 +59,17 @@
 // alles, was die KI daraus bekommt: geprüft vom Plugin, nicht von moocp. Die
 // letzte Sperre prüft dabei weiter den ganzen Text des Plugins.
 //
-// Ausfall: Je Lauf der App bekommt jedes Plugin genau einen zweiten Start,
-// gleich wofür -- weil es beim Start nicht binnen der Startfrist antwortete
-// oder sich dabei beendete, oder weil sein Programm später unerwartet endete.
-// Der zweite Start ist ein ganz neuer: neuer Port, neuer Schlüssel, und die
-// Prüfsumme des Ordners wird wieder gegen die Zustimmung geprüft. Danach gilt
-// das Plugin bis zum nächsten Start der App als ausgefallen. Nicht öfter, weil
-// ein Plugin, das immer wieder abstürzt, sonst die App in einer Schleife
-// beschäftigte und die KI Aufruf um Aufruf ins Leere schickte. Ein Aufruf,
+// Ausfall: Antwortet ein Plugin beim Start nicht binnen der Startfrist oder
+// endet es dabei, bekommt es einen zweiten Versuch. Endet sein Programm
+// später unerwartet, startet die App es neu, nach jedem Absturz -- außer es
+// stürzt binnen der [LaufendePlugins.neustartFrist] (einer Minute) nach einem
+// solchen Neustart wieder ab: Dann gilt es bis zum nächsten Start der App als
+// ausgefallen. Ein Plugin, das gleich nach jedem Start wieder abstürzt,
+// beschäftigte die App sonst in einer Schleife, und die KI schickte Aufruf um
+// Aufruf ins Leere; eines, das nur ab und zu abstürzt, bleibt nutzbar. Jeder
+// Neustart ist ein ganz neuer: neuer Port, neuer Schlüssel, und die
+// Prüfsumme des Ordners wird wieder gegen die Zustimmung geprüft. Scheitert
+// ein Neustart, ist das Plugin ebenfalls ausgefallen. Ein Aufruf,
 // der beim Absturz lief, wird nicht wiederholt: Ein Schreibvorgang könnte
 // schon halb gelaufen sein. Die Werkzeuge eines ausgefallenen Plugins bleiben
 // in der Werkzeugliste und antworten mit einem Fehler, der das Plugin nennt:
@@ -116,9 +119,16 @@ Future<Process> _prozessStarten(
   required String arbeitsordner,
 }) => prozessStarten(programm, argumente, dazu: umgebung, arbeitsordner: arbeitsordner);
 
-/// Wie oft das Programm eines Plugins je Lauf der App starten darf: der
-/// Start und ein zweiter Versuch.
-const _startsHoechstens = 2;
+/// Wie oft die App beim Start versucht, ein Plugin zu starten: der Start und
+/// ein zweiter Versuch. Neustarts nach einem Absturz zählen nicht dazu
+/// ([LaufendePlugins.neustartFrist]).
+const _startversuche = 2;
+
+/// Eine Frist als Text für Protokoll und Dialog: „einer Minute“, „2 Minuten“,
+/// „30 Sekunden“.
+String _fristText(Duration d) => d.inSeconds % 60 == 0 && d.inMinutes > 0
+    ? (d.inMinutes == 1 ? 'einer Minute' : '${d.inMinutes} Minuten')
+    : (d.inSeconds == 1 ? 'einer Sekunde' : '${d.inSeconds} Sekunden');
 
 /// Name und Version eines Plugins für das Protokoll.
 String _name(PluginEintrag e) => '„${e.anzeigename}“ ${e.beschreibung!.version}';
@@ -163,6 +173,7 @@ class LaufendePlugins implements WerkzeugQuelle {
     this._protokoll, {
     this.starter = _prozessStarten,
     this.startfrist = const Duration(seconds: 20),
+    this.neustartFrist = const Duration(minutes: 1),
     this.entwicklungsIntervall = const Duration(seconds: 3),
     this.entwicklungsFrist = const Duration(seconds: 2),
     this.dialoge,
@@ -204,6 +215,11 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// seine Werkzeuge nennt; danach gilt der Versuch als gescheitert.
   final Duration startfrist;
 
+  /// Stürzt ein Plugin binnen dieser Frist nach einem Neustart wieder ab,
+  /// startet die App es nicht noch einmal: Es ist ausgefallen. Danach startet
+  /// jeder Absturz es neu. Einstellbar nur für Tests.
+  final Duration neustartFrist;
+
   /// Für ein Entwicklungs-Plugin: wie oft die App nachsieht, ob die
   /// Verbindung steht, und wie lange ein Versuch dauern darf
   /// ([AngehaengtesPlugin]).
@@ -223,9 +239,9 @@ class LaufendePlugins implements WerkzeugQuelle {
   final _laufend = <String, _Laufend>{};
   final _fehler = <String, String>{};
 
-  /// Wie oft das Programm eines Plugins in diesem Lauf der App gestartet
-  /// wurde (je Ordner); höchstens [_startsHoechstens].
-  final _starts = <String, int>{};
+  /// Seit wann ein Plugin nach seinem letzten Neustart läuft (je Ordner);
+  /// fehlt, solange es seit dem Start der App nicht neu gestartet wurde.
+  final _seitNeustart = <String, Stopwatch>{};
 
   /// Plugins, die nach einem Absturz gerade neu starten: die Werkzeuge von
   /// vorher, damit sie in der Liste bleiben, und der Neustart, auf den ein
@@ -269,6 +285,9 @@ class LaufendePlugins implements WerkzeugQuelle {
 
   /// Ob das Plugin läuft.
   bool laeuft(PluginEintrag e) => _laufend.containsKey(e.ordner);
+
+  /// Ob das Plugin nach einem Absturz gerade neu startet.
+  bool startetNeu(PluginEintrag e) => _neustart.containsKey(e.ordner);
 
   /// Ob das Plugin ausgefallen ist: Es läuft bis zum nächsten Start der App
   /// nicht mehr; der Grund steht in [startfehler].
@@ -344,7 +363,9 @@ class LaufendePlugins implements WerkzeugQuelle {
         _protokoll.eintrag(Art.info, 'Plugin „${e.anzeigename}“ nicht gestartet: $grund');
         continue;
       }
+      var versuche = 0;
       while (true) {
+        versuche++;
         try {
           final laufend = await _starten(e);
           _einsetzen(laufend);
@@ -355,7 +376,7 @@ class LaufendePlugins implements WerkzeugQuelle {
           await plugins.werkzeugeMerken(e, laufend.verbindung.werkzeuge);
         } on PluginStartFehler catch (f) {
           if (_beendet) return;
-          if (_nochEinStart(e)) {
+          if (versuche < _startversuche) {
             _protokoll.eintrag(
               Art.fehler,
               'Plugin „${e.anzeigename}“ nicht gestartet: ${f.grund} moocp versucht es noch einmal.',
@@ -374,8 +395,6 @@ class LaufendePlugins implements WerkzeugQuelle {
 
   bool _bekannt(String ordner) =>
       _laufend.containsKey(ordner) || _neustart.containsKey(ordner) || _ausgefallen.containsKey(ordner);
-
-  bool _nochEinStart(PluginEintrag e) => (_starts[e.ordner] ?? 0) < _startsHoechstens;
 
   Future<_Laufend> _starten(PluginEintrag e) async {
     final b = e.beschreibung!;
@@ -408,7 +427,6 @@ class LaufendePlugins implements WerkzeugQuelle {
     }
     final port = await _freierPort();
     final schluessel = _schluessel();
-    _starts[e.ordner] = (_starts[e.ordner] ?? 0) + 1;
     // Mit dem Schlüssel dieses Starts meldet sich das Plugin an der Adresse
     // der App an; der Schlüssel eines früheren Starts gilt dort nicht mehr.
     adresse.pluginAnmelden(b.kurzname, e.anzeigename, schluessel, zusatzadressen: b.zusatzadressen);
@@ -514,14 +532,19 @@ class LaufendePlugins implements WerkzeugQuelle {
     unawaited(l.verbindung.schliessen());
     _protokoll.eintrag(Art.fehler, 'Plugin ${l.name} unerwartet beendet (Exit-Code $code)');
     final werkzeuge = l.verbindung.werkzeuge;
-    if (!_nochEinStart(e)) {
-      _ausfallen(e, werkzeuge, 'Es hat sich unerwartet beendet und hatte seinen zweiten Start schon.');
+    final seit = _seitNeustart[e.ordner];
+    if (seit != null && seit.elapsed < neustartFrist) {
+      _ausfallen(
+        e,
+        werkzeuge,
+        'Es hat sich binnen ${_fristText(neustartFrist)} nach seinem Neustart wieder unerwartet beendet.',
+      );
       return;
     }
     _neustart[e.ordner] = (eintrag: e, werkzeuge: werkzeuge, fertig: _neustarten(e, werkzeuge));
   }
 
-  /// Der eine Neustart nach einem Absturz. Liefert das Plugin danach andere
+  /// Der Neustart nach einem Absturz. Liefert das Plugin danach andere
   /// Werkzeuge, gelten sie ab der nächsten Sitzung eines KI-Werkzeugs (der
   /// MCP-Server fragt die Liste je Sitzung); die Namensregeln gelten neu.
   Future<void> _neustarten(PluginEintrag e, List<WerkzeugBeschreibung> vorher) async {
@@ -541,6 +564,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       return;
     }
     _neustart.remove(e.ordner);
+    _seitNeustart[e.ordner] = Stopwatch()..start();
     _einsetzen(l);
     _protokoll.eintrag(Art.info, 'Plugin ${l.name} neu gestartet (${l.verbindung.werkzeuge.length} Werkzeuge)');
     try {
@@ -562,8 +586,9 @@ class LaufendePlugins implements WerkzeugQuelle {
   /// Die Werkzeuge der Plugins, die in [profil] eingeschaltet sind, ohne
   /// die, deren Name mit `mcp__<Profil>__` davor länger als 64 Zeichen wäre
   /// (verbindung.dart, werkzeugnameZuLang): Claude Code nähme sie nicht an.
-  /// Der Kurzname ist so begrenzt, dass beim Profil `moodle` alles passt; den
-  /// Namen eines Profils begrenzt die App nicht. Was fehlt, nennt das
+  /// Der Kurzname ist so begrenzt, dass bei einem Profilnamen bis 17 Zeichen
+  /// alles passt, und länger wird der eines neuen Profils nicht; nur ein
+  /// Profil mit älterem, längerem Namen kann betroffen sein. Was fehlt, nennt das
   /// Protokoll einmal je Profil, Plugin und Werkzeugliste, nicht bei jeder
   /// Sitzung, und der Dialog „Plugins“ beim Plugin ([zuLangeWerkzeuge]).
   @override

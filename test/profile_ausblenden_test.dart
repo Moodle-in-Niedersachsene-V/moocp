@@ -642,6 +642,8 @@ void main() {
             wahlSkills: {...appWahlSkills, 'beispiel-vorlage': 'Eine Vorlage zum Ausprobieren.'},
             gewaehlt: einstellungen.wahlSkills ?? const {},
             verwaist: const {'alt-skill'},
+            // In Codex hat moocp ihn installiert; nur dort wird er entfernt.
+            pluginSkills: const {'codex/alt-skill'},
             skillFehler: const [fehler],
             gefunden: [codex],
             python: () async => true,

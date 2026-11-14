@@ -558,7 +558,9 @@ class McpDienst implements AufrufKontext {
           'Angemeldet: ${moodle.angemeldet ? "ja" : "nein -- bitte in der App anmelden"}\n'
           'Profil: ${profil.name} (${profil.mcpName})\n'
           'Moodle: ${moodle.basis?.host ?? profil.adresse}\n'
-          'Verbunden über: ${_client(server)}\n'
+          // Ruft ein Plugin `status` auf, hängt kein KI-Werkzeug an diesem
+          // Server (eingebautAufrufen); dann ist das Plugin die Verbindung.
+          'Verbunden über: ${Freigaben.aufruferImAufruf ?? _client(server)}\n'
           // Erkannt beim Anmelden (moodle_zugang.dart); vorher unbekannt.
           'Druckaufbereitung „Aufgabenblatt-Druck": ${!moodle.angemeldet
               ? "unbekannt, erst nach der Anmeldung"

@@ -717,6 +717,25 @@ Future<EntwicklungsPlugin?> entwicklungSchritt(
   return null;
 }
 
+/// Was der Dialog „Plugins“ über den Lauf eines zugestimmten Plugins sagt,
+/// das gerade nicht läuft, und ob es ein Fehler ist; null, wenn es läuft.
+/// Während eines Neustarts nach einem Absturz läuft es nicht und hat keinen
+/// Startfehler -- das ist weder „ab dem nächsten Start“ noch ein Ausfall.
+({String text, bool fehler})? pluginLaufHinweis(LaufendePlugins laufende, PluginEintrag e) {
+  if (laufende.laeuft(e)) return null;
+  if (laufende.startetNeu(e)) {
+    return (text: 'Das Plugin hat sich unerwartet beendet und wird gerade neu gestartet.', fehler: false);
+  }
+  return switch (laufende.startfehler(e)) {
+    final String grund when laufende.ausgefallen(e) => (
+      text: 'Ausgefallen: $grund Es läuft erst nach einem Neustart von moocp wieder.',
+      fehler: true,
+    ),
+    final String grund => (text: 'Nicht gestartet: $grund', fehler: true),
+    null => (text: 'Das Plugin läuft ab dem nächsten Start von moocp.', fehler: false),
+  };
+}
+
 /// Der Dialog „Plugins“ (Einstellungen): je gefundenem Plugin der Stand, mit
 /// Profilen, in denen es eingeschaltet ist, wenn es mehrere gibt (E32). Die
 /// Zustimmung ändern führt in denselben Dialog wie beim Start; ein Profil ein-
@@ -796,18 +815,12 @@ class _PluginsDialogState extends State<PluginsDialog> {
             ],
             Text('Ordner: ${e.ordner}', style: klein),
             const SizedBox(height: 4),
-            if (s.zustand == PluginZustand.zugestimmt && widget.laufende != null && !widget.laufende!.laeuft(e))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: switch (widget.laufende!.startfehler(e)) {
-                  final String grund when widget.laufende!.ausgefallen(e) => Text(
-                    'Ausgefallen: $grund Es läuft erst nach einem Neustart von moocp wieder.',
-                    style: TextStyle(color: theme.colorScheme.error),
-                  ),
-                  final String grund => Text('Nicht gestartet: $grund', style: TextStyle(color: theme.colorScheme.error)),
-                  null => Text('Das Plugin läuft ab dem nächsten Start von moocp.', style: klein),
-                },
-              ),
+            if (s.zustand == PluginZustand.zugestimmt && widget.laufende != null)
+              if (pluginLaufHinweis(widget.laufende!, e) case final h?)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(h.text, style: h.fehler ? TextStyle(color: theme.colorScheme.error) : klein),
+                ),
             // Werkzeuge, deren Name mit einem langen Profilnamen davor zu lang
             // wäre, fehlen in diesem Profil (laufende_plugins.dart).
             for (final h in widget.laufende?.zuLangeWerkzeuge(e, widget.profile) ?? const <String>[])

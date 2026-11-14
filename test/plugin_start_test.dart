@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:moocp/anmeldung.dart' show Instanz, mcpServerStarten;
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/einstellungen_dialog.dart' show pluginLaufHinweis;
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/testbetrieb.dart' show pluginDialogantwortenDatei;
@@ -219,6 +220,7 @@ void main() {
       expect(File(pfad).readAsStringSync(), 'Inhalt der Datei');
       expect(status, contains('Angemeldet: nein -- bitte in der App anmelden'));
       expect(status, contains('Profil: moodle (moodle)'));
+      expect(status, contains('Verbunden über: Plugin „Beispiel“'));
       expect(zeilen, contains('status({}) -- Aufrufer: Plugin „Beispiel“'));
       expect(l.appAdresse?.host, '127.0.0.1');
     });
@@ -925,7 +927,7 @@ void main() {
       expect(zeilen, contains(startsWith('Plugin „Beispiel“ 1.0.0 ausgefallen: Das Plugin hat nicht binnen 2 Sekunden')));
     });
 
-    test('antwortet es beim ersten Versuch nicht, startet der zweite; einen Absturz danach fängt kein Neustart mehr auf', () async {
+    test('antwortet es beim ersten Versuch nicht, startet der zweite; ein Absturz danach startet es neu', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final plugins = await beispielAngenommen([profil]);
       final warten = File(p.join(wurzel.path, 'warten.dart'))
@@ -953,9 +955,10 @@ void main() {
       final r = await client.call('tools/call', {'name': 'beispiel_absturz', 'arguments': <String, Object?>{}});
 
       expect(r['isError'], true);
-      expect(prozesse, hasLength(2), reason: 'Startversuch und Neustart teilen sich den einen');
-      expect(l.ausgefallen(e), isTrue);
-      expect(l.ausgefalleneNamen, ['Beispiel']);
+      expect(await client.tool('beispiel_echo', {'text': 'b'}), startsWith('Echo: b'));
+      expect(prozesse, hasLength(3), reason: 'der zweite Startversuch zählt nicht als Neustart nach einem Absturz');
+      expect(l.laeuft(e), isTrue);
+      expect(l.ausgefalleneNamen, isEmpty);
     });
   });
 
@@ -963,12 +966,13 @@ void main() {
     /// Startet das Beispiel-Plugin mit einem Starter, der jeden Prozess
     /// sammelt, und verbindet einen Client über den MCP-Server des Profils.
     Future<({LaufendePlugins laufende, McpTestClient client, Plugins plugins, List<Process> prozesse, List<String> starts})>
-    gestartet(Profil profil) async {
+    gestartet(Profil profil, {Duration neustartFrist = const Duration(minutes: 1)}) async {
       final prozesse = <Process>[];
       final starts = <String>[];
       final l = LaufendePlugins(
         protokoll,
         startfrist: const Duration(seconds: 10),
+        neustartFrist: neustartFrist,
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
           starts.add('${argumente.last} ${umgebung[schluesselVariable]}');
           final prozess = await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
@@ -1022,6 +1026,41 @@ void main() {
       }
     });
 
+    test('während des Neustarts sagt der Dialog „Plugins“, dass es neu gestartet wird', () async {
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      final weiter = Completer<void>();
+      var n = 0;
+      final l = LaufendePlugins(
+        protokoll,
+        startfrist: const Duration(seconds: 10),
+        starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
+          // Der Neustart wartet, bis der Test nachgesehen hat.
+          if (n++ == 1) await weiter.future;
+          return Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner);
+        },
+      );
+      final plugins = await beispielAngenommen([profil]);
+      await starten(plugins, mit: l);
+      final e = plugins.eintraege.single;
+      final client = await verbinden(profil, l);
+      expect(pluginLaufHinweis(l, e), isNull, reason: 'es läuft');
+
+      ausfallMeldung(await absturz(client));
+      for (var i = 0; i < 50 && !l.startetNeu(e); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+
+      expect(l.startetNeu(e), isTrue);
+      final hinweis = pluginLaufHinweis(l, e)!;
+      expect(hinweis.text, contains('wird gerade neu gestartet'));
+      expect(hinweis.text, isNot(contains('nächsten Start')));
+      expect(hinweis.fehler, isFalse);
+      weiter.complete();
+      expect(await client.tool('beispiel_echo', {'text': 'x'}), startsWith('Echo: x'));
+      expect(l.startetNeu(e), isFalse);
+      expect(pluginLaufHinweis(l, e), isNull);
+    });
+
     test('nach dem Neustart gilt an der Adresse der App nur der neue Schlüssel', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
@@ -1041,7 +1080,24 @@ void main() {
       expect(zeilen, contains('Plugin „Beispiel“: mit neuem Schlüssel'));
     });
 
-    test('ein zweiter Absturz: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
+    test('stürzt es nach jedem Neustart erst nach der Frist wieder ab, startet es jedes Mal neu', () async {
+      final profil = beispielProfil('standard', 'moodle', await freierPort());
+      final g = await gestartet(profil, neustartFrist: Duration.zero);
+
+      for (var i = 0; i < 3; i++) {
+        ausfallMeldung(await absturz(g.client));
+      }
+
+      expect(await g.client.tool('beispiel_echo', {'text': 'wieder'}), startsWith('Echo: wieder'));
+      final e = g.plugins.eintraege.single;
+      expect(g.laufende.laeuft(e), isTrue);
+      expect(g.laufende.ausgefalleneNamen, isEmpty);
+      expect(g.starts, hasLength(4), reason: 'der Start und drei Neustarts');
+      final zeilen = [for (final z in protokoll.eintraege) z.text];
+      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'), hasLength(3));
+    });
+
+    test('stürzt es binnen der Frist nach einem Neustart wieder ab: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final g = await gestartet(profil);
 
@@ -1051,7 +1107,8 @@ void main() {
       final e = g.plugins.eintraege.single;
       expect(g.laufende.ausgefallen(e), isTrue);
       expect(g.laufende.ausgefalleneNamen, ['Beispiel']);
-      expect(g.starts, hasLength(2), reason: 'nur ein Neustart je Lauf');
+      expect(g.laufende.startfehler(e), contains('binnen einer Minute'));
+      expect(g.starts, hasLength(2), reason: 'kein zweiter Neustart binnen der Frist');
       ausfallMeldung(await g.client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
       final neu = McpTestClient(profil.port);
       clients.add(neu);

@@ -500,6 +500,7 @@ void main() {
                 protokoll: protokoll,
                 updatefaehig: true,
                 moocpUpdateMoeglich: true,
+                appVersion: '0.11.0',
                 dialoge: _PluginDialoge(angeboten),
               ),
           github);

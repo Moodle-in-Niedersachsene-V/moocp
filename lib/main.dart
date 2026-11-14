@@ -182,6 +182,7 @@ Future<void> main(List<String> argumente) async {
       weitere: instanzen.sublist(1),
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
+      pluginUpdatefaehig: pluginUpdateMoeglich(argumente),
       pluginsLaden: () => Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
       laufendePlugins: laufendePlugins,
       entwicklungVorbereiten: entwicklungsOrdner == null
@@ -249,12 +250,14 @@ Future<int> _claudeEntfernen() async {
     final gespeichert = await _gespeicherteEinstellungen();
     return (await einrichtungEntfernen(
       umgebung: Platform.environment,
-      // Die Skills der App und die der Plugins, die die App installiert hat;
-      // die Plugins selbst liest sie dafür nicht.
+      // Die Skills der App und die der Plugins, die die App installiert hat
+      // (je Werkzeug, nach dem früheren Stand je Name); die Plugins selbst
+      // liest sie dafür nicht.
       skills: [
         for (final s in await _skillPakete()) s.name,
         ...?gespeichert?.pluginSkills,
       ],
+      pluginOrdner: gespeichert?.pluginSkillOrdner ?? const {},
       mcpNamen: _gespeicherteMcpNamen(gespeichert),
       // Ordner gleichen Namens, die nicht von moocp stammen, bleiben.
       auslassen: gespeichert?.fremdeSkillOrdner ?? const {},
@@ -354,6 +357,7 @@ class MoocpApp extends StatelessWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
     this.entwicklungVorbereiten,
@@ -366,6 +370,11 @@ class MoocpApp extends StatelessWidget {
   final McpDienst dienst;
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
+
+  /// Ob nach Updates von Plugins gesucht werden darf
+  /// (plugin/plugin_update.dart, pluginUpdateMoeglich): unabhängig davon, ob
+  /// sich moocp selbst ersetzen kann.
+  final bool pluginUpdatefaehig;
 
   /// Mit `--plugin-entwicklung` gesetzt: liest Beschreibungsdatei und
   /// Schlüssel des Entwicklungs-Plugins (plugin/entwicklung.dart) und wirft
@@ -421,6 +430,7 @@ class MoocpApp extends StatelessWidget {
         instanzErstellen: instanzErstellen,
         einrichtungsstand: einrichtungsstand,
         updatefaehig: updatefaehig,
+        pluginUpdatefaehig: pluginUpdatefaehig,
         pluginsLaden: pluginsLaden,
         laufendePlugins: laufendePlugins,
         entwicklungVorbereiten: entwicklungVorbereiten,
@@ -442,6 +452,7 @@ class Hauptseite extends StatefulWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
     this.entwicklungVorbereiten,
@@ -454,6 +465,7 @@ class Hauptseite extends StatefulWidget {
   final McpDienst dienst;
   final Freigaben freigaben;
   final Arbeitsordner arbeitsordner;
+  final bool pluginUpdatefaehig;
   final LaufendePlugins? laufendePlugins;
   final EntwicklungsPlugin Function()? entwicklungVorbereiten;
   final List<Instanz> weitere;
@@ -665,8 +677,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
           plugins: p,
           einstellungen: widget.einstellungen,
           protokoll: widget.protokoll,
-          updatefaehig: widget.updatefaehig,
+          updatefaehig: widget.pluginUpdatefaehig,
           moocpUpdateMoeglich: widget.updatefaehig && _version.isNotEmpty,
+          appVersion: _version,
           dialoge: PluginPruefDialogeUi(
             context,
             einstellungen: widget.einstellungen,
@@ -1064,8 +1077,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
       gewaehlt: e.wahlSkills ?? gewaehltVorgabe(Platform.environment, wahl.keys),
-      verwaist: verwaisteSkills(e.pluginSkills, plugins, appNamen),
-      pluginSkills: e.pluginSkills,
+      verwaist: verwaisteSkills({...e.pluginSkills, ...skillNamen(e.pluginSkillOrdner)}, plugins, appNamen),
+      pluginSkills: e.pluginSkillOrdner,
+      pluginSkillsAlt: e.pluginSkills,
       fremd: e.fremdeSkillOrdner,
       gesehen: e.skillFehlerGesehen,
       skillFehler: plugins.fehler,
@@ -1085,20 +1099,27 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
         e.fremdeSkillOrdner = alt.union(stand.fremdeOrdner);
       }
     }
+    // Je Werkzeug gemerkt; ein früherer Stand je Name geht dabei darin auf.
     final gemerkt = pluginSkillsGemerkt(
-      gemerkt: e.pluginSkills,
+      gemerkt: e.pluginSkillOrdner,
+      alt: e.pluginSkills,
       stand: stand,
       werkzeuge: alleWerkzeuge(Platform.environment),
     );
-    if (gemerkt.length != e.pluginSkills.length || !gemerkt.containsAll(e.pluginSkills)) {
-      final alt = e.pluginSkills;
-      e.pluginSkills = gemerkt;
+    if (e.pluginSkills.isNotEmpty ||
+        gemerkt.length != e.pluginSkillOrdner.length ||
+        !gemerkt.containsAll(e.pluginSkillOrdner)) {
+      final alt = e.pluginSkillOrdner;
+      final altJeName = e.pluginSkills;
+      e.pluginSkillOrdner = gemerkt;
+      e.pluginSkills = {};
       try {
         await e.speichern();
       } catch (x) {
         // Bleibt für diesen Lauf gemerkt; der nächste Start versucht es wieder.
         widget.protokoll.eintrag(Art.fehler, 'Skills der Plugins nicht gemerkt (${x.runtimeType})');
-        e.pluginSkills = alt.union(gemerkt);
+        e.pluginSkillOrdner = alt.union(gemerkt);
+        e.pluginSkills = altJeName;
       }
     }
     return stand;
@@ -1274,11 +1295,9 @@ class _HauptseiteState extends State<Hauptseite> with WindowListener {
     final index = profile.indexWhere((p) => p.kennung == geaendert.kennung);
     var hinzugefuegt = false;
     if (index < 0) {
-      var name = geaendert.mcpName;
-      var zaehler = 2;
-      while (profile.any((p) => p.mcpName == name)) {
-        name = '${geaendert.mcpName}-${zaehler++}';
-      }
+      // Höchstens 17 Zeichen, damit jedes Werkzeug eines Plugins in diesem
+      // Profil in die 64 Zeichen passt (profil.dart).
+      final name = Profil.neuerMcpName(geaendert.mcpName, {for (final p in profile) p.mcpName});
       var naechsterPort = standardPort;
       while (_instanzen.any((i) => i.dienst.profil.port == naechsterPort) ||
           profile.any((p) => p.port == naechsterPort)) {

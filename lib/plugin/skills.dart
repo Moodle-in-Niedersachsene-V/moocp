@@ -10,9 +10,12 @@
 // Die Regeln:
 //
 // - Angeboten werden nur die Skills von Plugins, denen die Lehrkraft für den
-//   jetzigen Stand zugestimmt hat. Ob ein Plugin in einem Profil eingeschaltet
-//   ist, zählt nicht: Skills liegen je KI-Werkzeug, nicht je Profil, wie die
-//   der App.
+//   jetzigen Stand zugestimmt hat und die in mindestens einem Instanzprofil
+//   eingeschaltet sind. In welchem, zählt nicht: Skills liegen je
+//   KI-Werkzeug, nicht je Profil, wie die der App. Ist ein Plugin in keinem
+//   Profil eingeschaltet, sind seine gemerkten Skills verwaist, und die
+//   Einrichtung bietet sie zum Entfernen an -- Skills ohne ihre Werkzeuge
+//   sollen nicht stehen bleiben.
 // - Ein Entwicklungs-Plugin (entwicklung.dart): Das Ja im Dialog beim Start
 //   mit `--plugin-entwicklung` zählt als Zustimmung. Seine Skills kommen aus
 //   dem Entwicklungsordner, nach denselben Regeln, aber ohne Prüfsumme -- der
@@ -42,13 +45,14 @@
 //   und was die Lehrkraft gesehen hat, merkt sich die App
 //   (Einstellungen.skillFehlerGesehen, main.dart).
 //
-// Welche Plugin-Skills die App installiert hat, merkt sie sich in den
-// Einstellungen (Einstellungen.pluginSkills, einrichtung.dart
-// pluginSkillsGemerkt). Fehlt das Plugin, ist es abgelehnt oder nennt es einen
-// gemerkten Skill nicht mehr, ist der Skill verwaist ([verwaisteSkills]), und
-// die Einrichtung bietet ihn zum Entfernen an. Einen fremden Ordner gleichen
-// Namens im Skill-Ordner eines KI-Werkzeugs überschreibt und entfernt sie nie
-// (einrichtung.dart, einrichtungPruefen).
+// Welche Plugin-Skills die App in welchem KI-Werkzeug installiert hat, merkt
+// sie sich in den Einstellungen (Einstellungen.pluginSkillOrdner,
+// einrichtung.dart pluginSkillsGemerkt). Fehlt das Plugin, ist es abgelehnt,
+// in keinem Profil eingeschaltet oder nennt es einen gemerkten Skill nicht
+// mehr, ist der Skill verwaist ([verwaisteSkills]), und die Einrichtung bietet
+// ihn dort zum Entfernen an, wo sie ihn installiert hat. Einen fremden Ordner
+// gleichen Namens im Skill-Ordner eines KI-Werkzeugs überschreibt und entfernt
+// sie nie (einrichtung.dart, einrichtungPruefen).
 
 import 'dart:convert';
 import 'dart:io';
@@ -100,7 +104,8 @@ class PluginSkills {
 }
 
 /// Liest die Skills aller Plugins in [plugins], denen für den jetzigen Stand
-/// zugestimmt ist, und die des angehängten Entwicklungs-Plugins
+/// zugestimmt ist und die in mindestens einem Profil eingeschaltet sind, und
+/// die des angehängten Entwicklungs-Plugins
 /// [entwicklung]. [appNamen] sind die Namen der Skills der App; so darf kein
 /// Skill eines Plugins heißen. Ohne Plugins (null) und ohne
 /// Entwicklungs-Plugin gibt es nichts.
@@ -152,6 +157,9 @@ Future<PluginSkills> pluginSkillsLesen(
     final e = s.eintrag;
     final b = e.beschreibung;
     if (s.zustand != PluginZustand.zugestimmt || b == null) continue;
+    // In keinem Profil eingeschaltet: Seine Werkzeuge stehen nirgends, also
+    // auch seine Skills nicht; gemerkte sind damit verwaist.
+    if (s.profile.isEmpty) continue;
     // Solange ein Entwicklungs-Plugin mit demselben Kurznamen angehängt ist,
     // gelten dessen Skills.
     if (entwicklung != null && entwicklung.beschreibung.kurzname == b.kurzname) continue;

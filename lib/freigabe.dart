@@ -329,6 +329,11 @@ class Freigaben extends ChangeNotifier {
   /// Adresse der App), doch für den Aufruf, zu dem sie gehört.
   static AufrufZaehler? get zaehlerImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.zaehler;
 
+  /// Das Plugin, das das Werkzeug aufgerufen hat, in dessen Zone das läuft
+  /// ([mitAbbruch]); null bei einem KI-Werkzeug und außerhalb eines Aufrufs.
+  /// `status` nennt es als Verbindung (mcp_dienst.dart).
+  static String? get aufruferImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.aufrufer;
+
   /// Führt [f] so aus, dass der Testbetrieb darin nichts automatisch
   /// freigibt, auch wenn ein Aufrufer weiter außen ihn eingeschaltet hat
   /// ([imTest]). Für die Freigaben eines Plugins: Für sie gibt es im

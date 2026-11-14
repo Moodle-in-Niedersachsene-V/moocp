@@ -168,6 +168,11 @@ class WerkzeugAufrufe {
       // gleichzeitiger zweiter Aufruf bekommt die Auslassung des ersten nicht
       // gemeldet.
       final zaehler = AufrufZaehler();
+      // Auch eine Fehlerantwort trägt beides: Was vor dem Fehler ohne
+      // persönliche Freigabe lief, ist geschehen, gleich wie der Aufruf endet.
+      String anhang() =>
+          '${_ohneFreigabe(zaehler.ausgelassen, aufrufer ?? zaehler.aufrufer)}'
+          '${zaehler.testfreigaben > 0 ? '\n$testfreigabeHinweis' : ''}';
       try {
         final String text;
         try {
@@ -190,20 +195,14 @@ class WerkzeugAufrufe {
           }
         }
         protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');
-        return CallToolResult.fromContent([
-          TextContent(
-            text:
-                '$text${_ohneFreigabe(zaehler.ausgelassen, aufrufer ?? zaehler.aufrufer)}'
-                '${zaehler.testfreigaben > 0 ? '\n$testfreigabeHinweis' : ''}',
-          ),
-        ]);
+        return CallToolResult.fromContent([TextContent(text: '$text${anhang()}')]);
       } on MoodleFehler catch (x) {
         protokoll.eintrag(Art.fehler, '$name: ${x.meldung}');
-        return _fehler(x.meldung);
+        return _fehler('${x.meldung}${anhang()}');
       } catch (x, st) {
         final b = fehlerBeschreibung(x, st);
         protokoll.eintrag(Art.fehler, '$name: $b');
-        return _fehler('Unerwarteter Fehler: $b');
+        return _fehler('Unerwarteter Fehler: $b${anhang()}');
       }
     }
 

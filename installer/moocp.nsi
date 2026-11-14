@@ -328,7 +328,7 @@ Section "Uninstall"
   ; Die Einrichtung in den KI-Werkzeugen entfernt die App selbst: Sie weiß,
   ; wo claude.exe liegt und wie die Einträge von Codex und LM Studio
   ; aussehen (lib/einrichtung.dart, einrichtungEntfernen), und welche Skills
-  ; der Plugins sie installiert hat (Einstellungen.pluginSkills). Exit-Code:
+  ; der Plugins sie in welchem Werkzeug installiert hat (Einstellungen.pluginSkillOrdner). Exit-Code:
   ; Bit 1 ein Eintrag „moodle" steht noch, Bit 2 Dateien der Skills sind noch da.
   DetailPrint "Entferne die Einrichtung in den KI-Werkzeugen …"
   ClearErrors

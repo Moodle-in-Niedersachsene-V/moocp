@@ -510,7 +510,7 @@ void main() {
         ),
       ));
       expect(find.text('Moodle Test (moodle-test) — KI-Werkzeuge einrichten'), findsOneWidget);
-      await tester.tap(find.text('Installieren'));
+      await tester.tap(find.text('Aktualisieren'));
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await tester.pumpAndSettle();
 
@@ -593,6 +593,24 @@ void main() {
       expect(find.text('Verbindung und Skills sind aktuell.'), findsOneWidget);
     });
 
+    // Steht schon etwas von der App in einem KI-Werkzeug, heißt der Knopf
+    // „Aktualisieren" (die Tests unten); nur beim ersten Einrichten
+    // „Installieren".
+    testWidgets('beim ersten Einrichten, ohne Eintrag und ohne Skills, heißt der Knopf „Installieren"', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 1600);
+      addTearDown(tester.view.reset);
+      heim = Directory.systemTemp.createTempSync('moocp_erstes_einrichten_');
+      addTearDown(() => heim.deleteSync(recursive: true));
+      env = {'USERPROFILE': heim.path, 'HOME': heim.path};
+      codex = CodexCli(env);
+      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+      await zeigen(tester);
+
+      expect(find.text('Installieren'), findsOneWidget);
+      expect(find.text('Aktualisieren'), findsNothing);
+    });
+
     testWidgets('Wählen speichert die Wahl, „Installieren" richtet ihn ein; Abwählen und „Installieren" entfernt ihn',
         (tester) async {
       await aufbauen(tester);
@@ -605,7 +623,7 @@ void main() {
       expect(find.text('Skills (moodle, lernsituation)'), findsOneWidget);
       expect(find.text('nicht installiert: lernsituation'), findsOneWidget);
 
-      await tester.tap(find.text('Installieren'));
+      await tester.tap(find.text('Aktualisieren'));
       await abwarten(tester);
       expect(File(p.join(skillOrdner('lernsituation').path, 'SKILL.md')).existsSync(), isTrue);
       expect(find.text('Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'),
@@ -617,7 +635,7 @@ void main() {
       expect(einstellungen.gespeichert, 2);
       expect(find.text('werden entfernt: lernsituation'), findsOneWidget);
 
-      await tester.tap(find.text('Installieren'));
+      await tester.tap(find.text('Aktualisieren'));
       await abwarten(tester);
       expect(skillOrdner('lernsituation').existsSync(), isFalse);
       expect(File(p.join(skillOrdner('moodle').path, 'SKILL.md')).existsSync(), isTrue, reason: 'der feste bleibt');
@@ -666,7 +684,7 @@ void main() {
       expect(find.text(fehler), findsOneWidget);
       expect(find.text('nicht installiert: beispiel; werden entfernt: alt-skill'), findsOneWidget);
 
-      await tester.tap(find.text('Installieren'));
+      await tester.tap(find.text('Aktualisieren'));
       await abwarten(tester);
       expect(File(p.join(skillOrdner('beispiel').path, 'SKILL.md')).existsSync(), isTrue);
       expect(skillOrdner('beispiel-vorlage').existsSync(), isFalse);
@@ -718,6 +736,7 @@ void main() {
       expect(find.text(fehler), findsOneWidget);
       expect(find.text('Beenden'), findsNothing);
       expect(find.text('Installieren'), findsNothing);
+      expect(find.text('Aktualisieren'), findsNothing);
       expect(find.textContaining('mit „Weiter" arbeitet die App ohne sie'), findsOneWidget);
       await tester.tap(find.text('Weiter'));
       await tester.pumpAndSettle();

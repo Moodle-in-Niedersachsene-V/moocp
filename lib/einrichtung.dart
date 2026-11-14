@@ -1407,6 +1407,14 @@ class Einrichtungsstand {
 
   /// Ob „Installieren" etwas bewirken kann.
   bool get einrichtbar => werkzeuge.any((w) => w.brauchtEtwas && w.machbar);
+
+  /// Ob in irgendeinem KI-Werkzeug schon etwas von der App steht: ein Eintrag
+  /// (auch ein veralteter) oder der Ordner eines Skills. Dann heißt der Knopf
+  /// im Dialog „Aktualisieren" statt „Installieren" -- er bringt auf Stand
+  /// oder entfernt, statt zum ersten Mal einzurichten.
+  bool get schonEingerichtet => werkzeuge.any(
+        (w) => w.verbindung != Verbindung.fehlt || w.stand.values.any((s) => !s.ordnerFehlt),
+      );
 }
 
 /// Was installiert sein soll: jeder Skill, der nicht in [wahlSkills] steht, und

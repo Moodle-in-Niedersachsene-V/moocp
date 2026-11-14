@@ -373,7 +373,9 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
           child: Text(!einrichtbar
               ? 'Nochmal prüfen'
               : _ergebnis.isEmpty
-                  ? 'Installieren'
+                  // Beim ersten Einrichten „Installieren"; steht schon etwas
+                  // von der App in einem KI-Werkzeug, „Aktualisieren".
+                  ? (s.schonEingerichtet ? 'Aktualisieren' : 'Installieren')
                   : 'Nochmal versuchen'),
         ),
       ];

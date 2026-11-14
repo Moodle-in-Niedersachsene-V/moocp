@@ -61,13 +61,24 @@ part 'plugin_dialoge.dart';
 
 /// Das Fenster der App. Null, wo es keines gibt oder der Zugriff scheitert;
 /// die Aufrufer lassen das Fenster dann, wie es ist.
+///
+/// Die App hat genau ein Fenster; es wird einmal ermittelt und behalten, beim
+/// Aufbau der Oberfläche, solange die App vorn ist. Jedes Mal neu zu fragen
+/// geht nicht: `WindowManager.getCurrent()` liefert das gerade aktive Fenster,
+/// also nichts, sobald die App im Hintergrund liegt -- genau dann, wenn ein
+/// Dialog sie nach vorn holen soll. `getAll()` taugt auch nicht: Es zählt die
+/// sichtbaren Fenster aller Programme auf, nicht nur die eigenen.
 Window? _appFenster() {
+  final bekannt = _fenster;
+  if (bekannt != null) return bekannt;
   try {
-    return WindowManager.instance.getCurrent();
+    return _fenster = WindowManager.instance.getCurrent();
   } catch (_) {
     return null;
   }
 }
+
+Window? _fenster;
 
 Future<void> main(List<String> argumente) async {
   // Keine Ausgabe auf die Konsole, von niemandem: debugPrint schweigt -- auch
@@ -569,10 +580,31 @@ class _HauptseiteState extends State<Hauptseite> {
   @override
   void initState() {
     super.initState();
-    _fensterAbo = _appFenster()?.addListener(_fensterEreignis);
+    _fensterAnmelden();
     widget.protokoll.addListener(_aktualisieren);
     _fokusAbo = widget.fokus?.listen((_) => _fensterZeigen());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _starten());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fensterAnmelden();
+      if (_fensterAbo == null) {
+        widget.protokoll.eintrag(
+          Art.fehler,
+          'Fenster der App nicht ermittelt: Dialoge holen es nicht nach vorn, bis es einmal aktiv war',
+        );
+      }
+      _starten();
+    });
+  }
+
+  /// Meldet _fensterEreignis am Fenster an, sobald es bekannt ist (siehe
+  /// _appFenster). Läuft beim Aufbau und noch einmal vor jedem Zugriff auf das
+  /// Fenster, falls die App beim Start nicht vorn war.
+  void _fensterAnmelden() {
+    if (_fensterAbo != null) return;
+    try {
+      _fensterAbo = _appFenster()?.addListener(_fensterEreignis);
+    } catch (_) {
+      // Ohne Fensterzugriff bleibt das Schließen, wie das Fenster es vorgibt.
+    }
   }
 
   /// Eine zweite Anmeldung hat die App gestartet: Das Fenster kommt aus dem

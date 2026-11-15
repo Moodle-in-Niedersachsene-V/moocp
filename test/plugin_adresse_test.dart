@@ -364,16 +364,16 @@ void main() {
         'POST $pfadProtokoll HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer $_schluessel\r\n'
         'Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n',
       );
-      // Mehr als die Grenze von 1 MB, in Stücken; das Ende des Inhalts kommt nie.
+      // Genau die Grenze von 1 MB in Stücken, dann ein Byte mehr; das Ende des
+      // Inhalts kommt nie. Mehr schickt der Test nicht: Läge beim Schließen
+      // noch Ungelesenes bei der App, setzte Windows die Verbindung zurück,
+      // und die Antwort könnte verloren gehen, bevor der Test sie liest.
       final stueck = 'x' * 65536;
-      for (var i = 0; i < 20 && !geschlossen.isCompleted; i++) {
-        try {
-          socket.write('${stueck.length.toRadixString(16)}\r\n$stueck\r\n');
-          await socket.flush();
-        } catch (_) {
-          break;
-        }
+      for (var i = 0; i < 16; i++) {
+        socket.write('${stueck.length.toRadixString(16)}\r\n$stueck\r\n');
       }
+      socket.write('1\r\nx\r\n');
+      await socket.flush();
 
       await geschlossen.future.timeout(const Duration(seconds: 10));
       expect(antwort.toString(), startsWith('HTTP/1.1 413'));

@@ -2,6 +2,8 @@
 
 Dieses Dart-Projekt ist das Beispiel-Plugin von moocp: eine Vorlage zum Ansehen und Kopieren für alle, die ein Plugin schreiben, und das Plugin, gegen das die Tests von moocp laufen. Es hat keine eigene Funktion; jedes seiner Werkzeuge zeigt einen Weg der Schnittstelle. Der Installer von moocp liefert es nicht mit.
 
+Das Beispiel steht wie moocp unter der GNU Affero General Public License, Version 3 oder später (`LICENSE.md` im Hauptordner von moocp). Das gilt auch für ein Plugin, das daraus entsteht: Plugins für moocp sind Open Source, mit Quelltext und unter der AGPL oder einer damit verträglichen Lizenz.
+
 Was ein Plugin ist, was die Beschreibungsdatei `plugin.json` enthält, was die Werkzeuge des Beispiels zeigen und wie moocp ein Plugin startet, steht in der README von moocp, Teil 4, Abschnitt „Plugins“. Der Quelltext in `bin/beispiel.dart` erklärt jeden Schritt.
 
 ## Voraussetzung

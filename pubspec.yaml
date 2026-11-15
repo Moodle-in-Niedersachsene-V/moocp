@@ -30,8 +30,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 # Nur Pakete mit freizügiger Lizenz (MIT, BSD, Apache 2.0), auch unter den
-# indirekten: Die App steht unter MIT (LICENSE.md). Eine GPL- oder
-# LGPL-Abhängigkeit änderte das.
+# indirekten: Die App steht unter der AGPL, Version 3 oder später
+# (LICENSE.md), und diese Lizenzen vertragen sich mit ihr (E14).
 dependencies:
   flutter:
     sdk: flutter

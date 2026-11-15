@@ -10,7 +10,8 @@ environment:
   sdk: ^3.13.2
 
 # Nur Pakete mit freizügiger Lizenz (MIT, BSD, Apache 2.0), auch unter den
-# indirekten. mcp_dart ist dasselbe Paket, das moocp für MCP benutzt;
+# indirekten; das Beispiel steht wie moocp unter der AGPL, Version 3 oder
+# später (LICENSE.md im Hauptordner). mcp_dart ist dasselbe Paket, das moocp für MCP benutzt;
 # pubspec.lock hält die Versionen fest.
 dependencies:
   mcp_dart: ^2.4.2

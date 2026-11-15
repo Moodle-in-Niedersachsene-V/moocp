@@ -1,4 +1,4 @@
-# E24 Plattformen: Windows ausgeliefert, macOS und Linux aus dem Entwicklungsbau
+# E24 Plattformen: Windows und Linux ausgeliefert, macOS aus dem Entwicklungsbau
 
 Status: gilt. Die Regeln dazu stehen im Index der [CLAUDE.md](../../CLAUDE.md).
 
@@ -6,13 +6,16 @@ Status: gilt. Die Regeln dazu stehen im Index der [CLAUDE.md](../../CLAUDE.md).
 
 Ausgeliefert wird moocp für **Windows**: ein Installer je Benutzer (E15), Zugangsdaten mit DPAPI (E7), die Brücke als `moocp-bruecke.exe` (E21), Einstellungen unter `%APPDATA%`. Das ist die Plattform der Schulen, für die die App gebaut ist.
 
-Auf **macOS** läuft die App aus dem Entwicklungsbau (`flutter run -d macos`, siehe README, Teil 4). Eine Veröffentlichung für den Mac gibt es nicht. Dasselbe gilt für **Linux** (Debian 13, amd64; `flutter run -d linux`): Entwicklungsbau, keine Veröffentlichung, keine Selbstaktualisierung, keine Brücke, kein LM Studio. Pakete gibt es für Linux trotzdem (siehe unten), damit die App im Startmenü steht und sich wieder entfernen lässt; wer sie braucht, baut sie selbst, ein Release dafür gibt es nicht. Wo die Windows-Lösung an Windows hängt (Ablage der Zugangsdaten, Ort von Einstellungen, Protokoll und Arbeitsordner, die Brücke für LM Studio und das Eintragen in die KI-Werkzeuge, Installation und Update), hat der Mac eine eigene Lösung; sie steht unten.
+Für **Linux** (Debian 13, amd64) wird ebenfalls ausgeliefert: An jedem Release hängen drei Pakete (Installer je Benutzer, AppImage, .deb; siehe unten). Eine Selbstaktualisierung, die Brücke und LM Studio gibt es unter Linux nicht; eine neue Version lädt man aus dem Release. Entwickelt wird mit `flutter run -d linux`.
+
+Auf **macOS** läuft die App aus dem Entwicklungsbau (`flutter run -d macos`, siehe README, Teil 4). Eine Veröffentlichung für den Mac gibt es nicht: Ein Paket für den Mac braucht eine Signatur und die Beglaubigung durch Apple. Wo die Windows-Lösung an Windows hängt (Ablage der Zugangsdaten, Ort von Einstellungen, Protokoll und Arbeitsordner, die Brücke für LM Studio und das Eintragen in die KI-Werkzeuge, Installation und Update), haben der Mac und Linux eigene Lösungen; sie stehen unten.
 
 ## Folgen
 
 - Eine Änderung, die Windows-spezifisch ist (Pfade, DPAPI, Installer), nennt das im Kommentar, damit die Umsetzung für den Mac sie findet.
 - Das Repository bleibt eines (Flutter, [E25](0025-flutter-desktop.md)); es gibt keinen Zweig für den Mac und keinen für Linux.
-- `flutter test` muss auf beiden Plattformen laufen, soweit die Tests nicht ausdrücklich Windows voraussetzen.
+- `flutter test` muss auf allen Plattformen laufen, soweit die Tests nicht ausdrücklich eine voraussetzen.
+- Zu einem Release gehören der Windows-Installer und die drei Linux-Pakete ([E12](0012-git-und-github.md)); die Update-Prüfung der App sucht nur den Windows-Installer ([E19](0019-updates.md)).
 
 ## Lösungen für macOS
 
@@ -35,11 +38,11 @@ Auf **macOS** läuft die App aus dem Entwicklungsbau (`flutter run -d macos`, si
 - **AppImage:** `tool/linux_appimage.sh` packt dieselbe Release-App in `installer/moocp_<Version>-x86_64.AppImage`, gebaut mit appimagetool 1.9.1 (beim ersten Lauf nach `build/tools` geladen und gegen eine feste Prüfsumme geprüft; der Bau braucht kein FUSE). Es enthält die Systembibliotheken nicht: GTK 3, libsecret, EGL und GLES (`libegl1`, `libgles2`) müssen auf dem Rechner sein, und die glibc mindestens 2.38 (gebaut auf Debian 13). Zum Starten braucht es FUSE 2 (`libfuse2t64`) oder `--appimage-extract-and-run`. Mit `--installieren` öffnet es denselben Assistenten wie das `.run`-Paket und kopiert die App aus dem AppImage nach `~/.local/opt/moocp`; ohne Schalter läuft die App direkt, ohne Menüeintrag.
 - **.deb:** `tool/linux_deb.sh` baut `installer/moocp_<Version>_amd64.deb`: App nach `/opt/moocp`, `/usr/bin/moocp`, Menüeintrag und Symbol unter `/usr/share`. Es ist systemweit und braucht Administratorrechte (`sudo apt install ./moocp_<Version>_amd64.deb`); eine Installation je Benutzer geht damit nicht. Menü und Symbolspeicher aktualisiert dpkg über seine Trigger, ein eigenes Skript gibt es nicht. Einstellungen und gespeicherte Anmeldedaten liegen im Benutzerordner und bleiben beim Entfernen des Pakets, weil apt keine Benutzerordner anfasst. Die Abhängigkeiten sind GTK 3, libsecret, glib und libstdc++; der Rest steht unter Empfohlen (`gdbus`, `secret-tool`, ein Schlüsselbund, `xdg-utils`, ein Browser für Bildschirmfotos).
 - **Flatpak und Snap** sind verworfen: Die Sandbox bremst, was moocp tut (Claude Code und Codex im `PATH` finden und starten, in `~/.claude` und `~/.codex` eintragen, den Browser für Bildschirmfotos starten, Secret Service und `/proc` nutzen). Mit Ausnahmen wie `--filesystem=home` und `flatpak-spawn --host` bliebe von der Sandbox wenig übrig.
-- **Erweiterungen (E35):** Was ein Plugin unter Linux braucht (Ordner, Start des Programms), ist nicht Teil dieser Entscheidung und kommt mit dem Plugin-System.
+- **Erweiterungen (E35):** Plugins liegen wie auf den anderen Plattformen in `plugins/<name>` im Einstellungsordner.
 
 ## Verworfen
 
-Windows, macOS und Linux gleichzeitig auszuliefern: Es gäbe mehrere Installer, mehrere Wege für Zugangsdaten und Updates und eine Prüfung auf drei Betriebssystemen, bevor die Funktionen selbst stehen. Offen bleibt, ob eine Veröffentlichung für den Mac oder Linux je nötig wird.
+Eine Selbstaktualisierung unter Linux: Die Update-Prüfung ersetzt einen Installer je Benutzer; das AppImage und das systemweite .deb ließen sich so nicht ersetzen, und drei Wege zu pflegen lohnt für die wenigen Rechner nicht.
 
 Ein Servermodus für Linux (Betrieb ohne Fenster, eigener Secretstore, Verwaltung im Browser): Der Aufwand stünde in keinem Verhältnis zum Nutzen; die App bleibt eine Desktop-App, die in einer grafischen Sitzung läuft, auch einer entfernten (xrdp). Ein eigener Secretstore oder Passwort als Datei: wie in [E26](0026-schluesselbund-mac.md).
 

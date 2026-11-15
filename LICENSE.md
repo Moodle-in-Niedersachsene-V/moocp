@@ -1,18 +1,17 @@
 ﻿moocp
-Copyright © 2026 Tobias Steinmann, Matthias Grünwald
+Copyright © 2026 Tobias Steinmann
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License below for more details.
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 
-Versions of moocp before 0.12.0 were published under the MIT License and remain available under it.
+You should have received a copy of the GNU Affero General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-Plugins
+Additional permission under GNU AGPL version 3 section 7
 
-A plugin for moocp is written for the plugin interface of moocp, is started by moocp and only works together with it. The copyright holders therefore regard a plugin and moocp as one combined work in the sense of this license: A plugin may only be distributed under the GNU Affero General Public License, version 3 or any later version, or under a license compatible with it, and together with its complete source code. Plugins that are distributed without their source code or under terms that keep others from using, changing and sharing them are not permitted.
+A plugin is a separate program that moocp starts and communicates with only through its plugin interface, the Model Context Protocol over a local network connection. As an additional permission, the copyright holders of moocp allow you to write, convey and use such plugins under terms of your choice; a plugin does not become a work based on moocp merely because it uses this interface. This permission does not cover modified versions of moocp itself.
 
-The full license text follows.
-
+--------------------------------------------------------------------------
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

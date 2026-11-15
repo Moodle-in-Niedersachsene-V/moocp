@@ -6,7 +6,6 @@ Everything on GitHub (issues, pull requests, commits, branch names, labels) is w
 
 ## Principles
 
-- moocp is free software under the GNU Affero General Public License, version 3 or later (`LICENSE.md`). Contributions are made under the same license.
 - One shared repository, no forks. Everyone with write access works on short-lived branches.
 - `main` is protected: changes only via pull request (PR), never a force-push, never a rewrite of history.
 - Everyone can start and build their own things without asking first. The only gate is the review before a merge.

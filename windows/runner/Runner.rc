@@ -98,7 +98,7 @@ BEGIN
             VALUE "FileDescription", "moocp" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "moocp" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Tobias Steinmann. MIT-Lizenz." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Tobias Steinmann. AGPLv3." "\0"
             VALUE "OriginalFilename", "moocp.exe" "\0"
             VALUE "ProductName", "moocp" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

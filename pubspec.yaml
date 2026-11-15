@@ -29,9 +29,9 @@ environment:
 # dependencies can be manually updated by changing the version numbers below to
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
-# Nur Pakete mit freizügiger Lizenz (MIT, BSD, Apache 2.0), auch unter den
-# indirekten: Die App steht unter der AGPL, Version 3 oder später
-# (LICENSE.md), und diese Lizenzen vertragen sich mit ihr (E14).
+# Nur Pakete, deren Lizenz mit der AGPLv3 verträglich ist (LICENSE.md), auch
+# unter den indirekten: MIT, BSD, Apache 2.0, GPLv3, LGPLv3, AGPLv3 – nicht
+# „GPLv2 only“.
 dependencies:
   flutter:
     sdk: flutter

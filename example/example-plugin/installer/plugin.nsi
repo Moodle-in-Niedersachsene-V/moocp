@@ -113,8 +113,7 @@ VIAddVersionKey /LANG=${LANG_GERMAN} "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "FileDescription" "Installer für das moocp-Plugin ${ANZEIGENAME}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "CompanyName" "${HERAUSGEBER}"
-; Ein echtes Plugin nennt hier Jahr, Herausgeber und Lizenz (Open Source,
-; AGPL ab Version 3 oder damit verträglich, siehe LICENSE.md von moocp).
+; Ein echtes Plugin nennt hier Jahr, Herausgeber und Lizenz.
 VIAddVersionKey /LANG=${LANG_GERMAN} "LegalCopyright" "© ${HERAUSGEBER}"
 
 ;--------------------------------

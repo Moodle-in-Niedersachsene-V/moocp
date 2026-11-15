@@ -382,9 +382,9 @@ class _InstallerSeiteState extends State<InstallerSeite> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'moocp ist freie Software unter der GNU Affero General Public License (AGPL), Version 3 oder später: '
-              'Sie dürfen die App frei benutzen, weitergeben und verändern; wer sie verändert weitergibt, gibt auch '
-              'den Quelltext weiter. Zum Benutzen ist keine Zustimmung nötig.',
+              'moocp steht unter der GNU AGPLv3 oder später: Sie dürfen die App frei benutzen, weitergeben und '
+              'verändern. Wer eine veränderte Version weitergibt, macht ihren Quelltext unter derselben Lizenz '
+              'zugänglich. Eine Zustimmung ist nicht nötig.',
             ),
           ],
         );

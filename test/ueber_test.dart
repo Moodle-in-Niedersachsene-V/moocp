@@ -21,14 +21,14 @@ void main() {
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
     expect(find.text('Version 1.2.3+4'), findsOneWidget);
-    expect(find.textContaining('Affero General Public License'), findsOneWidget);
+    expect(find.textContaining('GNU AGPLv3 oder später'), findsOneWidget);
 
     await tester.tap(find.text('Lizenzen ansehen'));
     await tester.pumpAndSettle();
     expect(find.text('moocp'), findsWidgets);
     await tester.tap(find.text('moocp').last);
     await tester.pumpAndSettle();
-    expect(find.textContaining('This program is free software'), findsOneWidget);
+    expect(find.textContaining('terms of the GNU Affero General Public License as published'), findsOneWidget);
   });
 
   test('Version ohne Buildnummer', () {

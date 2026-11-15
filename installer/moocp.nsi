@@ -366,6 +366,29 @@ Section "Uninstall"
   Delete "$DESKTOP\${NAME}.lnk"
   DeleteRegKey HKCU "${UNINST_KEY}"
 
+  ; Die Plugins gehen unten mit dem Ordner der App mit, samt ihren
+  ; Uninstallern. Ihre Einträge unter „Installierte Apps“ blieben sonst
+  ; stehen und zeigten ins Leere: Jeder Eintrag, dessen Installationsort
+  ; unter plugins\ liegt, wird deshalb mit entfernt (so trägt ihn die
+  ; Vorlage example/example-plugin/installer/plugin.nsi ein). Nach dem
+  ; Löschen eines Schlüssels bleibt der Zähler stehen, weil die folgenden
+  ; nachrücken.
+  StrCpy $0 0
+  StrLen $4 "$APPDATA\moocp\plugins\"
+  ${Do}
+    EnumRegKey $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall" $0
+    ${If} $1 == ""
+      ${ExitDo}
+    ${EndIf}
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1" "InstallLocation"
+    StrCpy $3 $2 $4
+    ${If} $3 == "$APPDATA\moocp\plugins\"
+      DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1"
+    ${Else}
+      IntOp $0 $0 + 1
+    ${EndIf}
+  ${Loop}
+
   ; Die Daten der App. Einstellungen mit Zugangsschlüssel und Protokoll
   ; (lib/einstellungen.dart), Benutzername und verschlüsseltes Passwort
   ; (lib/anmeldedaten.dart; der Ordner kommt aus CompanyName und ProductName

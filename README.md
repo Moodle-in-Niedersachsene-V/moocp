@@ -168,7 +168,7 @@ Das gilt für die App selbst. Ein Plugin ist ein eigenes Programm, das nur läuf
 
 ### Lizenz und Marken
 
-moocp steht unter der [MIT-Lizenz](LICENSE.md): Sie dürfen die App frei benutzen, weitergeben und verändern. Die Lizenzen aller eingebundenen Pakete zeigt die App über ⓘ oben rechts, „Lizenzen ansehen". Was sich von Version zu Version ändert, steht in [CHANGELOG.md](CHANGELOG.md).
+moocp steht unter der [GNU Affero General Public License, Version 3 oder später](LICENSE.md) (AGPLv3): Sie dürfen die App frei benutzen, auch beruflich und kommerziell, weitergeben und verändern. Wer eine veränderte Version weitergibt oder anderen über ein Netzwerk zur Verfügung stellt, muss deren Quelltext unter derselben Lizenz zugänglich machen. Plugins sind eigene Programme und dürfen unter einer eigenen Lizenz stehen; das erlaubt ein Zusatz in der Lizenz ausdrücklich. Die Lizenzen aller eingebundenen Pakete zeigt die App über ⓘ oben rechts, „Lizenzen ansehen". Was sich von Version zu Version ändert, steht in [CHANGELOG.md](CHANGELOG.md).
 
 Moodle™ ist eine eingetragene Marke von Moodle Pty Ltd, Claude eine Marke von Anthropic PBC; Codex, ChatGPT und LM Studio sind Marken ihrer jeweiligen Inhaber. moocp ist ein unabhängiges Projekt und mit keinem von ihnen verbunden.
 
@@ -661,7 +661,7 @@ Das baut die Skills, prüft (`flutter analyze`, `flutter test`), baut die App un
 
 ### Lizenzen der Abhängigkeiten
 
-Die App steht unter MIT. Neue Pakete kommen nur mit freizügiger Lizenz hinzu (MIT, BSD, Apache 2.0), und das gilt auch für jede indirekte Abhängigkeit in `pubspec.lock`: Mit GPL oder LGPL könnte die App nicht unter MIT stehen. Die Lizenzhinweise aller Pakete sammelt Flutter beim Bauen selbst ein; die App zeigt sie unter ⓘ.
+Die App steht unter der AGPLv3 oder später. Neue Pakete kommen nur hinzu, wenn ihre Lizenz damit verträglich ist, und das gilt auch für jede indirekte Abhängigkeit in `pubspec.lock`: freizügige Lizenzen wie MIT, BSD und Apache 2.0 sind es, GPLv3, LGPLv3 und AGPLv3 ebenfalls, Lizenzen nur für die GPLv2 („GPLv2 only“) nicht. Das Beispiel-Plugin (`example/example-plugin/`) steht unter MIT, damit eigene Plugins daraus unter jeder Lizenz entstehen können; seine Pakete brauchen deshalb eine freizügige Lizenz. Die Lizenzhinweise aller Pakete sammelt Flutter beim Bauen selbst ein; die App zeigt sie unter ⓘ.
 
 Die Bilder dieser README entstehen aus den echten Fenstern mit erfundenen
 Daten:
@@ -984,6 +984,6 @@ Danach wird auf GitHub aus diesem Tag ein Release erzeugt, mit dem Installer als
 
 ### Mitwirken
 
-Fehlerberichte und Vorschläge sind als Issue willkommen. Code-Änderungen kommen als Pull Request auf `main`; größere bitte vorher als Issue besprechen. Wie wir zusammenarbeiten (Zweige, Review, Labels, Sprache), steht in [CONTRIBUTING.md](CONTRIBUTING.md), auf Englisch. Beiträge stehen unter der MIT-Lizenz des Projekts. Das Projekt wird nebenbei gepflegt; eine Zusage für Unterstützung oder Antwortzeiten gibt es nicht.
+Fehlerberichte und Vorschläge sind als Issue willkommen. Code-Änderungen kommen als Pull Request auf `main`; größere bitte vorher als Issue besprechen. Wie wir zusammenarbeiten (Zweige, Review, Labels, Sprache), steht in [CONTRIBUTING.md](CONTRIBUTING.md), auf Englisch. Beiträge stehen unter der Lizenz des Projekts, der AGPLv3 oder später samt ihrem Zusatz für Plugins; Beiträge zum Beispiel-Plugin unter dessen MIT-Lizenz. Das Projekt wird nebenbei gepflegt; eine Zusage für Unterstützung oder Antwortzeiten gibt es nicht.
 
 Sicherheitslücken bitte nicht als öffentliches Issue melden, sondern vertraulich über „Report a vulnerability" im Reiter „Security".

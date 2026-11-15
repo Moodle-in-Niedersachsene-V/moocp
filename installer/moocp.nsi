@@ -86,10 +86,10 @@ Var WeiterKnopf
 ; Zeilen fett setzen lassen.
 Page custom HinweisSeite HinweisSeiteEnde
 
-; Die MIT-Lizenz verlangt keine Zustimmung; die Seite zeigt sie zur
-; Kenntnis, mit „Weiter" statt „Annehmen".
+; Die AGPLv3 verlangt fürs Benutzen keine Zustimmung (Abschnitt 9); die
+; Seite zeigt sie zur Kenntnis, mit „Weiter" statt „Annehmen".
 !define MUI_LICENSEPAGE_BUTTON "$(^NextBtn)"
-!define MUI_LICENSEPAGE_TEXT_BOTTOM "moocp steht unter der MIT-Lizenz: Sie dürfen die App frei benutzen, weitergeben und verändern. Eine Zustimmung ist nicht nötig."
+!define MUI_LICENSEPAGE_TEXT_BOTTOM "moocp steht unter der GNU AGPLv3 oder später: Sie dürfen die App frei benutzen, weitergeben und verändern. Wer eine veränderte Version weitergibt, macht ihren Quelltext unter derselben Lizenz zugänglich. Eine Zustimmung ist nicht nötig."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE LizenzSeite
 ; LICENSE.md beginnt mit einem BOM, und das muss so bleiben: Eine Textdatei
 ; ohne BOM liest NSIS in der ANSI-Codepage, auch im Unicode-Installer -- aus
@@ -113,7 +113,7 @@ VIAddVersionKey /LANG=${LANG_GERMAN} "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "FileDescription" "Installer für ${NAME}"
 VIAddVersionKey /LANG=${LANG_GERMAN} "CompanyName" "${HERAUSGEBER}"
-VIAddVersionKey /LANG=${LANG_GERMAN} "LegalCopyright" "© 2026 ${HERAUSGEBER}, MIT-Lizenz"
+VIAddVersionKey /LANG=${LANG_GERMAN} "LegalCopyright" "© 2026 ${HERAUSGEBER}, AGPLv3"
 
 ;--------------------------------
 ; Aufruf durch die App (Update)

@@ -1,6 +1,6 @@
 // Der Dialog „Über moocp": Version, Lizenz der App und die Lizenzen
-// aller eingebundenen Pakete. MIT, BSD und Apache 2.0 verlangen, dass ihre
-// Hinweise mit der fertigen App weitergegeben werden. Die Lizenzseite von
+// aller eingebundenen Pakete. Die Lizenzen der Pakete (MIT, BSD, Apache 2.0)
+// verlangen, dass ihre Hinweise mit der fertigen App weitergegeben werden. Die Lizenzseite von
 // Flutter zeigt sie alle; Flutter sammelt sie beim Bauen selbst ein (die
 // Datei NOTICES in den Assets), auch die der Engine.
 
@@ -46,6 +46,6 @@ Future<void> ueberZeigen(BuildContext context) async {
     context: context,
     applicationName: appName,
     applicationVersion: version == null ? null : 'Version $version',
-    applicationLegalese: '© 2026 Tobias Steinmann\nMIT-Lizenz',
+    applicationLegalese: '© 2026 Tobias Steinmann\nGNU AGPLv3 oder später',
   );
 }

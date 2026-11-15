@@ -55,7 +55,8 @@
 // (moodle_lesen.dart, textFuerPlugin).
 //
 // Letzte Sperre (namenssperre.dart, E36): Ein Plugin nennt der App Namen zum
-// Sperren (/v1/namen), die App lädt beim Beginn eines Laufs die Namen der
+// Sperren (/v1/namen) und fragt, wo sie in einem Text träfe
+// (/v1/namen/pruefen), die App lädt beim Beginn eines Laufs die Namen der
 // Teilnehmenden und, sobald sie ihn kennt, den Namen der angemeldeten
 // Lehrkraft des Profils; von da an prüft sie bis zum Ende der App alles, was
 // von diesem Plugin ins Protokoll ginge, gegen sie: seine Protokollzeilen,
@@ -115,6 +116,7 @@ const pfadLaufBeenden = '/v1/moodle/lauf/beenden';
 const pfadZusatzLesen = '/v1/moodle/zusatz/lesen';
 const pfadZusatzDatei = '/v1/moodle/zusatz/datei';
 const pfadNamen = '/v1/namen';
+const pfadNamenPruefen = '/v1/namen/pruefen';
 
 /// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
 /// Teilnehmenden einer großen Schule auf einmal.
@@ -569,6 +571,7 @@ class AppAdresse {
     pfadZusatzLesen: const _Funktion(mitAufruf: true, ausfuehren: _zusatzLesen),
     pfadZusatzDatei: const _Funktion(mitAufruf: true, ausfuehren: _zusatzDatei),
     pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
+    pfadNamenPruefen: const _Funktion(mitAufruf: true, ausfuehren: _namenPruefen),
   };
 
   /// Die Antwort, wenn die letzte Sperre etwas angehalten hat: ohne das
@@ -638,6 +641,37 @@ class AppAdresse {
       '${plugin.aufrufer}: ${namen.length} ${namen.length == 1 ? 'Name' : 'Namen'} zum Sperren genannt',
     );
     return (status: HttpStatus.ok, json: <String, Object?>{});
+  }
+
+  /// `POST /v1/namen/pruefen` `{"text": "…"}`: wo die letzte Sperre in
+  /// diesem Text träfe (LetzteSperre.pruefen), nach derselben Regel und
+  /// gegen dieselben Namen, samt dem Namen der Lehrkraft und dem Ordner für
+  /// Downloads. So bereinigt ein Plugin seine Antwort, bevor es sie an die KI
+  /// gibt. Antwort `{"stellen": [{"anfang": 7, "ende": 12}, …], "kodiert":
+  /// false, "pfad": false}`; Anfang und Ende zählen UTF-16-Codeeinheiten wie
+  /// in JSON und JavaScript, das Ende ausschließlich. Die Antwort nennt keine
+  /// Namen, nur Stellen im Text des Plugins. Nichts davon geht ins Protokoll:
+  /// Es geht nichts hinaus, und eine Zeile je Prüfung füllte es nur.
+  static Future<_Antwort> _namenPruefen(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final text = daten['text'];
+    if (text is! String) return _fehler(HttpStatus.badRequest, 'text fehlt: der Text, der geprüft werden soll.');
+    a._lehrkraftSperren(plugin.kurzname, aufruf!);
+    final (:stellen, :kodiert, :pfad) = a.sperre.pruefen(plugin.kurzname, text);
+    return (
+      status: HttpStatus.ok,
+      json: <String, Object?>{
+        'stellen': [
+          for (final (anfang, ende) in stellen) {'anfang': anfang, 'ende': ende},
+        ],
+        'kodiert': kodiert,
+        'pfad': pfad,
+      },
+    );
   }
 
   /// Moodle braucht die Anmeldung, und das Profil ist nicht angemeldet

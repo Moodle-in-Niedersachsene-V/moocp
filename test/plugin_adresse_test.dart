@@ -1291,6 +1291,43 @@ void main() {
       );
     });
 
+    test('/v1/namen/pruefen: Stellen nach der Regel der Sperre, mit Token, ohne Warnung und ohne Protokoll', () async {
+      expect((await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Erika'})).status, 403);
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      await nennen(a.token, [name]);
+      final vorher = zeilen().length;
+
+      final r = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Von ERIKA und Erik%61, 3 Punkte'}, token: a.token);
+      final ohne = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Aufgabe 3'}, token: a.token);
+      final fehlt = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 3}, token: a.token);
+
+      expect(r.status, 200);
+      expect(r.json, {
+        'stellen': [
+          {'anfang': 4, 'ende': 9},
+        ],
+        'kodiert': true,
+        'pfad': false,
+      });
+      expect(ohne.json, {'stellen': <Object?>[], 'kodiert': false, 'pfad': false});
+      expect(fehlt.status, 400);
+      expect(zeilen().length, vorher, reason: 'Prüfen schreibt nichts ins Protokoll');
+      expect(gemeldet, isEmpty, reason: 'es geht nichts hinaus, also keine Warnung');
+      adresse.pluginAnmelden('anderes', 'Anderes', _fremderSchluessel);
+      final andere = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('anderes', andere);
+      final fremd = await _post(
+        adresse.adresse,
+        pfadNamenPruefen,
+        daten: {'text': 'Erika'},
+        token: andere.token,
+        schluessel: _fremderSchluessel,
+      );
+      expect(fremd.status, 200);
+      expect(fremd.json['stellen'], isEmpty, reason: 'die Namen eines Plugins gelten nur für seine Texte');
+    });
+
     test('je Plugin höchstens $namenJePluginHoechstens verschiedene Namen; gleiche zählen einmal', () async {
       final a = _aufruf(kontext('A'));
       adresse.aufrufAnmelden('beispiel', a);

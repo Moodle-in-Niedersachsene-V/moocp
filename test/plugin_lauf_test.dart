@@ -565,6 +565,25 @@ void main() {
       ohneNamen(zeilen().where((z) => !z.contains('Paula')).join('\n'));
       expect(zeilen().join('\n'), isNot(contains('Musterlehrerin')));
     });
+
+    test('/v1/namen/pruefen kennt die Namen des Kurses und der Lehrkraft und nennt nur Stellen', () async {
+      final a = await imLauf();
+      await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
+      const text = 'Lieschen und Frau Musterlehrerin: Aufgabe 3';
+
+      final r = await anAdresse(adresse.adresse, pfadNamenPruefen, {'text': text}, token: a.token);
+
+      expect(r.status, 200);
+      expect(r.json, {
+        'stellen': [
+          {'anfang': 0, 'ende': 8},
+          {'anfang': 18, 'ende': 32},
+        ],
+        'kodiert': false,
+        'pfad': false,
+      });
+      expect(zeilen().join('\n'), isNot(contains('Lieschen')));
+    });
   });
 
   group('Rohes Lesen: nur der Hauptbereich', () {

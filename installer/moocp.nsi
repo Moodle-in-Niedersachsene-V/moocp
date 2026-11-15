@@ -369,12 +369,14 @@ Section "Uninstall"
   ; Die Plugins gehen unten mit dem Ordner der App mit, samt ihren
   ; Uninstallern. Ihre Einträge unter „Installierte Apps“ blieben sonst
   ; stehen und zeigten ins Leere: Jeder Eintrag, dessen Installationsort
-  ; unter plugins\ liegt, wird deshalb mit entfernt (so trägt ihn die
-  ; Vorlage example/example-plugin/installer/plugin.nsi ein). Nach dem
-  ; Löschen eines Schlüssels bleibt der Zähler stehen, weil die folgenden
-  ; nachrücken.
+  ; (InstallLocation) oder dessen Uninstaller (UninstallString, mit oder
+  ; ohne Anführungszeichen) unter plugins\ liegt, wird deshalb mit entfernt.
+  ; Die Vorlage example/example-plugin/installer/plugin.nsi trägt beides
+  ; so ein. Nach dem Löschen eines Schlüssels bleibt der Zähler stehen, weil
+  ; die folgenden nachrücken.
   StrCpy $0 0
   StrLen $4 "$APPDATA\moocp\plugins\"
+  IntOp $5 $4 + 1
   ${Do}
     EnumRegKey $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall" $0
     ${If} $1 == ""
@@ -382,7 +384,12 @@ Section "Uninstall"
     ${EndIf}
     ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1" "InstallLocation"
     StrCpy $3 $2 $4
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
+    StrCpy $6 $2 $4
+    StrCpy $7 $2 $5
     ${If} $3 == "$APPDATA\moocp\plugins\"
+    ${OrIf} $6 == "$APPDATA\moocp\plugins\"
+    ${OrIf} $7 == '"$APPDATA\moocp\plugins\'
       DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1"
     ${Else}
       IntOp $0 $0 + 1

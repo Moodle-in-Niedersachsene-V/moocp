@@ -209,6 +209,9 @@ Section
 
   WriteUninstaller "${UNINST_EXE}"
 
+  ; InstallLocation und UninstallString zeigen in den Plugin-Ordner: Daran
+  ; erkennt der Uninstaller von moocp den Eintrag eines Plugins und entfernt
+  ; ihn mit, wenn moocp vor dem Plugin deinstalliert wird.
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "moocp-Plugin ${ANZEIGENAME}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${HERAUSGEBER}"

@@ -101,7 +101,7 @@ void main() {
     });
 
     test('Claude Desktop (MSIX): höchste Version, als Zahl verglichen', () {
-      datei('$desktop/2.1.9/claude.exe');
+      datei(claudeProgramm);
       datei('$desktop/2.1.10/claude.exe');
       datei('$desktop/2.1.11/anderes.txt'); // Ordner ohne claude.exe zählt nicht
       datei('$desktop/neu/claude.exe'); // keine Versionsnummer
@@ -620,13 +620,20 @@ void main() {
       }));
       skillInstallieren(paket, skills('.lmstudio', 'moodle'));
 
-      var s = await pruefen(abgewaehlt: {'lmstudio'});
+      // Hier wird das Aufräumen eines vorhandenen Eintrags geprüft, unabhängig
+      // davon, ob die aktuelle Plattform Bionic automatisch anbietet.
+      Future<Einrichtungsstand> pruefenLm() => einrichtungPruefen(
+          umgebung: u, port: 47811, schluessel: 'abc', skills: [paket],
+          wahlSkills: appWahlSkills, abgewaehlt: {'lmstudio'},
+          gefunden: [ClaudeCode(u), LmStudio(u, bruecke: exe)],
+          python: () async => true);
+      var s = await pruefenLm();
       var w = s.werkzeuge.firstWhere((x) => x.werkzeug.id == 'lmstudio');
       expect(w.verbindung, Verbindung.aktuell);
       expect((w.brauchtEtwas, w.machbar), (true, true));
       skillEntfernen(skills('.lmstudio', 'moodle'));
       expect(await w.werkzeug.austragen(), isNull);
-      s = await pruefen(abgewaehlt: {'lmstudio'});
+      s = await pruefenLm();
       w = s.werkzeuge.firstWhere((x) => x.werkzeug.id == 'lmstudio');
       expect(w.brauchtEtwas, isFalse);
       expect(s.brauchtEtwas, isFalse);
@@ -740,7 +747,9 @@ void main() {
   });
 
   group('Entfernen beim Deinstallieren', () {
-    const desktop ='lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code';
+    final claudeProgramm = Platform.isWindows
+        ? 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.9/claude.exe'
+        : 'heim/.local/bin/claude';
     const fremd = {'type': 'http', 'url': 'http://127.0.0.1:2/mcp'};
     late Map<String, String> umgebung;
     late File konfig;
@@ -781,7 +790,7 @@ void main() {
         [ClaudeCode(umgebung)..ausfuehren = ausfuehren ?? claudeAttrappe, CodexCli(umgebung), LmStudio(umgebung)];
 
     test('Eintrag über claude.exe, Skills der App gelöscht, fremde bleiben', () async {
-      final exe = datei('$desktop/2.1.9/claude.exe').path;
+      final exe = datei(claudeProgramm).path;
       final e = await einrichtungEntfernen(umgebung: umgebung, skills: ['moodle', 'lernsituation'], werkzeuge: werkzeuge());
       expect(aufrufe, [
         [exe, 'mcp', 'remove', 'moodle', '--scope', 'user'],
@@ -801,7 +810,7 @@ void main() {
     }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
 
     test('Exit-Code 0 von claude.exe zählt nicht, nur der Eintrag danach', () async {
-      datei('$desktop/2.1.9/claude.exe');
+      datei(claudeProgramm);
       final e = await einrichtungEntfernen(
           umgebung: umgebung, skills: const [], werkzeuge: werkzeuge(ausfuehren: (_, _) async => 0));
       expect(e.code, 1);
@@ -860,7 +869,9 @@ void main() {
   });
 
   group('Profil löschen: Einträge in den Werkzeugen', () {
-    const claudeExe = 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.9/claude.exe';
+    final claudeExe = Platform.isWindows
+        ? 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.9/claude.exe'
+        : 'heim/.local/bin/claude';
     const macSkip = 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9';
     late Map<String, String> umgebung;
     late File konfig;

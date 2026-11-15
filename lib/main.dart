@@ -691,6 +691,12 @@ class _HauptseiteState extends State<Hauptseite> {
     if (mounted && Testzugang.fuer(_profil) == null) {
       await _gespeichertAnmelden();
     }
+    // Danach die übrigen Profile, ohne die Felder im Fenster anzufassen: Auch
+    // sie sind nach dem Start angemeldet, und ihr MCP-Server läuft.
+    if (!mounted || _instanzen.length < 2) return;
+    await (_startAnmeldung = weitereProfileAnmelden([..._instanzen], sichtbar: _aktiv));
+    await _mcpStarten();
+    if (mounted) setState(() {});
   }
 
   /// Das Update der App beim Start. Liefert true, wenn ein Installer läuft und
@@ -1346,6 +1352,10 @@ class _HauptseiteState extends State<Hauptseite> {
     }
   }
 
+  /// Die Anmeldung der nicht sichtbaren Profile beim Start
+  /// (weitereProfileAnmelden), solange sie läuft.
+  Future<void>? _startAnmeldung;
+
   Future<void> _profilWaehlen(int index) async {
     setState(() {
       _profilIndex = index;
@@ -1396,6 +1406,11 @@ class _HauptseiteState extends State<Hauptseite> {
       );
       if (mounted) setState(() => _meldung = d.speicherProblem);
     }
+    // Läuft die Anmeldung der übrigen Profile vom Start noch, erst sie
+    // abwarten: Sonst ginge dasselbe Passwort zweimal an Moodle, und ein
+    // falsches zählte dort doppelt als Fehlversuch (E7).
+    await _startAnmeldung;
+    if (!zielIstAktiv()) return;
     // Hier steht ohne Passwort kein Fehlversuch: Hat Moodle das gespeicherte
     // abgelehnt, hat _anmelden es verworfen, und dieser Wechsel meldet nicht
     // noch einmal damit an (E7) -- bis die Lehrkraft ein neues eingegeben hat.

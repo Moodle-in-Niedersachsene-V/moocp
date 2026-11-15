@@ -6,6 +6,7 @@ Everything on GitHub (issues, pull requests, commits, branch names, labels) is w
 
 ## Principles
 
+- An issue is assigned before anyone works on it, people and AI tools alike: assign it to yourself first, and never start on an issue assigned to someone else without talking to them and changing the assignment. This is how we avoid doing the same work twice.
 - One shared repository, no forks. Everyone with write access works on short-lived branches.
 - `main` is protected: changes only via pull request (PR), never a force-push, never a rewrite of history.
 - Everyone can start and build their own things without asking first. The only gate is the review before a merge.

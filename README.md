@@ -629,10 +629,43 @@ Der Workflow `experiment-builds.yml` läuft ausschließlich auf
 `experiment/github-actions-builds`, auf GitHub-hosted Standardrunnern
 (Ubuntu 24.04 und Windows Server 2022, jeweils x64). Flutter ist auf 3.50.0
 mit Dart 3.14 gepinnt. Er erzeugt zuerst die Skills, prüft den Lockfile,
-führt `flutter analyze` auf beiden Plattformen und die vollständige lokale
-Testsuite auf Windows aus und baut
+führt `flutter analyze` und die vollständige lokale Testsuite auf beiden
+Plattformen aus und baut
 Release-Bundles. Live-Tests gegen Moodle sind darin nicht enthalten;
 Zugangsdaten und Repository-Secrets werden nicht benötigt.
+
+Vom eigenen Laptop aus lässt sich der ganze Ablauf mit einem Befehl starten:
+
+```bash
+python3 tool/ci_bau.py linux
+# Windows (auch auf einem Linux-/Mac-Laptop anforderbar):
+python3 tool/ci_bau.py windows
+# Beide Plattformen:
+python3 tool/ci_bau.py both
+```
+
+Unter Windows heißt Python je nach Installation `python` statt `python3`.
+Voraussetzungen: Git, Python 3 und angemeldetes GitHub CLI mit Schreibrecht
+für `topse/moocp`; der Experiment-Branch muss ausgecheckt und der Arbeitsbaum
+sauber sein. Flutter und native Buildwerkzeuge werden auf dem Laptop nicht
+benötigt. Das Skript erzeugt einen leeren Auslöse-Commit, pusht ausschließlich
+diesen Branch, wartet auf genau dessen CI-Lauf und lädt die Archive nach
+`build/ci-downloads/<Commit>/<Plattform>/` auf **diesen Laptop** herunter.
+Es entpackt oder startet keine App und ersetzt keine Installation.
+`--output <Ordner>` wählt ein anderes Downloadziel; `--task tests` fordert nur
+Prüfungen an, `--task builds` nur Builds. Ohne Schalter werden beide geprüft
+und gebaut. Bei fehlgeschlagenem oder abgebrochenem CI-Lauf bricht das Skript
+ab und lädt kein Bundle. Den ausgegebenen Lauf-Link zur Diagnose öffnen.
+Ein anderer Benutzer kann dasselbe Artefakt mit den Downloadbefehlen unten
+herunterladen, ohne erneut zu bauen. Gleichzeitige Anforderungen können sich
+durch die Concurrency-Regel des Experiment-Branches abbrechen.
+
+Ein Release-Workflow kann später zusätzlich auf GitHub-hosted macOS-Runnern
+`.app`-Bundles erzeugen. Dadurch können beide Maintainer Linux-, Windows-
+und Mac-Builds vom eigenen Laptop anfordern. Für die Mac-Verteilung sind
+Signierung und Notarisierung einzurichten; für Windows ist die Signierung
+separat einzurichten. Das Experiment veröffentlicht keine Releases und baut
+noch keine Mac-Bundles.
 
 Ein Push auf diesen Branch startet beide Plattformen mit Tests und Builds.
 Die letzte Commit-Nachricht kann `[ci:linux]` oder `[ci:windows]` sowie
@@ -661,7 +694,7 @@ und dessen Artefakt herunterladen. Alternativ mit angemeldetem GitHub CLI
 gh run download RUN_ID -R topse/moocp -n moocp-linux-x64 -D download-linux
 mkdir -p moocp-experiment
 tar -xzf download-linux/moocp-linux-x64.tar.gz -C moocp-experiment
-./moocp-experiment/moocp-starten --kein-update
+./moocp-experiment/moocp --kein-update
 ```
 
 Das tar-Archiv bewahrt die Ausführungsrechte und enthält das gesamte Bundle
@@ -676,13 +709,10 @@ Der CI-Lauf prüft in einem frischen Debian-13-Container die dynamischen
 Bibliotheken und einen Start unter Xvfb. Das ersetzt keinen interaktiven
 Funktionstest von Schlüsselbund, Desktopintegration und Moodle-Anmeldung.
 Linux nutzt hier den von Flutter erzeugten Standardrunner und ist experimentell.
-Der Starthelfer setzt `APPDATA` auf `${XDG_CONFIG_HOME:-$HOME/.config}`, weil
-Teile der App noch den Windows-Einstellungsort erwarten. Dadurch liegen die
-Einstellungen unter `~/.config/moocp`, wenn XDG_CONFIG_HOME nicht gesetzt ist.
-Die vollständige Testsuite enthält Windows-Fixtures und läuft deshalb auf
-Windows; Linux erhält Analyse und die Debian-Startprüfung. Eine vollständige
-Linux-Portierung der Tests und Desktopintegration ist nicht Bestandteil dieses
-Experiments.
+Die App nutzt unter Linux `$XDG_CONFIG_HOME/moocp`, sonst `~/.config/moocp`,
+für Einstellungen, Sicherungen und Plugins. Relative oder leere XDG-Werte
+werden ignoriert. Ohne gültigen Benutzerordner bricht sie mit einem klaren
+Fehler ab, statt in einem temporären Ordner zu speichern.
 
 Für Windows 10/11 x64 in PowerShell:
 

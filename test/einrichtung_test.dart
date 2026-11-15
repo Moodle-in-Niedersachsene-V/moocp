@@ -159,7 +159,7 @@ void main() {
       };
 
   group('Claude Code: MCP-Eintrag', () {
-    ClaudeCode claude() => ClaudeCode({'USERPROFILE': tmp.path});
+    ClaudeCode claude() => ClaudeCode({Platform.isWindows ? 'USERPROFILE' : 'HOME': tmp.path});
     File konfig(Object inhalt) => datei('.claude.json', inhalt is String ? inhalt : jsonEncode(inhalt));
 
     test('aktuell, veraltet, fehlt, unlesbar', () {
@@ -196,10 +196,10 @@ void main() {
     });
 
     test('CLAUDE_CONFIG_DIR verlegt Einstellungen und Skills', () {
-      final o = ClaudeCode({'USERPROFILE': 'C:\\Users\\x', 'CLAUDE_CONFIG_DIR': 'D:\\claude'});
+      final o = ClaudeCode({Platform.isWindows ? 'USERPROFILE' : 'HOME': 'C:\\Users\\x', 'CLAUDE_CONFIG_DIR': 'D:\\claude'});
       expect(o.konfiguration.path, p.join('D:\\claude', '.claude.json'));
       expect(o.skillOrdner.path, p.join('D:\\claude', 'skills'));
-      final n = ClaudeCode({'USERPROFILE': 'C:\\Users\\x'});
+      final n = ClaudeCode({Platform.isWindows ? 'USERPROFILE' : 'HOME': 'C:\\Users\\x'});
       expect(n.konfiguration.path, p.join('C:\\Users\\x', '.claude.json'));
       expect(n.skillOrdner.path, p.join('C:\\Users\\x', '.claude', 'skills'));
     }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
@@ -309,10 +309,10 @@ void main() {
     });
 
     test('CODEX_HOME verlegt Konfiguration und Skills', () {
-      final c = CodexCli({'USERPROFILE': 'C:\\Users\\x', 'CODEX_HOME': 'D:\\codex'});
+      final c = CodexCli({Platform.isWindows ? 'USERPROFILE' : 'HOME': 'C:\\Users\\x', 'CODEX_HOME': 'D:\\codex'});
       expect(c.konfiguration.path, p.join('D:\\codex', 'config.toml'));
       expect(c.skillOrdner.path, p.join('D:\\codex', 'skills'));
-      expect(CodexCli({'USERPROFILE': 'C:\\Users\\x'}).skillOrdner.path, p.join('C:\\Users\\x', '.codex', 'skills'));
+      expect(CodexCli({Platform.isWindows ? 'USERPROFILE' : 'HOME': 'C:\\Users\\x'}).skillOrdner.path, p.join('C:\\Users\\x', '.codex', 'skills'));
     }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
   });
 
@@ -338,7 +338,7 @@ void main() {
           },
         };
     List gelesen() => (jsonDecode(File(p.join(tmp.path, pfad)).readAsStringSync()) as Map)['servers'] as List;
-    LmStudio lm() => LmStudio({'USERPROFILE': tmp.path}, bruecke: exe);
+    LmStudio lm() => LmStudio({Platform.isWindows ? 'USERPROFILE' : 'HOME': tmp.path}, bruecke: exe);
 
     test('fehlt, aktuell, veraltet, unlesbar', () {
       expect(lm().verbindung(0, ''), Verbindung.fehlt);
@@ -391,7 +391,7 @@ void main() {
     }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
 
     test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
-      final ohne = LmStudio({'USERPROFILE': tmp.path}, bruecke: p.join(tmp.path, 'weg', 'moocp-bruecke.exe'));
+      final ohne = LmStudio({Platform.isWindows ? 'USERPROFILE' : 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', 'moocp-bruecke.exe'));
       expect(await ohne.eintragen(47811, 'abc'), contains('moocp-bruecke.exe fehlt'));
       expect(File(p.join(tmp.path, pfad)).existsSync(), isFalse);
     });
@@ -414,7 +414,7 @@ void main() {
 
   group('gefunden', () {
     test('an Konfigurationsordnern oder Programmen', () {
-      final u = {'USERPROFILE': p.join(tmp.path, 'heim'), 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
+      final u = {'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim'), 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
       expect(gefundeneWerkzeuge(u), isEmpty);
       Directory(p.join(tmp.path, 'heim', '.codex')).createSync(recursive: true);
       expect(gefundeneWerkzeuge(u).map((w) => w.id), ['codex']);
@@ -422,12 +422,13 @@ void main() {
       expect(gefundeneWerkzeuge(u).map((w) => w.id), ['codex'], reason: 'LM Studio, aber Bionic lief nie');
       Directory(p.join(tmp.path, 'heim', '.lmstudio', 'apps', 'bionic')).createSync(recursive: true);
       datei('heim/.claude.json', '{}');
-      expect(gefundeneWerkzeuge(u).map((w) => w.id), ['claude', 'codex', 'lmstudio']);
+      expect(gefundeneWerkzeuge(u).map((w) => w.id), ['claude', 'codex', if (Platform.isWindows) 'lmstudio']);
     }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
 
-    test('Codex auch nur über npm', () {
-      datei('roaming/npm/codex.cmd');
-      expect(CodexCli({'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim'), 'APPDATA': p.join(tmp.path, 'roaming')}).gefunden,
+    test('Codex über ein Programm im Suchpfad', () {
+      final name = Platform.isWindows ? 'codex.cmd' : 'codex';
+      datei('roaming/npm/$name');
+      expect(CodexCli({'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim'), 'APPDATA': p.join(tmp.path, 'roaming'), 'PATH': p.join(tmp.path, 'roaming', 'npm')}).gefunden,
           isTrue);
     });
   });

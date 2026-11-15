@@ -79,9 +79,8 @@ jobs:
       - name: Analysis
         if: needs.select.outputs.task != 'builds'
         run: flutter analyze
-      # Die vollständige Suite verwendet Windows-Fixtures; Linux prüft Analyse und Bundle.
       - name: Complete test suite
-        if: matrix.platform == 'windows' && needs.select.outputs.task != 'builds'
+        if: needs.select.outputs.task != 'builds'
         run: flutter test --reporter expanded
       # Linux ist experimentell: Der Standardrunner wird nur im CI-Checkout erzeugt.
       - name: Linux runner
@@ -94,13 +93,6 @@ jobs:
         if: matrix.platform == 'linux' && needs.select.outputs.task != 'tests'
         run: |
           mkdir -p dist
-          cat > build/linux/x64/release/bundle/moocp-starten <<'SCRIPT'
-          #!/bin/sh
-          # Der experimentelle Linux-Bau erwartet noch den Windows-Einstellungsort.
-          export APPDATA="${XDG_CONFIG_HOME:-$HOME/.config}"
-          exec "$(dirname "$(readlink -f "$0")")/moocp" "$@"
-          SCRIPT
-          chmod +x build/linux/x64/release/bundle/moocp-starten
           tar -czf dist/moocp-linux-x64.tar.gz -C build/linux/x64/release/bundle .
       - name: Debian 13 runtime check
         if: matrix.platform == 'linux' && needs.select.outputs.task != 'tests'
@@ -113,7 +105,7 @@ jobs:
             cat /tmp/ldd.txt
             ! grep -q "not found" /tmp/ldd.txt
             set +e
-            xvfb-run -a timeout 15s ./moocp-starten --kein-update > /tmp/start.log 2>&1
+            xvfb-run -a timeout 15s ./moocp --kein-update > /tmp/start.log 2>&1
             result=$?
             cat /tmp/start.log
             test "$result" = 124

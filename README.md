@@ -669,7 +669,7 @@ mit `lib/` und `data/`; diese Ordner zusammenlassen. Unter Debian 13 x64
 benötigt es eine grafische Sitzung sowie folgende Laufzeitpakete:
 
 ```bash
-sudo apt-get install libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6
+sudo apt-get install libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6 libegl1 libgles2 libgl1-mesa-dri
 ```
 
 Der CI-Lauf prüft in einem frischen Debian-13-Container die dynamischen

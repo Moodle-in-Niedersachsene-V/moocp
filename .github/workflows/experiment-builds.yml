@@ -107,7 +107,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/build/linux/x64/release/bundle:/bundle:ro" debian:13 bash -euxc '
             apt-get update
-            apt-get install -y libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6 xvfb xauth
+            apt-get install -y libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6 libegl1 libgles2 libgl1-mesa-dri xvfb xauth
             cd /bundle
             find . -type f \( -name "*.so" -o -name moocp \) -exec ldd {} \; > /tmp/ldd.txt
             cat /tmp/ldd.txt

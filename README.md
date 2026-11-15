@@ -629,7 +629,8 @@ Der Workflow `experiment-builds.yml` läuft ausschließlich auf
 `experiment/github-actions-builds`, auf GitHub-hosted Standardrunnern
 (Ubuntu 24.04 und Windows Server 2022, jeweils x64). Flutter ist auf 3.50.0
 mit Dart 3.14 gepinnt. Er erzeugt zuerst die Skills, prüft den Lockfile,
-führt `flutter analyze` und die vollständige lokale Testsuite aus und baut
+führt `flutter analyze` auf beiden Plattformen und die vollständige lokale
+Testsuite auf Windows aus und baut
 Release-Bundles. Live-Tests gegen Moodle sind darin nicht enthalten;
 Zugangsdaten und Repository-Secrets werden nicht benötigt.
 
@@ -660,7 +661,7 @@ und dessen Artefakt herunterladen. Alternativ mit angemeldetem GitHub CLI
 gh run download RUN_ID -R topse/moocp -n moocp-linux-x64 -D download-linux
 mkdir -p moocp-experiment
 tar -xzf download-linux/moocp-linux-x64.tar.gz -C moocp-experiment
-./moocp-experiment/moocp --kein-update
+./moocp-experiment/moocp-starten --kein-update
 ```
 
 Das tar-Archiv bewahrt die Ausführungsrechte und enthält das gesamte Bundle
@@ -675,6 +676,13 @@ Der CI-Lauf prüft in einem frischen Debian-13-Container die dynamischen
 Bibliotheken und einen Start unter Xvfb. Das ersetzt keinen interaktiven
 Funktionstest von Schlüsselbund, Desktopintegration und Moodle-Anmeldung.
 Linux nutzt hier den von Flutter erzeugten Standardrunner und ist experimentell.
+Der Starthelfer setzt `APPDATA` auf `${XDG_CONFIG_HOME:-$HOME/.config}`, weil
+Teile der App noch den Windows-Einstellungsort erwarten. Dadurch liegen die
+Einstellungen unter `~/.config/moocp`, wenn XDG_CONFIG_HOME nicht gesetzt ist.
+Die vollständige Testsuite enthält Windows-Fixtures und läuft deshalb auf
+Windows; Linux erhält Analyse und die Debian-Startprüfung. Eine vollständige
+Linux-Portierung der Tests und Desktopintegration ist nicht Bestandteil dieses
+Experiments.
 
 Für Windows 10/11 x64 in PowerShell:
 

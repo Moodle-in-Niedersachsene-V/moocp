@@ -1,6 +1,6 @@
 # Changelog
 
-## Kommende Version
+## 0.13.0
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.
 

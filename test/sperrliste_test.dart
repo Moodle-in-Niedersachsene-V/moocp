@@ -2,8 +2,10 @@
 // Browser-Skills (pruefe-sperrliste.cjs); dazu die Dateibereiche unter
 // pluginfile.php und die Gegenprobe gegen die Positivliste der App.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/moodle/browserliste.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/moodle/sperrliste.dart';
+import 'package:moocp/plugin/moodle_lesen.dart' show PluginAufrufer;
 import 'package:moocp/protokoll.dart';
 
 const mussSperren = [
@@ -232,6 +234,71 @@ void main() {
         }
       },
     );
+  });
+
+  group('Ausnahme Teilnehmendenseite, nur für die letzte Sperre (E36)', () {
+    const basis = 'https://m.example';
+    const genau = '/user/index.php?id=12&perpage=5000&tifirst=&tilast=';
+    Uri u(String a) => Uri.parse('$basis$a');
+
+    test('genau diese Form: für die letzte Sperre erlaubt, für alle anderen gesperrt', () {
+      final z = MoodleZugang(Protokoll());
+      expect(sperrregelFuerNamenssperre(u(genau)), isNull);
+      expect(z.erlaubtFuerNamenssperre(u(genau)), isTrue);
+      // Die eingebauten Werkzeuge, Plugins (roh und als lesende Regel) und
+      // der Browser der Bildschirmfotos bekommen sie nicht.
+      expect(gesperrt(u(genau)), isTrue);
+      expect(z.erlaubt('GET', u(genau)), isFalse);
+      expect(z.erlaubtZumLesen(u(genau)), isFalse);
+      final plugin = PluginAufrufer(z, 'Plugin „Beispiel“');
+      expect(plugin.gesperrtDurch(u(genau)), isNotNull);
+      final (weg, _) = browserPruefen('GET', u(genau), basis: Uri.parse(basis), seiten: {'$basis$genau'}, dokument: true);
+      expect(weg, isNot(BrowserWeg.ueberApp));
+    });
+
+    test('jede andere Form und jede andere Seite zu Personen bleibt auch für die letzte Sperre gesperrt', () {
+      final z = MoodleZugang(Protokoll());
+      for (final a in [
+        '/user/index.php?id=12',
+        '/user/index.php?id=12&perpage=5000',
+        '/user/index.php?id=12&perpage=20&tifirst=&tilast=',
+        '/user/index.php?id=12&perpage=5000&tifirst=A&tilast=',
+        '/user/index.php?id=12&perpage=5000&tifirst=&tilast=&roleid=5',
+        '/user/index.php?id=0&perpage=5000&tifirst=&tilast=',
+        '/user/index.php?perpage=5000&id=12&tifirst=&tilast=',
+        '/user/index.php?id=12&id=13&perpage=5000&tifirst=&tilast=',
+        '/user/view.php?id=7&course=12',
+        '/user/profile.php?id=7',
+        '/user/index.php/x?id=12&perpage=5000&tifirst=&tilast=',
+        '/grade/report/grader/index.php?id=12',
+        '/enrol/users.php?id=12',
+      ]) {
+        expect(sperrregelFuerNamenssperre(u(a)), isNotNull, reason: a);
+      }
+      // Die Positivliste für die letzte Sperre ist ebenso eng.
+      for (final a in [
+        '/user/index.php?id=12&perpage=5000',
+        '/user/index.php?id=12&perpage=5000&tifirst=&tilast=&x=1',
+        '/user/index.php?id=12&id=13&perpage=5000&tifirst=&tilast=',
+        '/user/index.php?id=x&perpage=5000&tifirst=&tilast=',
+        '/course/view.php?id=12',
+      ]) {
+        expect(z.erlaubtFuerNamenssperre(u(a)), isFalse, reason: a);
+      }
+    });
+
+    test('genau eine Regel der Positivliste ist für die letzte Sperre, und sie gilt für sonst niemanden', () {
+      final regeln = MoodleZugang(Protokoll()).positivliste.where((e) => e.nurNamenssperre).toList();
+      expect(regeln, hasLength(1));
+      expect(regeln.single.methode, 'GET');
+      expect(regeln.single.pfad, r'^/user/index\.php$');
+      expect(regeln.single.lesend, isFalse);
+      // Keine Adresse, die die Werkzeuge brauchen, hängt an ihr.
+      final z = MoodleZugang(Protokoll());
+      for (final a in werkzeugGet) {
+        expect(z.erlaubtFuerNamenssperre(u(a)), isFalse, reason: a);
+      }
+    });
   });
 
   test('Protokoll ohne Parameterwerte', () {

@@ -28,6 +28,7 @@ import 'dart:math';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
+import 'plattform/kindprozess.dart';
 import 'plattform/signatur_mac.dart';
 import 'plattform/signatur_windows.dart';
 
@@ -38,12 +39,16 @@ const skillAssets = 'skills/dist/';
 /// Der Name des MCP-Eintrags in jedem KI-Werkzeug.
 const mcpName = 'moodle';
 
-/// Skills, die die Lehrkraft im Dialog „KI-Werkzeuge einrichten" wählt, mit
-/// dem Satz, der dort dabeisteht. Alle anderen Skills der App sind immer
-/// dabei. lernsituation ist für berufsbildende Schulen gebaut; anderswo
+/// Skills der App, die die Lehrkraft im Dialog „KI-Werkzeuge einrichten"
+/// wählt, mit dem Satz, der dort dabeisteht. Alle anderen Skills der App sind
+/// immer dabei. lernsituation ist für berufsbildende Schulen gebaut; anderswo
 /// stünde er nur im Weg, denn seine Beschreibung zieht bei jedem
 /// „Arbeitsblatt".
-const wahlSkills = {
+///
+/// Die Einrichtung liest diese Liste nicht selbst, sondern bekommt die
+/// wählbaren Skills als Daten (`wahlSkills`) von ihrem Aufrufer (main.dart);
+/// so muss sie nicht wissen, woher ein Skill kommt.
+const appWahlSkills = {
   'lernsituation': 'Für berufsbildende Schulen: Lernsituationen mit SchuCu-Tabelle, Ablaufplan, Arbeits- '
       'und Informationsblättern entwerfen.',
 };
@@ -490,7 +495,7 @@ class ClaudeCode extends KiWerkzeug {
 /// Ausgabe wird gelesen (sonst kann ein voller Puffer den Prozess anhalten)
 /// und verworfen.
 Future<int> _ausfuehren(String programm, List<String> argumente) async {
-  final pr = await Process.start(programm, argumente);
+  final pr = await prozessStarten(programm, argumente);
   unawaited(pr.stdout.drain<void>());
   unawaited(pr.stderr.drain<void>());
   return pr.exitCode.timeout(const Duration(minutes: 1), onTimeout: () {
@@ -921,8 +926,8 @@ List<KiWerkzeug> gefundeneWerkzeuge(Map<String, String> umgebung) =>
 /// wählbaren, die in einem der Werkzeuge schon installiert sind. So entfernt
 /// ein Update nichts, was jemand bisher benutzt hat; wer neu anfängt, hat
 /// keinen.
-Set<String> gewaehltVorgabe(Map<String, String> umgebung) => {
-      for (final n in wahlSkills.keys)
+Set<String> gewaehltVorgabe(Map<String, String> umgebung, Iterable<String> wahlNamen) => {
+      for (final n in wahlNamen)
         if (gefundeneWerkzeuge(umgebung).any((w) => skillInstalliert(w, n))) n,
     };
 
@@ -934,23 +939,67 @@ bool skillInstalliert(KiWerkzeug w, String name) => File(p.join(w.skillOrdner.pa
 // Die Skills
 // ---------------------------------------------------------------------------
 
-/// Ein Skill, wie ihn die App mitbringt: Name und Dateien (Pfad mit „/"
-/// relativ zum Skill-Ordner, Inhalt).
+/// Woher ein Skill-Paket kommt. Die Herkunft muss jedes Paket angeben, damit
+/// kein Paket stillschweigend als das der App gilt.
+enum SkillHerkunft {
+  /// Die App selbst: die Pakete von skills/build.py unter [skillAssets].
+  app,
+
+  /// Ein Plugin, dem die Lehrkraft zugestimmt hat (plugin/skills.dart).
+  plugin,
+}
+
+final RegExp _skillName = RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$');
+
+/// Ob [name] als Name eines Skills taugt: Kleinbuchstaben, Ziffern und
+/// einzelne Bindestriche, wie bei den Skills der App. Der Name wird zum
+/// Ordnernamen im Skill-Ordner jedes KI-Werkzeugs; was hier durchgeht, kann
+/// keinen Pfad nach außen bilden („..", Trenner, Laufwerk). Jeder Name, der
+/// nicht von der App selbst kommt (Beschreibungsdatei eines Plugins, gemerkte
+/// Namen in den Einstellungen), muss hier durch, bevor er einen Pfad bildet.
+bool skillNameGueltig(String name) => name.length <= 64 && _skillName.hasMatch(name);
+
+/// Ein Skill, wie ihn die Einrichtung installiert: Name, Herkunft und Dateien
+/// (Pfad mit „/" relativ zum Skill-Ordner, Inhalt).
 class SkillPaket {
-  SkillPaket(this.name, this.dateien);
+  SkillPaket(this.name, this.dateien, {required this.herkunft, this.plugin});
   final String name;
   final Map<String, List<int>> dateien;
+  final SkillHerkunft herkunft;
+
+  /// Bei einem Skill eines Plugins dessen Anzeigename, für den Dialog.
+  final String? plugin;
 
   /// Liest ein Paket von skills/build.py: ein ZIP mit dem Ordner `<name>/`.
-  factory SkillPaket.ausZip(String name, List<int> zip) {
+  factory SkillPaket.ausZip(String name, List<int> zip, {required SkillHerkunft herkunft}) {
     final dateien = <String, List<int>>{};
     for (final f in ZipDecoder().decodeBytes(zip)) {
       if (!f.isFile || !f.name.startsWith('$name/')) continue;
       dateien[f.name.substring(name.length + 1)] = f.content;
     }
-    return SkillPaket(name, dateien);
+    return SkillPaket(name, dateien, herkunft: herkunft);
   }
 }
+
+/// Alle Skill-Pakete, die die Einrichtung kennt, aus jeder Herkunft: die
+/// Einrichtung beim Start wie das Entfernen bei der Deinstallation
+/// (`--claude-entfernen`) fragen hier und nirgends sonst, damit beide
+/// dieselben Skills meinen.
+///
+/// Die Pakete der App sind die `*.skill` unter [skillAssets], der Name ist der
+/// Dateiname ohne Endung. [appAssets] sind die Pfade aller Assets der App und
+/// [laden] liest eines; beides reicht der Aufrufer herein (main.dart: das
+/// AssetManifest und der rootBundle), weil dieser Code ohne Flutter laufen
+/// muss -- die Brücke (mcp/bruecke.dart) bindet ihn ein.
+Future<List<SkillPaket>> skillPaketeFinden({
+  required Iterable<String> appAssets,
+  required Future<List<int>> Function(String asset) laden,
+}) async =>
+    [
+      for (final a in appAssets)
+        if (a.startsWith(skillAssets) && a.endsWith('.skill'))
+          SkillPaket.ausZip(p.basenameWithoutExtension(a), await laden(a), herkunft: SkillHerkunft.app),
+    ];
 
 class SkillStand {
   SkillStand({this.fehlend = 0, this.abweichend = 0, this.ueberzaehlig = 0, this.ordnerFehlt = false});
@@ -974,10 +1023,17 @@ class SkillStand {
 // Windows unterscheidet bei Pfaden nicht nach Groß- und Kleinschreibung.
 String _schluessel(String rel) => rel.replaceAll('\\', '/').toLowerCase();
 
+/// Die Dateien in einem installierten Skill. Verknüpfungen darin folgt die
+/// App nicht: Was hinter ihnen liegt, gehört nicht zum Skill, und Aufräumen
+/// löschte sonst dort.
 Map<String, File> _vorhandene(Directory ziel) => {
-      for (final f in ziel.listSync(recursive: true).whereType<File>())
+      for (final f in ziel.listSync(recursive: true, followLinks: false).whereType<File>())
         _schluessel(p.relative(f.path, from: ziel.path)): f,
     };
+
+/// Ob unter [pfad] ein echter Ordner liegt, keine Verknüpfung und keine Datei.
+bool _echterOrdner(String pfad) =>
+    FileSystemEntity.typeSync(pfad, followLinks: false) == FileSystemEntityType.directory;
 
 bool _gleich(List<int> a, List<int> b) {
   if (a.length != b.length) return false;
@@ -1015,11 +1071,21 @@ SkillStand skillVergleichen(SkillPaket paket, Directory ziel) {
 /// nicht zum Paket gehören (etwa aus der alten Browser-Version), werden
 /// einzeln entfernt, leer gewordene Unterordner danach. Liefert die Pfade,
 /// die sich nicht entfernen ließen.
+///
+/// Ist [ziel] selbst eine Verknüpfung, schreibt es durch sie hindurch: Für die
+/// Skills der App ist das gewollt (ein Entwickler legt den Skill-Ordner etwa
+/// auf das Repository und bekommt dort die Dateien des Pakets); bei Skills von
+/// Plugins kommt es nicht dazu, denn dort gilt eine Verknüpfung an der Stelle
+/// des Skill-Ordners als fremder Ordner ([einrichtungPruefen]). Beim
+/// Auflisten und Aufräumen darin folgt es keiner Verknüpfung ([_vorhandene]).
 List<String> skillInstallieren(SkillPaket paket, Directory ziel) {
   ziel.createSync(recursive: true);
   final gewollt = <String>{};
   for (final e in paket.dateien.entries) {
     final f = File(p.joinAll([ziel.path, ...e.key.split('/')]));
+    // Steht an der Stelle einer Datei des Pakets eine Verknüpfung, schriebe
+    // die App sonst durch sie hindurch; entfernt wird nur die Verknüpfung.
+    if (FileSystemEntity.isLinkSync(f.path)) Link(f.path).deleteSync();
     f.parent.createSync(recursive: true);
     f.writeAsBytesSync(e.value, flush: true);
     gewollt.add(_schluessel(e.key));
@@ -1029,8 +1095,18 @@ List<String> skillInstallieren(SkillPaket paket, Directory ziel) {
 
 /// Entfernt einen installierten Skill: jede Datei einzeln, dann den Ordner,
 /// wenn er leer ist -- ein laufendes KI-Werkzeug hält ihn offen, leer schadet
-/// er nicht. Liefert die Dateien, die sich nicht löschen ließen.
+/// er nicht. Liefert die Dateien, die sich nicht löschen ließen. Ist der
+/// Skill-Ordner selbst eine Verknüpfung, entfernt es nur sie, nie, was
+/// dahinter liegt.
 List<String> skillEntfernen(Directory ziel) {
+  if (FileSystemEntity.isLinkSync(ziel.path)) {
+    try {
+      Link(ziel.path).deleteSync();
+      return const [];
+    } on FileSystemException {
+      return [p.basename(ziel.path)];
+    }
+  }
   if (!ziel.existsSync()) return const [];
   final geblieben = _aufraeumen(ziel, const {});
   try {
@@ -1043,7 +1119,8 @@ List<String> skillEntfernen(Directory ziel) {
 
 /// Löscht in [ziel] jede Datei, die nicht in [behalten] steht, einzeln, dann
 /// die leer gewordenen Unterordner. Liefert die Dateien, die sich nicht
-/// löschen ließen.
+/// löschen ließen. Verknüpfungen folgt es nicht; es entfernt sie selbst, nie,
+/// was dahinter liegt.
 List<String> _aufraeumen(Directory ziel, Set<String> behalten) {
   final geblieben = <String>[];
   for (final e in _vorhandene(ziel).entries) {
@@ -1054,7 +1131,14 @@ List<String> _aufraeumen(Directory ziel, Set<String> behalten) {
       geblieben.add(e.key);
     }
   }
-  final ordner = ziel.listSync(recursive: true).whereType<Directory>().toList()
+  for (final l in ziel.listSync(recursive: true, followLinks: false).whereType<Link>()) {
+    try {
+      l.deleteSync();
+    } on FileSystemException {
+      geblieben.add(_schluessel(p.relative(l.path, from: ziel.path)));
+    }
+  }
+  final ordner = ziel.listSync(recursive: true, followLinks: false).whereType<Directory>().toList()
     ..sort((a, b) => b.path.length.compareTo(a.path.length));
   for (final d in ordner) {
     try {
@@ -1107,13 +1191,18 @@ class Entfernt {
 
 /// Entfernt, was die App in den KI-Werkzeugen eingerichtet hat: die
 /// Einträge [mcpNamen] (je Instanzprofil einer, E31) und die Skills
-/// [skills], in jedem Werkzeug. Danach wird nachgesehen, statt dem Ergebnis
-/// zu glauben.
+/// der App [skills] in jedem Werkzeug, dazu die gemerkten Ordner der Plugins
+/// [pluginOrdner] ([pluginSkillsGemerkt]) nur in ihrem Werkzeug. Danach wird
+/// nachgesehen, statt dem Ergebnis zu glauben. Ein Name, der kein Skill-Name
+/// sein kann ([skillNameGueltig]), bildet keinen Pfad und wird übergangen,
+/// ebenso ein fremder Ordner aus [auslassen] ([fremderOrdner]).
 Future<Entfernt> einrichtungEntfernen({
   required Map<String, String> umgebung,
   required List<String> skills,
+  Set<String> pluginOrdner = const {},
   List<String> mcpNamen = const [mcpName],
   List<KiWerkzeug>? werkzeuge,
+  Set<String> auslassen = const {},
 }) async {
   final geblieben = <String>[];
   final eintraege = <String>[];
@@ -1124,7 +1213,13 @@ Future<Entfernt> einrichtungEntfernen({
         eintraege.add(mcpNamen.length > 1 ? '${w.id} ($eintrag)' : w.id);
       }
     }
-    for (final name in skills) {
+    final hier = {
+      ...skills,
+      for (final e in pluginOrdner)
+        if (werkzeugSkillGueltig(e) && e.split('/')[0] == w.id) e.split('/')[1],
+    };
+    for (final name in hier.where(skillNameGueltig)) {
+      if (auslassen.contains(fremderOrdner(w.id, name))) continue;
       geblieben.addAll(skillEntfernen(Directory(p.join(w.skillOrdner.path, name))).map((f) => '${w.id}: $name/$f'));
     }
   }
@@ -1210,8 +1305,9 @@ class Werkzeugstand {
   /// Stand je Skill, auch der nicht gewollten.
   final Map<String, SkillStand> stand;
 
-  /// Skills, die hier weg sollen: die abgewählten, und bei einem abgewählten
-  /// Werkzeug alle.
+  /// Skills, die hier weg sollen: die abgewählten, bei einem abgewählten
+  /// Werkzeug alle, und in jedem Werkzeug die verwaisten Skills von Plugins
+  /// (`verwaist` in [einrichtungPruefen]).
   final Set<String> entfernen;
 
   bool get verbunden => verbindung == Verbindung.aktuell;
@@ -1245,24 +1341,53 @@ class Einrichtungsstand {
     required this.werkzeuge,
     required this.skills,
     required this.python,
+    this.wahlSkills = const {},
     this.gewaehlt = const {},
+    this.skillFehler = const [],
+    this.skillFehlerNeu = false,
+    this.fremdeOrdner = const {},
+    this.konfliktStand = const {},
   });
+
+  /// Die fremden Ordner mit dem Namen eines Plugin-Skills ([einrichtungPruefen],
+  /// [fremderOrdner]): Die App merkt sie sich (Einstellungen.fremdeSkillOrdner)
+  /// und gibt sie der nächsten Prüfung mit.
+  final Set<String> fremdeOrdner;
+
+  /// Je fremdem Ordner ein Stand für Einstellungen.skillFehlerGesehen; ein
+  /// gesehener öffnet den Dialog nicht noch einmal.
+  final Set<String> konfliktStand;
 
   /// Je gefundenes KI-Werkzeug ein Stand; leer, wenn keines gefunden wurde.
   final List<Werkzeugstand> werkzeuge;
 
-  /// Alle Skills, die die App mitbringt.
+  /// Alle Skills, die die Einrichtung kennt ([skillPaketeFinden]).
   final List<SkillPaket> skills;
 
   final bool python;
 
+  /// Die wählbaren Skills mit dem Satz, der im Dialog dabeisteht; alle anderen
+  /// in [skills] sind immer dabei.
+  final Map<String, String> wahlSkills;
+
   /// Die gewählten unter den [wahlSkills].
   final Set<String> gewaehlt;
 
+  /// Skill-Pakete von Plugins, die nicht installiert werden, weil sie sich
+  /// nicht lesen lassen oder eine Regel brechen, und Plugin-Skills, die in
+  /// einem Werkzeug wegen eines fremden Ordners gleichen Namens fehlen: je
+  /// eines ein Satz mit Plugin und Grund, ohne Inhalte (E11). Sie halten
+  /// nichts auf; der Dialog nennt sie nur.
+  final List<String> skillFehler;
+
+  /// Ob unter [skillFehler] etwas ist, das die Lehrkraft noch nicht gesehen
+  /// hat (Einstellungen.skillFehlerGesehen): Dann erscheint der Dialog beim
+  /// Start auch, wenn sonst alles eingerichtet ist.
+  final bool skillFehlerNeu;
+
   /// Was installiert sein soll: jeder Skill, der nicht wählbar ist, und die
   /// gewählten.
-  List<SkillPaket> get gewollt =>
-      [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+  List<SkillPaket> get gewollt => _gewollt(skills, wahlSkills, gewaehlt);
 
   /// Ob mindestens ein Werkzeug fertig eingerichtet ist. Nur dann läuft die
   /// App (einrichtung_dialog.dart): Für Claude, Codex und LM Studio
@@ -1271,50 +1396,201 @@ class Einrichtungsstand {
   /// nicht.
   bool get bereit => werkzeuge.any((w) => w.fertig);
 
-  /// Ob der Dialog erscheinen muss. Python allein zählt nicht: Das kann die
-  /// App nicht beheben, der Hinweis stünde sonst bei jedem Start da.
-  bool get brauchtEtwas => !bereit || werkzeuge.any((w) => w.brauchtEtwas);
+  /// Ob an Verbindung oder Skills noch etwas zu tun ist.
+  bool get brauchtEinrichtung => !bereit || werkzeuge.any((w) => w.brauchtEtwas);
+
+  /// Ob der Dialog erscheinen muss: weil etwas zu tun ist oder weil ein
+  /// unbrauchbares Skill-Paket eines Plugins noch nicht gesehen ist
+  /// ([skillFehlerNeu]). Python allein zählt nicht: Das kann die App nicht
+  /// beheben, der Hinweis stünde sonst bei jedem Start da.
+  bool get brauchtEtwas => brauchtEinrichtung || skillFehlerNeu;
 
   /// Ob „Installieren" etwas bewirken kann.
   bool get einrichtbar => werkzeuge.any((w) => w.brauchtEtwas && w.machbar);
+
+  /// Ob in irgendeinem KI-Werkzeug schon etwas von der App steht: ein Eintrag
+  /// (auch ein veralteter) oder der Ordner eines Skills. Dann heißt der Knopf
+  /// im Dialog „Aktualisieren" statt „Installieren" -- er bringt auf Stand
+  /// oder entfernt, statt zum ersten Mal einzurichten.
+  bool get schonEingerichtet => werkzeuge.any(
+        (w) => w.verbindung != Verbindung.fehlt || w.stand.values.any((s) => !s.ordnerFehlt),
+      );
 }
 
+/// Was installiert sein soll: jeder Skill, der nicht in [wahlSkills] steht, und
+/// die gewählten.
+List<SkillPaket> _gewollt(List<SkillPaket> skills, Map<String, String> wahlSkills, Set<String> gewaehlt) =>
+    [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+
+/// Prüft jedes gefundene KI-Werkzeug. [skills] sind alle Skills, die es gibt
+/// ([skillPaketeFinden] und die der Plugins); [wahlSkills] die darunter
+/// wählbaren mit dem Satz für den Dialog, [gewaehlt] die davon gewählten. Ein
+/// Skill, der nicht in [wahlSkills] steht, ist immer gewollt.
+///
+/// [verwaist] sind Skills, die die App für ein Plugin installiert hat, das
+/// abgelehnt oder nicht mehr da ist (plugin/skills.dart, verwaisteSkills): Sie
+/// werden in jedem Werkzeug, in dem sie stehen, zum Entfernen angeboten, auch
+/// in einem abgewählten. [skillFehler] reicht der Dialog nur weiter;
+/// [skillFehlerNeu] sagt, ob darunter Ungesehenes ist.
+///
+/// Fremde Ordner ([fremdeOrdner]): Im Skill-Ordner eines KI-Werkzeugs kann
+/// schon ein Ordner mit dem Namen eines Plugin-Skills liegen, den nicht moocp
+/// angelegt hat. Ihn überschreibt die Einrichtung nicht und räumt ihn nicht
+/// auf; der Dialog nennt ihn, ohne die Einrichtung aufzuhalten, wie ein
+/// unbrauchbares Paket. Fremd ist ein Ordner, wenn er vom Paket abweicht und
+/// moocp ihn nicht in genau diesem Werkzeug installiert hat ([pluginSkills],
+/// je Werkzeug, [werkzeugSkill], [pluginSkillsGemerkt]), oder wenn er in diesem Werkzeug
+/// schon einmal fremd war ([fremd], die Liste aus der letzten Prüfung). Ein
+/// verwaister Skill kommt nur dort zum Entfernen, wo moocp ihn installiert
+/// hat. Eine Verknüpfung an seiner Stelle ist immer fremd; die App folgt ihr
+/// nicht. Fremd ist er nicht mehr, wenn er fehlt
+/// oder genau dem Paket entspricht. Für die Skills der App ändert sich nichts.
+/// [gesehen] sind die Stände, die die Lehrkraft gesehen hat
+/// (Einstellungen.skillFehlerGesehen); ein neuer fremder Ordner öffnet den
+/// Dialog wie ein neues unbrauchbares Paket.
 Future<Einrichtungsstand> einrichtungPruefen({
   required Map<String, String> umgebung,
   required int port,
   required String schluessel,
   String name = mcpName,
   required List<SkillPaket> skills,
+  required Map<String, String> wahlSkills,
   Set<String> abgewaehlt = const {},
   Set<String> gewaehlt = const {},
+  Set<String> verwaist = const {},
+  Set<String> pluginSkills = const {},
+  Set<String> fremd = const {},
+  Set<String> gesehen = const {},
+  List<String> skillFehler = const [],
+  bool skillFehlerNeu = false,
   Future<bool> Function() python = pythonVorhanden,
   List<KiWerkzeug>? gefunden,
 }) async {
-  final gewollt = [for (final s in skills) if (!wahlSkills.containsKey(s.name) || gewaehlt.contains(s.name)) s];
+  final gewollt = _gewollt(skills, wahlSkills, gewaehlt);
+  // Was als Paket da ist, entscheidet die Wahl, nicht die Liste der
+  // Verwaisten; ein Name, der kein Skill-Name ist, bildet keinen Pfad.
+  final weg = [
+    for (final n in verwaist)
+      if (skillNameGueltig(n) && !skills.any((s) => s.name == n)) n,
+  ];
   final liste = gefunden ?? gefundeneWerkzeuge(umgebung);
   // Gewählt ist jedes gefundene Werkzeug, das die Lehrkraft nicht abgewählt
   // hat. Wer ein KI-Werkzeug auf dem Rechner hat, soll damit auch in Moodle
   // arbeiten können, ohne es erst zu erlauben -- auch eines, das erst nach
   // der App dazukam. Abwählen kann es jeder im Dialog, und die Wahl bleibt.
   final gewaehlteWerkzeuge = {for (final w in liste) if (!abgewaehlt.contains(w.id)) w.id};
+  final fremdeOrdner = <String>{};
+  final konflikte = <String>[];
+  final werkzeuge = <Werkzeugstand>[];
+  // Ob moocp den Ordner [n] in [w] für ein Plugin installiert hat (je
+  // Werkzeug gemerkt).
+  bool eigen(String w, String n) => pluginSkills.contains(werkzeugSkill(w, n));
+  for (final w in liste) {
+    final stand = {for (final s in skills) s.name: skillVergleichen(s, Directory(p.join(w.skillOrdner.path, s.name)))};
+    bool istFremd(SkillPaket s) {
+      if (s.herkunft != SkillHerkunft.plugin) return false;
+      final pfad = p.join(w.skillOrdner.path, s.name);
+      final typ = FileSystemEntity.typeSync(pfad, followLinks: false);
+      if (typ == FileSystemEntityType.notFound) return false;
+      if (typ != FileSystemEntityType.directory) return true;
+      if (stand[s.name]!.aktuell) return false;
+      return !eigen(w.id, s.name) || fremd.contains(fremderOrdner(w.id, s.name));
+    }
+
+    final fremdHier = {for (final s in skills) if (istFremd(s)) s.name};
+    for (final s in skills.where((s) => fremdHier.contains(s.name))) {
+      fremdeOrdner.add(fremderOrdner(w.id, s.name));
+      konflikte.add(
+        '${w.name}: Den Ordner ${s.name} im Skill-Ordner gibt es schon, und er stammt nicht von moocp. Der Skill '
+        '${s.name} des Plugins „${s.plugin ?? s.name}“ wird dort nicht installiert; der Ordner bleibt, wie er ist.',
+      );
+    }
+    werkzeuge.add(
+      Werkzeugstand(
+        werkzeug: w,
+        gewaehlt: gewaehlteWerkzeuge.contains(w.id),
+        verbindung: w.verbindung(port, schluessel, name: name),
+        skills: gewaehlteWerkzeuge.contains(w.id) ? [for (final s in gewollt) if (!fremdHier.contains(s.name)) s] : const [],
+        stand: stand,
+        entfernen: {
+          for (final s in skills)
+            if (!fremdHier.contains(s.name) &&
+                skillInstalliert(w, s.name) &&
+                (!gewaehlteWerkzeuge.contains(w.id) || !gewollt.contains(s)))
+              s.name,
+          // Verwaiste Plugin-Skills nur aus einem echten Ordner, den moocp in
+          // diesem Werkzeug installiert hat und der nicht als fremd bekannt
+          // ist.
+          for (final n in weg)
+            if (skillInstalliert(w, n) &&
+                eigen(w.id, n) &&
+                _echterOrdner(p.join(w.skillOrdner.path, n)) &&
+                !fremd.contains(fremderOrdner(w.id, n)))
+              n,
+        },
+      ),
+    );
+  }
+  final konfliktStand = {for (final k in fremdeOrdner) 'fremd:$k'};
   return Einrichtungsstand(
-    werkzeuge: [
-      for (final w in liste)
-        Werkzeugstand(
-          werkzeug: w,
-          gewaehlt: gewaehlteWerkzeuge.contains(w.id),
-          verbindung: w.verbindung(port, schluessel, name: name),
-          skills: gewaehlteWerkzeuge.contains(w.id) ? gewollt : const [],
-          stand: {for (final s in skills) s.name: skillVergleichen(s, Directory(p.join(w.skillOrdner.path, s.name)))},
-          entfernen: {
-            for (final s in skills)
-              if (skillInstalliert(w, s.name) && (!gewaehlteWerkzeuge.contains(w.id) || !gewollt.contains(s)))
-                s.name,
-          },
-        ),
-    ],
+    werkzeuge: werkzeuge,
     skills: skills,
     python: await python(),
+    wahlSkills: wahlSkills,
     gewaehlt: gewaehlt,
+    skillFehler: [...skillFehler, ...konflikte],
+    skillFehlerNeu: (skillFehlerNeu && skillFehler.isNotEmpty) || !gesehen.containsAll(konfliktStand),
+    fremdeOrdner: fremdeOrdner,
+    konfliktStand: konfliktStand,
   );
 }
+
+/// Ein Ordner im Skill-Ordner eines KI-Werkzeugs, wie er in den Einstellungen
+/// steht: Werkzeug und Skill-Name, `<Werkzeug>/<Name>`
+/// (Einstellungen.pluginSkillOrdner, Einstellungen.fremdeSkillOrdner).
+String werkzeugSkill(String werkzeug, String skill) => '$werkzeug/$skill';
+
+/// Wie ein fremder Ordner ([einrichtungPruefen]) in den Einstellungen steht
+/// ([werkzeugSkill]).
+String fremderOrdner(String werkzeug, String skill) => werkzeugSkill(werkzeug, skill);
+
+/// Ob [eintrag] die Form von [werkzeugSkill] hat: eine Werkzeug-Kennung aus
+/// Kleinbuchstaben und Ziffern und ein gültiger Skill-Name. Aus einem solchen
+/// Eintrag wird ein Pfad zum Löschen; anderes fällt beim Lesen weg.
+bool werkzeugSkillGueltig(String eintrag) {
+  final teile = eintrag.split('/');
+  return teile.length == 2 && RegExp(r'^[a-z0-9]+$').hasMatch(teile[0]) && skillNameGueltig(teile[1]);
+}
+
+/// Die Skill-Namen in Einträgen der Form [werkzeugSkill].
+Set<String> skillNamen(Iterable<String> eintraege) => {
+  for (final e in eintraege)
+    if (werkzeugSkillGueltig(e)) e.split('/')[1],
+};
+
+/// Die Ordner von Plugin-Skills, die die App in den KI-Werkzeugen installiert
+/// hat, je Werkzeug ([werkzeugSkill], Einstellungen.pluginSkillOrdner), nach
+/// der Prüfung [stand]: Dazu kommt jeder Skill eines Plugins, der in einem
+/// Werkzeug genau so steht wie im Paket -- so installiert ihn die
+/// Einrichtung --, und es bleibt jeder gemerkte, der in seinem Werkzeug noch
+/// installiert ist. Vergessen wird ein Eintrag erst, wenn der Ordner dort
+/// fehlt. Nur was hier steht, entfernt die App später ungefragt bei der
+/// Deinstallation oder bietet es zum Entfernen an, wenn das Plugin fort ist,
+/// und nur in diesem Werkzeug: Ein fremder Ordner gleichen Namens, der vom
+/// Paket abweicht, kommt nicht hinein, auch wenn moocp denselben Skill in
+/// einem anderen Werkzeug installiert hat.
+Set<String> pluginSkillsGemerkt({
+  required Set<String> gemerkt,
+  required Einrichtungsstand stand,
+  required List<KiWerkzeug> werkzeuge,
+}) =>
+    {
+      for (final ws in stand.werkzeuge)
+        for (final s in stand.skills)
+          if (s.herkunft == SkillHerkunft.plugin && (ws.stand[s.name]?.aktuell ?? false))
+            werkzeugSkill(ws.werkzeug.id, s.name),
+      for (final e in gemerkt)
+        if (werkzeugSkillGueltig(e) &&
+            werkzeuge.any((w) => w.id == e.split('/')[0] && skillInstalliert(w, e.split('/')[1])))
+          e,
+    };

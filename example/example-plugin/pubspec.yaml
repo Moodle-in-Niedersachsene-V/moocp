@@ -1,0 +1,16 @@
+# Das Beispiel-Plugin von moocp als eigenständiges Dart-Projekt: Vorlage für
+# Plugin-Autoren und das Plugin, gegen das die Tests von moocp laufen. Es wird
+# nicht veröffentlicht und kommt nicht in den Installer von moocp.
+name: beispiel_plugin
+description: Beispiel-Plugin für moocp, Vorlage für Plugin-Autoren.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.2
+
+# Nur Pakete mit freizügiger Lizenz (MIT, BSD, Apache 2.0), auch unter den
+# indirekten. mcp_dart ist dasselbe Paket, das moocp für MCP benutzt;
+# pubspec.lock hält die Versionen fest.
+dependencies:
+  mcp_dart: ^2.4.2

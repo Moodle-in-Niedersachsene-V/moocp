@@ -9,6 +9,8 @@
 
 import 'dart:io';
 
+import 'kindprozess.dart';
+
 /// Team-Kennung im Zertifikat der Programme von Anthropic. Gemessen an
 /// `claude.app/Contents/MacOS/claude` aus Claude Desktop 2.1.317:
 /// `Authority=Developer ID Application: Anthropic PBC (Q6L2SF6YDW)`.
@@ -18,9 +20,9 @@ const anthropicTeamKennung = 'Q6L2SF6YDW';
 /// Jeder Fehler, auch ein fehlendes `codesign`, heißt: nicht geprüft.
 bool vonAnthropicMac(String exe) {
   try {
-    final gueltig = Process.runSync('codesign', ['--verify', '--strict', exe]);
+    final gueltig = prozessAusfuehrenSync('codesign', ['--verify', '--strict', exe]);
     if (gueltig.exitCode != 0) return false;
-    final info = Process.runSync('codesign', ['-dv', '--verbose=2', exe]);
+    final info = prozessAusfuehrenSync('codesign',['-dv', '--verbose=2', exe]);
     // codesign schreibt die Angaben auf stderr.
     return info.exitCode == 0 && '${info.stderr}'.contains('TeamIdentifier=$anthropicTeamKennung');
   } on ProcessException {

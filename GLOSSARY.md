@@ -61,7 +61,7 @@ _Nicht zu verwechseln mit_: MCP-Server.
 Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex CLI und Bionic (LM Studio).
 
 **Freigabe**
-Der Dialog in der App, in dem die Lehrkraft einen Schreibvorgang in Moodle bestätigt. Wie viele Freigaben kommen, stellt die Lehrkraft ein.
+Der Dialog in der App, in dem die Lehrkraft einen Schreibvorgang in Moodle bestätigt. Wie viele Freigaben kommen, stellt die Lehrkraft ein. Auch ein Plugin kann um eine Freigabe bitten; Titel und Beschreibung stammen dann vom Plugin, alle Regeln einer Freigabe gelten.
 _Nicht zu verwechseln mit_: Bestätigungen (die Einstellung, die bestimmt, wie oft der Dialog erscheint).
 
 **Bestätigungen**
@@ -91,6 +91,10 @@ _Nicht zu verwechseln mit_: Positivliste.
 Die Liste im Code, die festlegt, welche Moodle-Adressen die App überhaupt anfragen darf. Sie ist die eigentliche Grenze für den Zugriff auf Moodle.
 _Nicht zu verwechseln mit_: Sperrliste.
 
+**Lesender Teil der Positivliste**
+Die Regeln der Positivliste, die eine Seite oder Datei zeigen, ohne in Moodle etwas zu ändern, und kein Schritt eines Schreibvorgangs sind. Nur sie gelten für ein Plugin, das Moodle über die Adresse der App liest. Schreiben kann ein Plugin, was die Positivliste erlaubt, nur über die eingebauten Werkzeuge; was darüber hinausgeht, nur über eine Zusatzadresse der Art „schreiben“, mit einer Freigabe auf jeder Stufe.
+_Nicht zu verwechseln mit_: Zusatzadresse (geht über die Positivliste hinaus und braucht die Zustimmung der Lehrkraft).
+
 **Protokoll**
 Der Verlauf in der App, in dem jede Anfrage an Moodle mit Methode, Pfad und Status steht, ohne Formularwerte und ohne Zugangsdaten.
 
@@ -111,9 +115,55 @@ Eine Funktion der App, die ein KI-Werkzeug über den MCP-Server aufruft, etwa zu
 _Nicht zu verwechseln mit_: Skill.
 
 **Plugin**
-Eine zusätzlich installierbare Erweiterung der App aus einem eigenen Projekt, die eigene Werkzeuge und Skills mitbringt. Die App nutzt ein Plugin erst, nachdem die Lehrkraft es in der Einrichtung angenommen hat.
+Eine zusätzlich installierbare Erweiterung der App aus einem eigenen Projekt, die eigene Werkzeuge und Skills mitbringt. Die App nutzt ein Plugin erst, nachdem die Lehrkraft ihm zugestimmt hat.
 _Nicht zu verwechseln mit_: Moodle-Plugin (eine Erweiterung der Moodle-Instanz; die App setzt keines voraus).
 _Vermeiden_: internes Plugin, Modul als Bezeichnung für Teile der App selbst
+
+**Zustimmung**
+Das Annehmen eines Plugins durch die Lehrkraft, für genau eine Version und einen Stand der Dateien, mit der Wahl der Instanzprofile, in denen es eingeschaltet ist. Eine Zustimmung gibt nur die Lehrkraft in der App.
+_Nicht zu verwechseln mit_: Freigabe (nur der Schreibvorgang in Moodle).
+_Vermeiden_: Freigabe für ein Plugin, Installieren für das Annehmen
+
+**Entwicklungs-Plugin**
+Ein Plugin, das sein Entwickler selbst gestartet hat und das die App mit `--plugin-entwicklung <Ordner>` anhängt, statt es zu starten. Statt einer Zustimmung fragt bei jedem Start der App ein eigener Dialog; die Antwort wird nicht gespeichert.
+_Nicht zu verwechseln mit_: ein installiertes Plugin, dem die Lehrkraft zugestimmt hat.
+
+**Beschreibungsdatei**
+Die Datei `plugin.json` im Ordner eines Plugins: Name, Kurzname, Version, Zusatzadressen und weitere Angaben, die die App vor jeder Zustimmung liest, ohne Code des Plugins auszuführen.
+
+**Zusatzadresse**
+Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinaus braucht: ein Adressmuster, die Angabe „lesen“ oder „schreiben“ und ein Grund in einem Satz. Die Lehrkraft stimmt der Liste mit der Version des Plugins zu. Sie hebt die Sperrliste nur für dieses Plugin auf; über eine Zusatzadresse mit „schreiben“ schreibt es nur mit einer Freigabe, auf jeder Stufe, über eine mit „lesen“ liest es nur in einem Lauf.
+
+**Lauf**
+Die Zeit, in der ein Plugin während eines Aufrufs über seine Zusatzadressen mit „lesen“ liest oder herunterlädt, angemeldet mit der Aktivität, um die es geht. Die App ermittelt den Kurs selbst, lädt die Namen seiner Teilnehmenden in die letzte Sperre und lehnt jede Anfrage ab, die nicht zu Kurs und Aktivität passt. Er endet mit seinem Beenden oder dem Ende des Aufrufs und löscht dann, was er in den Ordner für Downloads geladen hat; die Namen bleiben gesperrt, bis die App endet.
+_Nicht zu verwechseln mit_: der Aufruf eines Werkzeugs (ein Lauf liegt in einem Aufruf, höchstens einer zugleich).
+
+**Ordner für Downloads**
+Der Ordner im Temp-Verzeichnis, in den die App legt, was ein Plugin in einem Lauf über eine Zusatzadresse herunterlädt, je Plugin und Instanzprofil getrennt. Die App leert ihn beim Start und beim Beenden; sein Pfad geht nie an die KI und steht in keinem Protokoll.
+_Nicht zu verwechseln mit_: Arbeitsordner (dort liest die KI) und dem Unterordner `plugin-<Kurzname>` darin.
+
+**Adresse der App (für Plugins)**
+Die lokale Adresse, unter der ein Plugin die App erreicht, getrennt vom MCP-Server der KI-Werkzeuge: Protokollzeile, Arbeitsordner, eingebaute Werkzeuge, Dialoge, Freigaben, Lesen in Moodle und Schreiben über eine Zusatzadresse. Das Plugin meldet sich mit seinem Schlüssel an und nennt das Token des Aufrufs, in dem es gerade arbeitet.
+_Nicht zu verwechseln mit_: Zusatzadresse (eine Seite der Moodle-Instanz).
+_Vermeiden_: Host-Schnittstelle, Callback-Server
+
+**Dialog eines Plugins**
+Ein Dialog, den ein Plugin über die Adresse der App beschreibt und die App zeigt, mit dem Plugin als Absender: Auswahl, Eingabe, Ordner- oder Dateiwahl, Hinweis. Er liefert die Antwort oder „abgebrochen“.
+_Nicht zu verwechseln mit_: Freigabe (bestätigt einen Schreibvorgang; ein Dialog eines Plugins tut das nie).
+_Vermeiden_: Fenster des Plugins (ein Plugin öffnet keine Fenster)
+
+**Aufruf-Token**
+Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.
+_Nicht zu verwechseln mit_: Schlüssel (gilt für das Plugin, solange sein Programm läuft).
+
+**Kennung einer Freigabe**
+Ein zufälliges Geheimnis, das ein Plugin bekommt, wenn die Lehrkraft einen Schreibvorgang über eine seiner Zusatzadressen freigegeben hat. Es gilt für genau diesen Schreibvorgang (Methode, Adresse mit Parametern, Formularfelder), einmal und nur im selben Aufruf.
+_Nicht zu verwechseln mit_: Aufruf-Token (gilt für alles, was das Plugin während eines Aufrufs tut), Kennung eines Instanzprofils.
+
+**Letzte Sperre**
+Die Prüfung der App, die jede Antwort eines Plugins an die KI und jede Zeile, die es ins Protokoll schreibt, gegen alle Namen prüft, die sie seit ihrem Start für dieses Plugin geladen hat. Jeder Teil eines Namens sperrt für sich, als ganzes Wort; bei einem Treffer geht nichts hinaus, die KI erfährt nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort. Gesperrtes lässt sich nicht doch senden.
+_Nicht zu verwechseln mit_: Sperrliste (sperrt Adressen in Moodle, nicht Wörter in Antworten).
+_Vermeiden_: Namensfilter, Schwärzen (geschwärzt wird nichts, die Antwort geht gar nicht hinaus)
 
 **Fragensammlung**
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.

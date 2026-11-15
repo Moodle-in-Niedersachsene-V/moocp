@@ -8,6 +8,15 @@ import '../freigabe.dart';
 import '../log.dart';
 import '../moodle/moodle_zugang.dart';
 import '../protokoll.dart';
+import 'werkzeugquelle.dart';
+
+typedef _Huelle =
+    Future<CallToolResult> Function(
+      Map<String, dynamic> args,
+      Future<void> abbruch,
+      String? aufrufer, {
+      AufrufZaehler? aussen,
+    });
 
 class WerkzeugAufrufe {
   WerkzeugAufrufe(this.protokoll, this.freigaben, {required this.ausfuehren});
@@ -31,11 +40,177 @@ class WerkzeugAufrufe {
     bool nurLesen = false,
     bool zerstoerend = false,
     required Future<String> Function(Map<String, dynamic> a) ausfuehren,
+  }) => _anmelden(
+    server,
+    name,
+    titel: titel,
+    beschreibung: beschreibung,
+    eingabeSchema: JsonSchema.object(properties: parameter, required: pflicht),
+    pflicht: pflicht,
+    nurLesen: nurLesen,
+    zerstoerend: zerstoerend,
+    ausfuehren: (a, _) => ausfuehren(a),
+  );
+
+  /// Ein Werkzeug, das nur mit Name, Beschreibung und fertigem JSON-Schema
+  /// beschrieben ist (eine [WerkzeugQuelle]): dieselbe Hülle wie bei
+  /// [registrieren]. Ein Schema, das kein Objekt beschreibt, bricht ab -- die
+  /// Eingabe eines MCP-Werkzeugs ist immer ein Objekt. [ausfuehren] bekommt
+  /// neben den Argumenten, was sich erfüllt, wenn der Client abbricht.
+  void registrierenBeschrieben(
+    McpServer server,
+    WerkzeugBeschreibung werkzeug, {
+    required Future<String> Function(Map<String, dynamic> a, Future<void> abbruch) ausfuehren,
   }) {
+    final JsonSchema schema;
+    try {
+      schema = JsonSchema.fromJson(werkzeug.eingabeSchema);
+    } on FormatException catch (x) {
+      throw StateError(
+        'Das Eingabeschema des Werkzeugs „${werkzeug.name}" ist ungültig: ${x.message}',
+      );
+    }
+    if (schema is! JsonObject) {
+      throw StateError(
+        'Das Eingabeschema des Werkzeugs „${werkzeug.name}" beschreibt kein Objekt.',
+      );
+    }
+    _anmelden(
+      server,
+      werkzeug.name,
+      titel: werkzeug.titel,
+      beschreibung: werkzeug.beschreibung,
+      eingabeSchema: schema,
+      pflicht: schema.required ?? const [],
+      nurLesen: werkzeug.nurLesen,
+      zerstoerend: werkzeug.zerstoerend,
+      ausfuehren: ausfuehren,
+    );
+  }
+
+  /// Die Namen, die je Server schon vergeben sind. mcp_dart wiese einen
+  /// doppelten Namen auch ab, aber mit einem englischen ArgumentError; so
+  /// meldet die Hülle jeden Fall gleich, deutsch und mit dem Namen.
+  final _namen = Expando<Set<String>>('Werkzeugnamen je Server');
+
+  /// Je Server die Hülle jedes Werkzeugs mit seinem Eingabeschema, für
+  /// [direktAufrufen].
+  final _huellen = Expando<Map<String, ({JsonObject schema, _Huelle huelle})>>('Hüllen je Server');
+
+  /// Ruft das Werkzeug [name] von [server] ohne MCP-Verbindung auf, durch
+  /// dieselbe Hülle wie ein Aufruf über MCP und nach derselben Prüfung der
+  /// Argumente gegen das Eingabeschema. So ruft ein Plugin ein eingebautes
+  /// Werkzeug auf (McpDienst.eingebautAufrufen): [aufrufer] steht im
+  /// Protokoll, in der Freigabe und im Hinweis „ohne Freigabe ausgeführt“,
+  /// und [abbruch] wirkt wie der Abbruch durch einen Client. Automatische
+  /// Freigaben des Testbetriebs zählen auch für [aussen], den Zähler des
+  /// Werkzeugaufrufs des Plugins. Null, wenn [server] kein Werkzeug [name] hat.
+  Future<CallToolResult>? direktAufrufen(
+    McpServer server,
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+    AufrufZaehler? aussen,
+  }) {
+    final w = _huellen[server]?[name];
+    if (w == null) return null;
+    try {
+      w.schema.validate(args);
+    } on JsonSchemaValidationException catch (x) {
+      return Future.value(_fehler('Ungültige Argumente für „$name“: ${x.message}'));
+    }
+    return w.huelle(args, abbruch, aufrufer, aussen: aussen);
+  }
+
+  /// Die eine Hülle für alle Werkzeuge: Aufruf ins Protokoll, Abbruch,
+  /// Fehlerantwort. [registrieren] und [registrierenBeschrieben] führen
+  /// beide hierher; was sich daran ändert, ändert sich für alle Werkzeuge.
+  /// Auch [direktAufrufen] läuft durch sie.
+  void _anmelden(
+    McpServer server,
+    String name, {
+    required String? titel,
+    required String beschreibung,
+    required JsonObject eingabeSchema,
+    required List<String> pflicht,
+    required bool nurLesen,
+    required bool zerstoerend,
+    required Future<String> Function(Map<String, dynamic> a, Future<void> abbruch) ausfuehren,
+  }) {
+    if (!(_namen[server] ??= {}).add(name)) {
+      throw StateError(
+        'Das Werkzeug „$name" ist schon registriert: Werkzeugnamen müssen auf dem Server eindeutig sein.',
+      );
+    }
+    // [aufrufer] ist null bei einem Aufruf eines KI-Werkzeugs über MCP und
+    // der Name des Plugins, wenn ein Plugin über die Adresse der App aufruft
+    // (direktAufrufen).
+    Future<CallToolResult> huelle(
+      Map<String, dynamic> args,
+      Future<void> abbruch,
+      String? aufrufer, {
+      AufrufZaehler? aussen,
+    }) async {
+      final aufruf = jsonEncode(args);
+      protokoll.eintrag(
+        Art.werkzeug,
+        '$name(${aufruf.length > 200 ? '${aufruf.substring(0, 199)}…' : aufruf})'
+        '${aufrufer == null ? '' : ' -- Aufrufer: $aufrufer'}',
+      );
+      for (final p in pflicht) {
+        if (args[p] == null) return _fehler('$p fehlt.');
+      }
+      // Hat das Werkzeug wegen der eingestellten Stufe ohne Freigabe
+      // geschrieben, erfährt Claude das hier -- an einer Stelle für alle
+      // Werkzeuge. Sonst kündigte der Skill eine Rückfrage an, die nie kommt.
+      // Der Zähler gehört diesem Aufruf allein (Freigaben.mitAbbruch): Ein
+      // gleichzeitiger zweiter Aufruf bekommt die Auslassung des ersten nicht
+      // gemeldet.
+      final zaehler = AufrufZaehler();
+      // Auch eine Fehlerantwort trägt beides: Was vor dem Fehler ohne
+      // persönliche Freigabe lief, ist geschehen, gleich wie der Aufruf endet.
+      String anhang() =>
+          '${_ohneFreigabe(zaehler.ausgelassen, aufrufer ?? zaehler.aufrufer)}'
+          '${zaehler.testfreigaben > 0 ? '\n$testfreigabeHinweis' : ''}';
+      try {
+        final String text;
+        try {
+          text = await Freigaben.mitAbbruch(
+            abbruch,
+            () => this.ausfuehren(name, args, () => ausfuehren(args, abbruch)),
+            zaehler: zaehler,
+            aufrufer: aufrufer,
+          );
+        } finally {
+          // Ruft ein Plugin ein eingebautes Werkzeug auf, steht der Hinweis
+          // „ohne Freigabe ausgeführt“ nicht nur in der Antwort an das Plugin:
+          // Der Werkzeugaufruf des Plugins ([aussen]) zählt die Auslassung mit,
+          // und moocp selbst sagt es der KI, mit dem Plugin als Aufrufer (A3,
+          // E20, E35) -- gleich, was das Plugin daraus macht.
+          aussen?.testfreigaben += zaehler.testfreigaben;
+          if (aussen != null && zaehler.ausgelassen > 0) {
+            aussen.ausgelassen += zaehler.ausgelassen;
+            aussen.aufrufer ??= aufrufer ?? zaehler.aufrufer;
+          }
+        }
+        protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');
+        return CallToolResult.fromContent([TextContent(text: '$text${anhang()}')]);
+      } on MoodleFehler catch (x) {
+        protokoll.eintrag(Art.fehler, '$name: ${x.meldung}');
+        return _fehler('${x.meldung}${anhang()}');
+      } catch (x, st) {
+        final b = fehlerBeschreibung(x, st);
+        protokoll.eintrag(Art.fehler, '$name: $b');
+        return _fehler('Unerwarteter Fehler: $b${anhang()}');
+      }
+    }
+
+    (_huellen[server] ??= {})[name] = (schema: eingabeSchema, huelle: huelle);
     server.registerTool(
       name,
       description: beschreibung,
-      inputSchema: JsonSchema.object(properties: parameter, required: pflicht),
+      inputSchema: eingabeSchema,
       annotations: ToolAnnotations(
         title: titel,
         readOnlyHint: nurLesen,
@@ -43,21 +218,6 @@ class WerkzeugAufrufe {
         openWorldHint: false,
       ),
       callback: (args, extra) async {
-        final aufruf = jsonEncode(args);
-        protokoll.eintrag(
-          Art.werkzeug,
-          '$name(${aufruf.length > 200 ? '${aufruf.substring(0, 199)}…' : aufruf})',
-        );
-        for (final p in pflicht) {
-          if (args[p] == null) return _fehler('$p fehlt.');
-        }
-        // Hat das Werkzeug wegen der eingestellten Stufe ohne Freigabe
-        // geschrieben, erfährt Claude das hier -- an einer Stelle für alle
-        // Werkzeuge. Sonst kündigte der Skill eine Rückfrage an, die nie kommt.
-        // Der Zähler gehört diesem Aufruf allein (Freigaben.mitAbbruch): Ein
-        // gleichzeitiger zweiter Aufruf bekommt die Auslassung des ersten nicht
-        // gemeldet.
-        final zaehler = AufrufZaehler();
         // Bricht der Client ab (sein Zeitlimit, ein Abbruch in der Sitzung),
         // verfallen die offenen Freigaben dieses Aufrufs (Freigaben.mitAbbruch).
         final abbruch = Completer<void>();
@@ -68,26 +228,7 @@ class WerkzeugAufrufe {
         if (extra.signal.aborted) abbrechen();
         final horcht = extra.signal.onAbort.listen((_) => abbrechen());
         try {
-          final text = await Freigaben.mitAbbruch(
-            abbruch.future,
-            () => this.ausfuehren(name, args, () => ausfuehren(args)),
-            zaehler: zaehler,
-          );
-          protokoll.eintrag(Art.info, '$name: ${text.split('\n').first}');
-          return CallToolResult.fromContent([
-            TextContent(
-              text:
-                  '$text${_ohneFreigabe(zaehler.ausgelassen)}'
-                  '${zaehler.testfreigaben > 0 ? '\nDebug-Testbetrieb: automatisch freigegeben, ohne persönliche Freigabe.' : ''}',
-            ),
-          ]);
-        } on MoodleFehler catch (x) {
-          protokoll.eintrag(Art.fehler, '$name: ${x.meldung}');
-          return _fehler(x.meldung);
-        } catch (x, st) {
-          final b = fehlerBeschreibung(x, st);
-          protokoll.eintrag(Art.fehler, '$name: $b');
-          return _fehler('Unerwarteter Fehler: $b');
+          return await huelle(args, abbruch.future, null);
         } finally {
           await horcht.cancel();
         }
@@ -96,10 +237,11 @@ class WerkzeugAufrufe {
   }
 
   /// Angehängt an die Antwort eines Werkzeugs, das [n] Freigaben wegen der
-  /// eingestellten Stufe ausgelassen hat.
-  String _ohneFreigabe(int n) => n <= 0
+  /// eingestellten Stufe ausgelassen hat; mit dem Plugin, das aufgerufen hat.
+  String _ohneFreigabe(int n, String? aufrufer) => n <= 0
       ? ''
-      : '\n\nOhne Freigabe ausgeführt ($n ${n == 1 ? 'Vorgang' : 'Vorgänge'}): Die Lehrkraft hat '
+      : '\n\nOhne Freigabe ausgeführt ($n ${n == 1 ? 'Vorgang' : 'Vorgänge'}'
+            '${aufrufer == null ? '' : ', Aufrufer: $aufrufer'}): Die Lehrkraft hat '
             'die Bestätigungen in der App auf „${freigaben.stufe.text}" gestellt. Kündige keine '
             'Freigabe an, die nicht kommt, und schlage nicht vor, die Stufe zu ändern -- das ist '
             'ihre Entscheidung.';

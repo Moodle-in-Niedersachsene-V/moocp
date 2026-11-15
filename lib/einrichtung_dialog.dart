@@ -7,9 +7,14 @@
 // kein KI-Werkzeug kann mit ihr arbeiten" gibt es nicht. Darum kein
 // „Abbrechen", und nach einem Fehler „Nochmal versuchen" statt weiter. Ein
 // Skill, der nicht zur App passt, ruft Werkzeuge falsch auf. Haken gibt es
-// bei den Werkzeugen und bei den wählbaren Skills (wahlSkills in
+// bei den Werkzeugen und bei den wählbaren Skills (Einrichtungsstand.wahlSkills,
 // einrichtung.dart); was gewählt ist, wird streng geprüft, was abgewählt
-// ist, entfernt „Installieren".
+// ist, entfernt „Installieren". Die Skills der Plugins, denen zugestimmt ist,
+// stehen hier wie die eigenen (plugin/skills.dart); die eines abgelehnten
+// oder entfernten Plugins entfernt „Installieren", und ein Skill-Paket, das
+// sich nicht installieren lässt, nennt der Dialog nur. Ein solches Paket
+// öffnet ihn beim Start, einmal je Stand; steht sonst alles, schließt ihn
+// „Weiter".
 //
 // Die App öffnet den Dialog beim Start, wenn etwas nicht passt, und jederzeit
 // über den Knopf „KI-Werkzeuge einrichten" in der Titelzeile.
@@ -19,7 +24,7 @@
 
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
 
 import 'einrichtung.dart';
@@ -79,8 +84,10 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
   /// Stands. Schlüssel: `<werkzeug>/verbindung` und `<werkzeug>/skills`.
   Map<String, String> _ergebnis = {};
 
-  /// Alles erledigt: Nur noch „Weiter".
-  bool get _fertig => _s != null && !_s!.brauchtEtwas;
+  /// Alles erledigt: Nur noch „Weiter". Ein unbrauchbares Skill-Paket eines
+  /// Plugins öffnet den Dialog zwar beim Start, hält aber nichts auf: Steht
+  /// sonst alles, bleibt es bei „Weiter".
+  bool get _fertig => _s != null && !_s!.brauchtEinrichtung;
 
   /// Mindestens ein Werkzeug ist eingerichtet: Die App kann laufen, auch
   /// wenn bei einem anderen noch etwas fehlt -- eines genügt.
@@ -213,8 +220,24 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
             ...jetzt.entfernen,
           ];
           if (offen.isEmpty) {
-            ergebnis[sk] = 'erledigt';
-            _protokoll(Art.info, '${w.name}: Skills erledigt');
+            // Was geschehen ist, nicht nur „erledigt": Vorher stand in der
+            // Zeile, was fehlt, abweicht oder weg soll; danach steht dort,
+            // was daraus geworden ist.
+            final neuDa = [
+              for (final x in vorher.skills)
+                if (vorher.stand[x.name]!.ordnerFehlt) x.name,
+            ];
+            final erneuert = [
+              for (final x in vorher.skills)
+                if (!vorher.stand[x.name]!.aktuell && !vorher.stand[x.name]!.ordnerFehlt) x.name,
+            ];
+            final getan = [
+              if (neuDa.isNotEmpty) 'installiert: ${neuDa.join(', ')}',
+              if (erneuert.isNotEmpty) 'aktualisiert: ${erneuert.join(', ')}',
+              if (vorher.entfernen.isNotEmpty) 'entfernt: ${vorher.entfernen.join(', ')}',
+            ];
+            ergebnis[sk] = getan.isEmpty ? 'erledigt' : 'erledigt – ${getan.join('; ')}';
+            _protokoll(Art.info, '${w.name}: Skills ${ergebnis[sk]}');
           } else {
             final weg = geblieben[w.id] ?? const <String>[];
             ergebnis[sk] = fehler[sk] ??
@@ -316,8 +339,8 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
       controlAffinity: ListTileControlAffinity.leading,
       value: s.gewaehlt.contains(name),
       onChanged: _laeuft ? null : (v) => _skillWaehlen(name, v ?? false),
-      title: Text('Skill $name'),
-      subtitle: Text(wahlSkills[name]!),
+      title: Text(paket.plugin == null ? 'Skill $name' : 'Skill $name (Plugin „${paket.plugin}“)'),
+      subtitle: Text(s.wahlSkills[name]!),
     );
   }
 
@@ -342,8 +365,10 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
               'den Rest holen Sie später über die Einstellungen nach.'
           : 'Ohne ein eingerichtetes KI-Werkzeug kann niemand mit dieser App arbeiten. „Beenden" schließt die App.';
     }
-    return _installiert
-        ? 'Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.'
+    if (_installiert) return 'Eingerichtet. Im KI-Werkzeug eine neue Sitzung starten, damit die Änderungen wirken.';
+    return s != null && s.skillFehler.isNotEmpty
+        ? 'Verbindung und Skills sind aktuell. Die oben genannten Skills von Plugins fehlen; '
+            'mit „Weiter" arbeitet die App ohne sie.'
         : 'Verbindung und Skills sind aktuell.';
   }
 
@@ -364,7 +389,9 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
           child: Text(!einrichtbar
               ? 'Nochmal prüfen'
               : _ergebnis.isEmpty
-                  ? 'Installieren'
+                  // Beim ersten Einrichten „Installieren"; steht schon etwas
+                  // von der App in einem KI-Werkzeug, „Aktualisieren".
+                  ? (s.schonEingerichtet ? 'Aktualisieren' : 'Installieren')
                   : 'Nochmal versuchen'),
         ),
       ];
@@ -387,12 +414,15 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
                 _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex CLI und LM Studio. '
                     'Eines davon installieren und einmal starten, danach „Nochmal prüfen".'),
               // Das Wählbare für sich, damit es nicht wie ein Pflichtteil aussieht.
-              if (s.werkzeuge.isNotEmpty && s.skills.any((x) => wahlSkills.containsKey(x.name))) ...[
+              if (s.werkzeuge.isNotEmpty && s.skills.any((x) => s.wahlSkills.containsKey(x.name))) ...[
                 const Divider(height: 24),
                 Text('Wählbare Skills', style: Theme.of(context).textTheme.titleSmall),
                 for (final paket in s.skills)
-                  if (wahlSkills.containsKey(paket.name)) _wahlZeile(s, paket),
+                  if (s.wahlSkills.containsKey(paket.name)) _wahlZeile(s, paket),
               ],
+              // Skills von Plugins, die nicht installiert werden: Sie halten
+              // nichts auf, die Lehrkraft soll aber wissen, dass sie fehlen.
+              for (final f in s.skillFehler) _hinweis(f),
             ],
             if (s == null) _hinweis('Die Prüfung ist fehlgeschlagen; Einzelheiten stehen im Protokoll.'),
             if (s != null && !s.python && s.gewaehlt.contains('lernsituation'))

@@ -13,8 +13,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'einrichtung.dart' show werkzeugSkillGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
+import 'plugin/entscheidung.dart';
 import 'profil.dart';
 
 class Einstellungen {
@@ -30,7 +32,19 @@ class Einstellungen {
     this.updatePruefen,
     this.updateZuletzt,
     this.updateErwartet,
-  }) : profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
+    Map<String, PluginEntscheidung>? plugins,
+    Map<String, PluginUpdateStand>? pluginUpdates,
+    Set<String> pluginSkillOrdner = const {},
+    Set<String> fremdeSkillOrdner = const {},
+    Set<String> skillFehlerGesehen = const {},
+    Set<String> schnittstelleGesehen = const {},
+  })  : plugins = Map.of(plugins ?? const {}),
+        pluginUpdates = Map.of(pluginUpdates ?? const {}),
+        pluginSkillOrdner = {...pluginSkillOrdner},
+        schnittstelleGesehen = {...schnittstelleGesehen},
+        fremdeSkillOrdner = {...fremdeSkillOrdner},
+        skillFehlerGesehen = {...skillFehlerGesehen},
+        profile = _verteilt(profile ?? (moodleAdresse.isEmpty ? [] : [Profil.migriert(moodleAdresse)]));
 
   /// Die Moodle-Instanzen, mit denen die App angemeldet sein kann. Das erste
   /// Profil hat die Kennung `standard` (profil.dart), wenn es aus dem
@@ -140,6 +154,48 @@ class Einstellungen {
   /// App ist währenddessen beendet und sieht sonst nichts davon.
   String? updateErwartet;
 
+  /// Was die Lehrkraft über Plugins entschieden hat, je Plugin-Ordner
+  /// (plugin/entscheidung.dart). Die Zustimmung steht hier und nicht neben dem
+  /// Plugin: Sie gehört der Lehrkraft, und ein Plugin kann sie nicht selbst
+  /// mitbringen. Wer die Map ändert, ersetzt sie als Ganzes (so lässt sich ein
+  /// Speicherfehler zurückrollen).
+  Map<String, PluginEntscheidung> plugins;
+
+  /// Die Update-Prüfung je Plugin-Ordner (plugin/entscheidung.dart,
+  /// PluginUpdateStand): ob sie abgeschaltet ist und wann zuletzt geprüft
+  /// wurde. Ob überhaupt geprüft wird, entscheidet zuerst [updatePruefen]; ein
+  /// eigenes Ja je Plugin gibt es nicht.
+  Map<String, PluginUpdateStand> pluginUpdates;
+
+  /// Die Ordner von Plugin-Skills, die die App in den KI-Werkzeugen
+  /// installiert hat, je `<Werkzeug>/<Name>` (einrichtung.dart,
+  /// pluginSkillsGemerkt, werkzeugSkill). Nur diese entfernt sie, wenn das
+  /// Plugin abgelehnt, ausgeschaltet oder fort ist, und bei der
+  /// Deinstallation (`--claude-entfernen`) -- die Plugins selbst sind dann
+  /// vielleicht schon nicht mehr lesbar --, und nur im Werkzeug, in dem sie
+  /// sie installiert hat. Beim Lesen fällt jeder Eintrag weg, der nicht diese
+  /// Form hat: Aus ihm wird ein Pfad zum Löschen.
+  Set<String> pluginSkillOrdner;
+
+  /// Ordner in den Skill-Ordnern der KI-Werkzeuge, die den Namen eines
+  /// Plugin-Skills tragen, aber nicht von moocp stammen, je `<Werkzeug>/<Name>`
+  /// (einrichtung.dart, einrichtungPruefen, fremderOrdner). Die Einrichtung
+  /// überschreibt und entfernt sie nicht.
+  Set<String> fremdeSkillOrdner;
+
+  /// Die Dialoge „Plugin bleibt aus“ (unpassende Schnittstelle), die die
+  /// Lehrkraft schon gesehen hat: je Plugin-Ordner ein Eintrag aus Ordner,
+  /// Version und Prüfsumme des Plugins und Version der App
+  /// (plugin/plugin_update.dart, schnittstelleStand). Ein gesehener erscheint
+  /// nicht noch einmal, außer er bietet ein Update an.
+  Set<String> schnittstelleGesehen;
+
+  /// Die unbrauchbaren Skill-Pakete von Plugins, die die Lehrkraft im Dialog
+  /// „KI-Werkzeuge einrichten“ schon gesehen hat, je Plugin ein Stand
+  /// (plugin/skills.dart, PluginSkills.fehlerStand). Ein Stand, der hier
+  /// fehlt, öffnet den Dialog beim Start; ein gesehener nicht noch einmal.
+  Set<String> skillFehlerGesehen;
+
   static File get _datei => einstellungenDatei;
 
   static String neuerSchluessel() {
@@ -221,6 +277,13 @@ class Einstellungen {
       updatePruefen: j['updatePruefen'] as bool?,
       updateZuletzt: j['updateZuletzt'] as String?,
       updateErwartet: j['updateErwartet'] as String?,
+      plugins: pluginEntscheidungenAus(j['plugins']),
+      pluginUpdates: pluginUpdatesAus(j['pluginUpdates']),
+      pluginSkillOrdner:
+          (j['pluginSkillOrdner'] as List?)?.whereType<String>().where(werkzeugSkillGueltig).toSet() ?? const {},
+      fremdeSkillOrdner: (j['fremdeSkillOrdner'] as List?)?.whereType<String>().toSet() ?? const {},
+      skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
+      schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
   }
 
@@ -236,6 +299,13 @@ class Einstellungen {
         if (updatePruefen != null) 'updatePruefen': updatePruefen,
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
+        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
+        if (pluginUpdates.isNotEmpty)
+          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
+        if (pluginSkillOrdner.isNotEmpty) 'pluginSkillOrdner': (pluginSkillOrdner.toList()..sort()),
+        if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
+        if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),
+        if (schnittstelleGesehen.isNotEmpty) 'schnittstelleGesehen': (schnittstelleGesehen.toList()..sort()),
       };
 
   Future<void> speichern() async {

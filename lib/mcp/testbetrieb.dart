@@ -21,6 +21,12 @@ part 'testkopien.dart';
 
 typedef _Probe = ({int kurs, String name, String modul, String hash});
 
+/// Der Name der Datei mit vorbereiteten Antworten auf Dialoge eines Plugins
+/// im Testbetrieb. Sie liegt neben der Zugangsdatei des Testprofils
+/// (Testzugang.datei) und gilt nur für dieses Profil; ihr Format steht in
+/// plugin/testantworten.dart.
+const pluginDialogantwortenDatei = 'plugin-dialoge.json';
+
 class Testbetrieb {
   Testbetrieb(
     this.moodle,
@@ -104,6 +110,22 @@ class Testbetrieb {
       moodle.angemeldet &&
       Testzugang.adresseSchluessel(moodle.basis.toString()) ==
           Testzugang.adresseSchluessel(zugang.adresse);
+
+  /// Ob [kurs] ein gebundener Testkurs von [profil] ist, bei passender
+  /// Bindung (Profil, Adresse, angemeldete Instanz). Für das Schreiben eines
+  /// Plugins über eine Zusatzadresse: Der Testbetrieb gibt es nur in einem
+  /// Lauf frei, dessen Kurs die App selbst ermittelt hat (E35, McpDienst).
+  bool gebundenerTestkurs(Profil profil, Testzugang? zugang, int kurs) =>
+      _bindungPasst(profil, zugang) && zugang!.kurse.contains(kurs);
+
+  /// Die Datei mit vorbereiteten Antworten auf Dialoge eines Plugins
+  /// ([pluginDialogantwortenDatei]) neben der Zugangsdatei des gebundenen
+  /// Testprofils; null ohne passende Bindung oder mit einem Zugangspfad, der
+  /// nicht absolut ist (dann wäre „daneben“ das Arbeitsverzeichnis).
+  String? dialogantworten(Profil profil, Testzugang? zugang) =>
+      _bindungPasst(profil, zugang) && p.isAbsolute(zugang!.datei)
+      ? p.join(p.dirname(zugang.datei), pluginDialogantwortenDatei)
+      : null;
 
   Future<String> ausfuehren(
     Profil profil,

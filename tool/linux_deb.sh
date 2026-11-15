@@ -59,7 +59,7 @@ Installed-Size: $SIZE
 Section: education
 Priority: optional
 Homepage: https://github.com/topse/moocp
-Depends: libc6 (>= 2.38), libgtk-3-0t64 | libgtk-3-0, libsecret-1-0, libglib2.0-0t64 | libglib2.0-0, libstdc++6
+Depends: libc6 (>= 2.38), libgtk-3-0t64 | libgtk-3-0, libsecret-1-0, libegl1, libgles2, libgl1, libglib2.0-0t64 | libglib2.0-0, libstdc++6
 Recommends: libglib2.0-bin, libsecret-tools, gnome-keyring | keepassxc, xdg-utils, chromium | google-chrome-stable | microsoft-edge-stable
 Description: Moodle-Kurse mit einem KI-Werkzeug bearbeiten
  moocp ist die lokale App, über die Claude Code oder Codex CLI Moodle-Kurse

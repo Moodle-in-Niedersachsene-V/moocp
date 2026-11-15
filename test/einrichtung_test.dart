@@ -101,7 +101,7 @@ void main() {
     });
 
     test('Claude Desktop (MSIX): höchste Version, als Zahl verglichen', () {
-      datei(claudeProgramm);
+      datei('$desktop/2.1.9/claude.exe');
       datei('$desktop/2.1.10/claude.exe');
       datei('$desktop/2.1.11/anderes.txt'); // Ordner ohne claude.exe zählt nicht
       datei('$desktop/neu/claude.exe'); // keine Versionsnummer

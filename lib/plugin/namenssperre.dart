@@ -64,7 +64,16 @@
 // Die Namen stehen nur im Arbeitsspeicher, bis die App endet: in keiner Datei,
 // keinem Protokoll, keiner Einstellung, keiner Fehlermeldung und keiner
 // Antwort. Darum hat keine Klasse hier ein toString, das sie nennt, und es gibt
-// keinen Weg, sie abzufragen oder zu entfernen.
+// keinen Weg, sie auszulesen oder zu entfernen.
+//
+// Prüfen lässt sich ein Text aber ([LetzteSperre.pruefen], für
+// `/v1/namen/pruefen`): Ein Plugin erfährt, wo in seinem Text die Sperre
+// träfe, nach genau dieser Regel und gegen genau diese Namen, damit es seine
+// Antwort vorher bereinigt, statt einen Werkzeugfehler zu bekommen. Es erfährt
+// dabei, welche seiner Wörter gesperrte Namen sind, auch solche, die es nicht
+// selbst genannt hat (die Teilnehmenden eines Laufs, die angemeldete
+// Lehrkraft). Das ist in Kauf genommen: Geschützt wird die KI, nicht das
+// Plugin vor Daten, die es über seine Zusatzadressen ohnehin bekommt (E36).
 
 import 'dart:convert';
 
@@ -337,7 +346,31 @@ class Namenssperre {
     }
     return null;
   }
+
+  /// Jedes Wort in [text], so wie er dasteht, das einen Namensteil trifft,
+  /// als Anfang und Ende (ausschließlich) in UTF-16-Codeeinheiten, der
+  /// Reihenfolge nach. Die aufgelösten Formen des Texts sieht diese Suche
+  /// nicht; dafür [LetzteSperre.pruefen].
+  List<(int, int)> fundstellen(String text) {
+    if (_teile.isEmpty || text.isEmpty) return const [];
+    return [
+      for (final m in _wort.allMatches(text))
+        if (_formen(m[0]!) case (final mitE, final ohne)
+            when mitE.isNotEmpty && (_teile.contains(mitE) || _teile.contains(ohne)))
+          (m.start, m.end),
+    ];
+  }
 }
+
+/// Das Ergebnis von [LetzteSperre.pruefen]: wo die Sperre im Text träfe.
+///
+/// [stellen] sind die Wörter, die einen Namen treffen, so wie der Text
+/// dasteht, als Anfang und Ende in UTF-16-Codeeinheiten. [kodiert] heißt: Auch
+/// wenn diese Stellen fehlen, träfe die Sperre noch, und zwar erst nach dem
+/// Auflösen einer Kodierung; wo genau, lässt sich im Rohtext nicht sagen.
+/// [pfad] heißt: Der Text nennt den Ordner für Downloads. Sind [stellen] leer
+/// und beide Angaben falsch, sperrt die App den Text nicht.
+typedef NamenPruefung = ({List<(int, int)> stellen, bool kodiert, bool pfad});
 
 /// Wo die letzte Sperre gegriffen hat, wie es die Warnung an die Lehrkraft
 /// nennt.
@@ -463,6 +496,35 @@ class LetzteSperre {
       if (pfad != null) return (wort: pfad, pfad: true);
     }
     return null;
+  }
+
+  /// Wo die Sperre in [text] des Plugins [kurzname] träfe ([NamenPruefung]),
+  /// ohne Warnung an die Lehrkraft: Es geht nichts hinaus.
+  ///
+  /// [NamenPruefung.kodiert] ergibt sich so: Die Stellen im Rohtext werden
+  /// durch Leerzeichen gleicher Länge ersetzt und der Rest mit der ganzen
+  /// Regel geprüft, also auch in seinen aufgelösten Formen. Leerzeichen
+  /// trennen nur und bilden keine neue Kodierung; was dann noch trifft, steckt
+  /// in einer Kodierung. Ersetzt ein Plugin die Stellen durch eigenen Text,
+  /// kann der mit den Nachbarzeichen Neues ergeben (`%4` vor einem Ersatz, der
+  /// mit `1` beginnt); wer sichergehen will, prüft das Ergebnis noch einmal.
+  NamenPruefung pruefen(String kurzname, String text) {
+    final s = _je[kurzname];
+    final stellen = s?.fundstellen(text) ?? const <(int, int)>[];
+    var kodiert = false;
+    if (s != null && !s.leer) {
+      final rest = StringBuffer();
+      var bis = 0;
+      for (final (anfang, ende) in stellen) {
+        rest
+          ..write(text.substring(bis, anfang))
+          ..write(' ' * (ende - anfang));
+        bis = ende;
+      }
+      rest.write(text.substring(bis));
+      kodiert = s.treffer(rest.toString()) != null;
+    }
+    return (stellen: stellen, kodiert: kodiert, pfad: _pfadIn(text) != null);
   }
 
   /// Prüft [texte] des Plugins [kurzname] und meldet einen Treffer der

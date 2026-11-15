@@ -2,6 +2,7 @@
 """Startet den Experiment-Bau auf GitHub und lädt sein Bundle auf diesen Rechner."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -22,7 +23,6 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('build/ci-downloads'))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    import os
     os.chdir(root)
     if run('git', 'branch', '--show-current') != BRANCH:
         parser.error(f'Zuerst {BRANCH} auschecken.')
@@ -47,7 +47,7 @@ def main():
         raise RuntimeError('Kein Workflow-Lauf gefunden. Actions-Berechtigungen auf GitHub prüfen.')
     ci = runs[0]
     print(ci['url'], flush=True)
-    subprocess.run(['gh', 'run', 'watch', str(ci['databaseId']), '-R', REPO, '--exit-status'], check=True)
+    subprocess.run(['gh', 'run', 'watch', str(ci['databaseId']), '-R', REPO, '--exit-status', '--interval', '15'], check=True)
     if args.task == 'tests':
         print('Tests abgeschlossen; kein Bundle angefordert.')
         return

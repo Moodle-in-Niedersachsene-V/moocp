@@ -17,7 +17,7 @@ void main() {
   test('Linux: ohne gültiges XDG_CONFIG_HOME unter HOME/.config', () {
     for (final xdg in [null, '', 'relativ']) {
       expect(
-        ort({'HOME': '/heim', if (xdg != null) 'XDG_CONFIG_HOME': xdg}),
+        ort({'HOME': '/heim', 'XDG_CONFIG_HOME': ?xdg}),
         p.join('/heim', '.config', 'moocp'),
       );
     }
@@ -28,7 +28,7 @@ void main() {
     () {
       for (final heim in [null, '', 'relativ']) {
         expect(
-          () => ort({if (heim != null) 'HOME': heim, 'APPDATA': '/windows'}),
+          () => ort({'HOME': ?heim, 'APPDATA': '/windows'}),
           throwsStateError,
         );
       }

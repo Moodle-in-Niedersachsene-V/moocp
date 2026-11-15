@@ -623,6 +623,82 @@ Schalter von `moocp.exe`; die Auskünfte schreiben nach stdout, und weil `moocp.
 | `--werkzeugliste` | gibt als eine Zeile JSON aus, was der MCP-Server des Standardprofils auf `initialize` und `tools/list` antwortet, und endet; daraus antwortet die Brücke. Die Werkzeuge der Plugins stehen darin aus dem, was die App von ihnen gemerkt hat (siehe „Werkzeuge eines Plugins“); ein Plugin wird dafür nicht gestartet |
 | `--claude-entfernen` | entfernt die Einrichtung in allen KI-Werkzeugen und endet; ruft die Deinstallation auf (der Name stammt aus der Zeit, als es nur Claude Code gab, und bleibt, damit auch ältere Deinstallationen wirken) |
 
+### Experiment: Builds auf GitHub
+
+Der Workflow `experiment-builds.yml` läuft ausschließlich auf
+`experiment/github-actions-builds`, auf GitHub-hosted Standardrunnern
+(Ubuntu 24.04 und Windows Server 2022, jeweils x64). Flutter ist auf 3.50.0
+mit Dart 3.14 gepinnt. Er erzeugt zuerst die Skills, prüft den Lockfile,
+führt `flutter analyze` und die vollständige lokale Testsuite aus und baut
+Release-Bundles. Live-Tests gegen Moodle sind darin nicht enthalten;
+Zugangsdaten und Repository-Secrets werden nicht benötigt.
+
+Ein Push auf diesen Branch startet beide Plattformen mit Tests und Builds.
+Die letzte Commit-Nachricht kann `[ci:linux]` oder `[ci:windows]` sowie
+`[ci:tests]` oder `[ci:builds]` enthalten. Ohne Marker gilt jeweils beides.
+Ein erneuter Push bricht einen noch laufenden Versuch desselben Branches ab.
+Ein branchlokaler Start ohne Codeänderung geht so (GitHub-Schreibrecht nötig):
+
+```bash
+git switch experiment/github-actions-builds
+git commit --allow-empty -m "ci: run desktop experiment [ci:linux]"
+git push origin HEAD:experiment/github-actions-builds
+gh run list -R topse/moocp --branch experiment/github-actions-builds
+```
+
+Für Windows den Marker durch `[ci:windows]` ersetzen; für beide weglassen.
+`workflow_dispatch` bietet dieselbe Auswahl, sobald GitHub den Workflow dafür
+anbietet. Vor Aufnahme in den Default-Branch ist dieser Weg nicht verlässlich
+verfügbar; der Push-Auslöser braucht keine Änderung an `main`. Auch manuelle
+Läufe auf anderen Branches überspringen sämtliche Jobs.
+
+Unter „Actions“, „Experimental desktop builds“, den erfolgreichen Lauf öffnen
+und dessen Artefakt herunterladen. Alternativ mit angemeldetem GitHub CLI
+(`RUN_ID` durch die Nummer des erfolgreichen Laufs ersetzen):
+
+```bash
+gh run download RUN_ID -R topse/moocp -n moocp-linux-x64 -D download-linux
+mkdir -p moocp-experiment
+tar -xzf download-linux/moocp-linux-x64.tar.gz -C moocp-experiment
+./moocp-experiment/moocp --kein-update
+```
+
+Das tar-Archiv bewahrt die Ausführungsrechte und enthält das gesamte Bundle
+mit `lib/` und `data/`; diese Ordner zusammenlassen. Unter Debian 13 x64
+benötigt es eine grafische Sitzung sowie folgende Laufzeitpakete:
+
+```bash
+sudo apt-get install libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6
+```
+
+Der CI-Lauf prüft in einem frischen Debian-13-Container die dynamischen
+Bibliotheken und einen Start unter Xvfb. Das ersetzt keinen interaktiven
+Funktionstest von Schlüsselbund, Desktopintegration und Moodle-Anmeldung.
+Linux nutzt hier den von Flutter erzeugten Standardrunner und ist experimentell.
+
+Für Windows 10/11 x64 in PowerShell:
+
+```powershell
+gh run download RUN_ID -R topse/moocp -n moocp-windows-x64 -D download-windows
+Expand-Archive download-windows/moocp-windows-x64.zip -DestinationPath moocp-experiment
+& .\moocp-experiment\moocp.exe --kein-update
+```
+
+Auch unter Windows den ganzen entpackten Ordner zusammenlassen: Flutter-DLLs,
+Plugins, Visual-C++-Laufzeit, Brücke und `data/` gehören dazu. Es entsteht kein
+Installer; ein unsignierter Experiment-Bau kann eine Windows-Warnung auslösen.
+Vor dem manuellen Start eine laufende moocp schließen: Der Experiment-Bau
+verwendet dieselben Benutzereinstellungen und startet keine zweite Instanz.
+Das Herunterladen und Entpacken ersetzt keine installierte App.
+
+Die Artefakte sind drei Tage verfügbar, enthalten ausschließlich das frische
+Release-Bundle und keine Testzugänge, Profile oder Protokolle. Standardrunner
+für öffentliche Repositorys sind [laut GitHub kostenlos](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+Es werden keine größeren kostenpflichtigen Runner verwendet. Jeder Plattformjob
+hat ein Zeitlimit von 60 Minuten. Setup-, Test- und Buildzeiten stehen getrennt
+in den Schritten des jeweiligen Laufs; daraus folgt keine pauschale
+Beschleunigung gegenüber lokalen Läufen.
+
 ### Auf dem Mac bauen (nur Entwicklerversion)
 
 Voraussetzung: Flutter und Xcode (aus dem App Store, einmal gestartet). Eine Veröffentlichung für den Mac gibt es nicht; die App läuft aus dem Entwicklungsbau.

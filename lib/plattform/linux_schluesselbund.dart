@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'kindprozess.dart';
+
 /// Zustand des Standard-Schlüsselbunds (Secret Service, etwa GNOME Keyring
 /// oder KeePassXC) der Sitzung.
 enum Schluesselbund {
@@ -55,7 +57,7 @@ const _wurzel = '/org/freedesktop/secrets';
 Future<(int, String)?> _gdbus(List<String> aufruf, {Duration frist = const Duration(seconds: 5)}) async {
   final Process p;
   try {
-    p = await Process.start('gdbus', ['call', '--session', '--dest', _dienst, ...aufruf]);
+    p = await prozessStarten('gdbus', ['call', '--session', '--dest', _dienst, ...aufruf]);
   } on ProcessException {
     return null;
   }
@@ -120,7 +122,7 @@ Future<Schluesselbund> schluesselbundEntsperren({Duration frist = const Duration
   const attribute = ['moocp', 'entsperren'];
   final Process p;
   try {
-    p = await Process.start('secret-tool', const ['store', '--label=moocp entsperren', ...attribute]);
+    p = await prozessStarten('secret-tool', const ['store', '--label=moocp entsperren', ...attribute]);
   } on ProcessException {
     return Schluesselbund.gesperrt;
   }
@@ -136,7 +138,7 @@ Future<Schluesselbund> schluesselbundEntsperren({Duration frist = const Duration
   final danach = await schluesselbundPruefen();
   if (danach == Schluesselbund.bereit) {
     try {
-      await Process.run('secret-tool', const ['clear', ...attribute]).timeout(const Duration(seconds: 5));
+      await prozessAusfuehren('secret-tool', const ['clear', ...attribute]).timeout(const Duration(seconds: 5));
     } on Exception {
       // Der Platzhalter bleibt höchstens liegen; er enthält nichts.
     }

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'kindprozess.dart';
 import 'plattform.dart';
 
 /// macOS: Browser im Programmbündel in /Applications oder im Benutzerordner;
@@ -44,11 +45,7 @@ class MacBrowser implements PlattformBrowser {
     ];
     for (final ort in orte) {
       try {
-        final r = await Process.run('defaults', [
-          'read',
-          ort,
-          'RemoteDebuggingAllowed',
-        ]);
+        final r = await prozessAusfuehren('defaults',['read', ort, 'RemoteDebuggingAllowed']);
         if (r.exitCode == 0 && '${r.stdout}'.trim() == '0') return true;
       } on ProcessException {
         // Ohne defaults gibt es keine Richtlinie zu lesen.

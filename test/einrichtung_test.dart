@@ -439,10 +439,39 @@ void main() {
           'moodle/SKILL.md': 'Skill',
           'moodle/references/lesen.md': 'Lesen',
           'anderes/SKILL.md': 'gehört nicht dazu',
-        }));
+        }),
+        herkunft: SkillHerkunft.app);
 
     test('Paket liest nur den eigenen Ordner', () {
       expect(paket.dateien.keys, unorderedEquals(['SKILL.md', 'references/lesen.md']));
+    });
+
+    test('Pakete der App: nur *.skill unter dem Asset-Pfad, Name aus dem Dateinamen, Herkunft App', () async {
+      final assets = {
+        '${skillAssets}moodle.skill': zip({'moodle/SKILL.md': 'Kurs'}),
+        '${skillAssets}lernsituation.skill':
+            zip({'lernsituation/SKILL.md': 'Lernsituation', 'lernsituation/references/a.md': 'A'}),
+        '${skillAssets}notizen.txt': const [1, 2, 3],
+        'LICENSE.md': const [4, 5, 6],
+        'anderswo/dist/fremd.skill': zip({'fremd/SKILL.md': 'Fremd'}),
+      };
+      final geladen = <String>[];
+      final pakete = await skillPaketeFinden(
+          appAssets: assets.keys,
+          laden: (a) async {
+            geladen.add(a);
+            return assets[a]!;
+          });
+      expect(pakete.map((x) => x.name), unorderedEquals(['moodle', 'lernsituation']));
+      expect(pakete.every((x) => x.herkunft == SkillHerkunft.app), isTrue);
+      expect(pakete.firstWhere((x) => x.name == 'lernsituation').dateien.keys,
+          unorderedEquals(['SKILL.md', 'references/a.md']));
+      expect(geladen, unorderedEquals(['${skillAssets}moodle.skill', '${skillAssets}lernsituation.skill']),
+          reason: 'was kein Paket ist, wird nicht einmal geladen');
+    });
+
+    test('ohne Pakete: leere Liste', () async {
+      expect(await skillPaketeFinden(appAssets: const ['LICENSE.md'], laden: (_) async => const []), isEmpty);
     });
 
     test('vergleichen, installieren, Verwaistes entfernen', () {
@@ -468,7 +497,7 @@ void main() {
   });
 
   group('Einrichtungsstand', () {
-    final paket = SkillPaket('moodle', {'SKILL.md': utf8.encode('Skill')});
+    final paket = SkillPaket('moodle', {'SKILL.md': utf8.encode('Skill')}, herkunft: SkillHerkunft.app);
     late String heim;
     late Map<String, String> u;
     setUp(() {
@@ -482,6 +511,7 @@ void main() {
         port: 47811,
         schluessel: 'abc',
         skills: [paket],
+        wahlSkills: appWahlSkills,
         abgewaehlt: abgewaehlt,
         python: () async => python);
 
@@ -615,17 +645,23 @@ void main() {
     datei('heim/.claude.json', jsonEncode(eintrag('http://127.0.0.1:47811/mcp', 'abc')));
     final u = {'USERPROFILE': heim, 'HOME': heim};
     final claude = ClaudeCode(u);
-    final moodle = SkillPaket('moodle', {'SKILL.md': utf8.encode('Kurs')});
-    final ls = SkillPaket('lernsituation', {'SKILL.md': utf8.encode('Lernsituation')});
+    final moodle = SkillPaket('moodle', {'SKILL.md': utf8.encode('Kurs')}, herkunft: SkillHerkunft.app);
+    final ls = SkillPaket('lernsituation', {'SKILL.md': utf8.encode('Lernsituation')}, herkunft: SkillHerkunft.app);
     Directory ziel(String n) => Directory(p.join(claude.skillOrdner.path, n));
     Future<Einrichtungsstand> pruefen(Set<String> gewaehlt) => einrichtungPruefen(
-        umgebung: u, port: 47811, schluessel: 'abc', skills: [moodle, ls], gewaehlt: gewaehlt, python: () async => true);
+        umgebung: u,
+        port: 47811,
+        schluessel: 'abc',
+        skills: [moodle, ls],
+        wahlSkills: appWahlSkills,
+        gewaehlt: gewaehlt,
+        python: () async => true);
     Set<String> entfernen(Einrichtungsstand s) => s.werkzeuge.single.entfernen;
 
     // Neu angefangen: nichts gewählt, lernsituation gehört nicht dazu.
-    expect(gewaehltVorgabe(u), isEmpty);
+    expect(gewaehltVorgabe(u, appWahlSkills.keys), isEmpty);
     skillInstallieren(moodle, ziel('moodle'));
-    var s = await pruefen(gewaehltVorgabe(u));
+    var s = await pruefen(gewaehltVorgabe(u, appWahlSkills.keys));
     expect(s.gewollt.map((x) => x.name), ['moodle']);
     expect(s.brauchtEtwas, isFalse, reason: 'nicht gewählt und nicht installiert: nichts zu tun');
 
@@ -636,7 +672,7 @@ void main() {
     expect((await pruefen({'lernsituation'})).brauchtEtwas, isFalse);
 
     // Wer ihn schon hat und noch nichts gewählt hat, behält ihn.
-    expect(gewaehltVorgabe(u), {'lernsituation'});
+    expect(gewaehltVorgabe(u, appWahlSkills.keys), {'lernsituation'});
 
     // Abgewählt: installiert, also entfernen.
     s = await pruefen({});
@@ -649,8 +685,61 @@ void main() {
     expect(ziel('lernsituation').existsSync(), isFalse);
   }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
 
+  test('Die wählbaren Skills der App: nur lernsituation, mit dem Satz aus dem Dialog', () {
+    expect(appWahlSkills, {
+      'lernsituation': 'Für berufsbildende Schulen: Lernsituationen mit SchuCu-Tabelle, Ablaufplan, Arbeits- '
+          'und Informationsblättern entwerfen.',
+    });
+  });
+
+  group('Wählbare Skills sind Daten der Einrichtung', () {
+    // lernsituation ist hier nicht wählbar, zusatz schon: Was wählbar ist, steht nicht in der Einrichtung.
+    final fest = SkillPaket('lernsituation', {'SKILL.md': utf8.encode('Lernsituation')}, herkunft: SkillHerkunft.app);
+    final zusatz = SkillPaket('zusatz', {'SKILL.md': utf8.encode('Zusatz')}, herkunft: SkillHerkunft.app);
+    const wahl = {'zusatz': 'Ein Zusatz, der nicht jeder braucht.'};
+    late Map<String, String> u;
+    late CodexCli codex;
+    setUp(() {
+      final heim = p.join(tmp.path, 'heim');
+      u = {'USERPROFILE': heim, 'HOME': heim};
+      codex = CodexCli(u);
+    });
+
+    test('gewollt ist alles außer dem Wählbaren, das nicht gewählt ist; Abgewähltes wird entfernt', () async {
+      Future<Einrichtungsstand> pruefen(Set<String> gewaehlt) => einrichtungPruefen(
+          umgebung: u,
+          port: 47811,
+          schluessel: 'abc',
+          skills: [fest, zusatz],
+          wahlSkills: wahl,
+          gewaehlt: gewaehlt,
+          gefunden: [codex],
+          python: () async => true);
+
+      var s = await pruefen({});
+      expect(s.wahlSkills, wahl);
+      expect(s.gewollt.map((x) => x.name), ['lernsituation']);
+      expect(s.werkzeuge.single.skills.map((x) => x.name), ['lernsituation']);
+
+      s = await pruefen({'zusatz'});
+      expect(s.gewollt.map((x) => x.name), ['lernsituation', 'zusatz']);
+      expect(s.werkzeuge.single.skills.map((x) => x.name), ['lernsituation', 'zusatz']);
+
+      skillInstallieren(zusatz, Directory(p.join(codex.skillOrdner.path, 'zusatz')));
+      s = await pruefen({});
+      expect(s.werkzeuge.single.entfernen, {'zusatz'});
+    });
+
+    test('die Vorgabe wählt, was wählbar und schon installiert ist', () {
+      skillInstallieren(zusatz, Directory(p.join(codex.skillOrdner.path, 'zusatz')));
+      skillInstallieren(fest, Directory(p.join(codex.skillOrdner.path, 'lernsituation')));
+      expect(gewaehltVorgabe(u, wahl.keys), {'zusatz'});
+      expect(gewaehltVorgabe(u, const []), isEmpty);
+    }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+  });
+
   group('Entfernen beim Deinstallieren', () {
-    const desktop = 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code';
+    const desktop ='lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code';
     const fremd = {'type': 'http', 'url': 'http://127.0.0.1:2/mcp'};
     late Map<String, String> umgebung;
     late File konfig;
@@ -722,6 +811,19 @@ void main() {
       final e = await einrichtungEntfernen(umgebung: umgebung, skills: ['nicht-da'], werkzeuge: werkzeuge());
       expect(aufrufe, isEmpty);
       expect(e.code, 0);
+    });
+
+    test('entfernt jeden gefundenen Skill: Die Namen kommen aus derselben Entdeckung wie die der Einrichtung', () async {
+      konfig.writeAsStringSync(jsonEncode({'mcpServers': {}}));
+      final pakete = await skillPaketeFinden(
+          appAssets: ['${skillAssets}moodle.skill', '${skillAssets}lernsituation.skill', 'LICENSE.md'],
+          laden: (a) async => zip({'${p.basenameWithoutExtension(a)}/SKILL.md': 'x'}));
+      final e = await einrichtungEntfernen(
+          umgebung: umgebung, skills: [for (final s in pakete) s.name], werkzeuge: werkzeuge());
+      expect(e.code, 0);
+      expect(Directory(p.join(tmp.path, 'cfg/skills/moodle')).existsSync(), isFalse);
+      expect(Directory(p.join(tmp.path, 'cfg/skills/lernsituation')).existsSync(), isFalse);
+      expect(File(p.join(tmp.path, 'cfg/skills/fremd/SKILL.md')).existsSync(), isTrue);
     });
 
     test('Codex und LM Studio: Einträge und Skills weg, Fremdes bleibt', () async {

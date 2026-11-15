@@ -20,6 +20,17 @@ There are two ways to add something, and both are welcome:
 
 A plugin is the responsibility of its own project. This repository, its issues and its pull requests therefore contain nothing about a particular plugin and nothing about features that only a plugin has. Questions and requests about the plugin interface itself belong here, described by what the interface has to do in general, not by one use case.
 
+### Developing plugins in test mode
+
+For end-to-end runs without clicks, moocp has a test mode that also covers plugins within narrow limits. It exists only in a debug build started with `--dart-define=MOOCP_TESTBETRIEB=true` and only for an instance profile explicitly bound to a test course (`MOOCP_TESTZUGANG_PROFILE`, see `docs/agents/testing.md`); the installed app never has it. For a plugin under development, start moocp from source, for example `flutter run -d windows --dart-define=MOOCP_TESTBETRIEB=true -a --plugin-entwicklung -a <plugin folder>`, with the key in `MOOCP_PLUGIN_SCHLUESSEL` as usual.
+
+- Built-in tools called by the plugin follow the existing test-mode rules (own hidden ZZ probes in bound test courses).
+- A write to an additional address is approved automatically only inside a run (`/v1/moodle/lauf/beginnen`) whose course is a bound test course and whose course and activity the address matches; everywhere else the approval dialog shows.
+- Prepared answers for the plugin's dialogs go into `plugin-dialoge.json` next to the test profile's access file, matched by plugin short name, dialog kind and title. Without a matching answer the dialog shows.
+- Never automatic: the consent to a plugin, the dialog of a development plugin, interface and update dialogs, `/v1/freigabe`, and everything that asks on every level. The name check is unchanged.
+
+Every automatic step is in the log and in the answer. Details and the file format are in the README (part 4, "Plugins im Testbetrieb").
+
 ## Issues
 
 - Every piece of work starts as an issue. Small obvious fixes may go straight to a PR.

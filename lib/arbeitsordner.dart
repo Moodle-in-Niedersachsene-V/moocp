@@ -18,6 +18,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'plattform/kindprozess.dart';
+
 class Arbeitsordner {
   const Arbeitsordner(this.pfad);
 
@@ -45,7 +47,7 @@ class Arbeitsordner {
       throw StateError('Der Arbeitsordner ist eine Verknüpfung und wird nicht benutzt.');
     }
     final d = Directory(pfad)..createSync(recursive: true);
-    if (istLinux) Process.runSync('chmod', ['700', d.path]);
+    if (istLinux) prozessAusfuehrenSync('chmod', ['700', d.path]);
     final a = Arbeitsordner(d.resolveSymbolicLinksSync());
     return (a, a.leeren());
   }

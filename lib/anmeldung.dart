@@ -35,6 +35,89 @@ class AnmeldeAuftrag {
   final bool merken;
 }
 
+/// Wie der Start bis zur Anmeldung ausgeht.
+enum StartAusgang {
+  /// Ein Update-Installer läuft: Die App beendet sich.
+  beenden,
+
+  /// Es geht nicht weiter: ohne Einrichtung (die App läuft dann nicht) oder
+  /// weil die Oberfläche weg ist.
+  abgebrochen,
+
+  /// Eingerichtet; der Aufrufer meldet an.
+  bereit,
+}
+
+/// Die Schritte des Starts bis zur Anmeldung in fester Reihenfolge (E13, E35):
+///
+/// 1. [update] der App. Liefert true, wenn ein Installer läuft; dann endet der
+///    Start. Ein Update bringt auch neue Skills, und die Einrichtung soll nicht
+///    die Version einrichten, die gleich ersetzt wird.
+/// 2. [pluginPruefung]: je Plugin Schnittstelle und Update
+///    (plugin/plugin_update.dart), nach dem Update der App, weil eine neue App
+///    eine andere Schnittstelle bieten kann, und vor der Zustimmung, damit sie
+///    nach einem Update des Plugins gleich dem neuen Stand gilt. Liefert true,
+///    wenn der Installer von moocp läuft (ein Plugin verlangte eine neuere
+///    Schnittstelle); dann endet der Start.
+/// 3. [pluginZustimmung]: die Lehrkraft entscheidet über Plugins, die neu
+///    oder geändert sind. Vor der Einrichtung, weil Plugins eigene Skills
+///    mitbringen, die die Einrichtung behandelt.
+/// 4. [pluginsStarten]: die angenommenen Plugins starten, einmal je App. Vor
+///    der Einrichtung und vor dem MCP-Server, damit jede Sitzung ihre
+///    Werkzeuge schon vorfindet.
+/// 5. [einrichtungUndAnmeldung] ([testprofilVorEinrichtungStarten]): erst die
+///    Einrichtung der KI-Werkzeuge, dann die Anmeldung.
+///
+/// [weiter] sagt vor jedem Schritt nach dem ersten, ob die Oberfläche noch da
+/// ist; sonst stünde ein Dialog vor einem Fenster, das nicht mehr besteht.
+Future<StartAusgang> startBisAnmeldung({
+  required Future<bool> Function() update,
+  required Future<bool> Function() pluginPruefung,
+  required Future<void> Function() pluginZustimmung,
+  required Future<void> Function() pluginsStarten,
+  required Future<bool> Function() einrichtungUndAnmeldung,
+  required bool Function() weiter,
+}) async {
+  if (await update()) return StartAusgang.beenden;
+  if (!weiter()) return StartAusgang.abgebrochen;
+  if (await pluginPruefung()) return StartAusgang.beenden;
+  if (!weiter()) return StartAusgang.abgebrochen;
+  await pluginZustimmung();
+  if (!weiter()) return StartAusgang.abgebrochen;
+  await pluginsStarten();
+  if (!weiter()) return StartAusgang.abgebrochen;
+  return await einrichtungUndAnmeldung() ? StartAusgang.bereit : StartAusgang.abgebrochen;
+}
+
+/// Der letzte Schritt des Starts (E13, E31): Der MCP-Server eines Profils
+/// startet erst, wenn die App eingerichtet ist ([eingerichtet]) und dieses
+/// Profil angemeldet ist – ohne Ausnahme, auch wenn dort ein Plugin
+/// eingeschaltet ist. Aufgerufen nach jeder Anmeldung (main.dart,
+/// _mcpStarten); ein Server, der schon läuft, bleibt, wie er ist. Danach
+/// bleibt er an, auch nach „Abmelden“: Ein Stopp risse laufenden Sitzungen
+/// der KI-Werkzeuge die Verbindung ab; die Werkzeuge melden dann „Nicht
+/// angemeldet“. Ein Server, der nicht startet, steht mit dem Typ des Fehlers
+/// in [protokoll] und hält die übrigen nicht auf.
+Future<void> mcpServerStarten(
+  List<Instanz> instanzen, {
+  required bool eingerichtet,
+  required Protokoll protokoll,
+}) async {
+  if (!eingerichtet) return;
+  for (final i in instanzen) {
+    if (!i.moodle.angemeldet || i.dienst.laeuft) continue;
+    try {
+      await i.dienst.starten();
+    } catch (e) {
+      protokoll.eintrag(
+        Art.fehler,
+        'MCP-Server (${i.dienst.profil.name}) startet nicht auf Port '
+        '${i.dienst.profil.port}: ${e.runtimeType}',
+      );
+    }
+  }
+}
+
 /// Hält den normalen Start bei der Einrichtung an; nur eine explizite
 /// Testprofilbindung darf die Testanmeldung vor dem Einrichtungsdialog starten.
 Future<bool> testprofilVorEinrichtungStarten({

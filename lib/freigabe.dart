@@ -105,6 +105,9 @@ class FreigabeAnfrage {
     this.links = const [],
     this.ab = Bestaetigungen.mittel,
     this.bildschirmfoto = false,
+    this.zusatzSchreiben = false,
+    this.vomPlugin,
+    this.protokolltitel,
   });
 
   final String titel;
@@ -127,6 +130,28 @@ class FreigabeAnfrage {
   /// Karten-Zuordnungen und die Rückfrage vor einer Wiederholung gehen im
   /// Testbetrieb wie sonst an die Lehrkraft.
   final bool bildschirmfoto;
+
+  /// Ob dies die Freigabe zum Schreiben über eine Zusatzadresse eines Plugins
+  /// ist (E36). Sie fragt auf jeder Stufe; im Testbetrieb ist sie die zweite
+  /// benannte Ausnahme neben dem Bildschirmfoto. Automatisch freigegeben wird
+  /// sie trotzdem nur, wenn der Aufrufer die Zone des Testbetriebs dafür
+  /// öffnet ([Freigaben.imTest]): McpDienst tut das nur in einem Lauf, dessen
+  /// Kurs ein gebundener Testkurs ist (E35).
+  final bool zusatzSchreiben;
+
+  /// Was ein Plugin zu seiner eigenen Freigabe schreibt (app_adresse.dart):
+  /// reiner Text, bereinigt und begrenzt (klartext.dart). Der Dialog zeigt
+  /// ihn als solchen gekennzeichnet, denn moocp hat ihn nicht geprüft; null
+  /// bei jeder Freigabe der App selbst.
+  final String? vomPlugin;
+
+  /// Wie die Anfrage im Protokoll heißt, wenn nicht wie [titel]: Den Titel
+  /// einer Freigabe, um die ein Plugin bittet, bestimmt das Plugin, und der
+  /// gehört nicht ins Protokoll.
+  final String? protokolltitel;
+
+  /// Der Name im Protokoll.
+  String get _imProtokoll => protokolltitel ?? titel;
 
   /// Wozu Claude das braucht, in Claudes eigenen Worten -- steht oben im
   /// Dialog (Bildschirmfotos).
@@ -194,9 +219,27 @@ class FreigabeAnfrage {
   DateTime? get ablauf => _ablauf;
   DateTime? _ablauf;
 
+  /// Das Plugin, das das Werkzeug aufgerufen hat („Plugin „Name““), wenn
+  /// nicht die KI direkt fragt; gesetzt von [Freigaben.anfragen] aus dem
+  /// Aufruf ([Freigaben.mitAbbruch]). Der Dialog zeigt es, damit die
+  /// Lehrkraft sieht, wer fragt.
+  String? get aufrufer => _aufrufer;
+  String? _aufrufer;
+
   final Completer<bool> _antwort = Completer<bool>();
   bool get offen => !_antwort.isCompleted;
+
+  /// Ob die Anfrage ohne Entscheidung endete: Frist abgelaufen, oder der
+  /// Aufruf wartet nicht mehr ([Freigaben.mitAbbruch]). Dann ist sie nicht
+  /// erteilt, aber auch nicht abgelehnt.
+  bool get verfallen => _verfallen;
+  bool _verfallen = false;
 }
+
+/// Der Satz, mit dem eine Antwort sagt, dass der Testbetrieb freigegeben hat:
+/// in der Antwort eines Werkzeugs (werkzeug_aufrufe.dart) und in der Antwort
+/// der Adresse der App an ein Plugin (plugin/app_adresse.dart).
+const testfreigabeHinweis = 'Debug-Testbetrieb: automatisch freigegeben, ohne persönliche Freigabe.';
 
 /// Was während eines Werkzeugaufrufs ohne persönliche Freigabe geschah. Der
 /// MCP-Dienst legt einen an ([Freigaben.mitAbbruch]) und sagt Claude danach,
@@ -209,14 +252,21 @@ class AufrufZaehler {
 
   /// Freigaben, die der Testbetrieb automatisch erteilt hat.
   int testfreigaben = 0;
+
+  /// Das Plugin, in dessen Auftrag eine Freigabe ausgelassen wurde: bei einem
+  /// eingebauten Werkzeug, das ein Plugin aufgerufen hat, oder einer Freigabe,
+  /// um die ein Plugin selbst gebeten hat. Der Hinweis „ohne Freigabe
+  /// ausgeführt“ in der Antwort an die KI nennt es (werkzeug_aufrufe.dart).
+  String? aufrufer;
 }
 
 class _AbbruchStand {
-  _AbbruchStand(this.signal, this.zaehler) {
+  _AbbruchStand(this.signal, this.zaehler, this.aufrufer) {
     signal.then((_) => abgebrochen = true);
   }
   final Future<void> signal;
   final AufrufZaehler? zaehler;
+  final String? aufrufer;
   bool abgebrochen = false;
 }
 
@@ -267,9 +317,29 @@ class Freigaben extends ChangeNotifier {
   /// Führt [f] so aus, dass seine Freigaben verfallen, sobald sich [abbruch]
   /// erfüllt: Dann wartet der Client nicht mehr auf das Ergebnis. Mit [zaehler]
   /// zählt [anfragen] mit, was in diesem Aufruf ohne persönliche Freigabe lief.
+  /// [aufrufer] nennt das Plugin, wenn ein Plugin das Werkzeug aufgerufen hat
+  /// ([FreigabeAnfrage.aufrufer]); null bei einem KI-Werkzeug.
   static Future<T> mitAbbruch<T>(Future<void> abbruch, Future<T> Function() f,
-          {AufrufZaehler? zaehler}) =>
-      runZoned(f, zoneValues: {_abbruch: _AbbruchStand(abbruch, zaehler)});
+          {AufrufZaehler? zaehler, String? aufrufer}) =>
+      runZoned(f, zoneValues: {_abbruch: _AbbruchStand(abbruch, zaehler, aufrufer)});
+
+  /// Der Zähler des Werkzeugaufrufs, in dessen Zone das läuft
+  /// ([mitAbbruch]); null außerhalb eines Aufrufs. So zählt eine Freigabe,
+  /// die nicht in dieser Zone gestellt wird (die eines Plugins, über die
+  /// Adresse der App), doch für den Aufruf, zu dem sie gehört.
+  static AufrufZaehler? get zaehlerImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.zaehler;
+
+  /// Das Plugin, das das Werkzeug aufgerufen hat, in dessen Zone das läuft
+  /// ([mitAbbruch]); null bei einem KI-Werkzeug und außerhalb eines Aufrufs.
+  /// `status` nennt es als Verbindung (mcp_dienst.dart).
+  static String? get aufruferImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.aufrufer;
+
+  /// Führt [f] so aus, dass der Testbetrieb darin nichts automatisch
+  /// freigibt, auch wenn ein Aufrufer weiter außen ihn eingeschaltet hat
+  /// ([imTest]). Für die Freigaben eines Plugins: Für sie gibt es im
+  /// Testbetrieb keine automatische Freigabe, außer beim Schreiben über eine
+  /// Zusatzadresse in einem Lauf im gebundenen Testkurs (McpDienst).
+  static Future<T> ohneTestfreigabe<T>(Future<T> Function() f) => runZoned(f, zoneValues: {_testfreigabe: null});
 
   /// Ob [a] bei der eingestellten Stufe überhaupt gefragt wird.
   bool fragt(FreigabeAnfrage a) => stufe.index >= a.ab.index;
@@ -294,28 +364,34 @@ class Freigaben extends ChangeNotifier {
   /// Feld für die Stufe, und ohne offenen Dialog wartet keine Anfrage.
   Future<bool> anfragen(FreigabeAnfrage a) async {
     final abbruch = Zone.current[_abbruch] as _AbbruchStand?;
+    a._aufrufer = abbruch?.aufrufer;
+    // Hinter dem Titel im Protokoll: wer gefragt hat, wenn es ein Plugin war.
+    final titel = a._aufrufer == null ? a._imProtokoll : '${a._imProtokoll} (Aufrufer: ${a._aufrufer})';
     bool abgebrochen() {
       if (abbruch?.abgebrochen != true) return false;
       protokoll.eintrag(Art.info, 'Die KI wartet nicht mehr -- nicht gespeichert');
+      a._verfallen = true;
       a._antwort.complete(false);
       return true;
     }
     if (abgebrochen()) return false;
     // Testbetrieb: Automatisch freigegeben wird nur, was nicht „immer fragen"
     // ist. Eine Anfrage mit `ab: keine` (Übergabe-Bitte, fachliche Zuordnung,
-    // Wiederholung) geht wie im Normalbetrieb an die Lehrkraft; einzige
-    // Ausnahme ist das Bildschirmfoto (FreigabeAnfrage.bildschirmfoto).
+    // Wiederholung) geht wie im Normalbetrieb an die Lehrkraft; Ausnahmen
+    // sind das Bildschirmfoto (FreigabeAnfrage.bildschirmfoto) und das
+    // Schreiben eines Plugins über eine Zusatzadresse in einem Lauf im
+    // gebundenen Testkurs (FreigabeAnfrage.zusatzSchreiben).
     final test = Zone.current[_testfreigabe] as ({Freigaben freigaben, Future<bool> Function() pruefen})?;
     if (testbetriebAktiv &&
         test != null &&
         identical(test.freigaben, this) &&
-        (a.ab != Bestaetigungen.keine || a.bildschirmfoto)) {
+        (a.ab != Bestaetigungen.keine || a.bildschirmfoto || a.zusatzSchreiben)) {
       final erlaubt = await test.pruefen();
       if (abgebrochen()) return false;
       if (erlaubt) {
         testfreigaben++;
         abbruch?.zaehler?.testfreigaben++;
-        protokoll.eintrag(Art.schreiben, 'Testmodus, automatisch freigegeben: ${a.titel}');
+        protokoll.eintrag(Art.schreiben, 'Testmodus, automatisch freigegeben: $titel');
         a._antwort.complete(true);
         return true;
       }
@@ -323,7 +399,7 @@ class Freigaben extends ChangeNotifier {
     if (!fragt(a)) {
       ausgelassen++;
       abbruch?.zaehler?.ausgelassen++;
-      protokoll.eintrag(Art.schreiben, 'Ohne Freigabe (Bestätigungen: ${stufe.text}): ${a.titel}');
+      protokoll.eintrag(Art.schreiben, 'Ohne Freigabe (Bestätigungen: ${stufe.text}): $titel');
       a._antwort.complete(true);
       return true;
     }
@@ -337,7 +413,7 @@ class Freigaben extends ChangeNotifier {
     } else {
       final davor = 1 + _warteschlange.length;
       protokoll.eintrag(Art.info,
-          'Freigabe wartet hinter ${davor == 1 ? 'einer anderen' : '$davor anderen'}: ${a.titel}');
+          'Freigabe wartet hinter ${davor == 1 ? 'einer anderen' : '$davor anderen'}: $titel');
       _warteschlange.add(a);
     }
     notifyListeners();
@@ -350,7 +426,10 @@ class Freigaben extends ChangeNotifier {
 
   void _oeffnen(FreigabeAnfrage a) {
     _aktuell = a;
-    protokoll.eintrag(Art.info, 'Freigabe angefragt: ${a.titel} (Frist ${_dauer(a._ablauf!.difference(DateTime.now()))})');
+    protokoll.eintrag(
+        Art.info,
+        'Freigabe angefragt: ${a._imProtokoll} (${a.aufrufer == null ? '' : 'Aufrufer: ${a.aufrufer}, '}'
+        'Frist ${_dauer(a._ablauf!.difference(DateTime.now()))})');
   }
 
   /// Beantwortet [a], ob offen oder wartend; ist sie die offene, ist die
@@ -374,7 +453,8 @@ class Freigaben extends ChangeNotifier {
         Art.info,
         identical(a, _aktuell)
             ? '$grund -- nicht gespeichert'
-            : '$grund -- nicht gefragt, nicht gespeichert: ${a.titel}');
+            : '$grund -- nicht gefragt, nicht gespeichert: ${a._imProtokoll}');
+    a._verfallen = true;
     _beantworten(a, false);
   }
 

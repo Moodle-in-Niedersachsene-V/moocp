@@ -33,6 +33,19 @@ final RegExp _nutzerDateien = RegExp(r'^/pluginfile\.php/\d+/user/');
 /// Segment bleibt optional, falls Moodle es anderswo mit einer Zahl setzt.
 final RegExp _sicherungDatei = RegExp(r'^/pluginfile\.php/\d+/user/backup/(?:\d+/)?[^/?#]+\.mbz\?forcedownload=1$');
 
+/// Die Regel für Seiten zu Personen. Sie steht einzeln da, weil genau sie --
+/// und nur sie -- für einen einzigen Aufrufer eine Ausnahme hat
+/// ([sperrregelFuerNamenssperre]).
+final RegExp _personenRegel = RegExp(r'/user/(view|profile|index|files|editadvanced)\.php');
+
+/// Die Teilnehmendenseite eines Kurses, genau in der Form, in der die App
+/// selbst sie für die letzte Sperre liest (E36): Kursnummer, Seitengröße 5000
+/// (Moodles „alle zeigen“), der Filter nach Anfangsbuchstaben leer. Nur
+/// diese Adresse und nur für diesen einen Aufrufer (moodle_zugang.dart,
+/// `MoodleZugang.teilnehmendenseiteLesen`); für die eingebauten Werkzeuge,
+/// für Plugins und für den Browser der Bildschirmfotos bleibt sie gesperrt.
+final RegExp _teilnehmendenseite = RegExp(r'^/user/index\.php\?id=[1-9]\d{0,9}&perpage=5000&tifirst=&tilast=$');
+
 final List<RegExp> _gesperrt = [
   // Bewertungen, Abgaben, Versuche
   _notenRegel,
@@ -71,7 +84,7 @@ final List<RegExp> _gesperrt = [
   // deploy und caschat arbeiten nur mit der Frage und bleiben offen.
   RegExp(r'/question/type/stack/questiontestreport\.php'),
   // Personen
-  RegExp(r'/user/(view|profile|index|files|editadvanced)\.php'),
+  _personenRegel,
   RegExp(r'/course/user\.php'),
   RegExp(r'/message/'),
   RegExp(r'/badges/'),
@@ -113,13 +126,24 @@ final List<RegExp> _bewertungsschema = [
 ];
 
 /// Die Regel, die [uri] sperrt, oder null. Nur Pfad und Query zählen.
-String? sperrregel(Uri uri) {
+String? sperrregel(Uri uri) => _sperrregel(uri, namenssperre: false);
+
+/// Die Regel, die [uri] für den einen Aufrufer sperrt, der die Namen der
+/// Teilnehmenden für die letzte Sperre liest (E36): wie [sperrregel], nur dass
+/// die Regel für Seiten zu Personen die Teilnehmendenseite in genau der einen
+/// Form durchlässt, in der die App sie liest. Jede andere Regel gilt weiter,
+/// und jede andere Adresse unter /user/ bleibt gesperrt.
+String? sperrregelFuerNamenssperre(Uri uri) => _sperrregel(uri, namenssperre: true);
+
+String? _sperrregel(Uri uri, {required bool namenssperre}) {
   final u = uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
   final schema = _bewertungsschema.any((r) => r.hasMatch(u));
   final sicherung = _sicherungDatei.hasMatch(u);
+  final teilnehmende = namenssperre && _teilnehmendenseite.hasMatch(u);
   for (final r in _gesperrt) {
     if (schema && identical(r, _notenRegel)) continue;
     if (sicherung && identical(r, _nutzerDateien)) continue;
+    if (teilnehmende && identical(r, _personenRegel)) continue;
     if (r.hasMatch(u)) return r.pattern;
   }
   return null;

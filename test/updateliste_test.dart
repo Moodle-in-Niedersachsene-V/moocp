@@ -85,4 +85,121 @@ void main() {
           isNotNull);
     });
   });
+
+  group('Eine andere Liste von Herkünften', () {
+    const quellen = ['beispiel-org/zusatz', 'beispiel-org/zusatz.alt'];
+
+    String? sperreFuer(String adresse, {bool download = false}) =>
+        updateGesperrt(Uri.parse(adresse), download: download, quellen: quellen);
+
+    test('erlaubt genau die Abfrage und den Download ihrer Repositorys', () {
+      expect(sperreFuer('https://api.github.com/repos/beispiel-org/zusatz/releases/latest'), isNull);
+      expect(sperreFuer('https://api.github.com/repos/beispiel-org/zusatz.alt/releases/latest'), isNull);
+      expect(
+          sperreFuer('https://github.com/beispiel-org/zusatz/releases/download/v1.0/zusatz_setup_1.0.exe',
+              download: true),
+          isNull);
+      // Die Speicherdienste, auf die GitHub dabei umleitet, bleiben dieselben.
+      expect(sperreFuer('https://objects.githubusercontent.com/x?token=abc', download: true), isNull);
+    });
+
+    test('lässt die Repositorys von moocp dann nicht mehr zu', () {
+      expect(sperreFuer('https://api.github.com/repos/topse/moocp/releases/latest'), isNotNull);
+      expect(
+          sperreFuer('https://github.com/topse/moocp/releases/download/v1/moocp_setup_1.exe',
+              download: true),
+          isNotNull);
+    });
+
+    test('die erlaubten Rechner und die Form der Adresse bleiben', () {
+      expect(sperreFuer('http://api.github.com/repos/beispiel-org/zusatz/releases/latest'), 'kein https');
+      expect(sperreFuer('https://beispiel.test/repos/beispiel-org/zusatz/releases/latest'), isNotNull);
+      expect(sperreFuer('https://api.github.com/repos/beispiel-org/zusatz/releases'), isNotNull);
+      expect(sperreFuer('https://github.com/beispiel-org/zusatz/archive/main.zip', download: true), isNotNull);
+      expect(sperreFuer('https://githubusercontent.com.beispiel.test/x', download: true), isNotNull);
+    });
+  });
+
+  group('Was als Herkunft gilt', () {
+    test('schlicht „Besitzer/Name“', () {
+      for (final herkunft in [
+        'topse/moocp',
+        'Moodle-in-Niedersachsene-V/moocp',
+        'a/b',
+        'beispiel-org/zusatz_1.2-x',
+        'beispiel-org/.github',
+      ]) {
+        expect(herkunftGueltig(herkunft), isTrue, reason: herkunft);
+      }
+    });
+
+    test('alles andere nicht', () {
+      for (final herkunft in [
+        '',
+        'topse',
+        'topse/',
+        '/moocp',
+        'a/b/c',
+        'topse/moocp/',
+        'topse/..',
+        'topse/.',
+        '../moocp',
+        'a/b/../../c',
+        'x/y/../../../users/z',
+        'topse/moocp?x=1',
+        'topse/moocp#anker',
+        'topse/moocp\n',
+        'topse/moo cp',
+        'topse\\moocp',
+        'topse/moocp%2f..',
+        'wer@host/moocp',
+        'https://beispiel.test/x',
+        '-topse/moocp',
+        'topse-/moocp',
+        'tøpse/moocp',
+        'topse/møocp',
+      ]) {
+        expect(herkunftGueltig(herkunft), isFalse, reason: herkunft);
+      }
+    });
+
+    test('aus einem anderen Namen entsteht keine Abfrageadresse', () {
+      // Uri.parse faltet „..“ weg: Aus der Herkunft unten würde ohne die Regel
+      // genau die Adresse https://api.github.com/users/z/releases/latest.
+      expect(() => releaseAbfrage('x/y/../../../users/z'), throwsArgumentError);
+      expect(() => releaseAbfrage('topse/moocp?x=1'), throwsArgumentError);
+      expect(releaseAbfrage('topse/moocp').toString(),
+          'https://api.github.com/repos/topse/moocp/releases/latest');
+    });
+
+    test('ein Name, der keine Herkunft ist, öffnet auch in der Liste keine Adresse', () {
+      // Die Regel prüft jeden Namen der Liste selbst; sonst bestimmte ein
+      // Name, der aus dem Muster ausbricht, auch die Adresse, die dann gilt.
+      const hinterlistig = ['x/y/../../../users/z'];
+      expect(
+          updateGesperrt(Uri.parse('https://api.github.com/users/z/releases/latest'),
+              download: false, quellen: hinterlistig),
+          isNotNull);
+      expect(
+          updateGesperrt(Uri.parse('https://api.github.com/repos/x/y/releases/latest'),
+              download: false, quellen: hinterlistig),
+          isNotNull);
+      // Ein leerer Name ergäbe „//releases/download/“ auf github.com.
+      expect(
+          updateGesperrt(Uri.parse('https://github.com//releases/download/v1/setup.exe'),
+              download: true, quellen: const ['']),
+          isNotNull);
+      // Ein einzelnes Wort ergäbe „/wort/releases/download/“, also irgendein
+      // Repository namens „releases“.
+      expect(
+          updateGesperrt(Uri.parse('https://github.com/wort/releases/download/v1/setup.exe'),
+              download: true, quellen: const ['wort']),
+          isNotNull);
+      // Ein gültiger Name daneben gilt weiter.
+      expect(
+          updateGesperrt(Uri.parse('https://api.github.com/repos/a/b/releases/latest'),
+              download: false, quellen: const ['x/y/../../../users/z', 'a/b']),
+          isNull);
+    });
+  });
 }

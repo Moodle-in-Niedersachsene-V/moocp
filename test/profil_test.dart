@@ -7,6 +7,7 @@ import 'package:moocp/einstellungen.dart';
 import 'package:moocp/einstellungen_ort.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/moodle/instanzen.dart';
+import 'package:moocp/plugin/verbindung.dart' show mcpWerkzeugnameHoechstens, werkzeugnameHoechstens;
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 
@@ -261,6 +262,28 @@ void main() {
 
     test('ohne brauchbaren Namen zählt die Kennung', () {
       expect(Profil.mcpNameFuer('Ä', 'k9'), 'moodle-k9');
+    });
+
+    test('ein neues Profil: höchstens 17 Zeichen, auch mit Unterscheidung, gültig und eindeutig', () {
+      expect(Profil.neuerMcpNameHoechstens, 17);
+      // So passt jedes Werkzeug eines Plugins: mcp__<Profil>__ davor, und ein
+      // Werkzeugname hat höchstens 40 Zeichen (plugin/verbindung.dart).
+      expect(Profil.neuerMcpNameHoechstens, mcpWerkzeugnameHoechstens - 'mcp____'.length - werkzeugnameHoechstens);
+      expect(Profil.neuerMcpName('moodle-test', const {}), 'moodle-test');
+      expect(Profil.neuerMcpName('moodle-test', const {'moodle-test'}), 'moodle-test-2');
+      final lang = Profil.mcpNameAus('Berufsbildende Schulen Musterstadt');
+      expect(Profil.neuerMcpName(lang, const {}), 'berufsbildende-sc');
+      // Endet die Kürzung auf einem Bindestrich, fällt er weg.
+      expect(Profil.neuerMcpName('moodle-schule-abc-def', const {}), 'moodle-schule-abc');
+      expect(Profil.neuerMcpName('abcdefghijklmnop-qrs', const {}), 'abcdefghijklmnop');
+      final vergeben = <String>{'berufsbildende-sc'};
+      for (var i = 2; i <= 12; i++) {
+        final n = Profil.neuerMcpName(lang, vergeben);
+        expect(n.length, lessThanOrEqualTo(17), reason: n);
+        expect(Profil.mcpNameGueltig(n), isTrue, reason: n);
+        expect(vergeben.add(n), isTrue, reason: n);
+      }
+      expect(vergeben, containsAll(['berufsbildende-2', 'berufsbildende-12']));
     });
   });
 

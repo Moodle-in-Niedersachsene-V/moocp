@@ -16,13 +16,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../anmeldedaten.dart';
 import '../einstellungen.dart';
+import '../plattform/kindprozess.dart';
 import '../profil.dart';
 import '../ueber.dart';
 import 'installer_logik.dart';
@@ -100,20 +101,22 @@ Future<int> linuxInstallerAusfuehren(List<String> a) async {
       return 1;
     }
   }
-  await windowManager.ensureInitialized();
-  await windowManager.waitUntilReadyToShow(
-    const WindowOptions(size: _fenster, center: true, title: 'moocp Setup', titleBarStyle: TitleBarStyle.normal),
-    () async {
-      // Feste Größe wie bei einem Installer: Der GTK-Läufer startet mit
-      // 1280 x 720, und setResizable allein ließe es dabei.
-      await windowManager.setMinimumSize(_fenster);
-      await windowManager.setMaximumSize(_fenster);
-      await windowManager.setSize(_fenster);
-      await windowManager.center();
-      await windowManager.show();
-      await windowManager.focus();
-    },
-  );
+  // Feste Größe wie bei einem Installer: Der GTK-Läufer startet mit
+  // 1280 x 720 und zeigt das Fenster erst mit dem ersten Bild; bis dahin ist
+  // es schon da und lässt sich einrichten.
+  try {
+    final fenster = WindowManager.instance.getCurrent();
+    if (fenster != null) {
+      final groesse = _fenster.toNative();
+      fenster.title = 'moocp Setup';
+      fenster.minimumSize = groesse;
+      fenster.maximumSize = groesse;
+      fenster.setSize(groesse, false);
+      fenster.center();
+    }
+  } catch (_) {
+    // Ohne Fensterzugriff bleibt das Fenster, wie der Läufer es anlegt.
+  }
   runApp(
     InstallerApp(
       modus: inst ? InstallerModus.installieren : InstallerModus.deinstallieren,
@@ -123,7 +126,7 @@ Future<int> linuxInstallerAusfuehren(List<String> a) async {
       version: version,
       anmeldedatenLoeschen: loeschen,
       starten: (z) async {
-        await Process.start(p.join(z, programmName), const [], mode: ProcessStartMode.detached);
+        await prozessStarten(p.join(z, programmName), const [], modus: ProcessStartMode.detached);
       },
     ),
   );

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'kindprozess.dart';
 import 'linux.dart';
 import 'macos.dart';
 import 'windows.dart';
@@ -43,7 +44,7 @@ abstract interface class PlattformBrowser {
 /// Browserprozesse haben ein anderes Profil und bleiben unberührt.
 Future<int> unixProzesseBeenden(Directory profil) async {
   try {
-    final r = await Process.run('ps', ['-axww', '-o', 'pid=,command=']);
+    final r = await prozessAusfuehren('ps', ['-axww', '-o', 'pid=,command=']);
     final pids = <String>[];
     for (final zeile in '${r.stdout}'.split('\n')) {
       final m = RegExp(r'^\s*(\d+)\s(.*)$').firstMatch(zeile);
@@ -51,7 +52,7 @@ Future<int> unixProzesseBeenden(Directory profil) async {
       pids.add(m.group(1)!);
     }
     for (final pid in pids) {
-      await Process.run('kill', ['-9', pid]);
+      await prozessAusfuehren('kill', ['-9', pid]);
     }
     return pids.length;
   } on ProcessException {
@@ -65,3 +66,26 @@ final PlattformBrowser plattformBrowser = Platform.isMacOS
     : Platform.isLinux
     ? LinuxBrowser()
     : WindowsBrowser();
+
+/// Ob die Zwischenablage hier HTML neben dem Text trägt (zwischenablage.dart):
+/// unter Windows und macOS ja, sonst liegt nur der Quelltext als Text darin.
+/// Hier statt dort, damit der Kern (lib/moodle/) danach fragen kann, ohne
+/// Flutter und die native Bibliothek einzubinden.
+bool get zwischenablageMitHtml => Platform.isWindows || Platform.isMacOS;
+
+/// Beendet [prozess] hart, unter Windows samt den Prozessen, die er selbst
+/// gestartet hat (windows.dart, prozessbaumBeendenWindows). Auf dem Mac nur
+/// den Prozess selbst: Dart startet ihn nicht in einer eigenen
+/// Prozessgruppe, ein Signal an die Gruppe träfe die App mit.
+Future<void> prozessbaumBeenden(Process prozess) async {
+  if (Platform.isWindows) await prozessbaumBeendenWindows(prozess.pid);
+  prozess.kill(ProcessSignal.sigkill);
+}
+
+/// Der Benutzerordner aus [umgebung]: USERPROFILE unter Windows, sonst HOME;
+/// null, wenn er nicht gesetzt ist. Dort beginnt die Wahl eines Ordners oder
+/// einer Datei für ein Plugin, wenn es keinen Startordner nennt.
+String? benutzerordner(Map<String, String> umgebung) {
+  final o = umgebung[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+  return o == null || o.isEmpty ? null : o;
+}

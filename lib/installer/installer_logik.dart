@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 
 import '../arbeitsordner.dart';
 import '../einstellungen_ort.dart';
+import '../plattform/kindprozess.dart';
 
 const programmName = 'moocp';
 
@@ -311,7 +312,7 @@ void installieren({
 
 void _ausfuehrbar(String pfad) {
   try {
-    Process.runSync('chmod', ['755', pfad]);
+    prozessAusfuehrenSync('chmod', ['755', pfad]);
   } catch (_) {
     // Ohne chmod (kein Linux): nichts zu tun.
   }
@@ -326,7 +327,7 @@ void _menueAktualisieren(InstallerOrte orte) {
     ['gtk-update-icon-cache', '-f', '-t', p.join(p.dirname(p.dirname(p.dirname(orte.symbolDatei))))],
   ]) {
     try {
-      Process.runSync(befehl.first, befehl.sublist(1));
+      prozessAusfuehrenSync(befehl.first, befehl.sublist(1));
     } catch (_) {
       // Werkzeug fehlt.
     }
@@ -386,7 +387,7 @@ Future<EntfernenErgebnis> deinstallieren({
   sag('Entferne die Einrichtung in den KI-Werkzeugen …');
   var code = 3; // unbekannt, was geblieben ist: beides melden
   try {
-    final r = await Process.run(exe, ['--claude-entfernen'], environment: orte.umgebung);
+    final r = await prozessAusfuehren(exe, ['--claude-entfernen'], dazu: orte.umgebung);
     code = r.exitCode;
   } catch (_) {
     // code bleibt 3

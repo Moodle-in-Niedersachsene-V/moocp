@@ -22,6 +22,7 @@ import '../einstellungen_ort.dart';
 import '../freigabe.dart';
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
+import 'werkzeugquelle.dart';
 import 'testbetrieb.dart';
 import '../testzugang.dart';
 import '../uebertragung_zusammenfassung.dart';
@@ -97,7 +98,7 @@ Future<String> _zeitlimit(
   return c.future;
 }
 
-class McpDienst {
+class McpDienst implements AufrufKontext {
   McpDienst(
     this.einstellungen,
     this.moodle,
@@ -109,6 +110,7 @@ class McpDienst {
     this.sicherungsordner,
     this.uebertragungsprotokollPfad,
     this.antwortfrist = const Duration(minutes: 1),
+    this.werkzeugquellen = const [],
   });
 
   final Einstellungen einstellungen;
@@ -116,11 +118,14 @@ class McpDienst {
 
   /// Das Instanzprofil dieses Servers (E31): Port, Name und Adresse kommen von dort.
   Profil profil;
+  @override
   final MoodleZugang moodle;
+  @override
   final Protokoll protokoll;
   final Freigaben freigaben;
 
   /// Pfad des Arbeitsordners (arbeitsordner.dart).
+  @override
   final String arbeitsordner;
 
   final _kartenKontexte =
@@ -143,6 +148,12 @@ class McpDienst {
   /// Abweichender Protokollpfad für isolierte MCP-Vertragstests.
   final String? uebertragungsprotokollPfad;
 
+  /// Quellen weiterer Werkzeuge neben den eingebauten (werkzeugquelle.dart).
+  /// Jede Sitzung und die Werkzeugliste für die Brücke fragen dieselben
+  /// Quellen; die eingebauten Werkzeuge bleiben fester Code und laufen nicht
+  /// darüber.
+  final List<WerkzeugQuelle> werkzeugquellen;
+
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
     protokoll,
@@ -157,8 +168,12 @@ class McpDienst {
   );
 
   StreamableMcpServer? _server;
+
+  /// Ob der Server lauscht.
   bool get laeuft => _server != null;
 
+  /// Startet den Server. Wann, entscheidet der Start der App: erst nach
+  /// Einrichtung und Anmeldung (anmeldung.dart, mcpServerStarten; E13).
   Future<void> starten() async {
     if (_server != null) return;
     _testbetrieb.beginnen();
@@ -186,8 +201,18 @@ class McpDienst {
   /// statt über HTTP -- so steht darin genau, was ein Client bekäme, ohne dass
   /// der Server lauschen oder die App angemeldet sein muss: Die Werkzeuge
   /// hängen von keinem der beiden ab.
-  Future<Map<String, dynamic>> werkzeugliste() async {
-    final server = _erzeugen(protokollieren: false);
+  Future<Map<String, dynamic>> werkzeugliste() async => _werkzeugliste(_erzeugen(protokollieren: false));
+
+  /// Die Namen der eingebauten Werkzeuge, ohne die der [werkzeugquellen]:
+  /// Gegen sie prüft der Start eines Plugins dessen Werkzeugnamen.
+  Future<Set<String>> eingebauteWerkzeugnamen() async {
+    final liste = await _werkzeugliste(_erzeugen(protokollieren: false, mitQuellen: false));
+    return {
+      for (final t in (liste['tools'] as Map)['tools'] as List) (t as Map)['name'] as String,
+    };
+  }
+
+  Future<Map<String, dynamic>> _werkzeugliste(McpServer server) async {
     final hin = StreamController<List<int>>();
     final zurueck = StreamController<List<int>>();
     final antworten = <int, Completer<Map<String, dynamic>>>{
@@ -346,14 +371,15 @@ class McpDienst {
     return text.length > 80 ? '${text.substring(0, 79)}…' : text;
   }
 
-  /// Ein Server für eine Sitzung. Ohne [protokollieren] für die
-  /// Werkzeugliste: Die App fragt sich dort selbst, das ist keine Verbindung
-  /// eines KI-Werkzeugs.
   /// Das MCP-Profil des Servers; die Werkzeugliste nennt die Versionen
   /// daraus.
   static const _protokoll = McpProtocol.stable;
 
-  McpServer _erzeugen({bool protokollieren = true}) {
+  /// Ein Server für eine Sitzung: die eingebauten Werkzeuge, danach die der
+  /// [werkzeugquellen]. Ohne [protokollieren] für die Werkzeugliste: Die App
+  /// fragt sich dort selbst, das ist keine Verbindung eines KI-Werkzeugs.
+  /// Ein Werkzeugname, der zweimal vorkommt, bricht ab und nennt den Namen.
+  McpServer _erzeugen({bool protokollieren = true, bool mitQuellen = true}) {
     final server = McpServer(
       const Implementation(name: 'moocp', version: '0.3.0'),
       options: const McpServerOptions(protocol: _protokoll),
@@ -368,6 +394,149 @@ class McpDienst {
         'KI-Werkzeug verbunden: ${_client(server)}',
       );
     }
+    _eingebauteWerkzeuge(server);
+    for (final quelle in mitQuellen ? werkzeugquellen : const <WerkzeugQuelle>[]) {
+      for (final werkzeug in quelle.werkzeuge(profil)) {
+        _aufrufe.registrierenBeschrieben(
+          server,
+          werkzeug,
+          // Das Profil zum Zeitpunkt des Aufrufs: Die Oberfläche tauscht es
+          // beim Bearbeiten aus.
+          ausfuehren: (a, abbruch) => quelle.aufrufen(
+            WerkzeugAufruf(
+              name: werkzeug.name,
+              args: a,
+              profil: profil,
+              token: aufrufToken(),
+              abbruch: abbruch,
+              // Mit dem Zähler dieses Aufrufs: Lässt die Stufe eine Freigabe
+              // aus, um die das Plugin bittet, erfährt die KI es in der
+              // Antwort auf genau diesen Aufruf.
+              kontext: _KontextImAufruf(this, Freigaben.zaehlerImAufruf),
+            ),
+          ),
+        );
+      }
+    }
+    return server;
+  }
+
+  /// Ein eingebautes Werkzeug für ein Plugin (plugin/app_adresse.dart): über
+  /// einen eigenen Server mit den eingebauten Werkzeugen allein, wie für eine
+  /// neue Sitzung, und durch dieselbe Hülle wie ein Aufruf über MCP
+  /// (WerkzeugAufrufe.direktAufrufen). So gelten Freigaben, Stufe,
+  /// Namensprüfung, Rücklesen, Protokoll und der Zustand „nicht angemeldet“
+  /// genau wie für ein KI-Werkzeug. Werkzeuge der Plugins stehen in diesem
+  /// Server nicht: Ein Plugin ruft über diesen Weg weder ein fremdes noch ein
+  /// eigenes Werkzeug auf.
+  @override
+  Future<EingebautErgebnis> eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer);
+
+  /// [aussen] ist der Zähler des Werkzeugaufrufs des Plugins
+  /// (_KontextImAufruf): Gibt der Testbetrieb im eingebauten Werkzeug
+  /// automatisch frei, erfährt das auch die KI in der Antwort des Plugins.
+  Future<EingebautErgebnis> _eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+    AufrufZaehler? aussen,
+  }) async {
+    final server = _erzeugen(protokollieren: false, mitQuellen: false);
+    final ergebnis = _aufrufe.direktAufrufen(server, name, args, abbruch: abbruch, aufrufer: aufrufer, aussen: aussen);
+    if (ergebnis == null) {
+      final n = name.length > 60 ? '${name.substring(0, 59)}…' : name;
+      throw MoodleFehler(
+        '„${n.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '?')}“ ist kein eingebautes Werkzeug von moocp. '
+        'Über die Adresse der App lassen sich nur die eingebauten Werkzeuge aufrufen, '
+        'keine Werkzeuge von Plugins, auch nicht die eigenen.',
+      );
+    }
+    final r = await ergebnis;
+    return (
+      text: [for (final c in r.content) if (c is TextContent) c.text].join('\n'),
+      fehlgeschlagen: r.isError == true,
+    );
+  }
+
+  @override
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
+    required Future<void> abbruch,
+    required String aufrufer,
+    List<String> punkte = const [],
+    String? protokolltitel,
+    int? laufKurs,
+  }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel, laufKurs);
+
+  @override
+  String? get testDialogantworten => _testbetrieb.dialogantworten(profil, testzugang ?? Testzugang.fuer(profil));
+
+  /// [zaehler] ist der des Werkzeugaufrufs, zu dem die Freigabe gehört
+  /// (_KontextImAufruf); er bekommt eine ausgelassene Freigabe mitgezählt,
+  /// ebenso eine des Testbetriebs. Titel und Zusammenfassung stammen vom
+  /// Plugin: Der Dialog kennzeichnet sie so (FreigabeAnfrage.vomPlugin), und
+  /// ins Protokoll geht statt des Titels nur, dass ein Plugin fragt.
+  ///
+  /// Testbetrieb (E35): Nur mit [laufKurs] (Schreiben über eine Zusatzadresse
+  /// in einem Lauf, AufrufKontext.pluginFreigabe) und nur, wenn dieser Kurs
+  /// ein gebundener Testkurs des Profils ist, öffnet sich hier die Zone, in
+  /// der Freigaben.anfragen automatisch freigibt; geprüft wird an derselben
+  /// Stelle wie bei den eingebauten Werkzeugen (Testbetrieb, Testzugang).
+  /// Jede andere Freigabe eines Plugins läuft ohne Testfreigabe.
+  Future<PluginFreigabeAusgang> _pluginFreigabe(
+    String titel,
+    String zusammenfassung,
+    Bestaetigungen ab,
+    Future<void> abbruch,
+    String aufrufer,
+    AufrufZaehler? zaehler,
+    List<String> punkte,
+    String? protokolltitel,
+    int? laufKurs,
+  ) async {
+    final a = FreigabeAnfrage(
+      titel: titel,
+      punkte: punkte,
+      vergleich: const [],
+      knopf: 'Freigeben',
+      ablehnen: 'Ablehnen',
+      ohneEntscheidung: 'wird nichts freigegeben',
+      ab: ab,
+      zusatzSchreiben: laufKurs != null,
+      vomPlugin: zusammenfassung,
+      protokolltitel: protokolltitel ?? 'Freigabe eines Plugins',
+    );
+    final eigener = AufrufZaehler();
+    Future<bool> fragen() =>
+        Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), zaehler: eigener, aufrufer: aufrufer);
+    bool testkurs() =>
+        laufKurs != null && _testbetrieb.gebundenerTestkurs(profil, testzugang ?? Testzugang.fuer(profil), laufKurs);
+    final ja = testkurs()
+        ? await freigaben.imTest(fragen, pruefen: () async => testkurs())
+        : await Freigaben.ohneTestfreigabe(fragen);
+    if (eigener.testfreigaben > 0) {
+      zaehler?.testfreigaben += eigener.testfreigaben;
+      return PluginFreigabeAusgang.automatisch;
+    }
+    if (eigener.ausgelassen > 0) {
+      zaehler?.ausgelassen += eigener.ausgelassen;
+      zaehler?.aufrufer ??= aufrufer;
+      return PluginFreigabeAusgang.ohneFrage;
+    }
+    if (ja) return PluginFreigabeAusgang.freigegeben;
+    return a.verfallen ? PluginFreigabeAusgang.abgebrochen : PluginFreigabeAusgang.abgelehnt;
+  }
+
+  /// Die Werkzeuge der App selbst, in der Reihenfolge der Werkzeugliste.
+  void _eingebauteWerkzeuge(McpServer server) {
     final ao = arbeitsordner;
     final vorgaenge = Vorgaenge(
       sicherungsordner ?? sicherungenOrdner,
@@ -389,7 +558,9 @@ class McpDienst {
           'Angemeldet: ${moodle.angemeldet ? "ja" : "nein -- bitte in der App anmelden"}\n'
           'Profil: ${profil.name} (${profil.mcpName})\n'
           'Moodle: ${moodle.basis?.host ?? profil.adresse}\n'
-          'Verbunden über: ${_client(server)}\n'
+          // Ruft ein Plugin `status` auf, hängt kein KI-Werkzeug an diesem
+          // Server (eingebautAufrufen); dann ist das Plugin die Verbindung.
+          'Verbunden über: ${Freigaben.aufruferImAufruf ?? _client(server)}\n'
           // Erkannt beim Anmelden (moodle_zugang.dart); vorher unbekannt.
           'Druckaufbereitung „Aufgabenblatt-Druck": ${!moodle.angemeldet
               ? "unbekannt, erst nach der Anmeldung"
@@ -2366,7 +2537,48 @@ class McpDienst {
         aktionen: objekte(a['aktionen'], 'aktionen'),
       ),
     );
-
-    return server;
   }
+}
+
+/// Der Kontext eines Werkzeugaufrufs, der an ein Plugin geht: der MCP-Dienst
+/// des Profils, dazu der Zähler dieses Aufrufs (Freigaben.zaehlerImAufruf).
+/// Die Adresse der App bearbeitet die Anfragen des Plugins außerhalb der Zone
+/// des Aufrufs; ohne den Zähler hier erführe die KI nicht, dass eine
+/// Freigabe des Plugins wegen der Stufe ausgelassen wurde.
+class _KontextImAufruf implements AufrufKontext {
+  _KontextImAufruf(this._dienst, this._zaehler);
+  final McpDienst _dienst;
+  final AufrufZaehler? _zaehler;
+
+  @override
+  Protokoll get protokoll => _dienst.protokoll;
+
+  @override
+  String get arbeitsordner => _dienst.arbeitsordner;
+
+  @override
+  MoodleZugang get moodle => _dienst.moodle;
+
+  @override
+  Future<EingebautErgebnis> eingebautAufrufen(
+    String name,
+    Map<String, dynamic> args, {
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst._eingebautAufrufen(name, args, abbruch: abbruch, aufrufer: aufrufer, aussen: _zaehler);
+
+  @override
+  Future<PluginFreigabeAusgang> pluginFreigabe({
+    required String titel,
+    required String zusammenfassung,
+    required Bestaetigungen ab,
+    required Future<void> abbruch,
+    required String aufrufer,
+    List<String> punkte = const [],
+    String? protokolltitel,
+    int? laufKurs,
+  }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel, laufKurs);
+
+  @override
+  String? get testDialogantworten => _dienst.testDialogantworten;
 }

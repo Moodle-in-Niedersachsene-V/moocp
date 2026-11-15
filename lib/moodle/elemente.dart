@@ -99,7 +99,7 @@ String elementKopf(Uri basis, {String? stylesheet}) {
 /// Der Kopf für die Sitzung von [moodle].
 String elementKopfFuer(MoodleZugang moodle) {
   final b = moodle.basis;
-  if (b == null) throw MoodleFehler('Nicht angemeldet. Bitte in der App anmelden.');
+  if (b == null) throw NichtAngemeldet();
   return elementKopf(b, stylesheet: moodle.themeStylesheet);
 }
 

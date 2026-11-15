@@ -16,6 +16,9 @@ import 'package:moocp/mcp/bruecke.dart';
 class Attrappe {
   late HttpServer _server;
   final anfragen = <(String methode, String? rpc, Map<String, String?> kopf)>[];
+
+  /// Die Werkzeuge, die ein `tools/call` beim Server aufrief.
+  final aufgerufen = <String?>[];
   final sitzungen = <String>{};
   var _naechste = 0;
 
@@ -43,6 +46,7 @@ class Attrappe {
     }
     final n = jsonDecode(await utf8.decodeStream(req)) as Map;
     anfragen.add(('POST', n['method'] as String?, kopf));
+    if (n['method'] == 'tools/call') aufgerufen.add((n['params'] as Map?)?['name'] as String?);
     if (kopf['schluessel'] != 'Bearer abc') {
       r.statusCode = 401;
       return r.close();
@@ -292,6 +296,45 @@ void main() {
       expect(gestartet, 1);
       expect(r.last, {'jsonrpc': '2.0', 'id': 3, 'result': 'tools/call'});
       expect(app.anfragen.map((a) => a.$2), containsAllInOrder(['initialize', 'notifications/initialized']));
+    });
+
+    test('ein Werkzeug eines Plugins steht in der Liste, auch wenn die App zu ist; der Aufruf geht an die App, sobald sie läuft', () async {
+      final echo = {
+        'name': 'beispiel_echo',
+        'description': 'Gibt den Text zurück.',
+        'inputSchema': {'type': 'object'},
+      };
+      var gestartet = 0;
+      final r = await laufen(
+        [
+          anmelden(1),
+          initialisiert,
+          anfrage(2, 'tools/list'),
+          anfrage(3, 'tools/call', {
+            'name': 'beispiel_echo',
+            'arguments': {'text': 'Hallo'},
+          }),
+        ],
+        adresse: aus,
+        listeHolen: () async => werkzeugliste([
+          {'name': 'status'},
+          echo,
+        ]),
+        appStarten: () async {
+          gestartet++;
+          Timer(const Duration(milliseconds: 300), () => app.starten(port: aus.port));
+          return true;
+        },
+      );
+
+      expect(r.map((n) => n['id']), [1, 2, 3], reason: 'die Liste kommt, bevor die App läuft');
+      expect(r.firstWhere((n) => n['id'] == 2)['result']['tools'], [
+        {'name': 'status'},
+        echo,
+      ]);
+      expect(gestartet, 1, reason: 'gestartet wird die App erst für den Aufruf');
+      expect(app.aufgerufen, ['beispiel_echo'], reason: 'der Aufruf geht unverändert an die App');
+      expect(r.last, {'jsonrpc': '2.0', 'id': 3, 'result': 'tools/call'});
     });
 
     test('Werkzeugaufruf, den der Client abbricht, während die Brücke auf die App wartet: geht nicht hinaus',

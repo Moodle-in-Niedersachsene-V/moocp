@@ -1,0 +1,31 @@
+{
+  "name": "Beispiel",
+  "kurzname": "beispiel",
+  "version": "1.0.0",
+  "schnittstelle": 1,
+  "programm": "beispiel.exe",
+  "herkunft": "Beispiel-Plugin aus dem Repository von moocp",
+  "updateQuellen": [],
+  "zusatzadressen": [
+    {
+      "muster": "/mod/beispiel/speichern.php",
+      "art": "schreiben",
+      "grund": "Speichert die Notiz, mit der das Werkzeug beispiel_moodle_schreiben zeigt, wie ein Plugin über eine Zusatzadresse schreibt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    },
+    {
+      "muster": "/mod/beispiel/bericht.php",
+      "art": "lesen",
+      "grund": "Liest den Bericht einer Aktivität, mit dem das Werkzeug beispiel_lauf zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse liest. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    },
+    {
+      "muster": "/mod/beispiel/export.php",
+      "art": "lesen",
+      "grund": "Lädt den Export einer Aktivität herunter, mit dem das Werkzeug beispiel_download zeigt, wie ein Plugin in einem Lauf über eine Zusatzadresse herunterlädt. Die Seite ist erfunden; in einem echten Moodle gibt es sie nicht."
+    }
+  ],
+  "skills": ["beispiel"],
+  "wahlSkills": {
+    "beispiel-vorlage": "Vorlage für einen wählbaren Skill eines Plugins; zeigt, wie ein Skill mit Haken aussieht."
+  },
+  "entwicklungsPort": 47900
+}

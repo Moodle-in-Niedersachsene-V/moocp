@@ -58,6 +58,7 @@ import 'formular_schreiben.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
 import 'sperrliste.dart';
+import '../plattform/kindprozess.dart';
 import '../plattform/plattform.dart';
 import 'wiki.dart';
 
@@ -415,7 +416,7 @@ Future<_Aufnahme> _aufnehmen(
     p.join(arbeitsordner, '.browser-${DateTime.now().millisecondsSinceEpoch}'),
   );
   await profil.create(recursive: true);
-  final proz = await Process.start(programm, [
+  final proz = await prozessStarten(programm, [
     '--headless=new',
     '--remote-debugging-port=0',
     '--user-data-dir=${profil.path}',

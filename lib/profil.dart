@@ -156,6 +156,31 @@ class Profil {
   /// Ob ein Servername gültig ist: wie [mcpNameAus] liefert, nicht leer.
   static bool mcpNameGueltig(String n) => RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$').hasMatch(n);
 
+  /// Die Höchstlänge des technischen Namens eines neuen Profils. So bleibt der
+  /// Name jedes Werkzeugs, wie ein KI-Werkzeug ihn sieht
+  /// (`mcp__<Profil>__<Werkzeug>`), in den 64 Zeichen, die Claude Code
+  /// zulässt: 64 weniger `mcp__` und `__` weniger die 40 Zeichen, die ein
+  /// Werkzeug eines Plugins höchstens hat (plugin/verbindung.dart). Ein
+  /// Profil, das schon einen längeren Namen hat, behält ihn; dort fehlen
+  /// Werkzeuge, deren Name zu lang wäre.
+  static const neuerMcpNameHoechstens = 17;
+
+  /// Der technische Name eines neuen Profils aus [basis] (ein gültiger Name,
+  /// [mcpNameFuer]): auf [neuerMcpNameHoechstens] Zeichen gekürzt und, wenn
+  /// er unter [vergeben] schon steht, mit `-2`, `-3` … unterschieden -- auch
+  /// dann höchstens [neuerMcpNameHoechstens] Zeichen. Ein Bindestrich am Ende
+  /// einer Kürzung fällt weg.
+  static String neuerMcpName(String basis, Set<String> vergeben) {
+    String kuerzen(String s, int n) => s.length <= n ? s : s.substring(0, n).replaceAll(RegExp(r'-+$'), '');
+    final kurz = kuerzen(basis, neuerMcpNameHoechstens);
+    if (!vergeben.contains(kurz)) return kurz;
+    for (var i = 2;; i++) {
+      final anhang = '-$i';
+      final name = '${kuerzen(kurz, neuerMcpNameHoechstens - anhang.length)}$anhang';
+      if (!vergeben.contains(name)) return name;
+    }
+  }
+
   /// Der Servername, wenn er nicht gespeichert ist: aus dem Namen, und wenn
   /// der nichts hergibt, aus der Kennung.
   static String mcpNameFuer(String name, String kennung) {

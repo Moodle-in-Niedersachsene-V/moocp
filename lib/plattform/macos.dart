@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'kindprozess.dart';
 import 'plattform.dart';
 
 /// macOS: Browser im Programmbündel in /Applications oder im Benutzerordner;
@@ -43,7 +44,7 @@ class MacBrowser implements PlattformBrowser {
     ];
     for (final ort in orte) {
       try {
-        final r = await Process.run('defaults', ['read', ort, 'RemoteDebuggingAllowed']);
+        final r = await prozessAusfuehren('defaults',['read', ort, 'RemoteDebuggingAllowed']);
         if (r.exitCode == 0 && '${r.stdout}'.trim() == '0') return true;
       } on ProcessException {
         // Ohne defaults gibt es keine Richtlinie zu lesen.
@@ -58,7 +59,7 @@ class MacBrowser implements PlattformBrowser {
   @override
   Future<int> prozesseBeenden(Directory profil, String programm) async {
     try {
-      final r = await Process.run('ps', ['-axww', '-o', 'pid=,command=']);
+      final r = await prozessAusfuehren('ps',['-axww', '-o', 'pid=,command=']);
       final pids = <String>[];
       for (final zeile in '${r.stdout}'.split('\n')) {
         final m = RegExp(r'^\s*(\d+)\s(.*)$').firstMatch(zeile);
@@ -66,7 +67,7 @@ class MacBrowser implements PlattformBrowser {
         pids.add(m.group(1)!);
       }
       for (final pid in pids) {
-        await Process.run('kill', ['-9', pid]);
+        await prozessAusfuehren('kill',['-9', pid]);
       }
       return pids.length;
     } on ProcessException {

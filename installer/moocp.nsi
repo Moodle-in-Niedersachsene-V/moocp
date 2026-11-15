@@ -327,8 +327,9 @@ Section "Uninstall"
 
   ; Die Einrichtung in den KI-Werkzeugen entfernt die App selbst: Sie weiß,
   ; wo claude.exe liegt und wie die Einträge von Codex und LM Studio
-  ; aussehen (lib/einrichtung.dart, einrichtungEntfernen). Exit-Code: Bit 1
-  ; ein Eintrag „moodle" steht noch, Bit 2 Dateien der Skills sind noch da.
+  ; aussehen (lib/einrichtung.dart, einrichtungEntfernen), und welche Skills
+  ; der Plugins sie in welchem Werkzeug installiert hat (Einstellungen.pluginSkillOrdner). Exit-Code:
+  ; Bit 1 ein Eintrag „moodle" steht noch, Bit 2 Dateien der Skills sind noch da.
   DetailPrint "Entferne die Einrichtung in den KI-Werkzeugen …"
   ClearErrors
   ExecWait '"$INSTDIR\${EXE}" --claude-entfernen' $0
@@ -342,7 +343,7 @@ Section "Uninstall"
   ${EndIf}
   IntOp $2 $0 & 2
   ${If} $2 <> 0
-    StrCpy $1 "$1$\n$\n• Dateien der Skills. Das KI-Werkzeug beenden und unter %USERPROFILE%\.claude\skills, %USERPROFILE%\.codex\skills und %USERPROFILE%\.lmstudio\skills die Ordner moodle, moodle-fragen und lernsituation löschen, soweit vorhanden."
+    StrCpy $1 "$1$\n$\n• Dateien der Skills. Das KI-Werkzeug beenden und unter %USERPROFILE%\.claude\skills, %USERPROFILE%\.codex\skills und %USERPROFILE%\.lmstudio\skills die Ordner moodle, moodle-fragen und lernsituation und die Skills der Plugins löschen, soweit vorhanden."
   ${EndIf}
   ${If} $1 != ""
     MessageBox MB_OK|MB_ICONEXCLAMATION "Nicht alles ließ sich entfernen:$1" /SD IDOK
@@ -365,11 +366,46 @@ Section "Uninstall"
   Delete "$DESKTOP\${NAME}.lnk"
   DeleteRegKey HKCU "${UNINST_KEY}"
 
+  ; Die Plugins gehen unten mit dem Ordner der App mit, samt ihren
+  ; Uninstallern. Ihre Einträge unter „Installierte Apps“ blieben sonst
+  ; stehen und zeigten ins Leere: Jeder Eintrag, dessen Installationsort
+  ; (InstallLocation) oder dessen Uninstaller (UninstallString, mit oder
+  ; ohne Anführungszeichen) unter plugins\ liegt, wird deshalb mit entfernt.
+  ; Die Vorlage example/example-plugin/installer/plugin.nsi trägt beides
+  ; so ein. Nach dem Löschen eines Schlüssels bleibt der Zähler stehen, weil
+  ; die folgenden nachrücken.
+  StrCpy $0 0
+  StrLen $4 "$APPDATA\moocp\plugins\"
+  IntOp $5 $4 + 1
+  ${Do}
+    EnumRegKey $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall" $0
+    ${If} $1 == ""
+      ${ExitDo}
+    ${EndIf}
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1" "InstallLocation"
+    StrCpy $3 $2 $4
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
+    StrCpy $6 $2 $4
+    StrCpy $7 $2 $5
+    ${If} $3 == "$APPDATA\moocp\plugins\"
+    ${OrIf} $6 == "$APPDATA\moocp\plugins\"
+    ${OrIf} $7 == '"$APPDATA\moocp\plugins\'
+      DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$1"
+    ${Else}
+      IntOp $0 $0 + 1
+    ${EndIf}
+  ${Loop}
+
   ; Die Daten der App. Einstellungen mit Zugangsschlüssel und Protokoll
   ; (lib/einstellungen.dart), Benutzername und verschlüsseltes Passwort
   ; (lib/anmeldedaten.dart; der Ordner kommt aus CompanyName und ProductName
   ; in windows/runner/Runner.rc), der Arbeitsordner (lib/arbeitsordner.dart).
   ; Beides liegt unter %APPDATA%\moocp: CompanyName ist dort ebenfalls moocp.
+  ; Dazu der Ordner für Downloads der Plugins (lib/plugin/downloads.dart).
+  ; Die Plugins selbst liegen unter %APPDATA%\moocp\plugins und gehen hier mit;
+  ; ein Update fasst den Ordner nicht an. Erst nach --claude-entfernen oben,
+  ; das die gemerkten Skills der Plugins aus den Einstellungen liest.
   RMDir /r "$APPDATA\moocp"
   RMDir /r "$TEMP\moocp_arbeitsordner"
+  RMDir /r "$TEMP\moocp_plugin_downloads"
 SectionEnd

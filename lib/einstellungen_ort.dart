@@ -46,3 +46,14 @@ String get sicherungenOrdner => sicherungenOrdnerFuer(Platform.environment, maco
 
 String sicherungenOrdnerFuer(Map<String, String> umgebung, {required bool macos}) =>
     p.join(einstellungenOrdnerFuer(umgebung, macos: macos), 'sicherungen');
+
+/// Der Ordner der Plugins (E35): `plugins` im Einstellungsordner, unter Windows
+/// wie auf dem Mac. Der Entwicklungsbau auf dem Mac hat kein festes
+/// Installationsverzeichnis, und unter Windows wandert der Einstellungsordner mit
+/// dem Benutzerprofil, sodass Plugins und Zustimmungen auf jedem Rechner
+/// bereitstehen, auf dem die App installiert ist. Jedes Plugin liegt in einem
+/// Unterordner, `plugins/<name>`.
+String get pluginsOrdner => pluginsOrdnerFuer(Platform.environment, macos: Platform.isMacOS);
+
+String pluginsOrdnerFuer(Map<String, String> umgebung, {required bool macos}) =>
+    p.join(einstellungenOrdnerFuer(umgebung, macos: macos), 'plugins');

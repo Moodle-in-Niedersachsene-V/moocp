@@ -38,3 +38,26 @@ abstract interface class PlattformBrowser {
 
 /// Die einzige Stelle, die nach dem Betriebssystem fragt.
 final PlattformBrowser plattformBrowser = Platform.isMacOS ? MacBrowser() : WindowsBrowser();
+
+/// Ob die Zwischenablage hier HTML neben dem Text trägt (zwischenablage.dart):
+/// unter Windows und macOS ja, sonst liegt nur der Quelltext als Text darin.
+/// Hier statt dort, damit der Kern (lib/moodle/) danach fragen kann, ohne
+/// Flutter und die native Bibliothek einzubinden.
+bool get zwischenablageMitHtml => Platform.isWindows || Platform.isMacOS;
+
+/// Beendet [prozess] hart, unter Windows samt den Prozessen, die er selbst
+/// gestartet hat (windows.dart, prozessbaumBeendenWindows). Auf dem Mac nur
+/// den Prozess selbst: Dart startet ihn nicht in einer eigenen
+/// Prozessgruppe, ein Signal an die Gruppe träfe die App mit.
+Future<void> prozessbaumBeenden(Process prozess) async {
+  if (Platform.isWindows) await prozessbaumBeendenWindows(prozess.pid);
+  prozess.kill(ProcessSignal.sigkill);
+}
+
+/// Der Benutzerordner aus [umgebung]: USERPROFILE unter Windows, sonst HOME;
+/// null, wenn er nicht gesetzt ist. Dort beginnt die Wahl eines Ordners oder
+/// einer Datei für ein Plugin, wenn es keinen Startordner nennt.
+String? benutzerordner(Map<String, String> umgebung) {
+  final o = umgebung[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+  return o == null || o.isEmpty ? null : o;
+}

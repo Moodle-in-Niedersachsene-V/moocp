@@ -1,7 +1,6 @@
 // Der Dialog „Über moocp": Version, eigene Lizenz, deutsche Knöpfe,
 // und die Lizenzseite führt die App mit ihrer Lizenz.
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/ueber.dart';
 import 'package:package_info_plus/package_info_plus.dart';

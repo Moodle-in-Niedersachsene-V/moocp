@@ -36,6 +36,7 @@ import 'package:path/path.dart' as p;
 
 import '../freigabe.dart';
 import '../log.dart';
+import '../plattform/plattform.dart' show zwischenablageMitHtml;
 import 'auswertung.dart';
 import 'elemente.dart';
 import 'formeln.dart';
@@ -1753,9 +1754,9 @@ Future<String> inhaltUebergeben(
 /// so wie der Betreiber es vorsieht (E34). Der Dialog öffnet das Formular und
 /// legt je geändertes Editorfeld den Inhalt als HTML und als Text in die
 /// Zwischenablage; Strg+A, Strg+V in der gewöhnlichen Editoransicht behält
-/// Kästen, Tabellen, Bilder und Code-Blöcke (gemessen). Auf dem Mac gibt es
-/// den HTML-Teil nicht (zwischenablage_html): Dort liegt der Quelltext als
-/// Text, und die Lehrkraft fügt ihn in der Quelltextansicht des Editors ein.
+/// Kästen, Tabellen, Bilder und Code-Blöcke (gemessen). Wo die Zwischenablage
+/// kein HTML trägt (zwischenablageMitHtml), liegt der Quelltext als Text
+/// darin, und die Lehrkraft fügt ihn in der Quelltextansicht des Editors ein.
 ///
 /// Neue Dateien zieht die Lehrkraft aus neue-dateien/ in den Editor,
 /// geänderte Einstellungen setzt sie von Hand; beides hakt sie ab. Ersetzte
@@ -1850,7 +1851,7 @@ Future<(String, bool)> _uebergeben(
                 '„Lassen".'
           : 'Der Schutzdienst vor Moodle hat das Speichern angehalten. Seine Prüfung kann die App nicht '
                 'bestehen, Sie im Browser schon.',
-      if (!Platform.isWindows)
+      if (!zwischenablageMitHtml)
         'Auf diesem Rechner liegt der Quelltext als Text in der Zwischenablage: im Editor die '
             'Quelltextansicht (<>) öffnen, mit $strg+A alles markieren und mit $strg+V einfügen.',
     ],

@@ -47,3 +47,5 @@ Was sie dabei tun und was moocp dann fragt, steht in der README von moocp, Absch
 ## Ein eigenes Plugin daraus machen
 
 Den Ordner kopieren und in `plugin.json` Name, Kurzname, Version, Herkunft, Update-Quellen, Zusatzadressen und Skills ersetzen; in `pubspec.yaml` den Namen; in den Skripten `bin/beispiel.dart` und den Vorgabeordner `build/beispiel`; in `installer/plugin.nsi` Anzeigename und Herausgeber. Die Werkzeuge beginnen mit dem neuen Kurznamen. Die Hilfsfunktionen `anMoocp` und `gleichInKonstanterZeit` lassen sich übernehmen; die Werkzeuge des Beispiels nicht, sie zeigen nur die Schnittstelle.
+
+Das Beispiel-Plugin steht unter der MIT-Lizenz (`LICENSE`), nicht unter der AGPLv3 von moocp: Ein Plugin, das daraus entsteht, darf jede Lizenz haben. Deshalb nimmt es nur Pakete mit freizügiger Lizenz auf.

@@ -24,7 +24,8 @@
 // 5. Als Antwort Text liefern. Bilder und andere Inhalte gibt moocp nicht
 //    an die KI weiter. Keine Namen von Personen in Antworten und
 //    Protokollzeilen: Was einen Namen trifft, den das Plugin zum Sperren
-//    genannt hat, hält moocp ganz an (`beispiel_namen`).
+//    genannt hat, hält moocp ganz an (`beispiel_namen`). Wo es treffen
+//    würde, sagt moocp vorher (`beispiel_namen_pruefen`).
 // 6. Sich beenden, wenn die Standardeingabe endet: Dann ist moocp fort, auch
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
@@ -74,8 +75,9 @@
 // Arbeitsordner laden), `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
 // Freigabe; in einem Lauf auch selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
 // Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
-// Zusatzadresse herunterladen) und `beispiel_namen` (Namen zum Sperren
-// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an).
+// Zusatzadresse herunterladen), `beispiel_namen` (Namen zum Sperren
+// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an) und
+// `beispiel_namen_pruefen` (eine Antwort vorher prüfen lassen und bereinigen).
 //
 // Übersetzen für die Installation: bauen.ps1 (Windows) und bauen.sh (Mac)
 // übersetzen das Programm mit `dart compile exe` unter dem Namen, den
@@ -811,6 +813,47 @@ McpServer _server() {
         if (f.status != 422) return text(f.text, fehler: true);
       }
       return text('Ergebnis für $name: 3 von 4 Punkten.');
+    },
+  );
+
+  // Vorher prüfen statt gesperrt werden: `/v1/namen/pruefen` mit
+  // `{"text": "…"}` sagt, wo die letzte Sperre in einem Text träfe, nach
+  // derselben Regel und gegen dieselben Namen, auch die, die moocp selbst
+  // geladen hat (Teilnehmende eines Laufs, die angemeldete Lehrkraft). Die
+  // Antwort nennt keine Namen, nur Stellen: `stellen` mit `anfang` und
+  // `ende` in UTF-16-Codeeinheiten (wie Dart-Strings zählen), `kodiert`, wenn
+  // ein Name erst nach dem Auflösen einer Kodierung (Prozentkodierung,
+  // `ü`, `&#252;`) dasteht, und `pfad`, wenn der Text den Ordner für
+  // Downloads nennt. Ersetzen tut das Plugin selbst. Was mehr finden soll
+  // als die Sperre (Tippfehler, Namen mitten in einem Wort), baut das Plugin
+  // selbst davor; die Prüfung von moocp sagt nur, was moocp sperren würde.
+  server.registerTool(
+    'beispiel_namen_pruefen',
+    description:
+        'Nennt moocp einen erfundenen Namen zum Sperren, lässt seine Antwort vorher prüfen und ersetzt den Namen; '
+        'die Antwort geht durch. $nurSchnittstelle',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: hinweise('Namen prüfen (Beispiel)'),
+    callback: (args, extra) async {
+      const name = 'Erika Mustermann';
+      var antwort = 'Ergebnis für $name: 3 von 4 Punkten.';
+      try {
+        await anMoocp(adresse(), '/v1/namen', {
+          'namen': [name],
+        }, aufruf: token(extra));
+        final pruefung = await anMoocp(adresse(), '/v1/namen/pruefen', {'text': antwort}, aufruf: token(extra));
+        // Von hinten ersetzen, damit die vorderen Stellen gültig bleiben.
+        for (final s in (pruefung['stellen'] as List).reversed) {
+          final stelle = s as Map;
+          antwort = antwort.replaceRange(stelle['anfang'] as int, stelle['ende'] as int, '[Name]');
+        }
+        if (pruefung['kodiert'] == true || pruefung['pfad'] == true) {
+          return text('Die Antwort enthält noch einen Namen in kodierter Form oder einen Pfad; nicht gesendet.', fehler: true);
+        }
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+      return text(antwort);
     },
   );
   return server;

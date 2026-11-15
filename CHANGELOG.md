@@ -4,6 +4,7 @@
 - Freigaben: Liegt eine Freigabe nach einem anderen Dialog wieder oben, nimmt sie erst nach der kurzen Wartezeit wieder Klicks an; ihre Knöpfe sind mit der Tastatur nicht mehr zu erreichen. Endet ein Werkzeug mit einem Fehler, erfährt die KI trotzdem, was davor ohne Ihre Freigabe geschrieben wurde.
 - Moodle-Profile: Der MCP-Name eines neuen Profils ist höchstens 17 Zeichen lang.
 - Neu: Plugins erweitern moocp um zusätzliche Werkzeuge und Skills.
+- Lizenz: moocp steht jetzt unter der GNU AGPLv3 oder später statt unter MIT; Plugins dürfen eine eigene Lizenz haben.
 
 ## 0.10.2
 - Updates: moocp findet neue Versionen auch, wenn das Projekt zum Verein Moodle in Niedersachsen e. V. umzieht; gibt es die hinterlegten Update-Adressen nicht mehr, warnt die App bei der täglichen Suche.

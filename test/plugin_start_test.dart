@@ -189,7 +189,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (18 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -686,6 +686,16 @@ void main() {
       expect(hinweise.offen.map((t) => t.plugin).toSet(), {'Beispiel'});
     });
 
+    test('letzte Sperre: Das Beispiel lässt seine Antwort vorher prüfen, ersetzt den Namen, und sie geht durch', () async {
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final hinweise = SperrHinweise();
+      final l = await starten(await beispielAngenommen([eins]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final a = await verbinden(eins, l);
+
+      expect(await a.tool('beispiel_namen_pruefen', {}), 'Ergebnis für [Name] [Name]: 3 von 4 Punkten.');
+      expect(hinweise.offen, isEmpty);
+    });
+
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
       final eins = beispielProfil('standard', 'moodle', await freierPort());
       final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
@@ -1022,7 +1032,7 @@ void main() {
       expect(await prozessLaeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }
@@ -1096,7 +1106,7 @@ void main() {
       expect(g.laufende.ausgefalleneNamen, isEmpty);
       expect(g.starts, hasLength(4), reason: 'der Start und drei Neustarts');
       final zeilen = [for (final z in protokoll.eintraege) z.text];
-      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'), hasLength(3));
+      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'), hasLength(3));
     });
 
     test('stürzt es binnen der Frist nach einem Neustart wieder ab: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
@@ -1170,7 +1180,7 @@ void main() {
         zeilen,
         contains(allOf(startsWith('Plugin „Beispiel“ nicht neu gestartet: '), endsWith('moocp versucht es noch einmal.'))),
       );
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'));
     });
 
     test('scheitert auch der zweite Versuch des Neustarts, ist es ausgefallen', () async {

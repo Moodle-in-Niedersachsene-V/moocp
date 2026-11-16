@@ -3,6 +3,12 @@ run-name: Desktop experiment (${{ github.event.head_commit.message || inputs.pla
 on:
   push:
     branches: [experiment/github-actions-builds]
+    # Client-/Dokuänderungen brauchen keine erneuten Flutter-Vollbuilds.
+    paths-ignore:
+      - README.md
+      - tool/ci_bau.py
+      - tool/test_ci_bau.py
+      - .github/workflows/client-checks.yml
   workflow_dispatch:
     inputs:
       platform:

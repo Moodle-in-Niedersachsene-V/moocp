@@ -191,7 +191,7 @@ _Vermeiden_: Host-Schnittstelle, Callback-Server
 Ein Dialog, den ein Plugin über die Adresse der App beschreibt und die App zeigt, mit dem Plugin als Absender: Auswahl, Eingabe, Ordner- oder Dateiwahl, Hinweis. Er liefert die Antwort oder „abgebrochen“.
 _Englisch_: plugin dialog
 _Nicht zu verwechseln mit_: Freigabe (bestätigt einen Schreibvorgang; ein Dialog eines Plugins tut das nie).
-_Vermeiden_: Fenster des Plugins (ein Plugin öffnet keine Fenster)
+_Vermeiden_: Fenster des Plugins (ein Plugin sollte kein eigenes Fenster öffnen)
 
 **Aufruf-Token**
 Ein zufälliges Geheimnis, das die App einem Plugin bei jedem Aufruf eines seiner Werkzeuge mitgibt. Es wählt das Instanzprofil und gilt an der Adresse der App nur für dieses Plugin und nur, solange der Aufruf läuft.

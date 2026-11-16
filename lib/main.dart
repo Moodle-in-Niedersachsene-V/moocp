@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import 'anmeldedaten.dart';
+import 'plattform/linux_schluesselbund.dart' show SchluesselbundFehler;
 import 'anmeldung.dart';
 import 'testzugang.dart';
 import 'arbeitsordner.dart';
@@ -26,6 +27,7 @@ import 'einstellungen_dialog.dart';
 import 'einstellungen_ort.dart';
 import 'einzelstart.dart';
 import 'freigabe.dart';
+import 'installer/installer_start.dart';
 import 'profile_dialog.dart';
 import 'log.dart';
 import 'mcp/mcp_dienst.dart';
@@ -86,6 +88,9 @@ Future<void> main(List<String> argumente) async {
   // Speicher beim Entschlüsseln). Fehler gehen nur mit ihrem TYP ins
   // Protokoll, nie mit ihrem Text. So gerät das Passwort in keine Ausgabe.
   debugPrint = (String? message, {int? wrapWidth}) {};
+  // Der Installer unter Linux (E24) läuft aus dem entpackten Paket, ohne
+  // Einzelstart-Sperre, Einstellungen und MCP-Server.
+  if (Platform.isLinux && installerVerlangt(argumente)) exit(await linuxInstallerAusfuehren(argumente));
   if (argumente.contains(claudeEntfernenSchalter)) {
     exit(await _claudeEntfernen());
   }
@@ -686,6 +691,12 @@ class _HauptseiteState extends State<Hauptseite> {
     if (mounted && Testzugang.fuer(_profil) == null) {
       await _gespeichertAnmelden();
     }
+    // Danach die übrigen Profile, ohne die Felder im Fenster anzufassen: Auch
+    // sie sind nach dem Start angemeldet, und ihr MCP-Server läuft.
+    if (!mounted || _instanzen.length < 2) return;
+    await (_startAnmeldung = weitereProfileAnmelden([..._instanzen], sichtbar: _aktiv));
+    await _mcpStarten();
+    if (mounted) setState(() {});
   }
 
   /// Das Update der App beim Start. Liefert true, wenn ein Installer läuft und
@@ -1018,8 +1029,13 @@ class _HauptseiteState extends State<Hauptseite> {
       // App still abgemeldet.
       instanz.dienst.protokoll.eintrag(
         Art.anmeldung,
-        'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden',
+        d.speicherProblem == null
+            ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
+            : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
       );
+      // Sichtbar, nicht nur im Protokoll: Sonst stünde die Lehrkraft vor einem
+      // leeren Passwortfeld und wüsste nicht, warum die App nicht anmeldet.
+      if (d.speicherProblem != null && mounted) setState(() => _meldung = d.speicherProblem);
       return;
     }
     instanz.dienst.protokoll.eintrag(
@@ -1336,6 +1352,10 @@ class _HauptseiteState extends State<Hauptseite> {
     }
   }
 
+  /// Die Anmeldung der nicht sichtbaren Profile beim Start
+  /// (weitereProfileAnmelden), solange sie läuft.
+  Future<void>? _startAnmeldung;
+
   Future<void> _profilWaehlen(int index) async {
     setState(() {
       _profilIndex = index;
@@ -1379,6 +1399,18 @@ class _HauptseiteState extends State<Hauptseite> {
       }
       return;
     }
+    if (d.merken && d.passwort == null && d.speicherProblem != null) {
+      instanz.dienst.protokoll.eintrag(
+        Art.anmeldung,
+        'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
+      );
+      if (mounted) setState(() => _meldung = d.speicherProblem);
+    }
+    // Läuft die Anmeldung der übrigen Profile vom Start noch, erst sie
+    // abwarten: Sonst ginge dasselbe Passwort zweimal an Moodle, und ein
+    // falsches zählte dort doppelt als Fehlversuch (E7).
+    await _startAnmeldung;
+    if (!zielIstAktiv()) return;
     // Hier steht ohne Passwort kein Fehlversuch: Hat Moodle das gespeicherte
     // abgelehnt, hat _anmelden es verworfen, und dieser Wechsel meldet nicht
     // noch einmal damit an (E7) -- bis die Lehrkraft ein neues eingegeben hat.
@@ -1564,7 +1596,7 @@ class _HauptseiteState extends State<Hauptseite> {
         } catch (e) {
           _meldung =
               'Angemeldet. Die Anmeldedaten konnten nicht gespeichert werden '
-              '(${e.runtimeType}).';
+              '(${e.runtimeType}).${e is SchluesselbundFehler ? ' ${e.meldung}' : ''}';
         }
       }
     } on MoodleNichtErreichbar catch (e) {

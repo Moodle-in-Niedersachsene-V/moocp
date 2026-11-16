@@ -2,6 +2,10 @@
 
 Verbindliche Ablage für offene Punkte, Specs und daraus abgeleitete Umsetzungstickets sind die GitHub-Issues dieses Repositories.
 
+## Zuweisung vor der Arbeit
+
+Wer an einem Issue arbeitet, dem ist es zugewiesen; die Regel mit ihren drei Fällen steht am Anfang der [CLAUDE.md](../../CLAUDE.md) und geht allem hier vor. Abfragen: `gh issue view <Nr> --json assignees`; sich zuweisen: `gh issue edit <Nr> --add-assignee @me`. Ist die Arbeit fertig oder wird sie abgegeben, die Zuweisung wieder lösen (`--remove-assignee @me`), wenn das Issue offen bleibt.
+
 ## Offene Punkte
 
 - Ein neuer offener Punkt (fehlende Funktion, Fehler, Aufgabe außerhalb des Codes, eine Lücke nach A6) wird als GitHub-Issue angelegt, nach Rückfrage bei der Lehrkraft.

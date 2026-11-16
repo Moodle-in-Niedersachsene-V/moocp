@@ -60,11 +60,11 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Native Linux dependencies
@@ -125,7 +125,7 @@ jobs:
       # Nur das frische Release-Bundle; keine Logs, Profile, Testzugänge oder Arbeitsordner.
       - name: Bundle artifact
         if: needs.select.outputs.task != 'tests'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: moocp-${{ matrix.platform }}-x64
           path: dist/*

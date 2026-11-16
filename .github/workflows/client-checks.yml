@@ -1,0 +1,31 @@
+name: CI client portability
+on:
+  push:
+    branches: [experiment/github-actions-builds]
+    paths:
+      - tool/ci_bau.py
+      - tool/test_ci_bau.py
+      - .github/workflows/client-checks.yml
+      - README.md
+permissions:
+  contents: read
+jobs:
+  client:
+    if: github.repository == 'topse/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: CLI entry point
+        run: python tool/ci_bau.py --help
+      - name: Client behaviour on native OS (GitHub calls simulated)
+        run: python tool/test_ci_bau.py -v

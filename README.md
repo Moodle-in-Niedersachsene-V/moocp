@@ -634,17 +634,55 @@ Plattformen aus und baut
 Release-Bundles. Live-Tests gegen Moodle sind darin nicht enthalten;
 Zugangsdaten und Repository-Secrets werden nicht benötigt.
 
-Vom eigenen Laptop aus lässt sich der ganze Ablauf mit einem Befehl starten:
+#### Übergabe: vom eigenen Laptop bauen lassen
 
-```bash
-python3 tool/ci_bau.py linux
-# Windows (auch auf einem Linux-/Mac-Laptop anforderbar):
-python3 tool/ci_bau.py windows
-# Beide Plattformen:
-python3 tool/ci_bau.py both
+Für den ersten Versuch einen eigenen Checkout verwenden, damit ein vorhandener
+Arbeitsstand unberührt bleibt. Benötigt werden Git, Python 3.10 oder neuer und
+GitHub CLI (`gh`) sowie Schreibrecht für `topse/moocp`. Windows: Git für Windows,
+Python von python.org und GitHub CLI installieren; danach PowerShell neu öffnen.
+macOS: Git (gegebenenfalls Command Line Tools), Python 3 und GitHub CLI installieren.
+Flutter, Visual Studio und Xcode für den App-Bau sind auf dem anfordernden
+Rechner nicht nötig. Git kann auf dem Mac Command Line Tools benötigen.
+
+In PowerShell (Windows) oder Terminal (macOS):
+
+```text
+git --version
+gh --version
+gh auth login
+gh auth setup-git
+git clone --branch experiment/github-actions-builds https://github.com/topse/moocp.git moocp-ci
+cd moocp-ci
+git config --get user.name
+git config --get user.email
 ```
 
-Unter Windows heißt Python je nach Installation `python` statt `python3`.
+Die Git-Identität muss für den Auslöse-Commit eingerichtet sein. Fehlt sie,
+`git config user.name "Ihr Git-Name"` und `git config user.email "Ihre Git-E-Mail"`
+mit den eigenen Angaben setzen; für das öffentliche Repository kann die
+GitHub-Noreply-Adresse verwendet werden. Die Anmeldung erfolgt selbst über
+GitHub CLI, Zugangsdaten gehören nicht in Chat, Anleitung oder Repository.
+
+Windows, in PowerShell:
+
+```powershell
+py -3 --version
+py -3 tool/ci_bau.py windows
+```
+
+macOS, im Terminal:
+
+```bash
+python3 --version
+python3 tool/ci_bau.py windows
+```
+
+Beide Aufrufe fordern einen **Windows-Build** an; der anfordernde Laptop muss
+kein Windows-Rechner sein. Für Linux `windows` durch `linux` ersetzen, für
+beide Zielplattformen durch `both`. Es gibt noch keine Zielauswahl `macos`.
+Unter Windows ist alternativ `python tool/ci_bau.py windows` möglich, wenn
+Python 3 unter diesem Namen installiert ist.
+
 Voraussetzungen: Git, Python 3 und angemeldetes GitHub CLI mit Schreibrecht
 für `topse/moocp`; der Experiment-Branch muss ausgecheckt und der Arbeitsbaum
 sauber sein. Flutter und native Buildwerkzeuge werden auf dem Laptop nicht
@@ -653,12 +691,17 @@ diesen Branch, wartet auf genau dessen CI-Lauf und lädt die Archive nach
 `build/ci-downloads/<Commit>/<Plattform>/` auf **diesen Laptop** herunter.
 Es entpackt oder startet keine App und ersetzt keine Installation.
 `--output <Ordner>` wählt ein anderes Downloadziel; `--task tests` fordert nur
-Prüfungen an, `--task builds` nur Builds. Ohne Schalter werden beide geprüft
-und gebaut. Bei fehlgeschlagenem oder abgebrochenem CI-Lauf bricht das Skript
+Prüfungen an, `--task builds` nur Builds. Ohne Schalter wird für jede gewählte Plattform geprüft und gebaut. Bei fehlgeschlagenem oder abgebrochenem CI-Lauf bricht das Skript
 ab und lädt kein Bundle. Den ausgegebenen Lauf-Link zur Diagnose öffnen.
 Ein anderer Benutzer kann dasselbe Artefakt mit den Downloadbefehlen unten
 herunterladen, ohne erneut zu bauen. Gleichzeitige Anforderungen können sich
 durch die Concurrency-Regel des Experiment-Branches abbrechen.
+
+**Build und Release sind getrennt.** Die Bundles dienen manuellen Tests und
+Integrationstests vor einer Veröffentlichung. Ein erfolgreicher Build ist
+keine Freigabe für ein Release; ein Release braucht einen eigenen Auftrag und
+die dafür vorgesehenen Prüfungen. Der Client legt weder Tags noch GitHub-Releases
+an. Er entpackt, installiert und startet die Bundles auch nicht automatisch.
 
 Ein Release-Workflow kann später zusätzlich auf GitHub-hosted macOS-Runnern
 `.app`-Bundles erzeugen. Dadurch können beide Maintainer Linux-, Windows-
@@ -667,7 +710,34 @@ Signierung und Notarisierung einzurichten; für Windows ist die Signierung
 separat einzurichten. Das Experiment veröffentlicht keine Releases und baut
 noch keine Mac-Bundles.
 
-Ein Push auf diesen Branch startet beide Plattformen mit Tests und Builds.
+#### Ergebnis, Fehler und erneuter Versuch
+
+Der Client zeigt den Lauf-Link und den absoluten Downloadordner an. Unter
+`build/ci-downloads/<Commit>/windows/` liegt das ZIP, unter `linux/` das tar-Archiv.
+Erst nach erfolgreichem CI-Abschluss lädt er die angeforderten Archive herunter.
+Die Download- und Startbefehle unten erklären das Entpacken; Windows-Apps laufen
+auf Windows, Linux-Apps auf Linux, auch wenn man sie vom Mac aus angefordert hat.
+Artefakte sind drei Tage verfügbar. Für einen neuen Versuch den Client erneut
+aufrufen; ein fremdes oder abgebrochenes Ergebnis wird nicht ersatzweise verwendet.
+
+- „Zuerst … auschecken“: Im separaten Checkout `git switch experiment/github-actions-builds` verwenden.
+- Arbeitsbaum nicht sauber: Eigene Änderungen zuerst committen oder beiseitelegen.
+- Push abgewiesen: Im sauberen Experiment-Checkout `git pull --ff-only origin experiment/github-actions-builds` ausführen und erneut starten. Bei auseinandergegangenen Zweigen nicht mit Force pushen; einen frischen Checkout verwenden.
+- GitHub-Anmeldung oder Download abgewiesen: `gh auth status` und Repository-Rechte prüfen; `gh auth setup-git` verbindet die HTTPS-Git-Anmeldung mit GitHub CLI.
+- CI rot oder abgebrochen: Den ausgegebenen Lauf-Link öffnen oder `gh run view RUN_ID -R topse/moocp --log-failed` ausführen. Eine GitHub-Fehlermail meldet einen tatsächlichen fehlgeschlagenen Lauf; auch wenn ein späterer Lauf grün ist, bleibt der alte rot. Abbrüche durch neuere Pushes sind keine bestandenen Tests.
+- `FileNotFoundError` oder „nicht gefunden“: Git, Python und GitHub CLI im PATH prüfen und das Terminal nach der Installation neu öffnen.
+
+Für Rückmeldungen genügen Betriebssystem, verwendeter Befehl, Lauf-Link und
+Fehlermeldung ohne persönliche Daten. Ob dieser Ablauf für den eigenen Laptop
+praktisch ist, lässt sich zunächst mit einem Windows- oder Linux-Bundle prüfen;
+auf dem Mac ist das noch kein Test einer Mac-App.
+
+#### Auslöser und spätere Mac-Erweiterung
+
+Ein Push mit App-Änderungen auf diesen Branch startet beide Plattformen mit Tests
+und Builds. Änderungen nur an Dokumentation und CI-Client benötigen keine neuen
+Flutter-Builds; die Client-Prüfung läuft auf Windows und macOS mit nachgebildeten
+Git-/GitHub-Antworten und prüft auch Fehlerfälle.
 Die letzte Commit-Nachricht kann `[ci:linux]` oder `[ci:windows]` sowie
 `[ci:tests]` oder `[ci:builds]` enthalten. Ohne Marker gilt jeweils beides.
 Ein erneuter Push bricht einen noch laufenden Versuch desselben Branches ab.

@@ -13,7 +13,7 @@ WORKFLOW = 'experiment-builds.yml'
 
 
 def run(*args):
-    return subprocess.check_output(args, text=True).strip()
+    return subprocess.check_output(args, text=True, encoding='utf-8').strip()
 
 
 def main():
@@ -62,5 +62,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (subprocess.CalledProcessError, RuntimeError) as error:
+    except (subprocess.CalledProcessError, RuntimeError, FileNotFoundError) as error:
         raise SystemExit(f'CI-Bau fehlgeschlagen: {error}') from error

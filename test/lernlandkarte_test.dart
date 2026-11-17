@@ -179,6 +179,9 @@ void main() {
     expect(text, contains('Titel nicht geprüft für Verweise auf cm 404'));
     expect(text, contains('Lernlandkarte'));
     expect(text, contains('Ort p1'));
+    // Das Fixture hat keine Kursstruktur: der Status ist nicht prüfbar, nicht verknüpft.
+    expect(text, contains('Verknüpfung: nicht prüfbar'));
+    expect(text, isNot(contains('Verknüpfung: verknüpft')));
     expect(text, contains('Aktivität 101'));
     expect(text, contains('Startort'));
     expect(text, contains('Titel nicht geprüft für Verweise auf cm 404'));
@@ -188,6 +191,72 @@ void main() {
     ) as Map;
     expect(karte['svgcode'], contains('<circle id="p1"/>'));
     expect((karte['orte'] as List).single['linkedActivity'], 101);
+  });
+
+  test('Verknüpfungsstatus je Ort: fehlend, verknüpft, fremd, nicht prüfbar', () {
+    final stand = zielStatusVon([101, 202], {101});
+    expect(stand, {101: OrtVerknuepfung.verknuepft, 202: OrtVerknuepfung.fremd});
+    expect(zielStatusVon([101], null), {101: OrtVerknuepfung.nichtPruefbar});
+
+    expect(ortVerknuepfung(null, stand), OrtVerknuepfung.fehlend);
+    expect(ortVerknuepfung('', stand), OrtVerknuepfung.fehlend);
+    // Moodle speichert „(keine)" als 0.
+    expect(ortVerknuepfung(0, stand), OrtVerknuepfung.fehlend);
+    expect(ortVerknuepfung(101, stand), OrtVerknuepfung.verknuepft);
+    expect(ortVerknuepfung('101', stand), OrtVerknuepfung.verknuepft);
+    expect(ortVerknuepfung(202, stand), OrtVerknuepfung.fremd);
+    // Nicht im Stand ermittelt: nicht prüfbar, nicht fremd.
+    expect(ortVerknuepfung(303, stand), OrtVerknuepfung.nichtPruefbar);
+    expect(ortVerknuepfung('abc', stand), OrtVerknuepfung.nichtPruefbar);
+    expect(ortVerknuepfung(101, zielStatusVon([101], null)), OrtVerknuepfung.nichtPruefbar);
+  });
+
+  test('Lernlandkarte: die Übersicht nennt den Verknüpfungsstatus je Ort', () {
+    final arbeitsordner = Directory.systemTemp.createTempSync('ticket13-');
+    addTearDown(() => arbeitsordner.deleteSync(recursive: true));
+    Map<String, Object?> ort(String id, Object? ziel) => {'id': id, 'linkedActivity': ziel};
+    final orte = [
+      ort('p1', 101),
+      ort('p2', 202),
+      ort('p3', null),
+      ort('p4', 0),
+      ort('p5', 'abc'),
+    ];
+    final g = FormularGelesen(
+      Formularziel.aktivitaet(31),
+      12,
+      'ZZ Karte',
+      'learningmap',
+      arbeitsordner.path,
+      const [],
+      const [],
+      const [],
+      const [],
+      const {},
+      const [],
+      lernlandkarte: {
+        'svgcode': '<svg/>',
+        'orte': orte,
+        'wege': <Object?>[],
+        'startorte': ['p1'],
+        'zielorte': <Object?>[],
+        'placestore': {
+          'places': orte,
+          'paths': <Object?>[],
+          'startingplaces': ['p1'],
+          'targetplaces': <Object?>[],
+        },
+      },
+      lernlandkarteTitel: {101: ('ZZ Seite', 'page')},
+      lernlandkarteZielstatus: {101: OrtVerknuepfung.verknuepft, 202: OrtVerknuepfung.fremd},
+    );
+    final text = g.zusammenfassung();
+    expect(text, contains('Ort p1 · Startort · Verknüpfung: verknüpft · Aktivität 101 „ZZ Seite" (page)'));
+    expect(text, contains('Ort p2 · Verknüpfung: fremd · Ziel nicht im Kurs'));
+    expect(text, contains('Ort p3 · Verknüpfung: fehlend'));
+    expect(text, contains('Ort p4 · Verknüpfung: fehlend'));
+    expect(text, contains('Ort p5 · Verknüpfung: nicht prüfbar'));
+    expect(text, isNot(contains('ohne Verknüpfung')));
   });
 
   test('Lernlandkarte: ein als Text gespeichertes Ortsziel wird wie eine Zahl gelesen', () async {

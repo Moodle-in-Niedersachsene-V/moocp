@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   select:
-    if: github.repository == 'topse/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
+    if: github.repository == 'Moodle-in-Niedersachsene-V/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
@@ -50,7 +50,7 @@ jobs:
               f.write('matrix=' + json.dumps({'include': rows}) + '\n' + 'task=' + task + '\n')
   desktop:
     needs: select
-    if: github.repository == 'topse/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
+    if: github.repository == 'Moodle-in-Niedersachsene-V/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}

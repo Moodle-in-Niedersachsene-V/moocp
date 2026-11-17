@@ -8,7 +8,7 @@ import subprocess
 import time
 
 BRANCH = 'experiment/github-actions-builds'
-REPO = 'topse/moocp'
+REPO = 'Moodle-in-Niedersachsene-V/moocp'
 WORKFLOW = 'experiment-builds.yml'
 
 

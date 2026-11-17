@@ -647,7 +647,7 @@ Zugangsdaten und Repository-Secrets werden nicht benötigt.
 
 Für den ersten Versuch einen eigenen Checkout verwenden, damit ein vorhandener
 Arbeitsstand unberührt bleibt. Benötigt werden Git, Python 3.10 oder neuer und
-GitHub CLI (`gh`) sowie Schreibrecht für `topse/moocp`. Windows: Git für Windows,
+GitHub CLI (`gh`) sowie Schreibrecht für `Moodle-in-Niedersachsene-V/moocp`. Windows: Git für Windows,
 Python von python.org und GitHub CLI installieren; danach PowerShell neu öffnen.
 macOS: Git (gegebenenfalls Command Line Tools), Python 3 und GitHub CLI installieren.
 Flutter, Visual Studio und Xcode für den App-Bau sind auf dem anfordernden
@@ -660,7 +660,7 @@ git --version
 gh --version
 gh auth login
 gh auth setup-git
-git clone --branch experiment/github-actions-builds https://github.com/topse/moocp.git moocp-ci
+git clone --branch experiment/github-actions-builds https://github.com/Moodle-in-Niedersachsene-V/moocp.git moocp-ci
 cd moocp-ci
 git config --get user.name
 git config --get user.email
@@ -693,7 +693,7 @@ Unter Windows ist alternativ `python tool/ci_bau.py windows` möglich, wenn
 Python 3 unter diesem Namen installiert ist.
 
 Voraussetzungen: Git, Python 3 und angemeldetes GitHub CLI mit Schreibrecht
-für `topse/moocp`; der Experiment-Branch muss ausgecheckt und der Arbeitsbaum
+für `Moodle-in-Niedersachsene-V/moocp`; der Experiment-Branch muss ausgecheckt und der Arbeitsbaum
 sauber sein. Flutter und native Buildwerkzeuge werden auf dem Laptop nicht
 benötigt. Das Skript erzeugt einen leeren Auslöse-Commit, pusht ausschließlich
 diesen Branch, wartet auf genau dessen CI-Lauf und lädt die Archive nach
@@ -733,7 +733,7 @@ aufrufen; ein fremdes oder abgebrochenes Ergebnis wird nicht ersatzweise verwend
 - Arbeitsbaum nicht sauber: Eigene Änderungen zuerst committen oder beiseitelegen.
 - Push abgewiesen: Im sauberen Experiment-Checkout `git pull --ff-only origin experiment/github-actions-builds` ausführen und erneut starten. Bei auseinandergegangenen Zweigen nicht mit Force pushen; einen frischen Checkout verwenden.
 - GitHub-Anmeldung oder Download abgewiesen: `gh auth status` und Repository-Rechte prüfen; `gh auth setup-git` verbindet die HTTPS-Git-Anmeldung mit GitHub CLI.
-- CI rot oder abgebrochen: Den ausgegebenen Lauf-Link öffnen oder `gh run view RUN_ID -R topse/moocp --log-failed` ausführen. Eine GitHub-Fehlermail meldet einen tatsächlichen fehlgeschlagenen Lauf; auch wenn ein späterer Lauf grün ist, bleibt der alte rot. Abbrüche durch neuere Pushes sind keine bestandenen Tests.
+- CI rot oder abgebrochen: Den ausgegebenen Lauf-Link öffnen oder `gh run view RUN_ID -R Moodle-in-Niedersachsene-V/moocp --log-failed` ausführen. Eine GitHub-Fehlermail meldet einen tatsächlichen fehlgeschlagenen Lauf; auch wenn ein späterer Lauf grün ist, bleibt der alte rot. Abbrüche durch neuere Pushes sind keine bestandenen Tests.
 - `FileNotFoundError` oder „nicht gefunden“: Git, Python und GitHub CLI im PATH prüfen und das Terminal nach der Installation neu öffnen.
 
 Für Rückmeldungen genügen Betriebssystem, verwendeter Befehl, Lauf-Link und
@@ -756,7 +756,7 @@ Ein branchlokaler Start ohne Codeänderung geht so (GitHub-Schreibrecht nötig):
 git switch experiment/github-actions-builds
 git commit --allow-empty -m "ci: run desktop experiment [ci:linux]"
 git push origin HEAD:experiment/github-actions-builds
-gh run list -R topse/moocp --branch experiment/github-actions-builds
+gh run list -R Moodle-in-Niedersachsene-V/moocp --branch experiment/github-actions-builds
 ```
 
 Für Windows den Marker durch `[ci:windows]` ersetzen; für beide weglassen.
@@ -770,7 +770,7 @@ und dessen Artefakt herunterladen. Alternativ mit angemeldetem GitHub CLI
 (`RUN_ID` durch die Nummer des erfolgreichen Laufs ersetzen):
 
 ```bash
-gh run download RUN_ID -R topse/moocp -n moocp-linux-x64 -D download-linux
+gh run download RUN_ID -R Moodle-in-Niedersachsene-V/moocp -n moocp-linux-x64 -D download-linux
 mkdir -p moocp-experiment
 tar -xzf download-linux/moocp-linux-x64.tar.gz -C moocp-experiment
 ./moocp-experiment/moocp --kein-update
@@ -796,7 +796,7 @@ Fehler ab, statt in einem temporären Ordner zu speichern.
 Für Windows 10/11 x64 in PowerShell:
 
 ```powershell
-gh run download RUN_ID -R topse/moocp -n moocp-windows-x64 -D download-windows
+gh run download RUN_ID -R Moodle-in-Niedersachsene-V/moocp -n moocp-windows-x64 -D download-windows
 Expand-Archive download-windows/moocp-windows-x64.zip -DestinationPath moocp-experiment
 & .\moocp-experiment\moocp.exe --kein-update
 ```
@@ -832,7 +832,7 @@ Die Einstellungen liegen unter `~/Library/Application Support/moocp`, dort auch 
 
 Das KI-Werkzeug LM Studio mit Bionic wird auf dem Mac nicht angeboten: Seine Brücke ist ein Windows-Programm. Claude Code und Codex CLI findet die App im `PATH` sowie unter `~/.local/bin`, `/opt/homebrew/bin` und `/usr/local/bin`.
 
-Bildschirmfotos suchen auf dem Mac Microsoft Edge, Google Chrome und Chromium in `/Applications` und `~/Applications`. Eine Richtlinie, die die Fernsteuerung abschaltet (`RemoteDebuggingAllowed`), liest die App aus den verwalteten Einstellungen; fehlt sie, ist die Fernsteuerung erlaubt. Beendet werden nur Browserprozesse mit dem eigenen Profil. Ob das auf dem Mac so läuft, ist ungemessen (siehe [Issue #9](https://github.com/topse/moocp/issues/9)). Findet die App keinen Browser, meldet das Werkzeug ihn, statt ihn zu raten.
+Bildschirmfotos suchen auf dem Mac Microsoft Edge, Google Chrome und Chromium in `/Applications` und `~/Applications`. Eine Richtlinie, die die Fernsteuerung abschaltet (`RemoteDebuggingAllowed`), liest die App aus den verwalteten Einstellungen; fehlt sie, ist die Fernsteuerung erlaubt. Beendet werden nur Browserprozesse mit dem eigenen Profil. Ob das auf dem Mac so läuft, ist ungemessen (siehe [Issue #9](https://github.com/Moodle-in-Niedersachsene-V/moocp/issues/9)). Findet die App keinen Browser, meldet das Werkzeug ihn, statt ihn zu raten.
 
 Die Skripte `tool/neustart.sh`, `tool/mcp_aufruf.sh` und `tool/mac_bau.sh` / `tool/mac_start.sh` erkennen den Mac über `uname`.
 

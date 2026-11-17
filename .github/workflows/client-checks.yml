@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   client:
-    if: github.repository == 'topse/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
+    if: github.repository == 'Moodle-in-Niedersachsene-V/moocp' && github.ref == 'refs/heads/experiment/github-actions-builds'
     strategy:
       fail-fast: false
       matrix:

@@ -31,7 +31,7 @@ class CiClientTest(unittest.TestCase):
                 self.queries += 1
                 if delayed and self.queries == 1:
                     return '[]'
-                return json.dumps([{'databaseId': 42, 'url': 'https://github.com/topse/moocp/actions/runs/42'}])
+                return json.dumps([{'databaseId': 42, 'url': 'https://github.com/Moodle-in-Niedersachsene-V/moocp/actions/runs/42'}])
             return ''
 
         def action(args, **kwargs):
@@ -50,7 +50,7 @@ class CiClientTest(unittest.TestCase):
     def test_both_downloads_exact_run_to_native_paths_with_spaces(self):
         self.execute(delayed=True)
         self.assertEqual(self.queries, 2)
-        self.assertIn(('git', 'push', 'https://github.com/topse/moocp.git',
+        self.assertIn(('git', 'push', 'https://github.com/Moodle-in-Niedersachsene-V/moocp.git',
                        f'HEAD:refs/heads/{ci_bau.BRANCH}'), self.commands)
         queries = [c for c in self.commands if c[:3] == ('gh', 'run', 'list')]
         self.assertTrue(all(c[c.index('--commit') + 1] == 'abc123' for c in queries))

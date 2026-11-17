@@ -650,7 +650,7 @@ class McpDienst implements AufrufKontext {
           'Dateibereiche wie Zusätzliche Dateien oder den Inhalt eines Verzeichnisses '
           '(bereiche/<feld>/) und alle Einstellungen (einstellungen.json). Gibt eine Übersicht '
           'zurück: Gliederung mit Zeitangaben, je Bild Maße, Stelle und Alternativtext, bei SVG '
-          'Titel, Beschreibung und Beschriftungen, Verweise mit dem Titel des Ziels, die '
+          'Titel, Beschreibung und Beschriftungen, Verweise mit dem Titel des Ziels, bei einer Lernlandkarte je Ort der Verknüpfungsstatus (verknüpft, fehlend, fremd, nicht prüfbar), die '
           'wichtigen Einstellungen und Befunde nach den Regeln der Skills. Oft genügt die '
           'Übersicht, um zu entscheiden, welche Datei geöffnet werden muss. Zurückschreiben mit '
           'aendern. Nur lesen.',

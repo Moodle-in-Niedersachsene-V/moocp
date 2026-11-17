@@ -225,7 +225,7 @@ class FormularGelesen {
   final List<String> hinweise;
   final Map<String, Object?>? lernlandkarte;
   final Map<int, (String, String)> lernlandkarteTitel;
-  final Map<int, String> lernlandkarteZielstatus;
+  final Map<int, OrtVerknuepfung> lernlandkarteZielstatus;
   final Map<String, String> editorFormate;
 
   String zusammenfassung() {
@@ -264,25 +264,34 @@ class FormularGelesen {
         final id = '${ort['id'] ?? '(ohne Kennung)'}';
         final rolle = lernlandkarteRolle(store, id);
         final ziel = ortsziel(ort['linkedActivity']);
+        final status = ortVerknuepfung(
+          ort['linkedActivity'],
+          lernlandkarteZielstatus,
+        );
         final titel = ziel == null ? null : lernlandkarteTitel[ziel];
-        final status = ziel == null ? null : lernlandkarteZielstatus[ziel];
         final anzahl = orte
             .whereType<Map>()
             .where((x) => x['id'] == ort['id'])
             .length;
         final zielText = switch (status) {
-          'im Kurs' when titel != null =>
+          OrtVerknuepfung.fehlend => null,
+          OrtVerknuepfung.verknuepft when titel != null =>
             'Aktivität $ziel „${titel.$1}" (${titel.$2})',
-          'außerhalb des Kurses' when titel != null =>
+          OrtVerknuepfung.fremd when titel != null =>
             'Ziel außerhalb des Kurses: cm $ziel „${titel.$1}"',
-          'Kurszugehörigkeit nicht prüfbar' when titel != null =>
+          OrtVerknuepfung.nichtPruefbar when titel != null =>
             'Aktivität $ziel „${titel.$1}" (Kurszugehörigkeit nicht prüfbar)',
-          _ => 'Ziel nicht gefunden oder nicht prüfbar: cm $ziel',
+          OrtVerknuepfung.fremd =>
+            'Ziel nicht im Kurs (anderer Kurs oder unbekannte cmid): cm $ziel',
+          _ => ziel == null
+              ? 'Ziel nicht lesbar: ${ort['linkedActivity']}'
+              : 'Ziel nicht prüfbar: cm $ziel',
         };
         b.writeln(
           '  Ort $id${rolle == null ? '' : ' · $rolle'}'
           '${anzahl > 1 ? ' · mehrdeutige Ortskennung' : ''}'
-          '${ziel == null ? ' · ohne Verknüpfung' : ' · $zielText'}',
+          ' · Verknüpfung: ${status.bezeichnung}'
+          '${zielText == null ? '' : ' · $zielText'}',
         );
       }
     }
@@ -752,25 +761,18 @@ Future<FormularGelesen> formularLesenOhneSperre(
     );
   }
   final titel = await _zielTitel(moodle, kurs, verlinkt, hinweise);
-  final lernlandkarteZielstatus = <int, String>{};
+  // Verknüpft oder fremd nur bei lesbarer Kursstruktur; sonst nicht prüfbar.
+  Set<int>? lokaleCmids;
   if (karte != null && kurs != null) {
     try {
-      final lokaleCmids = (await kursLesen(moodle, kurs)).nachCmid.keys.toSet();
-      for (final cmid in verlinkt) {
-        lernlandkarteZielstatus[cmid] = lokaleCmids.contains(cmid)
-            ? 'im Kurs'
-            : titel.containsKey(cmid)
-            ? 'außerhalb des Kurses'
-            : 'nicht gefunden oder nicht prüfbar';
-      }
+      lokaleCmids = (await kursLesen(moodle, kurs)).nachCmid.keys.toSet();
     } on MoodleFehler {
-      for (final cmid in verlinkt) {
-        lernlandkarteZielstatus[cmid] = titel.containsKey(cmid)
-            ? 'Kurszugehörigkeit nicht prüfbar'
-            : 'nicht gefunden oder nicht prüfbar';
-      }
+      lokaleCmids = null;
     }
   }
+  final lernlandkarteZielstatus = karte == null
+      ? <int, OrtVerknuepfung>{}
+      : zielStatusVon(verlinkt, lokaleCmids);
   for (final a in auswertungen) {
     verweiseAbgleichen(a, titel);
   }

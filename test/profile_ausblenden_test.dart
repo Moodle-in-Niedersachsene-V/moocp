@@ -202,8 +202,9 @@ void main() {
     List<String>? ablauf,
     EntwicklungsPlugin Function()? entwicklung,
     LaufendePlugins? laufende,
+    double breite = 2000,
   }) async {
-    tester.view.physicalSize = const Size(2000, 1200);
+    tester.view.physicalSize = Size(breite, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen, schluessel: 'global');
@@ -260,6 +261,12 @@ void main() {
       expect(find.text('Moodle-Anmeldung'), findsOneWidget);
     });
 
+    testWidgets('bei 700 px Breite läuft die Kopfzeile nicht über (Protokollspalte fest 460 px)', (tester) async {
+      await starten(tester, [standard], breite: 700);
+
+      expect(tester.takeException(), isNull, reason: 'kein Überlauf der Titelzeile oder der Spalten');
+    });
+
     testWidgets('die Hilfe zu den Stufen nennt kein Profil', (tester) async {
       await starten(tester, [standard]);
       await tester.tap(find.byIcon(Icons.help_outline));
@@ -310,6 +317,12 @@ void main() {
   });
 
   group('Ab zwei Profilen erscheinen Auswahl und Namen', () {
+    testWidgets('bei 800 px läuft die Titelzeile mit zwei Profilen nicht über', (tester) async {
+      await starten(tester, [standard, test], breite: 800);
+
+      expect(tester.takeException(), isNull, reason: 'kein Überlauf der Titelzeile oder der Spalten');
+    });
+
     testWidgets('Karte „Moodle-Profil", Profilname in der Titelzeile, Löschen in den Einstellungen', (tester) async {
       await starten(tester, [standard, test]);
 

@@ -423,7 +423,8 @@ void main() {
     });
   });
 
-  // Befund 8: ein nicht schreibbarer Typ darf nie verifiziert werden.
+  // Ein nicht schreibbarer Typ darf nie als verifiziert gelten: Er steht außerhalb
+  // der Positivliste und wird nicht zurückgelesen, also nennt die Antwort ihn als Prüflücke.
   group('nichtSchreibbarePruefluecke', () {
     test('nur schreibbare Typen: keine Prüflücke', () {
       expect(nichtSchreibbarePruefluecke(['page', 'quiz', 'resource']), isNull);

@@ -30,6 +30,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
@@ -1952,9 +1953,16 @@ Future<(String, bool)> _uebergeben(
 /// Schreibt einen gelesenen und bearbeiteten Ordner zurück. [neuSpeichern]:
 /// auch ohne Änderung einmal über das Formular speichern (CodeRunner prüft
 /// seine Musterlösung nur dort).
-/// Die Sperre des Ordners umfasst das Prüfen des Stands (.stand) bis zum Schreiben
-/// Parallel gelesen oder geschrieben wird dieser Ordner dann nicht.
-/// Sie gilt auch während der Freigabe; das wartet auf die Lehrkraft (höchstens die Frist).
+///
+/// Die Sperre des Ordners ([ordnerSperre]) schützt dessen Dateien: Ein Lesen
+/// löscht und füllt den Ordner, ein Schreiben liest `.stand` und `dateien/`.
+/// Sie liegt deshalb nur um das Vorbereiten (Dateien lesen, Abdruck des
+/// Ordners bilden) und um das Schreiben, nicht um die Freigabe, die bis zur
+/// Frist (30 Minuten) auf die Lehrkraft wartet. Wird der Ordner während der
+/// Freigabe neu gelesen, ist die Änderung samt `.stand` weg; der Abdruck
+/// zeigt das unter der Sperre, und es wird nichts geschrieben. Dass Moodle
+/// selbst noch den gelesenen Stand zeigt, prüft das Schreiben unter der
+/// Sperre mit frisch geholtem Formular (E17, [_pruefeStand]).
 Future<String> aendern(
   MoodleZugang moodle,
   Freigaben freigaben, {
@@ -1962,36 +1970,22 @@ Future<String> aendern(
   required String arbeitsordner,
   Map<String, Object?> einstellungen = const {},
   bool neuSpeichern = false,
-}) {
+}) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
-  return ordnerSperre(
-    ordnerSchluessel(Formularziel.ausOrdner(quelle), arbeitsordner),
-    () => _aendernOhneSperre(
+  final schluessel = ordnerSchluessel(
+    Formularziel.ausOrdner(quelle),
+    arbeitsordner,
+  );
+  final (a, abdruck) = await ordnerSperre(schluessel, () async {
+    final a = await _vorbereiten(
       moodle,
-      freigaben,
       ordner: ordner,
       arbeitsordner: arbeitsordner,
       einstellungen: einstellungen,
       neuSpeichern: neuSpeichern,
-    ),
-  );
-}
-
-Future<String> _aendernOhneSperre(
-  MoodleZugang moodle,
-  Freigaben freigaben, {
-  required String ordner,
-  required String arbeitsordner,
-  Map<String, Object?> einstellungen = const {},
-  bool neuSpeichern = false,
-}) async {
-  final a = await _vorbereiten(
-    moodle,
-    ordner: ordner,
-    arbeitsordner: arbeitsordner,
-    einstellungen: einstellungen,
-    neuSpeichern: neuSpeichern,
-  );
+    );
+    return (a, a == null ? '' : await _ordnerAbdruck(a.quelle));
+  });
   if (a == null) {
     return 'Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.';
   }
@@ -2008,12 +2002,37 @@ Future<String> _aendernOhneSperre(
     return 'Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
         '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.';
   }
-  try {
-    return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
-  } on SchutzPruefung catch (e) {
-    // Die Sperre des Ordners hält diese Funktion (aendern).
-    return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+  return ordnerSperre(schluessel, () async {
+    if (await _ordnerAbdruck(a.quelle) != abdruck) {
+      return 'Nicht gespeichert: Der Ordner ${a.ordner} wurde während der Freigabe neu gelesen oder '
+          'verändert; die freigegebene Änderung gibt es dort nicht mehr. Der Ordner und Moodle sind '
+          'unverändert. Neu lesen und die Änderung noch einmal machen.';
+    }
+    try {
+      return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
+    } on SchutzPruefung catch (e) {
+      // Die Sperre des Ordners hält diese Funktion (aendern).
+      return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+    }
+  });
+}
+
+/// Prüfsumme über Namen und Inhalt aller Dateien des Ordners. Zeigt, ob der
+/// Ordner seit dem Vorbereiten derselbe geblieben ist ([aendern]).
+Future<String> _ordnerAbdruck(String ordner) async {
+  final wurzel = Directory(ordner);
+  if (!await wurzel.exists()) return 'fehlt';
+  final dateien = [
+    await for (final e in wurzel.list(recursive: true, followLinks: false))
+      if (e is File) e.path,
+  ]..sort();
+  final zeilen = StringBuffer();
+  for (final d in dateien) {
+    zeilen.writeln(
+      '${p.relative(d, from: ordner)}:${sha256.convert(await File(d).readAsBytes())}',
+    );
   }
+  return sha256.convert(utf8.encode(zeilen.toString())).toString();
 }
 
 /// Schreibt mehrere gelesene Ordner eines Abschnitts mit EINER Freigabe

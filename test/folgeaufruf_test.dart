@@ -1,6 +1,7 @@
-// Befund 9 (Review): Zeitlimit- und Startantworten nennen die
-// Vorgangsnummer und genau einen Folgeaufruf; die Übersicht nennt ihn ebenfalls.
-// Der Stillstandstext behauptet nicht „Moodle meldet ...", wenn nur Angaben fehlen.
+// Zeitlimit- und Startantworten nennen die Vorgangsnummer und genau einen
+// Folgeaufruf, damit die KI nicht selbst einen Aufruf erfindet; die Übersicht nennt
+// ihn ebenfalls. Der Stillstandstext behauptet nicht „Moodle meldet ...“, wenn nur
+// Angaben fehlen, denn Moodle hat dann nichts gemeldet.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

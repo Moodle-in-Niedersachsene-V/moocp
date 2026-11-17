@@ -17,6 +17,7 @@ E27 sperrt einen zweiten Prozess aus, weil Einstellungen, Protokoll und Arbeitso
 ## Folgen
 
 - Gespeicherte Anmeldedaten gelten je Profil. Lehnt Moodle das gespeicherte Passwort beim Start oder beim Profilwechsel ab (E7), verwirft die App es, und ein Wechsel meldet nicht noch einmal damit an, bis ein neues eingegeben ist; sonst erzeugte jeder Wechsel einen weiteren Fehlversuch. Der Testzugang des Testbetriebs schreibt und löscht keine gemeinsamen Anmeldedaten.
+- Beim Start meldet die App jedes Profil mit gespeicherten Anmeldedaten an, nicht nur das sichtbare, je Profil mit einem Versuch (E7); sonst fehlte der MCP-Server eines Profils, bis die Lehrkraft es einmal ausgewählt hat.
 - Wechseln des Profils ändert die sichtbare Anmeldung und Freigabestufe. Bereits angemeldete Profile und ihre MCP-Server bleiben aktiv.
 - Für ein neu angelegtes Profil wird die MCP-Verbindung separat in Claude Code und Codex eingerichtet. Der Server startet nach der Anmeldung dieses Profils.
 - Das Protokoll und die Einstellungsdatei bleiben gemeinsam und werden nur von diesem Prozess beschrieben. Der Arbeitsordner bleibt ein Prozessordner; bei mehreren Profilen liegen neue Arbeitsdateien in Kennungs-Unterordnern.

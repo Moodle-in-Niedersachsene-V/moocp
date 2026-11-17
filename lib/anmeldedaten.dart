@@ -24,6 +24,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'plattform/linux_schluesselbund.dart';
 import 'profil.dart';
 import 'testzugang.dart';
 
@@ -42,10 +43,12 @@ class Anmeldedaten {
   /// Mac ist es der Schlüsselbund, unter Windows DPAPI.
   static String get schutz => Platform.isMacOS
       ? 'verschlüsselt im macOS-Schlüsselbund'
+      : Platform.isLinux
+      ? 'verschlüsselt im Schlüsselbund (Secret Service)'
       : 'verschlüsselt mit Windows-DPAPI';
 
   /// Wer das Passwort wieder lesen kann.
-  static String get lesbarFuer => Platform.isMacOS
+  static String get lesbarFuer => Platform.isMacOS || Platform.isLinux
       ? 'nur mit Ihrem Benutzerkonto lesbar'
       : 'nur mit Ihrem Windows-Konto lesbar';
 
@@ -58,11 +61,52 @@ class Anmeldedaten {
     mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
 
+  /// Unter Linux wartet libsecret bei einem gesperrten oder fehlenden
+  /// Schlüsselbund auf einen Dialog und blockiert dabei die ganze App
+  /// (plattform/linux_schluesselbund.dart). Darum wird vor jedem Zugriff
+  /// gefragt, ob der Bund benutzbar ist; ein gesperrter wird über einen
+  /// eigenen Prozess zum Entsperren aufgefordert, ohne die App anzuhalten.
+  /// Bleibt er unbenutzbar, scheitert der Zugriff mit einem
+  /// [SchluesselbundFehler], und es geht ohne gespeichertes Passwort weiter;
+  /// die App legt das Passwort nie auf eine andere Art ab (A2). Unter Windows
+  /// und auf dem Mac gibt es keinen solchen Dialog.
+  /// [fehltIstEgal]: Zum Löschen genügt es, wenn es gar keinen Bund gibt;
+  /// dann liegt auch kein Passwort darin.
+  static Future<T?> _zugriff<T>(Future<T> Function() zugriff, {bool fehltIstEgal = false}) async {
+    if (Platform.isLinux) {
+      var zustand = await schluesselbundPruefer();
+      if (zustand == Schluesselbund.gesperrt) zustand = await schluesselbundEntsperrer();
+      switch (zustand) {
+        case Schluesselbund.bereit:
+          break;
+        case Schluesselbund.fehlt when fehltIstEgal:
+          return null;
+        default:
+          throw SchluesselbundFehler(zustand);
+      }
+    }
+    return zugriff();
+  }
+
+  /// Nur für Tests: ersetzt die Abfrage des Secret Service, die es auf dem
+  /// Testrechner nicht gibt (test/flutter_test_config.dart setzt „bereit").
+  @visibleForTesting
+  static Future<Schluesselbund> Function() schluesselbundPruefer = schluesselbundPruefen;
+
+  /// Nur für Tests, wie [schluesselbundPruefer].
+  @visibleForTesting
+  static Future<Schluesselbund> Function() schluesselbundEntsperrer = schluesselbundEntsperren;
+
   final bool merken;
   final String? benutzer;
   final String? passwort;
 
-  const Anmeldedaten(this.merken, this.benutzer, this.passwort);
+  /// [speicherProblem]: Warum das gespeicherte Passwort nicht gelesen wurde,
+  /// wenn es an einem unbenutzbaren Schlüsselbund liegt (nur Linux); fester
+  /// Text für die Lehrkraft, ohne Inhalte (E11).
+  const Anmeldedaten(this.merken, this.benutzer, this.passwort, {this.speicherProblem});
+
+  final String? speicherProblem;
 
   /// Nur für Tests: ersetzt die Testzugänge aus der Umgebung (die ein Test
   /// nicht setzen kann). Ohne Wert gilt die Umgebung (Testzugang.ausUmgebung).
@@ -126,12 +170,17 @@ class Anmeldedaten {
     final merken = prefs.getBool(_schluessel(_merken, kennung)) ?? false;
     if (!merken) return const Anmeldedaten(false, null, null);
     String? passwort;
+    String? problem;
     try {
-      passwort = await _sicher.read(key: _schluessel(_passwort, kennung));
+      passwort = await _zugriff<String?>(() => _sicher.read(key: _schluessel(_passwort, kennung)));
+    } on SchluesselbundFehler catch (e) {
+      // Unter Linux: Der Bund ist gesperrt oder fehlt. Die Lehrkraft erfährt
+      // den Grund, statt vor einem leeren Passwortfeld zu stehen.
+      problem = e.meldung;
     } catch (_) {
       // Nicht zu entschlüsseln (etwa anderes Windows-Konto): dann eben eintippen.
     }
-    return Anmeldedaten(true, prefs.getString(_schluessel(_benutzer, kennung)), passwort);
+    return Anmeldedaten(true, prefs.getString(_schluessel(_benutzer, kennung)), passwort, speicherProblem: problem);
   }
 
   // Im Testbetrieb mit Testzugang (testzugang.dart) kommen die Zugangsdaten
@@ -156,7 +205,7 @@ class Anmeldedaten {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_schluessel(_merken, kennung), true);
     await prefs.setString(_schluessel(_benutzer, kennung), benutzer);
-    await _sicher.write(key: _schluessel(_passwort, kennung), value: passwort);
+    await _zugriff(() => _sicher.write(key: _schluessel(_passwort, kennung), value: passwort));
   }
 
   /// Entfernt Benutzername und Passwort ausdrücklich -- shared_preferences
@@ -166,7 +215,7 @@ class Anmeldedaten {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_schluessel(_merken, kennung), false);
     await prefs.remove(_schluessel(_benutzer, kennung));
-    await _sicher.delete(key: _schluessel(_passwort, kennung));
+    await _zugriff(() => _sicher.delete(key: _schluessel(_passwort, kennung)), fehltIstEgal: true);
   }
 
   /// Verwirft nur das Passwort, nachdem Moodle es abgelehnt hat (E7). Haken
@@ -177,6 +226,6 @@ class Anmeldedaten {
   /// Fehlversuch mehr, bis Moodle das Konto sperrt.
   static Future<void> passwortVerwerfen({String kennung = Profil.standardKennung, String? adresse}) async {
     if (_testprofil(kennung, adresse)) return;
-    await _sicher.delete(key: _schluessel(_passwort, kennung));
+    await _zugriff(() => _sicher.delete(key: _schluessel(_passwort, kennung)), fehltIstEgal: true);
   }
 }

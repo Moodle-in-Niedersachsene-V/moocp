@@ -144,6 +144,73 @@ Future<Anmeldedaten?> gespeicherteAnmeldedatenVerwenden({
   return daten;
 }
 
+/// Meldet beim Start die Profile an, die nicht das sichtbare sind ([sichtbar]
+/// meldet main.dart selbst an, mit den Feldern im Fenster): jedes mit Haken und
+/// gespeicherten Anmeldedaten (E7, E32). Sonst wären sie erst erreichbar,
+/// nachdem die Lehrkraft jedes einmal ausgewählt hat, und ihr MCP-Server
+/// fehlte bis dahin. Es gelten dieselben Grenzen wie für das sichtbare Profil:
+/// ein Versuch je Profil; lehnt Moodle das Passwort ab, wird es verworfen
+/// ([passwortVerwerfen]), damit kein weiterer Start damit anmeldet; war Moodle
+/// nicht erreichbar, bleibt es gespeichert. Ein Profil ohne Adresse, mit
+/// Testzugang oder schon angemeldet bleibt, wie es ist. Ein Fehler steht mit
+/// seiner Art im Protokoll des Profils, nie mit seinem Text, und hält die
+/// übrigen Profile nicht auf. Den MCP-Server startet danach der Aufrufer.
+Future<void> weitereProfileAnmelden(
+  List<Instanz> instanzen, {
+  required Instanz sichtbar,
+  Future<Anmeldedaten> Function(Profil profil)? laden,
+  Future<void> Function(Profil profil)? passwortVerwerfen,
+  Future<void> Function(Instanz instanz, String adresse, String benutzer, String passwort)? anmelden,
+}) async {
+  laden ??= (p) => Anmeldedaten.laden(kennung: p.kennung, adresse: p.adresse);
+  passwortVerwerfen ??= (p) => Anmeldedaten.passwortVerwerfen(kennung: p.kennung, adresse: p.adresse);
+  anmelden ??= (i, adresse, benutzer, passwort) => i.moodle.anmelden(adresse, benutzer, passwort);
+  for (final instanz in instanzen) {
+    final profil = instanz.dienst.profil;
+    if (identical(instanz, sichtbar) || instanz.moodle.angemeldet) continue;
+    if (profil.adresse.isEmpty || Testzugang.fuer(profil) != null) continue;
+    final protokoll = instanz.dienst.protokoll;
+    final Anmeldedaten d;
+    try {
+      d = await laden(profil);
+    } catch (e) {
+      protokoll.eintrag(Art.fehler, 'Anmeldedaten: Speicher nicht erreichbar (${e.runtimeType})');
+      continue;
+    }
+    if (!d.merken || d.benutzer == null) continue;
+    if (d.passwort == null) {
+      protokoll.eintrag(
+        Art.anmeldung,
+        d.speicherProblem == null
+            ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
+            : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
+      );
+      continue;
+    }
+    protokoll.eintrag(Art.anmeldung, 'Melde mit gespeicherten Anmeldedaten an');
+    try {
+      await anmelden(instanz, profil.adresse, d.benutzer!, d.passwort!);
+    } on MoodleNichtErreichbar {
+      protokoll.eintrag(Art.fehler, 'Anmeldung beim Start: Moodle nicht erreichbar -- im Profil „Anmelden“ versucht es erneut');
+    } on MoodleAnmeldungAbgelehnt {
+      try {
+        await passwortVerwerfen(profil);
+        protokoll.eintrag(
+          Art.anmeldung,
+          'Gespeichertes Passwort verworfen: Moodle hat es abgelehnt -- kein weiterer Versuch damit',
+        );
+      } catch (e) {
+        protokoll.eintrag(
+          Art.fehler,
+          'Gespeichertes Passwort nicht verworfen: Speicher nicht erreichbar (${e.runtimeType})',
+        );
+      }
+    } catch (e) {
+      protokoll.eintrag(Art.fehler, 'Anmeldung beim Start fehlgeschlagen (${e.runtimeType})');
+    }
+  }
+}
+
 /// Meldet gebundene Debug-Testprofile unabhängig von der sichtbaren Auswahl an.
 /// Ohne den Bauschalter des Testbetriebs (testschalter.dart) tut es nichts.
 Future<void> testprofileStarten(

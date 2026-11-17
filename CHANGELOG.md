@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+- Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
+- Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.
+
 ## 0.12.0
 - Linux: Einstellungen, Sicherungen und Plugins nutzen den XDG-Benutzerordner.
 - Freigaben: Liegt eine Freigabe nach einem anderen Dialog wieder oben, nimmt sie erst nach der kurzen Wartezeit wieder Klicks an; ihre Knöpfe sind mit der Tastatur nicht mehr zu erreichen. Endet ein Werkzeug mit einem Fehler, erfährt die KI trotzdem, was davor ohne Ihre Freigabe geschrieben wurde.

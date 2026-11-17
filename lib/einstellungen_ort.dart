@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 const standardPort = 47811;
 
 /// `%APPDATA%\moocp` unter Windows, `~/Library/Application Support/moocp` auf
-/// dem Mac, `$XDG_CONFIG_HOME/moocp` (sonst `~/.config/moocp`) unter Linux.
+/// dem Mac, `~/.config/moocp` unter Linux: Einstellungen und Protokoll.
 String get einstellungenOrdner => einstellungenOrdnerFuer(
   Platform.environment,
   macos: Platform.isMacOS,
@@ -47,6 +47,18 @@ String einstellungenOrdnerFuer(
     }
     return p.join(heim, 'Library', 'Application Support', 'moocp');
   }
+  if (linux) {
+    // XDG Base Directory: $XDG_CONFIG_HOME, wenn gesetzt und absolut (die
+    // Spezifikation verlangt, ein relativer Wert wird ignoriert), sonst
+    // ~/.config.
+    final xdg = umgebung['XDG_CONFIG_HOME'];
+    if (xdg != null && p.isAbsolute(xdg)) return p.join(xdg, 'moocp');
+    final heim = umgebung['HOME'];
+    if (heim == null || heim.isEmpty) {
+      throw StateError('Der Benutzerordner (HOME) ist nicht gesetzt; die Einstellungen können nicht gespeichert werden.');
+    }
+    return p.join(heim, '.config', 'moocp');
+  }
   final appdata = umgebung['APPDATA'];
   if (appdata == null || appdata.isEmpty) {
     throw StateError(
@@ -61,39 +73,22 @@ File get einstellungenDatei =>
 
 /// Der Ordner für Sicherungen einer Aktivität (E29): außerhalb des Arbeitsordners,
 /// der beim Start und Beenden geleert wird. Unter Windows `%APPDATA%\moocp\sicherungen`,
-/// auf dem Mac `~/Library/Application Support/moocp/sicherungen`.
-String get sicherungenOrdner => sicherungenOrdnerFuer(
-  Platform.environment,
-  macos: Platform.isMacOS,
-  linux: Platform.isLinux,
-);
+/// auf dem Mac `~/Library/Application Support/moocp/sicherungen`, unter Linux
+/// `~/.config/moocp/sicherungen`.
+String get sicherungenOrdner =>
+    sicherungenOrdnerFuer(Platform.environment, macos: Platform.isMacOS, linux: Platform.isLinux);
 
-String sicherungenOrdnerFuer(
-  Map<String, String> umgebung, {
-  required bool macos,
-  bool linux = false,
-}) => p.join(
-  einstellungenOrdnerFuer(umgebung, macos: macos, linux: linux),
-  'sicherungen',
-);
+String sicherungenOrdnerFuer(Map<String, String> umgebung, {required bool macos, bool linux = false}) =>
+    p.join(einstellungenOrdnerFuer(umgebung, macos: macos, linux: linux), 'sicherungen');
 
-/// Der Ordner der Plugins (E35): `plugins` im Einstellungsordner, unter Windows
-/// wie auf dem Mac. Der Entwicklungsbau auf dem Mac hat kein festes
+/// Der Ordner der Plugins (E35): `plugins` im Einstellungsordner, auf allen
+/// Plattformen. Der Entwicklungsbau auf dem Mac hat kein festes
 /// Installationsverzeichnis, und unter Windows wandert der Einstellungsordner mit
 /// dem Benutzerprofil, sodass Plugins und Zustimmungen auf jedem Rechner
 /// bereitstehen, auf dem die App installiert ist. Jedes Plugin liegt in einem
 /// Unterordner, `plugins/<name>`.
-String get pluginsOrdner => pluginsOrdnerFuer(
-  Platform.environment,
-  macos: Platform.isMacOS,
-  linux: Platform.isLinux,
-);
+String get pluginsOrdner =>
+    pluginsOrdnerFuer(Platform.environment, macos: Platform.isMacOS, linux: Platform.isLinux);
 
-String pluginsOrdnerFuer(
-  Map<String, String> umgebung, {
-  required bool macos,
-  bool linux = false,
-}) => p.join(
-  einstellungenOrdnerFuer(umgebung, macos: macos, linux: linux),
-  'plugins',
-);
+String pluginsOrdnerFuer(Map<String, String> umgebung, {required bool macos, bool linux = false}) =>
+    p.join(einstellungenOrdnerFuer(umgebung, macos: macos, linux: linux), 'plugins');

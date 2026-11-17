@@ -65,11 +65,12 @@ Future<ProcessResult> prozessAusfuehren(
   String programm,
   List<String> argumente, {
   Encoding? stdoutEncoding = systemEncoding,
+  Map<String, String> dazu = const {},
 }) =>
     Process.run(
       programm,
       argumente,
-      environment: kindUmgebung(),
+      environment: kindUmgebung(dazu: dazu),
       includeParentEnvironment: false,
       stdoutEncoding: stdoutEncoding,
     );

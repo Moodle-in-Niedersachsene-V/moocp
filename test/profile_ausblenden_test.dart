@@ -450,10 +450,11 @@ void main() {
       expect((a.instanzen[0].moodle as _Zugang).versuche, 1, reason: 'ohne neues Passwort meldet der Wechsel nicht an');
     });
 
-    testWidgets('ein Profilwechsel meldet mit dem gespeicherten Passwort an und verwirft es, wenn Moodle es ablehnt', (tester) async {
+    testWidgets('der Start meldet auch das nicht sichtbare Profil an und verwirft dessen Passwort, wenn Moodle es ablehnt', (tester) async {
       gespeichert('k2', passwort: 'veraltet');
       final a = await starten(tester, [standard, test], ablehnen: [false, true]);
-      expect((a.instanzen[1].moodle as _Zugang).versuche, 0, reason: 'der Start betrifft nur das sichtbare Profil');
+      expect((a.instanzen[1].moodle as _Zugang).versuche, 1, reason: 'der Start meldet jedes Profil mit gespeicherten Anmeldedaten an');
+      expect(await sicher.read(key: 'moodle.passwort.k2'), isNull, reason: 'abgelehnt: verworfen');
 
       Future<void> wechseln(String eintrag) async {
         await tester.tap(find.byType(DropdownButtonFormField<int>));
@@ -463,12 +464,9 @@ void main() {
       }
 
       await wechseln('Moodle Test (moodle-test)');
-      expect((a.instanzen[1].moodle as _Zugang).versuche, 1);
-      expect(await sicher.read(key: 'moodle.passwort.k2'), isNull);
-
       await wechseln('Moodle (moodle)');
       await wechseln('Moodle Test (moodle-test)');
-      expect((a.instanzen[1].moodle as _Zugang).versuche, 1, reason: 'jeder weitere Wechsel wäre ein weiterer Fehlversuch');
+      expect((a.instanzen[1].moodle as _Zugang).versuche, 1, reason: 'jeder Wechsel wäre ein weiterer Fehlversuch');
     });
   });
 

@@ -43,6 +43,54 @@ int? ortsziel(Object? linkedActivity) => switch (linkedActivity) {
   _ => null,
 };
 
+/// Verknüpfung eines Kartenorts, wie aktivitaet_lesen sie aus den gelesenen
+/// Daten feststellt (Werkzeugausgabe, keine Ableitung der KI).
+///
+/// fehlend: kein Ziel gesetzt (Moodle speichert „(keine)" als 0 oder lässt es weg).
+/// verknüpft: zeigt auf eine Aktivität dieses Kurses.
+/// fremd: zeigt auf eine Aktivität eines anderen Kurses oder auf eine cmid,
+/// die es im Kurs nicht gibt.
+/// nicht prüfbar: das Ziel ist nicht lesbar, oder die Kursstruktur fehlt.
+///
+/// Ob das Ziel zum vorgesehenen Ziel passt, sagt das Werkzeug nicht: Dafür
+/// braucht es die Quellkarte (lernlandkarte_zielkontext).
+enum OrtVerknuepfung {
+  verknuepft('verknüpft'),
+  fehlend('fehlend'),
+  fremd('fremd'),
+  nichtPruefbar('nicht prüfbar');
+
+  const OrtVerknuepfung(this.bezeichnung);
+  final String bezeichnung;
+}
+
+/// Der Stand je Ziel-cmid: verknüpft oder fremd, je nachdem ob die cmid im
+/// Kurs liegt. Ohne Kursstruktur ([kursCmids] null) ist nichts prüfbar.
+Map<int, OrtVerknuepfung> zielStatusVon(Iterable<int> ziele, Set<int>? kursCmids) => {
+  for (final cmid in ziele)
+    cmid: kursCmids == null
+        ? OrtVerknuepfung.nichtPruefbar
+        : kursCmids.contains(cmid)
+        ? OrtVerknuepfung.verknuepft
+        : OrtVerknuepfung.fremd,
+};
+
+/// Die Verknüpfung eines Orts mit seinem [linkedActivity]-Wert, anhand des
+/// Stands aus [zielStatusVon]. Ein Ziel, das im Stand fehlt, ist nicht prüfbar.
+OrtVerknuepfung ortVerknuepfung(
+  Object? linkedActivity,
+  Map<int, OrtVerknuepfung> zielStatus,
+) {
+  if (linkedActivity == null ||
+      (linkedActivity is String && linkedActivity.trim().isEmpty)) {
+    return OrtVerknuepfung.fehlend;
+  }
+  final ziel = ortsziel(linkedActivity);
+  if (ziel == null) return OrtVerknuepfung.nichtPruefbar;
+  if (ziel == 0) return OrtVerknuepfung.fehlend;
+  return zielStatus[ziel] ?? OrtVerknuepfung.nichtPruefbar;
+}
+
 /// Die gespeicherten Kartendaten aus dem Lernlandkarten-Formular.
 ///
 /// SVG und Ortsdaten bleiben unverändert erhalten; die abgeleiteten Angaben

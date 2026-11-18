@@ -2335,7 +2335,7 @@ Future<String> aendernMehrere(
       if (!ok) {
         abbruch = uebergeben
             ? '${a.kopf(mitKurs: false)}: nicht im Browser gespeichert (oben).'
-            : '${a.kopf(mitKurs: false)} ist gespeichert, aber die Rückleseprobe weicht ab (oben).';
+            : '${a.kopf(mitKurs: false)}: nicht verifiziert; siehe Befund oben.';
       }
     } on MoodleFehler catch (x) {
       abbruch = '${a.kopf(mitKurs: false)}: ${x.meldung}';

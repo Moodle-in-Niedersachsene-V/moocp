@@ -455,6 +455,19 @@ void main() {
       expect(r.nachher!.text, isNot(contains('Geheimwort')));
     });
 
+    for (final tag in ['pre', 'textarea']) {
+      test('Bedeutender Leerraum in $tag bleibt beim Wiederherstellungsvergleich erhalten', () async {
+        final r = await lauf(archivMit('', '<$tag>a\nb</$tag>'), form('', '<$tag>a b</$tag>'));
+        expect(r.nachher!.verified, isFalse);
+        expect(r.nachher!.text, contains('Feld „Seiteninhalt" weicht von der Quelle ab'));
+      });
+    }
+
+    test('Zeilenenden in vorformatiertem Text sind weiterhin gleichwertig', () async {
+      final r = await lauf(archivMit('', '<pre>a\r\nb</pre>'), form('', '<pre>a\nb</pre>'));
+      expect(r.nachher!.verified, isTrue, reason: r.status);
+    });
+
     test('Beschreibung weicht ab: Feld „Beschreibung" genannt', () async {
       final r = await lauf(archivMit('<p>Intro</p>', quellInhalt), form('<p>Anderes</p>', zielInhalt));
       expect(r.nachher!.verified, isFalse);

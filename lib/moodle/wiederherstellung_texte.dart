@@ -19,7 +19,7 @@
 //
 // Vor dem Vergleich wird nur normalisiert, was sich beim Wiederherstellen von selbst ändert:
 // die Adresse der Instanz (Quelle und Ziel), Platzhalter und Pfade für Dateien,
-// Zeilenenden und Leerraum. Ohne belegte Zuordnung bleiben Objektkennungen erhalten;
+// Zeilenenden und Leerraum außerhalb vorformatierter Inhalte. Ohne belegte Zuordnung bleiben Objektkennungen erhalten;
 // Wiederherstellungsplatzhalter für Objektlinks bleiben eine Prüflücke. Alles andere
 // (Wörter, Tags, Linkziele, Dateinamen) bleibt, ein Unterschied dort ist eine Abweichung.
 // Ein Platzhalter der Sicherung, den die App nicht kennt, ist eine Prüflücke, nie Gleichheit.
@@ -183,8 +183,13 @@ String textNormalisiert(String roh, {Iterable<String> instanzen = const []}) {
       .replaceAll(_pluginfile, '@@PLUGINFILE@@/')
       .replaceAll(_draftfile, '@@PLUGINFILE@@/')
       .replaceAllMapped(_zaehler, (m) => m.group(1)!);
-  // Leerraum zwischen zwei Tags ändert die Darstellung nicht.
-  return t.replaceAll(RegExp(r'>\s+<'), '><').replaceAll(RegExp(r'\s+'), ' ').trim();
+  // In vorformatierten Inhalten ist Leerraum Teil des Texts. Auch ein nicht
+  // geschlossenes Element darf beim Vergleich keine Zeilenumbrüche verlieren.
+  return t.splitMapJoin(
+    RegExp(r'<(pre|textarea)\b[^>]*>[\s\S]*?(?:</\1\s*>|$)', caseSensitive: false),
+    onMatch: (m) => m[0]!,
+    onNonMatch: (s) => s.replaceAll(RegExp(r'>\s+<'), '><').replaceAll(RegExp(r'\s+'), ' '),
+  ).trim();
 }
 
 /// Bleibt nach der Normalisierung ein Platzhalter der Sicherung stehen, den die App nicht auflöst.

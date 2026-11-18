@@ -79,6 +79,16 @@ class _Doppel {
       return _umleiten(r, '/login/index.php');
     }
     if (!eingeloggt) return _umleiten(r, '/login/index.php');
+    if (pfad == '/lib/ajax/service.php') {
+      final anfragen = jsonDecode(await utf8.decoder.bind(r).join()) as List;
+      if ((anfragen.single as Map)['methodname'] != 'core_courseformat_get_state') {
+        return _text(r, 'nicht gefunden', status: HttpStatus.notFound);
+      }
+      return _text(r, jsonEncode([{'error': false, 'data': {
+        'section': [{'id': 1, 'number': 1, 'title': 'ZZ Abschnitt', 'visible': 1, 'cmlist': [101]}],
+        'cm': [{'id': 101, 'module': 'page', 'name': 'ZZ Seite', 'visible': 0, 'sectionid': 1}],
+      }}]));
+    }
     if (pfad == '/pluginfile.php/55/mod_page/content/0/bild.png') {
       r.response.headers.contentType = ContentType('image', 'png');
       r.response.add(base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII='));
@@ -187,6 +197,20 @@ void main() {
     final wiederholt = await aendern(zugang, freigaben,
         ordner: ordner, arbeitsordner: arbeitsordner.path);
     expect(wiederholt, contains('aendern_status'));
+    expect(doppel.speichern, hasLength(1));
+  });
+
+  test('Sammeländerung behauptet nach POST-Abbruch keine Speicherung', () async {
+    final ordner = await geaendertStarten();
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: [ordner], arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    expect(bericht, contains('Ausgang unklar'));
+    expect(bericht, contains('nicht verifiziert; siehe Befund'));
+    expect(bericht, isNot(contains('ist gespeichert')));
     expect(doppel.speichern, hasLength(1));
   });
 

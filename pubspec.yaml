@@ -86,7 +86,10 @@ dev_dependencies:
 # msedge --headless --default-background-color=00000000 --window-size=1024,1024
 # --screenshot=docs\icon\icon.png docs\icon\rendern.html), dann
 #   dart run flutter_launcher_icons
-# schreibt windows/runner/resources/app_icon.ico, das auch der Installer nimmt.
+# schreibt windows/runner/resources/app_icon.ico, das auch der Installer nimmt,
+# und das Symbol der Mac-App unter macos/Runner/Assets.xcassets/AppIcon.appiconset.
+# Für den Mac gilt docs/icon/icon_macos.svg (verkleinert auf Apples Raster),
+# gerendert mit cairosvg nach docs/icon/icon_macos.png.
 flutter_launcher_icons:
   android: false
   ios: false
@@ -94,6 +97,9 @@ flutter_launcher_icons:
     generate: true
     image_path: "docs/icon/icon.png"
     icon_size: 256
+  macos:
+    generate: true
+    image_path: "docs/icon/icon_macos.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

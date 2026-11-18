@@ -60,6 +60,8 @@ class EinstellungenDialog extends StatefulWidget {
     required this.protokoll,
     required this.eigene,
     required this.updateMoeglich,
+    this.updatePaket,
+    this.imBrowserOeffnen,
     required this.sitzungLaeuft,
     this.profilname,
     this.mcpName,
@@ -76,8 +78,15 @@ class EinstellungenDialog extends StatefulWidget {
   /// Die laufende Version, etwa „0.9.4".
   final String eigene;
 
-  /// Ob sich diese App überhaupt selbst aktualisieren kann (update.dart).
+  /// Ob diese App nach Updates sucht: unter Windows, wenn sie sich selbst
+  /// ersetzen kann, auf dem Mac und unter Linux, wenn sie aus einem Paket
+  /// installiert ist (update.dart).
   final bool updateMoeglich;
+
+  /// Mac und Linux: das Paket, aus dem die App stammt; dann sagt die Suche
+  /// nur Bescheid und öffnet die Datei mit [imBrowserOeffnen].
+  final UpdatePaket? updatePaket;
+  final Future<void> Function(Uri adresse)? imBrowserOeffnen;
 
   /// Ob der MCP-Server läuft; dann hängt womöglich eine Sitzung eines KI-Werkzeugs
   /// daran, die ein Update verlöre.
@@ -136,6 +145,8 @@ class _EinstellungenDialogState extends State<EinstellungenDialog> {
       eigene: widget.eigene,
       manuell: true,
       sitzungLaeuft: widget.sitzungLaeuft,
+      paket: widget.updatePaket,
+      imBrowserOeffnen: widget.imBrowserOeffnen,
     );
     if (!mounted) return;
     setState(() => _sucht = false);
@@ -167,9 +178,9 @@ class _EinstellungenDialogState extends State<EinstellungenDialog> {
                         ? 'Diese Version kann sich nicht selbst aktualisieren: Sie läuft nicht aus '
                               'dem Installationsverzeichnis, oder die Prüfung ist über die Kommandozeile '
                               'abgeschaltet ($keinUpdateSchalter).'
-                        : 'Diese Version aktualisiert sich nicht selbst. Auf dem Mac und unter Linux '
-                              'prüft moocp nicht bei GitHub und lädt nichts herunter; eine neue Version '
-                              'kommt von Hand.',
+                        : 'Diese Version sucht nicht nach Updates: Sie ist nicht aus einem der Pakete '
+                              'installiert (auf dem Mac: nicht aus „Programme“ gestartet), oder die '
+                              'Prüfung ist über die Kommandozeile abgeschaltet ($keinUpdateSchalter).',
                     style: klein,
                   ),
                 )

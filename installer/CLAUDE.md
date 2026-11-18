@@ -9,6 +9,14 @@ Die Entscheidung zum Installer (je Benutzer, Deinstallieren räumt alles ab, Umg
 - **Der Hinweis zur Nutzung** steht am Anfang der README und auf der ersten Seite des Installers (`HinweisSeite` in `moocp.nsi`); die Regel, ihn an beiden Stellen gleichzuziehen, steht in der [CLAUDE.md des Projekts](../CLAUDE.md) (Arbeitsregeln).
 - **Das Beispiel-Plugin (`example/example-plugin/`) gehört nicht in den Installer.** Der Installer packt nur den Bau unter `build/windows/x64/runner/Release`; das Beispiel steht nicht unter den Assets in `pubspec.yaml` und darf dort auch nicht hinein.
 
+## Mac
+
+Für den Mac gibt es keinen Installer mit Seiten, sondern ein Disk-Image: `tool/mac_dmg.sh` baut `installer/moocp_<Version>_macos.dmg` aus der Release-App, Fenster und Hintergrund liegen in `installer/macos/` (Entscheidung: [ADR 0024](../docs/adr/0024-plattformen.md), Abschnitt macOS).
+
+- **Fenster und Hintergrund gehören zusammen:** Die Lagen in `icon_locations` (`dmg_einstellungen.py`) sind die Mitten der Symbole und müssen zu Pfeil und Text in `hintergrund.svg` passen; nach einer Änderung am SVG beide PNGs neu erzeugen (Befehle im Kopf des SVG) und die DMG auf einem Mac öffnen.
+- **dmgbuild** steht mit Version und Prüfsummen im Skript; wer die Version hebt, trägt alle drei neu ein und prüft, dass sie noch mit dem Python 3.9 von Apple läuft.
+- **Tests:** `bash tool/mac_dmg_test.sh` (ohne Mac, Bau und dmgbuild ersetzt).
+
 ## Linux
 
 Der Installer für Linux liegt nicht in diesem Ordner, sondern in der App (`lib/installer/`, Schalter `--installieren` und `--deinstallieren`); `tool/linux_installer.sh` paketiert ihn zu `installer/moocp_setup_<Version>.run` (Entscheidung: [ADR 0024](../docs/adr/0024-plattformen.md), Abschnitt Linux).

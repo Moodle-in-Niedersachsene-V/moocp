@@ -10,11 +10,15 @@
 //     Moodle-Kopf und keine Moodle-Adresse gelangt zu GitHub. Erlaubt sind
 //     nur die Adressen aus updateliste.dart, jedes Umleitungsziel einzeln
 //     geprüft; jede Anfrage steht mit Status im Protokoll (A4 sinngemäß).
-//  3. Nur wer sich selbst ersetzen kann, prüft überhaupt (updateMoeglich):
-//     Der Installer legt die App nach %LOCALAPPDATA%\Programs\moocp. Läuft
-//     die exe woanders -- Entwicklerversion aus build\, eine Kopie --, würde
-//     ein Update sie gar nicht ersetzen, sondern eine zweite daneben
-//     installieren.
+//  3. Geprüft wird nur in einer installierten App. Unter Windows nur, wer
+//     sich selbst ersetzen kann (updateMoeglich): Der Installer legt die App
+//     nach %LOCALAPPDATA%\Programs\moocp. Läuft die exe woanders --
+//     Entwicklerversion aus build\, eine Kopie --, würde ein Update sie gar
+//     nicht ersetzen, sondern eine zweite daneben installieren. Auf dem Mac
+//     und unter Linux ersetzt sich die App nie selbst (E24): Dort sagt sie
+//     nur Bescheid und öffnet auf Wunsch die Datei im Browser (updatePaket,
+//     UpdatePaket); geprüft wird, wenn sie so läuft, wie eines der Pakete sie
+//     hinlegt.
 //
 // Der Installer läuft sichtbar, mit dem Schalter /UPDATE: Er wartet dann
 // still, bis die App zu ist (sie beendet sich gleich nach dem Start des
@@ -29,6 +33,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../einstellungen.dart';
+import '../installer/installer_logik.dart' show markeDatei;
 import '../log.dart';
 import '../plattform/kindprozess.dart';
 import '../protokoll.dart';
@@ -112,6 +117,79 @@ bool updateMoeglich(List<String> argumente, Map<String, String> umgebung) {
   }
 }
 
+/// Das Paket im Release, aus dem diese App auf dem Mac oder unter Linux
+/// stammt (E24). Mit ihm wird sie auch aktualisiert: Die App lädt es nicht
+/// selbst, sondern öffnet seine Adresse im Browser, und die Lehrkraft spielt
+/// es ein wie bei der Installation.
+enum UpdatePaket {
+  /// Disk-Image für den Mac (tool/mac_dmg.sh).
+  dmg,
+
+  /// Installer je Benutzer für Linux (tool/linux_installer.sh).
+  run,
+
+  /// AppImage für Linux (tool/linux_appimage.sh).
+  appImage,
+
+  /// Debian-Paket, systemweit (tool/linux_deb.sh).
+  deb;
+
+  /// Der Name der Datei im Release, wie die Skripte sie bauen.
+  String dateiname(String version) => switch (this) {
+        UpdatePaket.dmg => 'moocp_${version}_macos.dmg',
+        UpdatePaket.run => 'moocp_setup_$version.run',
+        UpdatePaket.appImage => 'moocp_$version-x86_64.AppImage',
+        UpdatePaket.deb => 'moocp_${version}_amd64.deb',
+      };
+}
+
+/// Aus welchem Paket diese App stammt, wenn sie auf dem Mac oder unter Linux
+/// installiert läuft; null sonst -- dann sucht sie nicht nach Updates. Ein
+/// Entwicklungsbau sucht so nie, und eine App, die macOS aus dem Disk-Image
+/// oder dem Download-Ordner heraus an einen Zufallsort verlegt hat
+/// (App Translocation), auch nicht.
+///
+/// [system] und [programm] sind für Tests: ohne Angabe das laufende System und
+/// die laufende Programmdatei. [gibtEs] prüft, ob eine Datei existiert.
+UpdatePaket? updatePaket(
+  List<String> argumente,
+  Map<String, String> umgebung, {
+  String? system,
+  String? programm,
+  bool Function(String pfad)? gibtEs,
+}) {
+  if (argumente.contains(keinUpdateSchalter)) return null;
+  final datei = p.posix.normalize(programm ?? Platform.resolvedExecutable);
+  final vorhanden = gibtEs ?? (String pfad) => File(pfad).existsSync();
+  switch (system ?? Platform.operatingSystem) {
+    case 'macos':
+      // …/moocp.app/Contents/MacOS/moocp; installiert ist sie, wenn das
+      // Bundle in einem der beiden Programme-Ordner liegt, wohin man es aus
+      // dem Disk-Image zieht.
+      final bundle = p.posix.dirname(p.posix.dirname(p.posix.dirname(datei)));
+      if (!bundle.endsWith('.app')) return null;
+      final ordner = p.posix.dirname(bundle);
+      final heim = umgebung['HOME'];
+      final programme = [
+        '/Applications',
+        if (heim != null && heim.isNotEmpty) p.posix.join(heim, 'Applications'),
+      ];
+      return programme.contains(ordner) ? UpdatePaket.dmg : null;
+    case 'linux':
+      // Das AppImage setzt APPIMAGE auf seinen eigenen Pfad, das .deb legt
+      // die App nach /opt/moocp, der Installer je Benutzer hinterlässt seine
+      // Marke im gewählten Zielordner (installer_logik.dart).
+      final appImage = umgebung['APPIMAGE'];
+      if (appImage != null && appImage.isNotEmpty) return UpdatePaket.appImage;
+      final ordner = p.posix.dirname(datei);
+      if (ordner == '/opt/moocp') return UpdatePaket.deb;
+      if (vorhanden(p.posix.join(ordner, markeDatei))) return UpdatePaket.run;
+      return null;
+    default:
+      return null;
+  }
+}
+
 /// Der Tag eines Releases als Version: „v0.9.4" ergibt „0.9.4" (Schema der
 /// Tags, E12); „github-v…" ist geduldet, weil die ersten Versionen so
 /// veröffentlicht wurden. Alles andere ergibt null --
@@ -182,6 +260,11 @@ Map<String, dynamic>? releaseDatei(List<dynamic> anhaenge, String version,
 /// Eine Prüfung samt Download. Eine je Vorgang; [abbrechen] bricht ab, was
 /// gerade läuft.
 ///
+/// Mit [paket] (Mac, Linux) sucht die Prüfung statt des Installers dieses
+/// Paket im Release; fehlt es, gibt es für dieses System keine neue Version.
+/// Heruntergeladen wird dann nicht: Die Adresse des Pakets öffnet die
+/// Lehrkraft im Browser (update_dialoge.dart).
+///
 /// [quellen] sind die Herkünfte (Repositorys bei GitHub), aus denen die
 /// Versionen kommen, in der Reihenfolge der Abfrage; ohne Angabe die von
 /// moocp selbst (updateliste.dart). [installerAnfang] ist der Anfang des
@@ -198,6 +281,7 @@ class Update {
     this.installerAnfang = moocpInstallerAnfang,
     this.dateiPraefix = moocpDateiPraefix,
     this.protokollName = 'Update',
+    this.paket,
   });
 
   final Protokoll protokoll;
@@ -206,6 +290,7 @@ class Update {
   final String installerAnfang;
   final String dateiPraefix;
   final String protokollName;
+  final UpdatePaket? paket;
 
   HttpClient? _klient;
   bool _abgebrochen = false;
@@ -263,7 +348,30 @@ class Update {
         protokoll.eintrag(Art.info, '$protokollName: neueste Version ist $version, läuft bereits ($eigene)');
         return null;
       }
-      final anhang = releaseDatei((j['assets'] as List?) ?? const [], version, anfang: installerAnfang);
+      final anhaenge = (j['assets'] as List?) ?? const [];
+      final gesucht = paket;
+      if (gesucht != null) {
+        final name = gesucht.dateiname(version);
+        final treffer = anhaenge.whereType<Map<String, dynamic>>().where((a) => a['name'] == name);
+        if (treffer.isEmpty) {
+          protokoll.eintrag(Art.info, '$protokollName: Version $version hat kein Paket $name für dieses System');
+          return null;
+        }
+        final adresse = Uri.parse(treffer.first['browser_download_url'] as String);
+        final grund = updateGesperrt(adresse, download: true, quellen: quellen);
+        if (grund != null) {
+          protokoll.eintrag(Art.gesperrt, '$protokollName gesperrt: ${_kurz(adresse)} ($grund)');
+          throw UpdateFehler('Die Adresse des Pakets ist nicht erlaubt ($grund).');
+        }
+        protokoll.eintrag(Art.info, '$protokollName: Version $version verfügbar (läuft: $eigene)');
+        return NeueVersion(
+          version: version,
+          datei: adresse,
+          dateiname: name,
+          beschreibung: (j['body'] as String?)?.trim() ?? '',
+        );
+      }
+      final anhang = releaseDatei(anhaenge, version, anfang: installerAnfang);
       if (anhang == null) {
         throw UpdateFehler(
             'Im Release $version liegt kein Installer (${installerName(version, anfang: installerAnfang)}).');

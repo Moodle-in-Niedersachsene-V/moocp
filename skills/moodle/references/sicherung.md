@@ -9,6 +9,7 @@ Mit diesen Werkzeugen sicherst du Teile eines Kurses oder den ganzen Kurs als Si
 | eine Sicherungsdatei zurückspielen | `wiederherstellen_datei` |
 | eine Auswahl in mehrere Kurse derselben Instanz bringen | `uebertragen` |
 | den Stand eines laufenden Vorgangs abfragen | `sicherung_status`, `wiederherstellung_status` |
+| fehlende oder abweichende Anhänge nach dem Wiederherstellen ergänzen | `anhaenge_reparieren` |
 
 ## Der Plan kommt zuerst
 
@@ -59,6 +60,16 @@ Dieselbe Datei für denselben Weg wird nicht ein zweites Mal gestartet, solange 
 ### Was der Bericht prüft
 
 Die Rückleseprobe liest den Zielkurs zurück und vergleicht ihn mit der Sicherungsdatei. Sie prüft auch Bilder und Anhänge der neuen Aktivitäten gegen die Datei (Inhalt, nicht Adresse). Ein zwischenzeitlich ausgetauschtes Archiv oder ein fehlender Startbezug bleibt eine ausdrückliche Prüflücke. Steht im Bericht „nicht vollständig verifiziert“, sag das so; die App repariert nichts von allein.
+
+### Anhänge reparieren
+
+Nennt der Bericht fehlende oder abweichende Anhänge, bietest du die Reparatur an, ohne sie zu beginnen: `anhaenge_reparieren` ist ein eigener Schreibschritt mit eigener Freigabe und läuft nur auf ausdrückliches Ja der Lehrkraft, mit dem Plan davor. Nenne im Plan je Datei Name, Ort (Text oder Dateibereich) und Aktion. So geht es:
+
+1. Lies die Aktivität mit `aktivitaet_lesen` frisch in einen Ordner.
+2. Lege die Dateien, die der Bericht nennt, mit genau dem Inhalt der Quelle in diesen Ordner: im Text eingebundene nach `dateien/<name>`, Dateien im Dateimanager nach `bereiche/<feld>/<pfad>/<name>`. Die Dateien kommen aus dem Arbeitsordner, etwa aus dem frisch gelesenen Quellkurs; die App prüft den Inhalt (SHA-1) gegen die Quellaufnahme und bricht ab, wenn etwas nicht passt, und nennt, was fehlt.
+3. Rufe `anhaenge_reparieren` mit Kurs, Nummer, Name und Ordner auf; nenne die Nummer der Wiederherstellung als `vorgang`, wenn der Kurs mehrere hat.
+
+Du änderst dabei keinen Text und keine Einstellung im Ordner; die App lehnt es ab. Fremde, mehrdeutige oder nicht lesbare Ziele, leere Ordner und Dateien, auf die der Text im Ziel nicht verweist, bleiben eine Prüflücke: Nenne sie und gib die Arbeit an die Lehrkraft (Moodle-Oberfläche). Was das Werkzeug zurückliest und `verified: true` nennt, liest du nicht noch einmal selbst nach; bei `verified: false` oder einem Abbruch wiederholst du nichts, sondern gibst den Befund weiter.
 
 Enthält die Datei einen Test, vergleicht die App außerdem Fragenzahl und Fragennamen, auch bei späteren Statusabfragen. Gleiche Sachnummern in der angegebenen Zielsammlung belegen keine eigene Quellherkunft; das bleibt eine Prüflücke. Ermittle diese Sammlung auf der Zielinstanz. Bei geteilten Sammlungen erläuterst du vor dem Start die mögliche Abhängigkeit vom Quellkurs auf derselben Instanz und die mögliche neue geteilte Sammlung zwischen Instanzen; die Herkunft bleibt dabei unbestätigt. Unauflösbare Fragenversionen sind ebenfalls Prüflücken. Gib einen solchen Test als nicht vollständig verifiziert weiter.
 

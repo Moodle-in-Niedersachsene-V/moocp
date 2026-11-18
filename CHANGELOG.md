@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.
 

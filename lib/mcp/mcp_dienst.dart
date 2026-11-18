@@ -52,6 +52,7 @@ import '../moodle/stack.dart';
 import '../moodle/test.dart';
 import '../moodle/wiederherstellung.dart';
 import '../moodle/wiederherstellung_regeln.dart';
+import '../moodle/wiederherstellung_reparatur.dart';
 import '../moodle/wiki.dart';
 import '../protokoll.dart';
 
@@ -1275,6 +1276,54 @@ class McpDienst implements AufrufKontext {
           _text(a, 'id'),
           'wiederherstellung_status',
         ),
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'anhaenge_reparieren',
+      titel: 'Anhänge nach Wiederherstellung reparieren',
+      beschreibung:
+          'Ergänzt oder ersetzt fehlende und abweichende Bilder und Anhänge einer wiederhergestellten '
+          'Aktivität aus Dateien im Arbeitsordner. wiederherstellung_status prüft nur und nennt, was fehlt oder '
+          'abweicht; dieses Werkzeug repariert, nur auf ausdrücklichen Auftrag und nach Freigabe. Ablauf: erst die '
+          'Aktivität mit aktivitaet_lesen in einen Ordner lesen und die Dateien, die die Prüfung nennt, mit '
+          'genau dem Inhalt der Quelle in diesen Ordner legen (im Text eingebundene Dateien nach dateien/<name>, '
+          'Dateien im Dateimanager nach bereiche/<feld>/<pfad>/<name>); dann dieses Werkzeug aufrufen. Es '
+          'vergleicht die Quellaufnahme der Wiederherstellung (Inhalt, SHA-1) mit dem Ziel, rührt nur eindeutig '
+          'zuordenbare Ziele an (fremde, mehrdeutige, unbekannte Ziele und leere Verzeichnisse bleiben als '
+          'Prüflücke stehen), bricht ab, wenn eine Reparaturdatei fehlt oder nicht der Quelle entspricht, zeigt der '
+          'Lehrkraft je Datei Name, Ort und Aktion, prüft nach der Freigabe Moodle und Ordner erneut und schreibt '
+          'nur, wenn nichts abweicht. Es ändert keinen Text, keine Einstellung und löscht nichts. Danach '
+          'Rückleseprobe (verified: nur wenn jede reparierte Datei im Ziel den Inhalt der Quelle hat). Nummer '
+          'und Name der Aktivität müssen zusammenpassen.',
+      parameter: {
+        'kurs': _kurs,
+        'cmid': _cmid,
+        'name': _name,
+        'ordner': JsonSchema.string(
+          description:
+              'Der gelesene Ordner der Aktivität im Arbeitsordner (aktivitaet_lesen), absolut oder relativ dazu, '
+              'etwa cm-815, mit den Reparaturdateien darin',
+        ),
+        'vorgang': JsonSchema.string(
+          description:
+              'Optional: Nummer der Wiederherstellung, deren Quellaufnahme gilt (wiederherstellung_status). '
+              'Ohne Angabe: der eine abgeschlossene Vorgang des Kurses, der diese Aktivität enthält.',
+        ),
+      },
+      pflicht: ['kurs', 'cmid', 'name', 'ordner'],
+      zerstoerend: true,
+      ausfuehren: (a) => anhaengeReparieren(
+        moodle,
+        freigaben,
+        vorgaenge,
+        kurs: _zahl(a, 'kurs'),
+        cmid: _zahl(a, 'cmid'),
+        name: _text(a, 'name'),
+        ordner: _text(a, 'ordner'),
+        arbeitsordner: ao,
+        vorgang: a['vorgang'] as String?,
       ),
     );
 

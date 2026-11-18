@@ -1,4 +1,4 @@
-# E24 Plattformen: Windows und Linux ausgeliefert, macOS aus dem Entwicklungsbau
+# E24 Plattformen: Windows, Linux und macOS ausgeliefert
 
 Status: gilt. Die Regeln dazu stehen im Index der [CLAUDE.md](../../CLAUDE.md).
 
@@ -8,21 +8,21 @@ Ausgeliefert wird moocp für **Windows**: ein Installer je Benutzer (E15), Zugan
 
 Für **Linux** (Debian 13, amd64) wird ebenfalls ausgeliefert: An jedem Release hängen drei Pakete (Installer je Benutzer, AppImage, .deb; siehe unten). Eine Selbstaktualisierung, die Brücke und LM Studio gibt es unter Linux nicht; eine neue Version lädt man aus dem Release. Entwickelt wird mit `flutter run -d linux`.
 
-Auf **macOS** läuft die App aus dem Entwicklungsbau (`flutter run -d macos`, siehe README, Teil 4). Eine Veröffentlichung für den Mac gibt es nicht: Ein Paket für den Mac braucht eine Signatur und die Beglaubigung durch Apple. Wo die Windows-Lösung an Windows hängt (Ablage der Zugangsdaten, Ort von Einstellungen, Protokoll und Arbeitsordner, die Brücke für LM Studio und das Eintragen in die KI-Werkzeuge, Installation und Update), haben der Mac und Linux eigene Lösungen; sie stehen unten.
+Für **macOS** (ab 12, Apple Silicon und Intel in einem Bau) hängt an jedem Release ein Disk-Image `moocp_<Version>_macos.dmg`: Wer es öffnet, zieht die App auf „Programme“. Die App ist nicht signiert und nicht von Apple beglaubigt, weil das eine kostenpflichtige Mitgliedschaft im Apple Developer Program voraussetzt. macOS hält sie deshalb beim ersten Öffnen an; die Lehrkraft gibt sie einmal unter Systemeinstellungen › Datenschutz & Sicherheit frei, mit dem Passwort oder der Touch ID eines Administrators (README, „Installation auf dem Mac“). Eine Selbstaktualisierung, die Brücke und LM Studio gibt es auf dem Mac nicht. Entwickelt wird mit `flutter run -d macos`. Wo die Windows-Lösung an Windows hängt (Ablage der Zugangsdaten, Ort von Einstellungen, Protokoll und Arbeitsordner, die Brücke für LM Studio und das Eintragen in die KI-Werkzeuge, Installation und Update), haben der Mac und Linux eigene Lösungen; sie stehen unten.
 
 ## Folgen
 
 - Eine Änderung, die Windows-spezifisch ist (Pfade, DPAPI, Installer), nennt das im Kommentar, damit die Umsetzung für den Mac sie findet.
 - Das Repository bleibt eines (Flutter, [E25](0025-flutter-desktop.md)); es gibt keinen Zweig für den Mac und keinen für Linux.
 - `flutter test` muss auf allen Plattformen laufen, soweit die Tests nicht ausdrücklich eine voraussetzen.
-- Zu einem Release gehören der Windows-Installer und die drei Linux-Pakete ([E12](0012-git-und-github.md)); die Update-Prüfung der App sucht nur den Windows-Installer ([E19](0019-updates.md)).
+- Zu einem Release gehören der Windows-Installer, die drei Linux-Pakete und das Disk-Image für den Mac ([E12](0012-git-und-github.md)); die Update-Prüfung der App sucht nur den Windows-Installer ([E19](0019-updates.md)).
 
 ## Lösungen für macOS
 
-- **Zugangsdaten:** Das Passwort liegt im Schlüsselbund des Benutzers statt unter DPAPI. Haken und Benutzername stehen wie unter Windows in `shared_preferences`. Der Entwicklerbau hat keine Team-ID und nutzt deshalb nicht die Datenschutz-Gruppe des Schlüsselbunds. Entscheidung und Verworfenes: [E26](0026-schluesselbund-mac.md).
+- **Zugangsdaten:** Das Passwort liegt im Schlüsselbund des Benutzers statt unter DPAPI. Haken und Benutzername stehen wie unter Windows in `shared_preferences`. Der Bau hat keine Team-ID (kein Konto bei Apple) und nutzt deshalb nicht die Datenschutz-Gruppe des Schlüsselbunds. Entscheidung und Verworfenes: [E26](0026-schluesselbund-mac.md).
 - **Einstellungen, Protokoll und Arbeitsordner:** Einstellungen und `protokoll.log` liegen unter `~/Library/Application Support/moocp` statt unter `%APPDATA%` (`lib/einstellungen_ort.dart`). Der Arbeitsordner liegt wie unter Windows im Temp-Verzeichnis des Systems, auf dem Mac also im benutzerbezogenen `$TMPDIR`. Dass dieser Ort und die Spec in Issue #1 auseinanderlaufen, steht in [Issue #9](https://github.com/topse/moocp/issues/9). Die Einzelstart-Sperre läuft auf dem Mac über einen Unix-Socket im Einstellungsordner: [E27](0027-einzelstart-mac.md).
 - **Brücke und KI-Werkzeuge:** Auf dem Mac gibt es keine Brücke. LM Studio mit Bionic wird nicht angeboten, weil dessen Brücke ein Windows-Programm ist. Claude Code und Codex CLI sprechen HTTP-MCP und werden über ihre Kommandozeile bzw. `~/.codex/config.toml` eingetragen. Gesucht werden sie im `PATH`, unter `~/.local/bin`, `/opt/homebrew/bin` und `/usr/local/bin`. Skills liegen in `~/.claude/skills` und `~/.codex/skills`. Ob die Clients auf dem Mac diese Pfade tatsächlich lesen, ist nicht ausgeführt geprüft; das steht in [Issue #9](https://github.com/topse/moocp/issues/9).
-- **Installation und Update:** Es gibt keinen Installer und keine Selbstaktualisierung. Die App läuft aus dem Entwicklungsbau (`flutter run -d macos`, README Teil 4). `updateMoeglich` gibt außerhalb von Windows `false` zurück.
+- **Installation und Update:** `tool/mac_dmg.sh` baut die Release-App (nie den Testbetrieb), prüft, dass sie Apple Silicon und Intel enthält, und packt sie mit dmgbuild in `installer/moocp_<Version>_macos.dmg`. Das Fenster der DMG zeigt die App, eine Verknüpfung „Programme“ auf `/Applications` und dazwischen einen Pfeil im Hintergrund (`installer/macos/`). dmgbuild schreibt die Fensterlage selbst in die DMG; der Weg über AppleScript steuert den Finder fern und hängt auf Build-Rechnern ohne Anmeldung. Einen Installer mit eigenen Seiten wie unter Windows und Linux gibt es nicht: Der Hinweis zur Nutzung steht in der README, und Deinstallieren heißt, die App in den Papierkorb zu legen; Einstellungen, Schlüsselbund-Eintrag und die Einrichtung in den KI-Werkzeugen bleiben dann stehen. Eine Selbstaktualisierung gibt es nicht, eine neue Version zieht man genauso auf „Programme“. `updateMoeglich` gibt außerhalb von Windows `false` zurück.
 - **Bildschirmfotos:** Die Browsersuche (`/Applications`, `~/Applications`; Edge, Chrome, Chromium), die Richtlinie aus den verwalteten Einstellungen (`defaults read`, fehlend heißt erlaubt) und die Prozessbereinigung nach Profil (`ps`, `kill`) stehen hinter der Schnittstelle `lib/plattform/plattform.dart`, mit je einer Umsetzung für Windows und macOS. Der Kern hat keine Plattformprüfung. Ungemessen auf dem Mac: der Wert `0` der Richtlinie, der Start des Browsers und die Bereinigung in der Praxis (siehe [Issue #9](https://github.com/topse/moocp/issues/9)). Die Entscheidung, nur den App-Browser zu nutzen, steht in [E28](0028-bildschirmfoto-app-browser.md).
 
 ## Lösungen für Linux
@@ -41,6 +41,10 @@ Auf **macOS** läuft die App aus dem Entwicklungsbau (`flutter run -d macos`, si
 - **Erweiterungen (E35):** Plugins liegen wie auf den anderen Plattformen in `plugins/<name>` im Einstellungsordner.
 
 ## Verworfen
+
+Signieren und Beglaubigen für den Mac: Es kostet die jährliche Mitgliedschaft im Apple Developer Program. Ohne sie fragt macOS einmal nach, und die Freigabe lässt sich mit Bildern beschreiben. Kommt die Mitgliedschaft, entfällt nur diese Freigabe; Paket und Ablauf bleiben.
+
+Eine ZIP-Datei für den Mac: Die Lehrkraft müsste selbst entpacken und den Ordner „Programme“ finden; das Disk-Image zeigt beides in einem Fenster.
 
 Eine Selbstaktualisierung unter Linux: Die Update-Prüfung ersetzt einen Installer je Benutzer; das AppImage und das systemweite .deb ließen sich so nicht ersetzen, und drei Wege zu pflegen lohnt für die wenigen Rechner nicht.
 

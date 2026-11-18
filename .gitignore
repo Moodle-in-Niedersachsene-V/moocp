@@ -55,6 +55,7 @@ failures/
 /installer/*.run
 /installer/*.AppImage
 /installer/*.deb
+/installer/*.dmg
 
 # Lokale Codex-Entwicklungseinstellungen
 .codex/config.toml

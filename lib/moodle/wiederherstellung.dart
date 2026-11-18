@@ -1143,7 +1143,7 @@ Future<String> _gegenlesen(
           ? 'Neu im Kurs: $liste.'
           : 'Neu im Kurs: $liste. Nicht alle sind verborgen; bitte prüfen.';
   // Verglichen wird: Aktivitäten nach Typ und Titel, Anhänge nach Inhalt (SHA-1), die Texte der
-  // Editorfelder nach Normalisierung von Instanzadresse, Dateipfaden und neuen Kennungen
+  // Editorfelder nach Normalisierung von Instanzadresse und Dateipfaden
   // (`wiederherstellung_texte.dart`), Fragen nach Name. Einstellungen werden nicht verglichen.
   // Fragenvergleich nach dem Wiederherstellen: je Quiz aus dem Archiv, zugeordnet
   // über den Titel (bei genau einem Quiz auf beiden Seiten auch ohne). Was sich nicht
@@ -1194,6 +1194,17 @@ Future<String> _gegenlesen(
         'Sie können aus einer geteilten Sammlung stammen; Abhängigkeiten von der Quellsammlung bleiben ungeprüft.',
     ?schreibPruefluecke,
   ].join(' ');
+  // Nur die während dieses Laufs zweimal bestätigte Zuordnung ist Provenienz.
+  vg.importierteAktivitaeten = bestaetigt == null
+      ? null
+      : [
+          for (final cmid in bestaetigt)
+            (
+              cmid: cmid,
+              modul: jetzt.nachCmid[cmid]!.modul,
+              titel: jetzt.nachCmid[cmid]!.name,
+            ),
+        ];
   final text = zusatz.isEmpty ? basis : '$basis $zusatz';
   final pruefbefund = verifiziert
       ? (verbergen ? 'verborgen: verified; verified: true' : 'verified: true (ohne Sichtbarkeit und Voraussetzungen)')

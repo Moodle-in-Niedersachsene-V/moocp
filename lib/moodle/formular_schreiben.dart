@@ -45,6 +45,7 @@ import 'formular_lesen.dart';
 import 'fragen.dart';
 import 'gruppierung.dart';
 import 'kurs.dart';
+import 'kurs_aendern.dart' show einrueckungPruefen, einrueckungSetzen;
 import 'lernlandkarte_entwurf.dart';
 import 'moodle_zugang.dart';
 import 'stack_skripte.dart';
@@ -884,7 +885,14 @@ Future<String> aktivitaetAnlegen(
   String? ordner,
   bool sichtbar = false,
   Map<String, Object?> einstellungen = const {},
+  int? einrueckung,
 }) async {
+  if (einrueckung != null) {
+    einrueckungPruefen(einrueckung);
+    if (typ == 'qbank') {
+      throw MoodleFehler('Eine Fragensammlung steht nicht auf der Kursseite; einrueckung gilt dafür nicht.');
+    }
+  }
   if (!MoodleZugang.anlegbareModule.contains(typ)) {
     throw MoodleFehler(
       'Typ „$typ" kann die App nicht anlegen. Möglich: '
@@ -1064,6 +1072,10 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
+  // Einrücken folgt direkt auf das Anlegen und braucht keine eigene Freigabe.
+  final einr = einrueckung == null || einrueckung == 0
+      ? null
+      : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 
   final g = await formularLesen(
     moodle,
@@ -1115,7 +1127,7 @@ Future<String> aktivitaetAnlegen(
       fehler: angehalten,
       angelegt:
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
-          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}',
+          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}'}',
     );
   }
   return [
@@ -1131,6 +1143,7 @@ Future<String> aktivitaetAnlegen(
     if (gesetzt.isNotEmpty)
       'Einstellungen: ${gesetzt.map((s) => '${s.label}: ${s.nachher}').join("; ")}.',
     probe.text,
+    if (einr != null) einr.text,
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',

@@ -36,6 +36,8 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
 import '../protokoll.dart';
+import '../einstellungen_ort.dart';
+import 'package:path/path.dart' as p;
 import '../testschalter.dart';
 import 'browserliste.dart';
 import 'sicherung_regeln.dart';
@@ -419,7 +421,11 @@ class _Namenssperre extends Aufrufer {
 }
 
 class MoodleZugang {
-  MoodleZugang(this.protokoll);
+  MoodleZugang(this.protokoll, {String? schreibvorgaengeOrdner})
+      : schreibvorgaengeOrdner = schreibvorgaengeOrdner ?? p.join(einstellungenOrdner, 'schreibvorgaenge');
+
+  /// Dauerhafte Prüfsummen offener Schreibvorgänge, außerhalb des Arbeitsordners.
+  final String schreibvorgaengeOrdner;
 
   /// Zeitgrenzen: Aufbau der Verbindung, und bis die Antwort vollständig da
   /// ist. Ohne sie kann eine hängende Anfrage ein Werkzeug beliebig lange
@@ -1748,12 +1754,14 @@ class MoodleZugang {
     Uri basis, {
     required String benutzer,
     required String passwort,
+    String? schreibvorgaengeOrdner,
   }) async {
     if (!testbetriebAktiv) throw StateError('Testzugang nur im Testbau verfügbar.');
     if (basis.scheme != 'http' || basis.host != '127.0.0.1') {
       throw ArgumentError('Testzugang nur über http://127.0.0.1.');
     }
-    final z = MoodleZugang(protokoll);
+    final z = MoodleZugang(protokoll, schreibvorgaengeOrdner: schreibvorgaengeOrdner ??
+        p.join(Directory.systemTemp.path, 'moocp-test-schreibvorgaenge', '${basis.port}-${Random.secure().nextInt(1 << 32)}'));
     z._testInstanz = true;
     z._basis = basis;
     z._benutzer = benutzer;
@@ -2502,6 +2510,20 @@ class MoodleZugang {
     final client = HttpClient()
       ..userAgent = 'moocp (lokal)'
       ..connectionTimeout = verbindungsgrenze;
+    final dauer = Stopwatch()..start();
+    var phase = 'Verbindung';
+    var empfangen = 0;
+    final dienst = uri.queryParameters['info'];
+    final schreibt = rumpf != null
+        ? schreibendeDienste.contains(dienst)
+        : methode != 'GET' || uri.queryParameters.containsKey('sesskey');
+    MoodleNichtErreichbar transportFehler(String grund) {
+      final diagnose = '$grund (Phase $phase, ${dauer.elapsedMilliseconds} ms, $empfangen Bytes)';
+      protokoll.eintrag(Art.fehler, '$methode ${aufrufer!.pfadImProtokoll(uri)}: $diagnose');
+      return MoodleNichtErreichbar('$diagnose. ${schreibt
+          ? 'Ausgang unklar: Moodle kann bereits gespeichert haben. Nicht blind wiederholen; den Vorgang beziehungsweise Speicherstand lesend prüfen.'
+          : 'Moodle nicht erreichbar. Später erneut lesen.'}');
+    }
     try {
       final req = await client.openUrl(methode, uri);
       req.followRedirects = false;
@@ -2561,7 +2583,9 @@ class MoodleZugang {
         req.contentLength = body.length;
         req.add(body);
       }
+      phase = 'Senden/Antwortkopf';
       final res = await req.close().timeout(antwortgrenze);
+      phase = 'Antwortinhalt';
       for (final c in res.cookies) {
         if (c.value.isEmpty || c.value == 'deleted') {
           _cookies.remove(c.name);
@@ -2579,6 +2603,7 @@ class MoodleZugang {
           break;
         }
         bytes.add(d);
+        empfangen += d.length;
       }
       if (zuGross) {
         _protokolliere(aufrufer, Art.moodle, methode, uri, res.statusCode, hinweis: ' (zu groß, abgebrochen)');
@@ -2614,10 +2639,6 @@ class MoodleZugang {
       // Cookies, keine Parameterwerte der Anmeldung.
       // Lesende Dienstaufrufe (JSON-Rumpf) sind zwar POST, schreiben aber
       // nichts; ein GET mit sesskey dagegen ist eine Aktion.
-      final dienst = uri.queryParameters['info'];
-      final schreibt = rumpf != null
-          ? schreibendeDienste.contains(dienst)
-          : methode != 'GET' || uri.queryParameters.containsKey('sesskey');
       _protokolliere(
         aufrufer,
         schreibt ? Art.schreiben : Art.moodle,
@@ -2640,28 +2661,13 @@ class MoodleZugang {
         throw SchutzPruefung(sperre: schutz == Schutz.sperre);
       }
       return a;
-    } on SocketException catch (e) {
-      protokoll.eintrag(Art.fehler, '$methode ${aufrufer.pfadImProtokoll(uri)}: nicht erreichbar');
-      throw MoodleNichtErreichbar('Moodle nicht erreichbar: ${e.message}');
+    } on SocketException {
+      throw transportFehler('Verbindung abgebrochen (SocketException)');
     } on TimeoutException {
-      protokoll.eintrag(
-        Art.fehler,
-        '$methode ${aufrufer.pfadImProtokoll(uri)}: keine Antwort innerhalb der Zeitgrenze',
-      );
-      throw MoodleNichtErreichbar(
-        'Moodle antwortet nicht (${uri.path}, Zeitgrenze '
-        '${antwortgrenze.inSeconds} s). Später noch einmal versuchen.',
-      );
+      throw transportFehler('Keine Antwort innerhalb der Zeitgrenze (${antwortgrenze.inSeconds} s)');
     } on IOException catch (e) {
-      // Abbruch mitten in der Antwort (HttpException) oder TLS-Fehler
-      // (HandshakeException): nur der Typ, der Text kann Adressen enthalten.
-      protokoll.eintrag(
-        Art.fehler,
-        '$methode ${aufrufer.pfadImProtokoll(uri)}: Verbindung abgebrochen (${e.runtimeType})',
-      );
-      throw MoodleNichtErreichbar(
-        'Verbindung zu Moodle abgebrochen (${e.runtimeType}). Später noch einmal versuchen.',
-      );
+      // Nur der Typ: Betriebssystemmeldungen können Instanzadressen enthalten.
+      throw transportFehler('Verbindung abgebrochen (${e.runtimeType})');
     } finally {
       client.close(force: true);
     }

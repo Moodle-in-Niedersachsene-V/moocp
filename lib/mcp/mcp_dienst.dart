@@ -715,7 +715,8 @@ class McpDienst implements AufrufKontext {
           'bereiche/<feld>/ (hinzufügen, ersetzen, entfernen) und Einstellungen als Parameter. '
           'Prüft zuerst, dass Moodle noch den Stand vom Lesen zeigt, zeigt der Lehrkraft in der '
           'App eine Änderungsübersicht mit Zeilenvergleich und schreibt nur nach ihrer Freigabe. '
-          'Danach Rückleseprobe (verified). Sichtbarkeit: sichtbarkeit_setzen. '
+          'Danach Rückleseprobe (verified). Bei Ausgang unklar nicht wiederholen, sondern aendern_status '
+          'mit der Vorgangsnummer aufrufen. Sichtbarkeit: sichtbarkeit_setzen. '
           '${MoodleZugang.nurGruppenModule.map(typName).join(", ")}: nur groupmode und groupingid '
           'bestehender Aktivitäten, keine Texte, Dateien, anderen Einstellungen oder unverändertes '
           'Neuspeichern; Optionen frisch aus dem Formular lesen. Gibt es die gewünschte Gruppierung '
@@ -741,6 +742,20 @@ class McpDienst implements AufrufKontext {
         einstellungen: _einstellungen(a),
         neuSpeichern: a['neu_speichern'] == true,
       ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'aendern_status',
+      titel: 'Schreibausgang prüfen',
+      beschreibung: 'Prüft einen unklaren aendern-Vorgang lesend gegen Ausgangs- und Zielstand. '
+          'Wiederholt keinen POST. Ein unveränderter Ausgangsstand erlaubt keine Wiederholung. '
+          'Nur ein eindeutig bestätigter Zielstand schließt den Vorgang ab; danach frisch lesen und planen.',
+      parameter: {
+        'vorgang': JsonSchema.string(description: 'Vorgangsnummer aus der Meldung Ausgang unklar'),
+      },
+      pflicht: ['vorgang'],
+      ausfuehren: (a) => aendernStatus(moodle, vorgang: _text(a, 'vorgang'), arbeitsordner: ao),
     );
 
     _aufrufe.registrieren(

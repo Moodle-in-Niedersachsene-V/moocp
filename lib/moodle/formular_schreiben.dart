@@ -50,6 +50,8 @@ import 'kurs_aendern.dart' show einrueckungPruefen, einrueckungSetzen;
 import 'lernlandkarte_entwurf.dart';
 import 'moodle_zugang.dart';
 import 'stack_skripte.dart';
+import 'schreibvorgang.dart';
+export 'schreibvorgang.dart' show normalisiert;
 import 'zeilenvergleich.dart';
 
 /// Das Editorfeld, das eine neue Aktivität mindestens braucht. Fehlt ein Typ
@@ -144,11 +146,6 @@ String wieImEditor(String html) {
   }
   return b.toString();
 }
-
-String normalisiert(String html) => html.replaceAll(
-  RegExp(r'/draftfile\.php/\d+/user/draft/\d+/'),
-  '/draftfile.php/U/user/draft/X/',
-);
 
 /// Entwurfs-IDs (`<feld>[itemid]` und der verborgene Wert des Hintergrunds)
 /// vergibt Moodle bei jedem Laden neu; sie gehören nicht zum Stand. Gemessen
@@ -1372,6 +1369,8 @@ Future<Aenderung?> _vorbereiten(
 }) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
   final ziel = Formularziel.ausOrdner(quelle);
+  final vorgang = Schreibvorgang(moodle, ziel);
+  if (vorgang.offen) throw MoodleFehler(vorgang.hinweis);
   final stand = p.join(quelle, '.stand');
   final lokal = felderIn(quelle);
   final alt = felderIn(stand);
@@ -1627,6 +1626,41 @@ Future<(String, bool)> _schreibenOhneSperre(
   Aenderung a,
   String arbeitsordner,
 ) async {
+  final vorgang = Schreibvorgang(moodle, a.ziel);
+  return ordnerSperre(vorgang.sperrpfad, () async {
+    if (vorgang.offen) return (vorgang.hinweis, false);
+    try {
+      final ergebnis = await _schreibenMitProbe(
+        moodle,
+        a,
+        arbeitsordner,
+        vorgang,
+      );
+      if (ergebnis.$2) {
+        vorgang.abschliessen();
+        return ergebnis;
+      }
+      return ('${vorgang.hinweis}\n${ergebnis.$1}', false);
+    } catch (e) {
+      // Vor dem letzten POST gibt es noch keinen Vorgang. Nach seinem Beginn
+      // ist auch ein Fehler beim Rücklesen kein Nachweis eines Misserfolgs.
+      if (vorgang.offen) {
+        return (
+          '${vorgang.hinweis}\nUrsache: ${e is MoodleFehler ? e.meldung : e.runtimeType}',
+          false,
+        );
+      }
+      rethrow;
+    }
+  });
+}
+
+Future<(String, bool)> _schreibenMitProbe(
+  MoodleZugang moodle,
+  Aenderung a,
+  String arbeitsordner,
+  Schreibvorgang vorgang,
+) async {
   final alt = felderIn(a.stand);
   Future<(Map<String, String>, List<Gesetzt>, Antwort)> schreiben() async {
     final f = await formularHolen(moodle, a.ziel.adresse);
@@ -1663,7 +1697,36 @@ Future<(String, bool)> _schreibenOhneSperre(
     for (final b in a.bereiche) {
       await bereichSetzen(moodle, f, b);
     }
-    final antwort = await absenden(moodle, f);
+    final vorher = schreibStand(a.stand);
+    final nachher = {...vorher};
+    for (final e in geschrieben.entries) {
+      nachher['text:${e.key}.html'] = schreibPruefsumme(normalisiert(e.value));
+    }
+    nachher.removeWhere((k, _) => k.startsWith('datei:dateien/'));
+    for (final e in a.dateien.entries) {
+      nachher['datei:dateien/${e.key}'] = sha256.convert(e.value).toString();
+    }
+    for (final b in a.bereiche) {
+      nachher.removeWhere((k, _) => k.startsWith('datei:bereiche/${b.feld}/'));
+      for (final e in b.lokal.entries) {
+        final pfad = e.key.split('/').where((s) => s.isNotEmpty).join('/');
+        nachher['datei:bereiche/${b.feld}/$pfad'] = sha256.convert(e.value).toString();
+      }
+    }
+    for (final e in gesetzt) {
+      nachher['einstellung:${e.schluessel}'] = schreibPruefsumme(e.auswahlwert ?? e.nachher);
+    }
+    vorgang.beginnen(vorher, nachher);
+    final Antwort antwort;
+    try {
+      antwort = await absenden(moodle, f);
+    } on SitzungAbgelaufen {
+      vorgang.verwerfen();
+      rethrow;
+    } on SchutzPruefung {
+      vorgang.verwerfen();
+      rethrow;
+    }
     return (geschrieben, gesetzt, antwort);
   }
 
@@ -1982,6 +2045,52 @@ Future<(String, bool)> _uebergeben(
   }
 }
 
+/// Klärt einen offenen Vorgang ausschließlich lesend. Ein unveränderter Stand
+/// beweist nicht, dass Moodle einen noch laufenden POST später nicht ausführt.
+Future<String> aendernStatus(
+  MoodleZugang moodle, {
+  required String vorgang,
+  required String arbeitsordner,
+}) async {
+  final v = Schreibvorgang.laden(moodle, vorgang);
+  final ziel = v.ziel;
+  return ordnerSperre(
+    ordnerSchluessel(ziel, arbeitsordner),
+    () => ordnerSperre(v.sperrpfad, () async {
+      final j = v.lesen()!;
+      if (j.status == Schreibstatus.bestaetigt) {
+        return 'Vorgang $vorgang abgeschlossen (verified: true).';
+      }
+      if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
+      // Frage zurückzulesen wäre ein falscher Nachweis.
+      if (ziel.art == Zielart.frage) {
+        return '${v.hinweis}\nNeue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.';
+      }
+      final temp = await Directory(arbeitsordner)
+          .createTemp('.aendern-status-');
+      try {
+        final g = await formularLesen(moodle, ziel, temp.path);
+        final aktuell = schreibStand(p.join(g.ordner, '.stand'));
+        final vorher = j.vorher;
+        final nachher = j.nachher;
+        final gleichVorher = schreibStandGleich(aktuell, vorher);
+        if (!gleichVorher && schreibStandGleich(aktuell, nachher)) {
+          v.abschliessen();
+          return 'Vorgang $vorgang: Zielstand bestätigt (verified: true). '
+              'Vor einer weiteren Änderung frisch lesen und planen. Kein POST wiederholt.';
+        }
+        return '${v.hinweis}\n${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
+            'Prozessende nicht belegt; durch die Lehrkraft beziehungsweise Verwaltung klären lassen.';
+      } on MoodleFehler catch (e) {
+        return '${v.hinweis}\nStatus nicht lesbar: ${e.meldung}';
+      } finally {
+        await temp.delete(recursive: true);
+      }
+    }),
+  );
+}
+
 /// Schreibt einen gelesenen und bearbeiteten Ordner zurück. [neuSpeichern]:
 /// auch ohne Änderung einmal über das Formular speichern (CodeRunner prüft
 /// seine Musterlösung nur dort).
@@ -2004,6 +2113,8 @@ Future<String> aendern(
   bool neuSpeichern = false,
 }) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
+  final vorgang = Schreibvorgang(moodle, Formularziel.ausOrdner(quelle));
+  if (vorgang.offen) return vorgang.hinweis;
   final schluessel = ordnerSchluessel(
     Formularziel.ausOrdner(quelle),
     arbeitsordner,

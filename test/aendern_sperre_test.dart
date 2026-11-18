@@ -24,6 +24,9 @@ class _Doppel {
 
   /// Der Text der Seite in Moodle; ein Test ändert ihn „von Hand".
   String text = '<p>ZZ Text</p>';
+  bool antwortAbbrechen = false;
+  bool speichernAnwenden = false;
+  bool ruecklesenAbbrechen = false;
 
   static const benutzer = 'e.mustermann';
   static const passwort = 'test-geheim-23';
@@ -33,6 +36,7 @@ class _Doppel {
       '''<form class="mform" method="post" action="/course/modedit.php">
 <input type="hidden" name="sesskey" value="$sesskey">
 <input type="hidden" name="modulename" value="page">
+<input type="hidden" name="_qf__mod_page_mod_form" value="1">
 <input type="hidden" name="course" value="12">
 <input type="hidden" name="update" value="101">
 <div id="fitem_id_name" class="mb-3 row fitem"><div class="col-md-9 felement" data-fieldtype="text"><input type="text" name="name" id="id_name" value="ZZ Seite"></div></div>
@@ -75,12 +79,30 @@ class _Doppel {
       return _umleiten(r, '/login/index.php');
     }
     if (!eingeloggt) return _umleiten(r, '/login/index.php');
+    if (pfad == '/pluginfile.php/55/mod_page/content/0/bild.png') {
+      r.response.headers.contentType = ContentType('image', 'png');
+      r.response.add(base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII='));
+      await r.response.close();
+      return;
+    }
     if (pfad == '/course/modedit.php' && r.method == 'POST') {
       speichern.add(r.uri.query);
-      return _text(r, _html('<p>gespeichert</p>'));
+      final f = Uri.splitQueryString(await utf8.decoder.bind(r).join());
+      if (speichernAnwenden) text = f['page[text]']!;
+      if (antwortAbbrechen) {
+        final socket = await r.response.detachSocket(writeHeaders: false);
+        socket.destroy();
+        return;
+      }
+      return _umleiten(r, '/course/view.php?id=12');
     }
     if (pfad == '/course/modedit.php' &&
         r.uri.queryParameters['update'] == '101') {
+      if (ruecklesenAbbrechen && speichern.isNotEmpty) {
+        final socket = await r.response.detachSocket(writeHeaders: false);
+        socket.destroy();
+        return;
+      }
       return _text(r, _html(_seite));
     }
     return _text(r, 'nicht gefunden', status: HttpStatus.notFound);
@@ -104,6 +126,7 @@ class _Doppel {
 void main() {
   late _Doppel doppel;
   late Directory arbeitsordner;
+  late Directory vorgangsordner;
   late MoodleZugang zugang;
   late Freigaben freigaben;
 
@@ -111,18 +134,21 @@ void main() {
     doppel = _Doppel();
     await doppel.starten();
     arbeitsordner = Directory.systemTemp.createTempSync('aendern-sperre-');
+    vorgangsordner = Directory.systemTemp.createTempSync('aendern-vorgaenge-');
     freigaben = Freigaben(Protokoll());
     zugang = await MoodleZugang.fuerTest(
       Protokoll(),
       doppel.basis,
       benutzer: _Doppel.benutzer,
       passwort: _Doppel.passwort,
+      schreibvorgaengeOrdner: vorgangsordner.path,
     );
   });
 
   tearDown(() async {
     await doppel.stoppen();
     if (arbeitsordner.existsSync()) arbeitsordner.deleteSync(recursive: true);
+    if (vorgangsordner.existsSync()) vorgangsordner.deleteSync(recursive: true);
   });
 
   Future<String> geaendertStarten() async {
@@ -138,6 +164,131 @@ void main() {
     }
     expect(freigaben.aktuell, isNotNull, reason: 'Die Freigabe wurde nicht gefragt');
   }
+
+  test('Verbindungsabbruch nach POST meldet unklar und sperrt Wiederholung', () async {
+    final ordner = await geaendertStarten();
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    expect(bericht, contains('Ausgang unklar'));
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    final status = await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+    expect(status, contains('Ausgangsstand unverändert'));
+    expect(status, contains('verified: false'));
+    doppel.text = '<p>ZZ Fremde Änderung</p>';
+    final abweichend = await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+    expect(abweichend, contains('Stand weicht vom Ausgangs- und Zielstand ab'));
+    expect(abweichend, contains('verified: false'));
+    // Auch ein erneutes Lesen ersetzt weder den Vorgang noch den Nachweis.
+    await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);
+    final wiederholt = await aendern(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    expect(wiederholt, contains('aendern_status'));
+    expect(doppel.speichern, hasLength(1));
+  });
+
+  for (final ruecklesefehler in [false, true]) {
+    test('Gespeicherte Änderung nach ${ruecklesefehler ? "Rückleseabbruch" : "POST-Abbruch"} wird lesend bestätigt', () async {
+      final ordner = await geaendertStarten();
+      doppel.speichernAnwenden = true;
+      doppel.antwortAbbrechen = !ruecklesefehler;
+      doppel.ruecklesenAbbrechen = ruecklesefehler;
+      final ergebnis = aendern(zugang, freigaben,
+          ordner: ordner, arbeitsordner: arbeitsordner.path);
+      await aufFreigabe();
+      freigaben.entscheiden(true);
+      final bericht = await ergebnis;
+      expect(bericht, contains('Ausgang unklar'));
+      final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+      doppel.ruecklesenAbbrechen = false;
+      // Ein neuer Zugang verwendet dieselbe dauerhafte Ablage.
+      final neuerZugang = await MoodleZugang.fuerTest(Protokoll(), doppel.basis,
+          benutzer: _Doppel.benutzer, passwort: _Doppel.passwort,
+          schreibvorgaengeOrdner: zugang.schreibvorgaengeOrdner);
+      final status = await aendernStatus(neuerZugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+      expect(status, contains('Zielstand bestätigt (verified: true)'));
+      expect(doppel.speichern, hasLength(1));
+      expect(File(p.join(arbeitsordner.path, ordner, 'page.html')).readAsStringSync(), contains('ZZ Zusatz'));
+    });
+  }
+
+  test('Entfernte Bildreferenz kann nach POST-Abbruch bestätigt werden', () async {
+    doppel.text = '<p>ZZ Text</p><img src="${doppel.basis}/pluginfile.php/55/mod_page/content/0/bild.png" alt="ZZ Bild">';
+    final ordner = await geaendertStarten();
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Ohne Bild</p>');
+    doppel.speichernAnwenden = true;
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    final status = await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+    expect(status, contains('Zielstand bestätigt (verified: true)'));
+    expect(doppel.speichern, hasLength(1));
+  });
+
+  test('Zwei Schreibvorgänge am selben Objekt behalten getrennte Statusnummern', () async {
+    final ordner = await geaendertStarten();
+    doppel.speichernAnwenden = true;
+    doppel.antwortAbbrechen = true;
+    Future<String> schreiben() async {
+      final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+      await aufFreigabe();
+      freigaben.entscheiden(true);
+      final bericht = await ergebnis;
+      return RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    }
+    final erste = await schreiben();
+    expect(await aendernStatus(zugang, vorgang: erste, arbeitsordner: arbeitsordner.path), contains('verified: true'));
+    await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Zweiter Vorgang</p>');
+    doppel.speichernAnwenden = false;
+    final zweite = await schreiben();
+    expect(zweite, isNot(erste));
+    expect(await aendernStatus(zugang, vorgang: erste, arbeitsordner: arbeitsordner.path), contains('abgeschlossen (verified: true)'));
+    expect(await aendernStatus(zugang, vorgang: zweite, arbeitsordner: arbeitsordner.path), contains('verified: false'));
+    expect(doppel.speichern, hasLength(2));
+  });
+
+  test('Nach geleertem Arbeitsordner bleibt der Vorgang lesbar und die Sperre erhalten', () async {
+    final ordner = await geaendertStarten();
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    arbeitsordner.deleteSync(recursive: true);
+    arbeitsordner.createSync();
+    final neu = await MoodleZugang.fuerTest(Protokoll(), doppel.basis,
+        benutzer: _Doppel.benutzer, passwort: _Doppel.passwort,
+        schreibvorgaengeOrdner: vorgangsordner.path);
+    expect(await aendernStatus(neu, vorgang: nummer, arbeitsordner: arbeitsordner.path), contains('Ausgangsstand unverändert'));
+    await formularLesen(neu, Formularziel.aktivitaet(101), arbeitsordner.path);
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Neuversuch</p>');
+    expect(await aendern(neu, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path), contains(nummer));
+    expect(doppel.speichern, hasLength(1));
+  });
+
+  test('Identischer Ausgangs- und Zielstand belegt nach Abbruch kein Prozessende', () async {
+    await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);
+    doppel.antwortAbbrechen = true;
+    doppel.speichernAnwenden = true;
+    final ergebnis = aendern(zugang, freigaben,
+        ordner: 'cm-101', arbeitsordner: arbeitsordner.path, neuSpeichern: true);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    final status = await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+    expect(status, contains('verified: false'));
+    expect(status, contains('Ausgangsstand unverändert'));
+    expect(doppel.speichern, hasLength(1));
+  });
 
   test('Offene Freigabe hält ein Lesen desselben Ordners nicht auf; die freigegebene Änderung ist dann weg und wird nicht geschrieben', () async {
     final ordner = await geaendertStarten();

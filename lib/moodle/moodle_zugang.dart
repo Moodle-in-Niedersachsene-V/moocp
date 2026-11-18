@@ -576,7 +576,7 @@ class MoodleZugang {
   /// Zustand zu erhalten (kurs_aendern.dart). UNGEMESSEN: der Name der Aktion und ob die
   /// Instanz ihn erlaubt (die Verwaltung kann „verfügbar ohne Link" ausschalten).
   /// `cm_moveright` und `cm_moveleft` rücken eine Aktivität je Aufruf um eine Stufe ein
-  /// oder aus (verschieben, aktivitaet_anlegen). UNGEMESSEN: Namen, Kursformate, Grenzen.
+  /// oder aus (verschieben, aktivitaet_anlegen), gemessen; die Obergrenze bestimmt die Instanz.
   static const Set<String> kursAktionen = {
     'section_add',
     'section_hide',

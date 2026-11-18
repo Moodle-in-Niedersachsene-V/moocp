@@ -357,7 +357,7 @@ class McpDienst implements AufrufKontext {
   static final _einrueckung = JsonSchema.integer(
     description:
         'Aktivität: Einrückung auf der Kursseite, ganze Zahl 0–16 (0 = nicht eingerückt). Moodle rückt '
-        'Stufe für Stufe; die App liest danach zurück und meldet verified nur bei Gleichheit',
+        'Stufe für Stufe, und manche Instanzen lassen nur eine Stufe zu; die App liest danach zurück und meldet verified nur bei Gleichheit',
   );
   static final _abschnittId = JsonSchema.integer(
     description:

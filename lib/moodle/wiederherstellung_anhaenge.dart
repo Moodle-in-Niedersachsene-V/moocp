@@ -316,28 +316,34 @@ AnhangPruefung vergleicheAnhaenge({required List<QuellDatei>? quelle, required L
   return AnhangPruefung(befunde, vollstaendig: befunde.isEmpty, abweichend: abweichend);
 }
 
-/// Prüft die Anhänge der eindeutig zugeordneten Aktivitäten. Liest nur Quelle und
-/// Formulare; schreibt nie.
-Future<AnhangPruefung> anhaengePruefen(MoodleZugang moodle, Vorgaenge vorgaenge, Vorgang vg,
-    List<WiederhergestellteAktivitaet> aktivitaeten) async {
+/// Die Sicherungsdatei, gegen die verglichen wird. Der Dateiname ist veränderlich, die vor
+/// dem Hochladen aufgenommene Quelle hingegen nicht: Ein später ersetztes Archiv kann keinen
+/// Vergleich belegen. [grund] nennt, warum es keine Quellaufnahme gibt (Anhänge und Texte).
+Future<({Uint8List? mbz, String? grund})> sicherungsquelleLesen(Vorgaenge vorgaenge, Vorgang vg) async {
   final Uint8List mbz;
   try {
     mbz = await File(p.join(vorgaenge.ordner, vg.datei)).readAsBytes();
   } on FileSystemException {
-    return AnhangPruefung(['Prüflücke: Quellaufnahme fehlt; die Sicherungsdatei ist nicht mehr vorhanden'],
-        vollstaendig: false);
+    return (mbz: null, grund: 'Quellaufnahme fehlt; die Sicherungsdatei ist nicht mehr vorhanden');
   }
-
-  // Der Dateiname ist veränderlich, die vor dem Hochladen aufgenommene Quelle
-  // hingegen nicht. Ein später ersetztes Archiv kann keinen Vergleich belegen.
   final startHash = vg.fingerabdruck?.split('|').first;
   if (startHash == null || !RegExp(r'^[0-9a-f]{64}$').hasMatch(startHash)) {
-    return AnhangPruefung(['Prüflücke: Quellaufnahme ist nicht an den Start-Inhalt gebunden (Inhalts-Hash fehlt)'],
-        vollstaendig: false);
+    return (mbz: null, grund: 'Quellaufnahme ist nicht an den Start-Inhalt gebunden (Inhalts-Hash fehlt)');
   }
   if (sha256.convert(mbz).toString() != startHash) {
-    return AnhangPruefung(['Prüflücke: Quellaufnahme hat seit dem Start einen anderen Inhalt; Anhänge nicht verglichen'],
-        vollstaendig: false);
+    return (mbz: null, grund: 'Quellaufnahme hat seit dem Start einen anderen Inhalt');
+  }
+  return (mbz: mbz, grund: null);
+}
+
+/// Prüft die Anhänge der eindeutig zugeordneten Aktivitäten. Liest nur Quelle und
+/// Formulare; schreibt nie.
+Future<AnhangPruefung> anhaengePruefen(MoodleZugang moodle, Vorgaenge vorgaenge, Vorgang vg,
+    List<WiederhergestellteAktivitaet> aktivitaeten) async {
+  final archiv = await sicherungsquelleLesen(vorgaenge, vg);
+  final mbz = archiv.mbz;
+  if (mbz == null) {
+    return AnhangPruefung(['Prüflücke: ${archiv.grund}; Anhänge nicht verglichen'], vollstaendig: false);
   }
 
   final befunde = <String>[];

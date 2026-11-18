@@ -615,6 +615,16 @@ Karte du aber nicht bearbeitest (`references/lernlandkarte.md`).
 
 *Lesen* geht bei allen Typen. Für Forum, Glossar, H5P und die übrigen Plugins ist das Formular nicht gemessen; die App weigert sich mit „Typ … kann die App nicht anlegen" bzw. „Ändern geht bisher für …". Das ist eine **Lücke** (Abschnitt „Was der Skill nicht kann"). Offen bleiben die **Kursrahmen-Aktionen**: Ein von Hand angelegtes Forum darf verborgen, verschoben, dupliziert und gelöscht werden — sie sind typunabhängig. Nicht so die **Fragensammlung** (`qbank`): Sie steht nicht in der Kursstruktur, deshalb geht von diesen vieren nur `loeschen`. Moodle legt sie außerdem immer im allgemeinen Abschnitt an, einerlei welchen du angibst.
 
+### Einrückung auf der Kursseite
+
+Eine Aktivität steht auf der Kursseite eingerückt, wenn sie zu der darüberstehenden
+gehört, etwa ein Link zu einem Chatbot unter der Aufgabe, zu der er dient.
+`aktivitaet_anlegen` und `verschieben` nehmen dafür `einrueckung` (0 bis 16);
+`verschieben` kann mit `kurs`, `cmid`, `name` und `einrueckung` allein nur einrücken,
+ohne die Stelle zu ändern. Das Anlegen rückt ohne eigene Freigabe ein, das Verschieben
+fragt wie jedes Verschieben. Meldet die Antwort bei der Einrückung `verified: false`,
+geht sie in diesem Kurs so nicht: nicht wiederholen, der Lehrkraft sagen.
+
 ### Welche Aktivität wofür: Anregungen, und Papier oder Gerät
 
 Wer nur fragt „Was soll ich anlegen?", bekommt immer Textseite und Aufgabe. Du kennst mehr: **Lies `references/einsatz.md`, bevor du eine Aktivität vorschlägst**, die der Nutzer nicht schon benannt hat. Dort steht, wofür sich jede Art bewährt hat, wo sie an Grenzen stößt und was sie auf Papier und am Gerät bedeutet. Das sind Anregungen, keine Vorschriften. Passt eine Aktivität für einen Zweck, der dort nicht steht, schlag sie vor und sag, warum. Und weil nicht jede Lehrkraft diese Wege kennt, nennst du sie konkret, so dass man sie umsetzen kann: „Hier könnten die Lernenden ihr Blatt mit dem Handy fotografieren und in der Aufgabe abgeben."

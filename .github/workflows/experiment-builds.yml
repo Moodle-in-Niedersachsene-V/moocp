@@ -45,7 +45,7 @@ jobs:
           message = os.environ['MESSAGE']
           platform = os.environ['PLATFORM'] or ('linux' if '[ci:linux]' in message else 'windows' if '[ci:windows]' in message else 'macos' if '[ci:macos]' in message else 'both')
           task = os.environ['TASK'] or ('tests' if '[ci:tests]' in message else 'builds' if '[ci:builds]' in message else 'all')
-          rows = [{'platform': p, 'runner': r} for p, r in [('linux', 'ubuntu-24.04'), ('windows', 'windows-2022'), ('macos', 'macos-14')] if platform in ('both', p) or (platform == 'macos' and p == 'macos')]
+          rows = [{'platform': p, 'runner': r} for p, r in [('linux', 'ubuntu-24.04'), ('windows', 'windows-2022'), ('macos', 'macos-26')] if platform in ('both', p) or (platform == 'macos' and p == 'macos')]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('matrix=' + json.dumps({'include': rows}) + '\n' + 'task=' + task + '\n')
   desktop:

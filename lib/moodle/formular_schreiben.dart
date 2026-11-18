@@ -51,6 +51,7 @@ import 'lernlandkarte_entwurf.dart';
 import 'moodle_zugang.dart';
 import 'stack_skripte.dart';
 import 'schreibvorgang.dart';
+export 'schreibvorgang.dart' show normalisiert;
 import 'zeilenvergleich.dart';
 
 /// Das Editorfeld, das eine neue Aktivität mindestens braucht. Fehlt ein Typ
@@ -145,11 +146,6 @@ String wieImEditor(String html) {
   }
   return b.toString();
 }
-
-String normalisiert(String html) => html.replaceAll(
-  RegExp(r'/draftfile\.php/\d+/user/draft/\d+/'),
-  '/draftfile.php/U/user/draft/X/',
-);
 
 /// Entwurfs-IDs (`<feld>[itemid]` und der verborgene Wert des Hintergrunds)
 /// vergibt Moodle bei jedem Laden neu; sie gehören nicht zum Stand. Gemessen
@@ -1631,7 +1627,7 @@ Future<(String, bool)> _schreibenOhneSperre(
   String arbeitsordner,
 ) async {
   final vorgang = Schreibvorgang(moodle, a.ziel);
-  return ordnerSperre(vorgang.datei.path, () async {
+  return ordnerSperre(vorgang.sperrpfad, () async {
     if (vorgang.offen) return (vorgang.hinweis, false);
     try {
       final ergebnis = await _schreibenMitProbe(
@@ -1648,11 +1644,12 @@ Future<(String, bool)> _schreibenOhneSperre(
     } catch (e) {
       // Vor dem letzten POST gibt es noch keinen Vorgang. Nach seinem Beginn
       // ist auch ein Fehler beim Rücklesen kein Nachweis eines Misserfolgs.
-      if (vorgang.offen)
+      if (vorgang.offen) {
         return (
           '${vorgang.hinweis}\nUrsache: ${e is MoodleFehler ? e.meldung : e.runtimeType}',
           false,
         );
+      }
       rethrow;
     }
   });
@@ -1705,6 +1702,7 @@ Future<(String, bool)> _schreibenMitProbe(
     for (final e in geschrieben.entries) {
       nachher['text:${e.key}.html'] = schreibPruefsumme(normalisiert(e.value));
     }
+    nachher.removeWhere((k, _) => k.startsWith('datei:dateien/'));
     for (final e in a.dateien.entries) {
       nachher['datei:dateien/${e.key}'] = sha256.convert(e.value).toString();
     }
@@ -2054,37 +2052,16 @@ Future<String> aendernStatus(
   required String vorgang,
   required String arbeitsordner,
 }) async {
-  if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(vorgang)) {
-    throw MoodleFehler(
-      'Ungültige Vorgangsnummer. Die Nummer aus der Fehlermeldung verwenden.',
-    );
-  }
-  final datei = File(p.join(moodle.schreibvorgaengeOrdner, '$vorgang.json'));
-  if (!datei.existsSync())
-    throw MoodleFehler(
-      'Schreibvorgang nicht gefunden. Nicht erneut schreiben.',
-    );
-  final Formularziel ziel;
-  try {
-    ziel = Formularziel.ausJson(
-      (jsonDecode(datei.readAsStringSync()) as Map)['ziel'] as Map,
-    );
-  } catch (_) {
-    throw MoodleFehler(
-      'Schreibvorgang beschädigt. Nicht erneut schreiben; Ablage prüfen lassen.',
-    );
-  }
-  final v = Schreibvorgang(moodle, ziel);
-  if (v.id != vorgang)
-    throw MoodleFehler(
-      'Der Vorgang gehört zu einer anderen Instanz. Nichts angefragt.',
-    );
+  final v = Schreibvorgang.laden(moodle, vorgang);
+  final ziel = v.ziel;
   return ordnerSperre(
     ordnerSchluessel(ziel, arbeitsordner),
-    () => ordnerSperre(v.datei.path, () async {
+    () => ordnerSperre(v.sperrpfad, () async {
       final j = v.lesen()!;
-      if (j['offen'] == false)
+      if (j.status == Schreibstatus.bestaetigt) {
         return 'Vorgang $vorgang abgeschlossen (verified: true).';
+      }
+      if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
       // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
       // Frage zurückzulesen wäre ein falscher Nachweis.
       if (ziel.art == Zielart.frage) {
@@ -2095,8 +2072,8 @@ Future<String> aendernStatus(
       try {
         final g = await formularLesen(moodle, ziel, temp.path);
         final aktuell = schreibStand(p.join(g.ordner, '.stand'));
-        final vorher = j['vorher'] as Map;
-        final nachher = j['nachher'] as Map;
+        final vorher = j.vorher;
+        final nachher = j.nachher;
         final gleichVorher = schreibStandGleich(aktuell, vorher);
         if (!gleichVorher && schreibStandGleich(aktuell, nachher)) {
           v.abschliessen();

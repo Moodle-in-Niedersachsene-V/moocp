@@ -8,6 +8,8 @@ Vor dem Absenden einer Änderung hält die App Ziel, Ausgangsstand und erwartete
 Zielstand als Prüfsummen in einem dauerhaften Vorgang fest. Zugangsdaten,
 Formularwerte und Dateiinhalte stehen nicht darin. Die Ablage gehört zur Instanz
 und zum Zielobjekt, unabhängig vom Namen des Profils und vom Arbeitsordner.
+Jeder Schreibvorgang hat eine eigene Nummer; spätere Vorgänge ersetzen weder
+seine Nummer noch seinen Status. Die Objektsperre verweist auf den aktuellen Vorgang.
 
 Ein Abbruch beim Absenden oder Rücklesen bedeutet „Ausgang unklar“. Solange der
 Vorgang offen ist, sendet die App keine weitere Änderung an dasselbe Objekt.

@@ -3,6 +3,7 @@
 // beendet einen Vorgang niemals, auch nicht nach einem Neustart.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -10,34 +11,111 @@ import 'package:path/path.dart' as p;
 import 'formular_lesen.dart';
 import 'moodle_zugang.dart';
 
+enum Schreibstatus { offen, bestaetigt, nichtGespeichert }
+
+class Schreibstand {
+  Schreibstand(this.vorher, this.nachher, this.status);
+  final Map<String, String> vorher, nachher;
+  final Schreibstatus status;
+}
+
 class Schreibvorgang {
   Schreibvorgang(this.moodle, this.ziel);
   final MoodleZugang moodle;
   final Formularziel ziel;
+  String? _nummer;
+
+  String get _objekt => schreibPruefsumme('${moodle.basis}|${ziel.adresse}');
+  String get sperrpfad =>
+      p.join(moodle.schreibvorgaengeOrdner, 'ziel-$_objekt.json');
+
+  static bool _nummerGueltig(String s) => RegExp(r'^[a-f0-9]{64}$').hasMatch(s);
+
+  String? get _aktuelleNummer {
+    final f = File(sperrpfad);
+    if (!f.existsSync()) return null;
+    final j = _lesen(f);
+    final nummer = j['id'];
+    if (nummer is! String || !_nummerGueltig(nummer)) _beschaedigt();
+    return nummer;
+  }
 
   String get id =>
-      sha256.convert(utf8.encode('${moodle.basis}|${ziel.adresse}')).toString();
-  File get datei => File(p.join(moodle.schreibvorgaengeOrdner, '$id.json'));
+      _nummer ??
+      _aktuelleNummer ??
+      (throw StateError('Kein Schreibvorgang begonnen.'));
+  File get _datei => File(p.join(moodle.schreibvorgaengeOrdner, '$id.json'));
 
-  Map<String, dynamic>? lesen() {
-    if (!datei.existsSync()) return null;
-    try {
-      final j = jsonDecode(datei.readAsStringSync()) as Map<String, dynamic>;
-      if (j['id'] != id ||
-          j['vorher'] is! Map ||
-          j['nachher'] is! Map ||
-          j['offen'] is! bool) {
-        throw const FormatException();
-      }
-      return j;
-    } catch (_) {
+  /// Lädt genau den genannten Vorgang, unabhängig von späteren Änderungen am Objekt.
+  static Schreibvorgang laden(MoodleZugang moodle, String nummer) {
+    if (!_nummerGueltig(nummer)) {
       throw MoodleFehler(
-        'Schreibvorgang $id ist beschädigt. Nicht erneut schreiben; Ablage durch die Verwaltung prüfen lassen.',
+        'Ungültige Vorgangsnummer. Die Nummer aus der Fehlermeldung verwenden.',
       );
+    }
+    final j = _lesen(
+      File(p.join(moodle.schreibvorgaengeOrdner, '$nummer.json')),
+    );
+    try {
+      final v = Schreibvorgang(moodle, Formularziel.ausJson(j['ziel'] as Map))
+        .._nummer = nummer;
+      v.lesen();
+      return v;
+    } on TypeError {
+      return _beschaedigt();
+    } on ArgumentError {
+      return _beschaedigt();
     }
   }
 
-  bool get offen => lesen()?['offen'] == true;
+  static Never _beschaedigt() => throw MoodleFehler(
+    'Schreibvorgang beschädigt. Nicht erneut schreiben; Ablage durch die Verwaltung prüfen lassen.',
+  );
+
+  static Map<String, dynamic> _lesen(File f) {
+    if (!f.existsSync()) {
+      throw MoodleFehler(
+        'Schreibvorgang nicht gefunden. Nicht erneut schreiben.',
+      );
+    }
+    try {
+      return jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+    } on FormatException {
+      return _beschaedigt();
+    } on TypeError {
+      return _beschaedigt();
+    }
+  }
+
+  Schreibstand? lesen() {
+    if (_nummer == null && _aktuelleNummer == null) return null;
+    final j = _lesen(_datei);
+    if (j['objekt'] != _objekt) {
+      throw MoodleFehler(
+        'Der Vorgang gehört zu einer anderen Instanz oder einem anderen Ziel. Nichts angefragt.',
+      );
+    }
+    try {
+      Map<String, String> pruefsummen(Object? roh) {
+        final m = Map<String, String>.from(roh as Map);
+        if (m.values.any((v) => !_nummerGueltig(v))) _beschaedigt();
+        return m;
+      }
+
+      if (j['id'] != id) _beschaedigt();
+      return Schreibstand(
+        pruefsummen(j['vorher']),
+        pruefsummen(j['nachher']),
+        Schreibstatus.values.byName(j['status'] as String),
+      );
+    } on TypeError {
+      return _beschaedigt();
+    } on ArgumentError {
+      return _beschaedigt();
+    }
+  }
+
+  bool get offen => lesen()?.status == Schreibstatus.offen;
   String get hinweis =>
       'Ausgang unklar (verified: false). Vorgang $id. '
       'Nicht erneut schreiben. Mit aendern_status(vorgang: "$id") lesend prüfen; '
@@ -45,24 +123,35 @@ class Schreibvorgang {
 
   void beginnen(Map<String, String> vorher, Map<String, String> nachher) {
     if (offen) throw MoodleFehler(hinweis);
-    _speichern({
+    final zufall = Random.secure();
+    _nummer = List.generate(
+      32,
+      (_) => zufall.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    // Erst der Datensatz, dann die Objektsperre, erst danach der POST. Ein
+    // Abbruch zwischen den Dateien hat noch nichts nach Moodle gesendet.
+    _speichern(_datei, {
       'id': id,
+      'objekt': _objekt,
       'ziel': ziel.toJson(),
       'vorher': vorher,
       'nachher': nachher,
-      'offen': true,
+      'status': Schreibstatus.offen.name,
     });
+    _speichern(File(sperrpfad), {'id': id});
   }
 
-  void abschliessen() {
-    final j = lesen();
-    if (j != null) _speichern({...j, 'offen': false});
-  }
+  void abschliessen() => _statusSetzen(Schreibstatus.bestaetigt);
 
   /// Nur bei einer ausdrücklichen Antwort, dass Moodle nicht gespeichert hat.
-  void verwerfen() => datei.deleteSync();
+  void verwerfen() => _statusSetzen(Schreibstatus.nichtGespeichert);
 
-  void _speichern(Map<String, Object?> j) {
+  void _statusSetzen(Schreibstatus status) {
+    final j = _lesen(_datei);
+    _speichern(_datei, {...j, 'status': status.name});
+  }
+
+  static void _speichern(File datei, Map<String, Object?> j) {
     datei.parent.createSync(recursive: true);
     final temp = File('${datei.path}.tmp');
     temp.writeAsStringSync(jsonEncode(j), flush: true);
@@ -70,16 +159,18 @@ class Schreibvorgang {
   }
 }
 
+/// Entwurfsadressen ändern sich bei jedem Formularabruf, nicht der Inhalt.
+String normalisiert(String html) => html.replaceAll(
+  RegExp(r'/draftfile\.php/\d+/user/draft/\d+/'),
+  '/draftfile.php/U/user/draft/X/',
+);
+
 String schreibPruefsumme(String text) =>
     sha256.convert(utf8.encode(text)).toString();
 
 /// Vollständiger lesbarer Stand: Editorfelder, Einstellungen und Dateien.
 /// Die Adressen des Entwurfsbereichs ändern sich bei jedem Formularabruf.
 Map<String, String> schreibStand(String stand) {
-  String normal(String s) => s.replaceAll(
-    RegExp(r'/draftfile\.php/\d+/user/draft/\d+/'),
-    '/draftfile.php/U/user/draft/X/',
-  );
   final result = <String, String>{};
   final d = Directory(stand);
   for (final f
@@ -88,7 +179,9 @@ Map<String, String> schreibStand(String stand) {
     if (!name.contains('/') &&
         name.endsWith('.html') &&
         name != 'formular.html') {
-      result['text:$name'] = schreibPruefsumme(normal(f.readAsStringSync()));
+      result['text:$name'] = schreibPruefsumme(
+        normalisiert(f.readAsStringSync()),
+      );
     } else if (name.startsWith('dateien/') || name.startsWith('bereiche/')) {
       result['datei:$name'] = sha256.convert(f.readAsBytesSync()).toString();
     }

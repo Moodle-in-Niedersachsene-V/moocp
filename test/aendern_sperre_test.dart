@@ -79,6 +79,12 @@ class _Doppel {
       return _umleiten(r, '/login/index.php');
     }
     if (!eingeloggt) return _umleiten(r, '/login/index.php');
+    if (pfad == '/pluginfile.php/55/mod_page/content/0/bild.png') {
+      r.response.headers.contentType = ContentType('image', 'png');
+      r.response.add(base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII='));
+      await r.response.close();
+      return;
+    }
     if (pfad == '/course/modedit.php' && r.method == 'POST') {
       speichern.add(r.uri.query);
       final f = Uri.splitQueryString(await utf8.decoder.bind(r).join());
@@ -120,6 +126,7 @@ class _Doppel {
 void main() {
   late _Doppel doppel;
   late Directory arbeitsordner;
+  late Directory vorgangsordner;
   late MoodleZugang zugang;
   late Freigaben freigaben;
 
@@ -127,19 +134,21 @@ void main() {
     doppel = _Doppel();
     await doppel.starten();
     arbeitsordner = Directory.systemTemp.createTempSync('aendern-sperre-');
+    vorgangsordner = Directory.systemTemp.createTempSync('aendern-vorgaenge-');
     freigaben = Freigaben(Protokoll());
     zugang = await MoodleZugang.fuerTest(
       Protokoll(),
       doppel.basis,
       benutzer: _Doppel.benutzer,
       passwort: _Doppel.passwort,
-      schreibvorgaengeOrdner: p.join(arbeitsordner.path, 'vorgaenge'),
+      schreibvorgaengeOrdner: vorgangsordner.path,
     );
   });
 
   tearDown(() async {
     await doppel.stoppen();
     if (arbeitsordner.existsSync()) arbeitsordner.deleteSync(recursive: true);
+    if (vorgangsordner.existsSync()) vorgangsordner.deleteSync(recursive: true);
   });
 
   Future<String> geaendertStarten() async {
@@ -205,6 +214,65 @@ void main() {
       expect(File(p.join(arbeitsordner.path, ordner, 'page.html')).readAsStringSync(), contains('ZZ Zusatz'));
     });
   }
+
+  test('Entfernte Bildreferenz kann nach POST-Abbruch bestätigt werden', () async {
+    doppel.text = '<p>ZZ Text</p><img src="${doppel.basis}/pluginfile.php/55/mod_page/content/0/bild.png" alt="ZZ Bild">';
+    final ordner = await geaendertStarten();
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Ohne Bild</p>');
+    doppel.speichernAnwenden = true;
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    final status = await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path);
+    expect(status, contains('Zielstand bestätigt (verified: true)'));
+    expect(doppel.speichern, hasLength(1));
+  });
+
+  test('Zwei Schreibvorgänge am selben Objekt behalten getrennte Statusnummern', () async {
+    final ordner = await geaendertStarten();
+    doppel.speichernAnwenden = true;
+    doppel.antwortAbbrechen = true;
+    Future<String> schreiben() async {
+      final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+      await aufFreigabe();
+      freigaben.entscheiden(true);
+      final bericht = await ergebnis;
+      return RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    }
+    final erste = await schreiben();
+    expect(await aendernStatus(zugang, vorgang: erste, arbeitsordner: arbeitsordner.path), contains('verified: true'));
+    await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Zweiter Vorgang</p>');
+    doppel.speichernAnwenden = false;
+    final zweite = await schreiben();
+    expect(zweite, isNot(erste));
+    expect(await aendernStatus(zugang, vorgang: erste, arbeitsordner: arbeitsordner.path), contains('abgeschlossen (verified: true)'));
+    expect(await aendernStatus(zugang, vorgang: zweite, arbeitsordner: arbeitsordner.path), contains('verified: false'));
+    expect(doppel.speichern, hasLength(2));
+  });
+
+  test('Nach geleertem Arbeitsordner bleibt der Vorgang lesbar und die Sperre erhalten', () async {
+    final ordner = await geaendertStarten();
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht)!.group(1)!;
+    arbeitsordner.deleteSync(recursive: true);
+    arbeitsordner.createSync();
+    final neu = await MoodleZugang.fuerTest(Protokoll(), doppel.basis,
+        benutzer: _Doppel.benutzer, passwort: _Doppel.passwort,
+        schreibvorgaengeOrdner: vorgangsordner.path);
+    expect(await aendernStatus(neu, vorgang: nummer, arbeitsordner: arbeitsordner.path), contains('Ausgangsstand unverändert'));
+    await formularLesen(neu, Formularziel.aktivitaet(101), arbeitsordner.path);
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Neuversuch</p>');
+    expect(await aendern(neu, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path), contains(nummer));
+    expect(doppel.speichern, hasLength(1));
+  });
 
   test('Identischer Ausgangs- und Zielstand belegt nach Abbruch kein Prozessende', () async {
     await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);

@@ -12,8 +12,8 @@
 // über den Pfad abgerufen, nie über einen anderen Host. Verglichen wird der Inhalt
 // (SHA-1), nicht die Adresse: URLs allein beweisen keine Gleichheit.
 //
-// Die Prüfung repariert nichts. Eine Reparatur über aktivitaet_aendern wäre ein
-// eigener Schritt mit Freigabe und hier nicht enthalten.
+// Die Prüfung repariert nichts und schreibt nie. Repariert wird nur mit dem eigenen
+// Werkzeug anhaenge_reparieren (wiederherstellung_reparatur.dart), nach Freigabe.
 //
 // Dateimanager-Dateien ohne lesbaren Verweis in der Formularinitialisierung bleiben
 // eine Prüflücke („nicht lesbar“); ihr Fehlen dort belegt keine fehlende Zieldatei.
@@ -40,6 +40,10 @@ import 'wiederherstellung_regeln.dart' show WiederhergestellteAktivitaet, archiv
 /// dort belegt darum nichts.
 typedef QuellDatei = ({String name, String sha1, bool dateimanager});
 
+/// Wie [QuellDatei], mit dem Ort in der Quelle: [pfad] im Dateibereich („/", „/Unterordner/")
+/// und die [komponente] der Datei (etwa `mod_resource`). Die Reparatur braucht beides.
+typedef QuellDateiOrt = ({String name, String sha1, bool dateimanager, String pfad, String komponente});
+
 /// Ein abgerufener Verweis aus dem Formular. [status] null: keine Antwort (Netzfehler).
 /// [sha1] nur bei HTTP 200.
 typedef ZielAbruf = ({String name, bool entwurf, int? status, String? sha1});
@@ -61,7 +65,8 @@ class AnhangPruefung {
   String get text => vollstaendig
       ? 'Anhänge und Bilder: verglichen, übereinstimmend.'
       : 'Anhänge und Bilder nicht vollständig verifiziert: ${befunde.join('; ')}. '
-          'Nichts wurde repariert.';
+          'Nichts wurde repariert; anhaenge_reparieren kann Fehlendes und Abweichendes nach Freigabe '
+          'aus Dateien im Arbeitsordner ergänzen.';
 }
 
 final RegExp _verweis = RegExp(r'/(pluginfile|draftfile)\.php/[^\s"\x27<>]+');
@@ -125,6 +130,13 @@ String? _quellname(String name, Map<String, Set<String>> namen) {
 /// das Archiv unlesbar ist, die Aktivität nicht eindeutig darin vorkommt oder ihre
 /// Dateiliste fehlt. Dann ist die Quelle „fehlend", nicht „leer".
 List<QuellDatei>? quelldateienAus(Uint8List mbz, {required String modul, required String titel}) {
+  final mitOrt = quelldateienMitOrt(mbz, modul: modul, titel: titel);
+  if (mitOrt == null) return null;
+  return [for (final q in mitOrt) (name: q.name, sha1: q.sha1, dateimanager: q.dateimanager)];
+}
+
+/// Wie [quelldateienAus], mit Pfad und Komponente jeder Datei.
+List<QuellDateiOrt>? quelldateienMitOrt(Uint8List mbz, {required String modul, required String titel}) {
   final Map<String, Uint8List> dateien;
   try {
     final tar = TarDecoder().decodeBytes(GZipDecoder().decodeBytes(mbz));
@@ -160,7 +172,7 @@ List<QuellDatei>? quelldateienAus(Uint8List mbz, {required String modul, require
     // inforef.xml nennt alle Dateien des Bereichs, auch alte, die der Text nicht mehr
     // einbindet. Gezählt wird nur, was der Text einbindet oder im Dateimanager liegt.
     final eingebunden = _eingebundeneNamen(dateien['$verz/$modul.xml']);
-    final liste = <QuellDatei>[];
+    final liste = <QuellDateiOrt>[];
     for (final f in XmlDocument.parse(utf8.decode(filesXml, allowMalformed: true)).findAllElements('file')) {
       // files.xml trägt die ID als Attribut; inforef.xml referenziert sie als Kindelement.
       if (!ids.contains(f.getAttribute('id'))) continue;
@@ -174,6 +186,8 @@ List<QuellDatei>? quelldateienAus(Uint8List mbz, {required String modul, require
         name: name,
         sha1: _text(f, 'contenthash') ?? '',
         dateimanager: dateimanager,
+        pfad: _text(f, 'filepath') ?? '/',
+        komponente: komponente,
       ));
     }
     return liste;
@@ -198,45 +212,81 @@ List<({bool entwurf, String pfad, String name})> verweiseAus(String html) {
   return liste;
 }
 
-/// Liest das Formular einer Aktivität und ruft jeden Verweis ab. [fehler] nennt den
-/// Grund, wenn das Formular selbst nicht lesbar ist.
-Future<({String? fehler, List<ZielAbruf> abrufe})> zielLesen(MoodleZugang moodle, int cmid) async {
+/// Eine Datei in einem Dateibereich des Formulars (Dateimanager), mit dem Abruf ihres Inhalts.
+typedef BereichDatei = ({String pfad, String name, int? status, String? sha1});
+
+/// Was das Bearbeitungsformular einer Aktivität über ihre Dateien zeigt.
+class ZielAufnahme {
+  ZielAufnahme({
+    this.fehler,
+    this.abrufe = const [],
+    this.feldNamen = const {},
+    this.bereiche = const {},
+    this.bereichsLuecken = const {},
+    this.name,
+    this.modul,
+    this.kurs,
+  });
+
+  /// Der Grund, wenn das Formular nicht lesbar ist.
+  final String? fehler;
+
+  /// Jeder abgerufene Verweis (Text und Dateibereiche), je Pfad einmal.
+  final List<ZielAbruf> abrufe;
+
+  /// Editorfeld (Name ohne `[text]`) -> Dateinamen der Verweise in seinem Text.
+  final Map<String, Set<String>> feldNamen;
+
+  /// Dateibereich (Feldname ohne `id_`) -> seine Dateien. [BereichDatei.pfad] beginnt und endet mit „/".
+  final Map<String, List<BereichDatei>> bereiche;
+
+  /// Dateibereich -> warum seine Unterordner nicht gelesen sind. Das Formular zeigt nur die
+  /// oberste Ebene; was in einem Ordner liegt, steht erst nach einer Abfrage des Ordners.
+  final Map<String, String> bereichsLuecken;
+
+  /// Name, Aktivitätsart und Kurs laut Formular (null, wenn es keines gab).
+  final String? name, modul;
+  final int? kurs;
+}
+
+/// Liest das Formular einer Aktivität und ruft jeden Verweis ab. Nur Lesen -- mit einer
+/// Ausnahme: Mit [unterordner] fragt es auch Ordner im Dateimanager ab (eine POST-Anfrage
+/// an den Entwurfsbereich, die nichts ändert, wie beim Lesen eines Ordners von aktivitaet_lesen).
+/// Die reine Prüfung braucht das nicht und lässt es.
+Future<ZielAufnahme> zielAufnahmeLesen(MoodleZugang moodle, int cmid, {bool unterordner = false}) async {
   final Antwort form;
   try {
     form = await moodle.lesen('/course/modedit.php?update=$cmid');
   } on MoodleFehler {
-    return (fehler: 'Bearbeitungsformular nicht lesbar', abrufe: const <ZielAbruf>[]);
+    return ZielAufnahme(fehler: 'Bearbeitungsformular nicht lesbar');
   }
   if (form.status != 200) {
-    return (fehler: 'Bearbeitungsformular nicht lesbar (HTTP ${form.status})', abrufe: const <ZielAbruf>[]);
+    return ZielAufnahme(fehler: 'Bearbeitungsformular nicht lesbar (HTTP ${form.status})');
   }
   final haupt = hauptformular(html_parser.parse(form.text));
   if (haupt == null) {
-    return (
-      fehler: 'Bearbeitungsformular nicht gefunden',
-      abrufe: const <ZielAbruf>[],
-    );
+    return ZielAufnahme(fehler: 'Bearbeitungsformular nicht gefunden');
   }
   final bereiche = dateibereiche(form.text);
   // Ein Dateibereich ohne Zielelement würde still ausgelassen und die Prüfung läse sich vollständig.
   if (bereiche.any((b) => haupt.querySelector('[id="${b['target']}"]') == null)) {
-    return (
-      fehler: 'Dateibereich im Formular nicht gefunden',
-      abrufe: const <ZielAbruf>[],
-    );
+    return ZielAufnahme(fehler: 'Dateibereich im Formular nicht gefunden');
   }
+  String? wert(String n) =>
+      haupt.querySelectorAll('input').where((e) => e.attributes['name'] == n).firstOrNull?.attributes['value'];
   // Die Seitenhülle trägt Logos, Editorressourcen und Profilbilder, keine Inhaltsdateien.
-  final inhalte = [
+  final textFelder = [
     for (final feld in haupt.querySelectorAll('textarea[name]'))
-      if (feld.attributes['name']!.endsWith('[text]') ||
-          feld.attributes['name'] == 'svgcode')
-        feld.text,
+      if (feld.attributes['name']!.endsWith('[text]') || feld.attributes['name'] == 'svgcode') feld,
+  ];
+  final inhalte = [
+    for (final feld in textFelder) feld.text,
     for (final bereich in bereiche)
-      for (final datei
-          in (bereich['list'] as List? ?? const []).whereType<Map>())
+      for (final datei in (bereich['list'] as List? ?? const []).whereType<Map>())
         if (datei['url'] case final String url) url,
   ];
   final abrufe = <ZielAbruf>[];
+  final nachPfad = <String, ZielAbruf>{};
   for (final v in verweiseAus(inhalte.join('\n'))) {
     int? status;
     String? sha;
@@ -247,9 +297,93 @@ Future<({String? fehler, List<ZielAbruf> abrufe})> zielLesen(MoodleZugang moodle
     } on MoodleFehler {
       status = null;
     }
-    abrufe.add((name: v.name, entwurf: v.entwurf, status: status, sha1: sha));
+    final abruf = (name: v.name, entwurf: v.entwurf, status: status, sha1: sha);
+    abrufe.add(abruf);
+    nachPfad[v.pfad] = abruf;
   }
-  return (fehler: null, abrufe: abrufe);
+  final feldNamen = <String, Set<String>>{
+    for (final feld in textFelder)
+      if (feld.attributes['name']!.endsWith('[text]'))
+        feld.attributes['name']!.replaceFirst(RegExp(r'\[text\]$'), ''): {
+          for (final v in verweiseAus(feld.text)) v.name,
+        },
+  };
+  final dateien = <String, List<BereichDatei>>{};
+  final luecken = <String, String>{};
+  final sesskey = wert('sesskey');
+  BereichDatei eintrag(Map datei, ZielAbruf? abruf) {
+    var pfad = '${datei['filepath'] ?? '/'}';
+    if (!pfad.startsWith('/')) pfad = '/$pfad';
+    if (!pfad.endsWith('/')) pfad = '$pfad/';
+    return (pfad: pfad, name: '${datei['filename']}', status: abruf?.status, sha1: abruf?.sha1);
+  }
+
+  for (final bereich in bereiche) {
+    final feld = '${bereich['target']}'.replaceFirst('id_', '');
+    final liste = <BereichDatei>[];
+    final offen = <List>[(bereich['list'] as List?) ?? const []];
+    var runden = 0;
+    while (offen.isNotEmpty && runden++ < 200) {
+      for (final datei in offen.removeAt(0).whereType<Map>()) {
+        final name = '${datei['filename'] ?? ''}';
+        if (name.isEmpty || name == '.') continue; // Verzeichniseinträge ohne Name
+        if (datei['type'] == 'folder') {
+          if (!unterordner || sesskey == null) {
+            luecken[feld] = 'Ordner „$name" nicht gelesen';
+            continue;
+          }
+          try {
+            final unter = await moodle.senden('/repository/draftfiles_ajax.php?action=list', [
+              MapEntry('itemid', '${bereich['itemid'] ?? ''}'),
+              MapEntry('filepath', '${datei['filepath'] ?? '/'}$name/'.replaceAll('//', '/')),
+              MapEntry('client_id', '${bereich['client_id'] ?? ''}'),
+              MapEntry('sesskey', sesskey),
+            ]);
+            final j = jsonDecode(unter.text);
+            offen.add(((j as Map)['list'] as List?) ?? const []);
+          } catch (_) {
+            luecken[feld] = 'Ordner „$name" nicht lesbar';
+          }
+          continue;
+        }
+        final url = datei['url'] is String ? verweiseAus(datei['url'] as String).firstOrNull : null;
+        var abruf = url == null ? null : nachPfad[url.pfad];
+        if (abruf == null && url != null) {
+          // Eine Datei aus einem Unterordner steht nicht im Formular: einzeln abrufen.
+          int? status;
+          String? sha;
+          try {
+            final r = await moodle.lesen(url.pfad);
+            status = r.status;
+            if (r.status == 200) sha = sha1.convert(r.bytes).toString();
+          } on MoodleFehler {
+            status = null;
+          }
+          abruf = (name: url.name, entwurf: url.entwurf, status: status, sha1: sha);
+          nachPfad[url.pfad] = abruf;
+        }
+        liste.add(eintrag(datei, abruf));
+      }
+    }
+    if (offen.isNotEmpty) luecken[feld] = 'zu viele Ordner';
+    dateien[feld] = liste;
+  }
+  return ZielAufnahme(
+    abrufe: abrufe,
+    feldNamen: feldNamen,
+    bereiche: dateien,
+    bereichsLuecken: luecken,
+    name: wert('name'),
+    modul: wert('modulename'),
+    kurs: int.tryParse(wert('course') ?? ''),
+  );
+}
+
+/// Liest das Formular einer Aktivität und ruft jeden Verweis ab. [fehler] nennt den
+/// Grund, wenn das Formular selbst nicht lesbar ist.
+Future<({String? fehler, List<ZielAbruf> abrufe})> zielLesen(MoodleZugang moodle, int cmid) async {
+  final z = await zielAufnahmeLesen(moodle, cmid);
+  return (fehler: z.fehler, abrufe: z.abrufe);
 }
 
 /// Vergleicht Quelle und Ziel einer Aktivität. [quelle] null heißt: Quellaufnahme fehlt.
@@ -361,4 +495,11 @@ Future<AnhangPruefung> anhaengePruefen(MoodleZugang moodle, Vorgaenge vorgaenge,
     }
   }
   return AnhangPruefung(befunde, vollstaendig: vollstaendig && aktivitaeten.isNotEmpty, abweichend: abweichend);
+}
+
+/// Wie [sicherungsquelleLesen], mit der Prüflücke als fertigem Satz für die Anhangsprüfung
+/// und die Reparatur.
+Future<({Uint8List? mbz, String? luecke})> quelleLaden(Vorgaenge vorgaenge, Vorgang vg) async {
+  final q = await sicherungsquelleLesen(vorgaenge, vg);
+  return (mbz: q.mbz, luecke: q.grund == null ? null : 'Prüflücke: ${q.grund}; Anhänge nicht verglichen');
 }

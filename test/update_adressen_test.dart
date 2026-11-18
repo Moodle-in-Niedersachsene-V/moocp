@@ -258,6 +258,110 @@ void main() {
     });
   });
 
+  group('Mac und Linux: nur Bescheid sagen, mit dem Paket der Installation', () {
+    const verein = 'Moodle-in-Niedersachsene-V/moocp';
+    _Soll releaseMitPaketen(String version, List<String> namen) => _Soll(200,
+        text: jsonEncode({
+          'tag_name': 'v$version',
+          'body': '- Neu: etwas',
+          'assets': [
+            for (final n in namen)
+              {'name': n, 'browser_download_url': 'https://github.com/$verein/releases/download/v$version/$n'}
+          ],
+        }));
+    const alle = [
+      'moocp_setup_0.11.0.exe',
+      'moocp_setup_0.11.0.run',
+      'moocp_0.11.0-x86_64.AppImage',
+      'moocp_0.11.0_amd64.deb',
+      'moocp_0.11.0_macos.dmg',
+    ];
+
+    test('jedes Paket findet seine eigene Datei, nicht den Installer für Windows', () async {
+      for (final paket in UpdatePaket.values) {
+        final github = _GitHub({_verein: releaseMitPaketen('0.11.0', alle)});
+        final neu = await HttpOverrides.runWithHttpOverrides(
+            () => Update(Protokoll(), paket: paket).pruefen('0.10.0'), github);
+        expect(neu?.dateiname, paket.dateiname('0.11.0'), reason: '$paket');
+        expect(neu?.datei.toString(),
+            'https://github.com/$verein/releases/download/v0.11.0/${paket.dateiname('0.11.0')}');
+        expect(neu?.beschreibung, '- Neu: etwas');
+      }
+    });
+
+    test('ohne Paket für dieses System gibt es keine neue Version, und das steht im Protokoll', () async {
+      final protokoll = Protokoll();
+      final github = _GitHub({_verein: releaseMitPaketen('0.11.0', ['moocp_setup_0.11.0.exe'])});
+      final neu = await HttpOverrides.runWithHttpOverrides(
+          () => Update(protokoll, paket: UpdatePaket.dmg).pruefen('0.10.0'), github);
+      expect(neu, isNull);
+      expect(protokoll.eintraege.map((e) => e.text),
+          contains('Update: Version 0.11.0 hat kein Paket moocp_0.11.0_macos.dmg für dieses System'));
+    });
+
+    test('die Datei muss aus einer Herkunft der Liste kommen', () async {
+      final github = _GitHub({
+        _verein: _Soll(200,
+            text: jsonEncode({
+              'tag_name': 'v0.11.0',
+              'assets': [
+                {
+                  'name': 'moocp_0.11.0_macos.dmg',
+                  'browser_download_url': 'https://github.com/fremd/moocp/releases/download/v0.11.0/moocp_0.11.0_macos.dmg',
+                }
+              ],
+            })),
+      });
+      await expectLater(
+          HttpOverrides.runWithHttpOverrides(
+              () => Update(Protokoll(), paket: UpdatePaket.dmg).pruefen('0.10.0'), github),
+          throwsA(isA<UpdateFehler>().having((e) => e.meldung, 'meldung', contains('nicht erlaubt'))));
+    });
+
+    group('der Dialog', () {
+      late HttpOverrides? vorher;
+      setUp(() => vorher = HttpOverrides.current);
+      tearDown(() => HttpOverrides.global = vorher);
+
+      Future<(List<Uri>, Future<bool>)> lauf(WidgetTester tester) async {
+        HttpOverrides.global = _GitHub({_verein: releaseMitPaketen('0.11.0', alle)});
+        await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+        final context = tester.element(find.byType(Scaffold));
+        final geoeffnet = <Uri>[];
+        final ergebnis = updateSchritt(
+          context,
+          einstellungen: _Einstellungen(),
+          protokoll: Protokoll(),
+          eigene: '0.10.0',
+          paket: UpdatePaket.dmg,
+          imBrowserOeffnen: (a) async => geoeffnet.add(a),
+        );
+        await tester.pumpAndSettle();
+        return (geoeffnet, ergebnis);
+      }
+
+      testWidgets('zeigt die Neuerungen und öffnet mit „Update herunterladen" die DMG im Browser',
+          (tester) async {
+        final (geoeffnet, ergebnis) = await lauf(tester);
+        expect(find.text('Version 0.11.0 ist verfügbar'), findsOneWidget);
+        expect(find.text('- Neu: etwas'), findsOneWidget);
+        expect(find.text('Herunterladen und installieren'), findsNothing);
+        await tester.tap(find.text('Update herunterladen'));
+        await tester.pumpAndSettle();
+        expect(geoeffnet, [Uri.parse('https://github.com/$verein/releases/download/v0.11.0/moocp_0.11.0_macos.dmg')]);
+        expect(await ergebnis, isFalse, reason: 'die App beendet sich nicht');
+      });
+
+      testWidgets('„Jetzt nicht" öffnet nichts', (tester) async {
+        final (geoeffnet, ergebnis) = await lauf(tester);
+        await tester.tap(find.text('Jetzt nicht'));
+        await tester.pumpAndSettle();
+        expect(geoeffnet, isEmpty);
+        expect(await ergebnis, isFalse);
+      });
+    });
+  });
+
   group('Eine andere Liste von Herkünften und ein anderes Namensmuster', () {
     const erste = 'beispiel-org/zusatz';
     const zweite = 'beispiel-org/zusatz-alt';

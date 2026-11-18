@@ -205,6 +205,7 @@ Future<void> main(List<String> argumente) async {
       weitere: instanzen.sublist(1),
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
+      updatePaket: updatePaket(argumente, Platform.environment),
       pluginUpdatefaehig: pluginUpdateMoeglich(argumente),
       pluginsLaden: () =>
           Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
@@ -378,6 +379,7 @@ class MoocpApp extends StatelessWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.updatePaket,
     this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
@@ -416,8 +418,13 @@ class MoocpApp extends StatelessWidget {
   final Future<Plugins> Function()? pluginsLaden;
 
   /// Ob diese App sich selbst aktualisieren kann (update.dart,
-  /// updateMoeglich). Nur dann wird geprüft und überhaupt gefragt.
+  /// updateMoeglich, nur Windows).
   final bool updatefaehig;
+
+  /// Mac und Linux: das Paket, aus dem die installierte App stammt
+  /// (update.dart, updatePaket); die Prüfung sagt dann nur Bescheid. Ohne
+  /// [updatefaehig] und ohne Paket wird nicht geprüft und nicht gefragt.
+  final UpdatePaket? updatePaket;
 
   /// Ersatz für die Prüfung der Einrichtung, nur für die README-Bilder
   /// (tool/bilder_test.dart): Die echte Prüfung sähe auf dem Rechner nach,
@@ -451,6 +458,7 @@ class MoocpApp extends StatelessWidget {
         instanzErstellen: instanzErstellen,
         einrichtungsstand: einrichtungsstand,
         updatefaehig: updatefaehig,
+        updatePaket: updatePaket,
         pluginUpdatefaehig: pluginUpdatefaehig,
         pluginsLaden: pluginsLaden,
         laufendePlugins: laufendePlugins,
@@ -473,6 +481,7 @@ class Hauptseite extends StatefulWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.updatePaket,
     this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
@@ -493,6 +502,7 @@ class Hauptseite extends StatefulWidget {
   final Instanz Function(Profil profil)? instanzErstellen;
   final Future<Einrichtungsstand> Function()? einrichtungsstand;
   final bool updatefaehig;
+  final UpdatePaket? updatePaket;
   final Future<Plugins> Function()? pluginsLaden;
   final Stream<void>? fokus;
 
@@ -705,12 +715,14 @@ class _HauptseiteState extends State<Hauptseite> {
     _version = await _eigeneVersion();
     if (_version.isEmpty) return false;
     await updateStandMelden(widget.einstellungen, _version, widget.protokoll);
-    if (!mounted || !widget.updatefaehig) return false;
+    if (!mounted || (!widget.updatefaehig && widget.updatePaket == null)) return false;
     return updateSchritt(
       context,
       einstellungen: widget.einstellungen,
       protokoll: widget.protokoll,
       eigene: _version,
+      paket: widget.updatePaket,
+      imBrowserOeffnen: imBrowserOeffnen,
     );
   }
 
@@ -830,7 +842,9 @@ class _HauptseiteState extends State<Hauptseite> {
         einstellungen: widget.einstellungen,
         protokoll: widget.protokoll,
         eigene: _version,
-        updateMoeglich: widget.updatefaehig,
+        updateMoeglich: widget.updatefaehig || widget.updatePaket != null,
+        updatePaket: widget.updatePaket,
+        imBrowserOeffnen: imBrowserOeffnen,
         sitzungLaeuft: _dienst.laeuft,
         profilname: _profilnameAnzeige,
         mcpName: _mehrere ? _profil.mcpName : null,

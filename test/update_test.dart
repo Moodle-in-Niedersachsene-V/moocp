@@ -117,6 +117,47 @@ void main() {
     });
   });
 
+  group('Mac und Linux: welches Paket, und nur installiert', () {
+    UpdatePaket? paket(String system, String programm,
+            {Map<String, String> umgebung = const {'HOME': '/Users/e'},
+            List<String> argumente = const [],
+            Set<String> dateien = const {}}) =>
+        updatePaket(argumente, umgebung,
+            system: system, programm: programm, gibtEs: dateien.contains);
+
+    test('Mac: nur aus einem der Programme-Ordner', () {
+      expect(paket('macos', '/Applications/moocp.app/Contents/MacOS/moocp'), UpdatePaket.dmg);
+      expect(paket('macos', '/Users/e/Applications/moocp.app/Contents/MacOS/moocp'), UpdatePaket.dmg);
+      // Entwicklungsbau, direkt aus dem Disk-Image, von macOS verlegt:
+      expect(paket('macos', '/Users/e/moocp/build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp'),
+          isNull);
+      expect(paket('macos', '/Volumes/moocp/moocp.app/Contents/MacOS/moocp'), isNull);
+      expect(paket('macos', '/private/var/folders/x/AppTranslocation/y/d/moocp.app/Contents/MacOS/moocp'), isNull);
+    });
+
+    test('Linux: AppImage, .deb, Installer je Benutzer; sonst nicht', () {
+      expect(paket('linux', '/tmp/.mount_x/usr/bin/moocp', umgebung: {'APPIMAGE': '/home/e/moocp.AppImage'}),
+          UpdatePaket.appImage);
+      expect(paket('linux', '/opt/moocp/moocp'), UpdatePaket.deb);
+      expect(paket('linux', '/home/e/.local/opt/moocp/moocp', dateien: {'/home/e/.local/opt/moocp/.moocp-installiert'}),
+          UpdatePaket.run);
+      expect(paket('linux', '/home/e/moocp/build/linux/x64/release/bundle/moocp'), isNull);
+    });
+
+    test('der Schalter schaltet auch hier ab, und Windows hat kein Paket', () {
+      expect(paket('macos', '/Applications/moocp.app/Contents/MacOS/moocp', argumente: [keinUpdateSchalter]), isNull);
+      expect(paket('linux', '/opt/moocp/moocp', argumente: [keinUpdateSchalter]), isNull);
+      expect(paket('windows', r'C:\Users\e\AppData\Local\Programs\moocp\moocp.exe'), isNull);
+    });
+
+    test('die Namen der Pakete wie die Skripte sie bauen', () {
+      expect(UpdatePaket.dmg.dateiname('1.2.3'), 'moocp_1.2.3_macos.dmg');
+      expect(UpdatePaket.run.dateiname('1.2.3'), 'moocp_setup_1.2.3.run');
+      expect(UpdatePaket.appImage.dateiname('1.2.3'), 'moocp_1.2.3-x86_64.AppImage');
+      expect(UpdatePaket.deb.dateiname('1.2.3'), 'moocp_1.2.3_amd64.deb');
+    });
+  });
+
   group('Einmal am Tag', () {
     test('Datum als Text', () {
       expect(tagesdatum(DateTime(2026, 10, 3)), '2026-10-03');

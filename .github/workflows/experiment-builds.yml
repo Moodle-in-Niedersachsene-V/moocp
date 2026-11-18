@@ -14,7 +14,7 @@ on:
       platform:
         description: Plattform
         type: choice
-        options: [both, linux, windows]
+        options: [both, linux, windows, macos]
         default: both
       task:
         description: Umfang
@@ -43,9 +43,9 @@ jobs:
         run: |
           import json, os
           message = os.environ['MESSAGE']
-          platform = os.environ['PLATFORM'] or ('linux' if '[ci:linux]' in message else 'windows' if '[ci:windows]' in message else 'both')
+          platform = os.environ['PLATFORM'] or ('linux' if '[ci:linux]' in message else 'windows' if '[ci:windows]' in message else 'macos' if '[ci:macos]' in message else 'both')
           task = os.environ['TASK'] or ('tests' if '[ci:tests]' in message else 'builds' if '[ci:builds]' in message else 'all')
-          rows = [{'platform': p, 'runner': r} for p, r in [('linux', 'ubuntu-24.04'), ('windows', 'windows-2022')] if platform in ('both', p)]
+          rows = [{'platform': p, 'runner': r} for p, r in [('linux', 'ubuntu-24.04'), ('windows', 'windows-2022'), ('macos', 'macos-14')] if platform in ('both', p) or (platform == 'macos' and p == 'macos')]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('matrix=' + json.dumps({'include': rows}) + '\n' + 'task=' + task + '\n')
   desktop:
@@ -123,11 +123,16 @@ jobs:
           New-Item -ItemType Directory -Force dist
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/moocp-windows-x64.zip
       # Nur das frische Release-Bundle; keine Logs, Profile, Testzugänge oder Arbeitsordner.
+      - name: macOS archive
+        if: matrix.platform == 'macos' && needs.select.outputs.task != 'tests'
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/moocp.app dist/moocp-macos-arm64.zip
       - name: Bundle artifact
         if: needs.select.outputs.task != 'tests'
         uses: actions/upload-artifact@v7
         with:
-          name: moocp-${{ matrix.platform }}-x64
+          name: moocp-${{ matrix.platform }}-${{ matrix.platform == 'macos' && 'arm64' || 'x64' }}
           path: dist/*
           if-no-files-found: error
           retention-days: 3

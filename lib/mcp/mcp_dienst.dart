@@ -354,6 +354,11 @@ class McpDienst implements AufrufKontext {
   static final _cmid = JsonSchema.integer(
     description: 'Aktivität: cmid, die Zahl hinter mod/<typ>/view.php?id= (oder aus kurs_uebersicht)',
   );
+  static final _einrueckung = JsonSchema.integer(
+    description:
+        'Aktivität: Einrückung auf der Kursseite, ganze Zahl 0–16 (0 = nicht eingerückt). Moodle rückt '
+        'Stufe für Stufe; die App liest danach zurück und meldet verified nur bei Gleichheit',
+  );
   static final _abschnittId = JsonSchema.integer(
     description:
         'Abschnitt: seine id aus kurs_uebersicht („[id …]"), nicht die Nummer',
@@ -838,7 +843,7 @@ class McpDienst implements AufrufKontext {
           'bereiche/files/). Eine Fragensammlung (qbank) legt Moodle immer im allgemeinen '
           'Abschnitt an, einerlei welcher angegeben ist. Einstellungen wie Fristen als Parameter (Schlüssel: nach dem '
           'Anlegen in einstellungen.json; Pflichtangaben eines Typs meldet Moodle). Legt '
-          'verborgen an; sichtbar nur nach Freigabe in der App. Lernlandkarten werden aus dem nativen Formular angelegt. Ein Ordner kann dafür zusätzlich lernlandkarte.json mit orte (id p1–p64, x 0–1000, y 0–560, optional titel) und wege (von/nach) enthalten; SVG und placestore erzeugt die App, Ziele bleiben leer. Das Hintergrundbild liegt in bereiche/backgroundfile/. Ortsziele ändert lernlandkarte_verknuepfungen_setzen nach Freigabe. Liest danach Name, Kurs, Sichtbarkeit und Kartendaten zurück.',
+          'verborgen an; sichtbar nur nach Freigabe in der App. Mit einrueckung (0–16) rückt es die neue Aktivität direkt danach ein (ohne eigene Freigabe). Lernlandkarten werden aus dem nativen Formular angelegt. Ein Ordner kann dafür zusätzlich lernlandkarte.json mit orte (id p1–p64, x 0–1000, y 0–560, optional titel) und wege (von/nach) enthalten; SVG und placestore erzeugt die App, Ziele bleiben leer. Das Hintergrundbild liegt in bereiche/backgroundfile/. Ortsziele ändert lernlandkarte_verknuepfungen_setzen nach Freigabe. Liest danach Name, Kurs, Sichtbarkeit und Kartendaten zurück.',
       parameter: {
         'kurs': _kurs,
         'abschnitt_id': JsonSchema.integer(
@@ -861,6 +866,7 @@ class McpDienst implements AufrufKontext {
           description: 'true = sofort für Lernende sichtbar, nur nach Freigabe; Standard false',
         ),
         'einstellungen': _einstellungenSchema,
+        'einrueckung': _einrueckung,
       },
       pflicht: ['kurs', 'abschnitt_id', 'typ', 'name'],
       ausfuehren: (a) => aktivitaetAnlegen(
@@ -874,6 +880,7 @@ class McpDienst implements AufrufKontext {
         arbeitsordner: ao,
         sichtbar: a['sichtbar'] == true,
         einstellungen: _einstellungen(a),
+        einrueckung: _zahlOder(a, 'einrueckung'),
       ),
     );
 
@@ -963,7 +970,9 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Verschiebt eine Aktivität (auch einen Unterabschnitt über seine cmid) in '
           'einen Abschnitt -- ans Ende oder vor eine andere Aktivität --, oder einen Abschnitt '
-          'hinter einen anderen. Nur nach Freigabe; prüft danach die Kursstruktur. Günstiger '
+          'hinter einen anderen. Mit einrueckung (0–16) rückt es eine Aktivität ein oder aus '
+          '(Stufe für Stufe); ohne ziel_abschnitt_id nur die Einrückung, die Aktivität bleibt, wo sie ist. '
+          'Nur nach Freigabe; prüft danach die Kursstruktur und die Einrückung. Günstiger '
           'ist, gleich in der richtigen Reihenfolge anzulegen.',
       parameter: {
         'kurs': _kurs,
@@ -980,6 +989,7 @@ class McpDienst implements AufrufKontext {
         'nach_abschnitt_id': JsonSchema.integer(
           description: 'Abschnitt: hinter diesen Abschnitt (id)',
         ),
+        'einrueckung': _einrueckung,
       },
       pflicht: ['kurs', 'name'],
       zerstoerend: true,
@@ -993,6 +1003,7 @@ class McpDienst implements AufrufKontext {
         zielAbschnittId: _zahlOder(a, 'ziel_abschnitt_id'),
         vorCmid: _zahlOder(a, 'vor_cmid'),
         nachAbschnittId: _zahlOder(a, 'nach_abschnitt_id'),
+        einrueckung: _zahlOder(a, 'einrueckung'),
       ),
     );
 

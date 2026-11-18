@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach, ob Moodle die Einrückung übernommen hat.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.

@@ -575,6 +575,8 @@ class MoodleZugang {
   /// (visible 1, visibleoncoursepage 0); nur `sichtbarkeit_setzen` braucht sie, um den
   /// Zustand zu erhalten (kurs_aendern.dart). UNGEMESSEN: der Name der Aktion und ob die
   /// Instanz ihn erlaubt (die Verwaltung kann „verfügbar ohne Link" ausschalten).
+  /// `cm_moveright` und `cm_moveleft` rücken eine Aktivität je Aufruf um eine Stufe ein
+  /// oder aus (verschieben, aktivitaet_anlegen). UNGEMESSEN: Namen, Kursformate, Grenzen.
   static const Set<String> kursAktionen = {
     'section_add',
     'section_hide',
@@ -586,6 +588,8 @@ class MoodleZugang {
     'cm_show',
     'cm_stealth',
     'cm_move',
+    'cm_moveright',
+    'cm_moveleft',
     'cm_delete',
     'cm_duplicate',
   };

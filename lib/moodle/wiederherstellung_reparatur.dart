@@ -247,7 +247,14 @@ ReparaturPlan reparaturPlanen({required List<QuellDateiOrt> quelle, required Zie
       ));
     }
   }
+  final zielstand = [
+    for (final a in ziel.abrufe) 'emb|${a.name}|${a.status}|${a.sha1}',
+    for (final b in ziel.bereiche.entries)
+      for (final d in b.value)
+        'mgr|${b.key}|${d.pfad}|${d.name}|${d.status}|${d.sha1}',
+  ]..sort();
   final signatur = [
+    ...zielstand,
     for (final e in eintraege) '${e.schluessel}|${e.name}|${e.ersetzen}|${e.sha1}|${e.ist}|${e.felder.join(',')}',
     for (final o in offen) 'offen|${o.schluessel}|${o.text}',
     'ok|$inOrdnung',
@@ -367,9 +374,20 @@ Future<Vorgang> _vorgang(
   required String? id,
   required int kurs,
   required String modul,
+  required int cmid,
   required String name,
 }) async {
-  bool enthaelt(Vorgang v) => (v.wiederherstellungAktivitaeten ?? const []).where((a) => a.modul == modul && nameNormal(a.titel) == nameNormal(name)).length == 1;
+  bool enthaelt(Vorgang v) =>
+      v.importierteAktivitaeten
+              ?.where(
+                (a) =>
+                    a.cmid == cmid &&
+                    a.modul == modul &&
+                    nameNormal(a.titel) == nameNormal(name),
+              )
+              .length ==
+          1 &&
+      (v.wiederherstellungAktivitaeten ?? const []).where((a) => a.modul == modul && nameNormal(a.titel) == nameNormal(name)).length == 1;
   Vorgang? vg;
   if (id != null && id.trim().isNotEmpty) {
     vg = await vorgaenge.finde(id.trim());
@@ -444,7 +462,7 @@ Future<String> _reparieren(
 }) async {
   // 1. Zuordnung.
   final ziel0 = await _zuordnungPruefen(moodle, kurs: kurs, cmid: cmid, name: name);
-  final vg = await _vorgang(vorgaenge, id: vorgang, kurs: kurs, modul: ziel0.modul ?? '', name: name);
+  final vg = await _vorgang(vorgaenge, id: vorgang, kurs: kurs, modul: ziel0.modul ?? '', cmid: cmid, name: name);
 
   // 2. Quellaufnahme und Plan.
   final geladen = await quelleLaden(vorgaenge, vg);
@@ -461,8 +479,10 @@ Future<String> _reparieren(
   String offenText(ReparaturPlan pl) =>
       pl.offen.isEmpty ? '' : ' Nicht repariert (Prüflücke): ${pl.offen.map((o) => o.text).join('; ')}.';
   if (plan.eintraege.isEmpty) {
-    return 'Nichts zu reparieren: ${plan.inOrdnung} Datei(en) stimmen mit der Quellaufnahme überein, nichts '
+    final bericht = 'Nichts zu reparieren: ${plan.inOrdnung} Datei(en) stimmen mit der Quellaufnahme überein, nichts '
         'Eindeutiges fehlt oder weicht ab. Nichts geschrieben, keine Freigabe.${offenText(plan)}';
+    await vorgaenge.befundAnhaengen(vg, 'Anhangsreparatur: „$name“: $bericht');
+    return bericht;
   }
 
   // 3. Reparaturdateien und Änderung: nur die Reparatur.
@@ -497,6 +517,14 @@ Future<String> _reparieren(
 
   // 5. Stand erneut prüfen: Moodle, Zuordnung und Ordner müssen noch das Freigegebene sein.
   final ziel1 = await _zuordnungPruefen(moodle, kurs: kurs, cmid: cmid, name: name);
+  await _vorgang(
+    vorgaenge,
+    id: vg.id,
+    kurs: kurs,
+    modul: ziel1.modul ?? '',
+    cmid: cmid,
+    name: name,
+  );
   final plan1 = reparaturPlanen(quelle: quelleDateien, ziel: ziel1);
   if (plan1.signatur != plan.signatur) {
     throw MoodleFehler('Moodle hat sich seit dem Planen geändert (Dateien der Aktivität sind anders als bei der Freigabe). '
@@ -539,8 +567,7 @@ Future<String> _reparieren(
     verified ? 'verified: true (Dateien der Reparatur zurückgelesen und verglichen).' : 'verified: false.',
   ].join('\n');
   // Der Vorgang behält sein Urteil; die Reparatur steht als eigener Befund im Status.
-  final text = vg.text.replaceFirst(RegExp(r' Anhangsreparatur:.*$'), '');
-  await vorgaenge.aktualisieren(vg,
-      text: '$text Anhangsreparatur: „$name" ${verified ? 'repariert und zurückgelesen' : 'nicht vollständig verifiziert'}.');
+  await vorgaenge.befundAnhaengen(vg,
+      'Anhangsreparatur: „$name" ${verified ? 'repariert und zurückgelesen' : 'nicht vollständig verifiziert'}.\n$bericht');
   return bericht;
 }

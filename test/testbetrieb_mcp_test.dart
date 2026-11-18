@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
+import 'package:moocp/moodle/formular_schreiben.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
@@ -17,6 +18,8 @@ import 'mcp_client.dart';
 class TestMoodle {
   late HttpServer server;
   bool vorhanden = false;
+  int einzug = 0;
+  bool einrueckungIgnorieren = false;
   bool globaleSuche = false;
   String suchformularAttribute = 'class="mform d-flex flex-wrap align-items-center searchform-navbar" action="/search/index.php"';
   bool bearbeitungsformularFehlt = false;
@@ -125,6 +128,7 @@ class TestMoodle {
                   'id': 70,
                   'module': modul,
                   'name': lernlandkarteVorhanden ? 'ZZ Ziel' : name,
+                  'indent': einzug,
                   'visible': 0,
                   'sectionid': 1,
                 },
@@ -148,7 +152,12 @@ class TestMoodle {
             ],
           },
           'core_courseformat_update_course' => () {
-            vorhanden = false;
+            final aktion = (call['args'] as Map)['action'];
+            if (aktion == 'cm_moveleft' || aktion == 'cm_moveright') {
+              if (!einrueckungIgnorieren) einzug = aktion == 'cm_moveleft' ? 0 : 1;
+            } else {
+              vorhanden = false;
+            }
             return <String, Object?>{};
           }(),
           _ => throw StateError('Unerwarteter Moodle-Dienst'),
@@ -374,6 +383,31 @@ void main() {
     await extern.server.close(force: true);
     await ordner.delete(recursive: true);
   });
+
+  test('Anlegen mit Einrückung 0 verweigert Erfolg bei ignorierter Ausrückung', () async {
+    extern.einzug = 1;
+    extern.einrueckungIgnorieren = true;
+    freigaben.stufe = Bestaetigungen.keine;
+    await starten();
+    final ergebnis = await aktivitaetAnlegen(moodle, freigaben,
+        kurs: 12, abschnittId: 1, typ: 'page', name: 'ZZ Probe',
+        ordner: 'entwurf', arbeitsordner: ordner.path, einrueckung: 0);
+    expect(ergebnis, contains('verified: false'));
+    expect(ergebnis, contains('in Moodle jetzt 1'));
+  });
+
+  for (final einrueckung in [0, 1]) {
+    test('Anlegen prüft die gewünschte Einrückung $einrueckung nach dem Speichern', () async {
+      extern.einzug = einrueckung == 0 ? 1 : 0;
+      freigaben.stufe = Bestaetigungen.keine;
+      await starten();
+      final ergebnis = await aktivitaetAnlegen(moodle, freigaben,
+          kurs: 12, abschnittId: 1, typ: 'page', name: 'ZZ Probe',
+          ordner: 'entwurf', arbeitsordner: ordner.path, einrueckung: einrueckung);
+      expect(ergebnis, contains('verified: true'));
+      expect(ergebnis, contains('auf $einrueckung gesetzt'));
+    });
+  }
 
   Future<void> collaboraLesen() async {
     extern.modul = 'collabora';

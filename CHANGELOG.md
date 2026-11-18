@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.13.0
-- Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach, ob Moodle die Einrückung übernommen hat.
+- Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
 - Wiederherstellung: Die App vergleicht jetzt auch die Texte der wiederhergestellten Aktivitäten mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
 - Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.

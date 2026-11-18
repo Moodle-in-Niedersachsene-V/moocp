@@ -10,7 +10,7 @@ import 'package:moocp/protokoll.dart';
 class _Kurs extends MoodleZugang {
   _Kurs() : super(Protokoll());
 
-  final Map<int, int> einzug = {11: 0, 12: 2};
+  final Map<int, int> einzug = {11: 0, 12: 1};
   final Map<int, String> namen = {11: 'ZZ Aufgabe', 12: 'ZZ Chatbot'};
   final aktionen = <String>[];
 
@@ -21,7 +21,7 @@ class _Kurs extends MoodleZugang {
   var unbekannt = false;
 
   /// Höchste Stufe, die Moodle annimmt.
-  var grenze = 16;
+  var grenze = 1;
 
   @override
   Future<Object?> dienst(String name, Map<String, Object?> args) async {
@@ -90,17 +90,17 @@ void main() {
   Future<String> rueck(int cmid, int? e, {int? ziel, int? vor}) => verschieben(moodle, freigaben,
       kurs: 5, cmid: cmid, name: moodle.namen[cmid]!, einrueckung: e, zielAbschnittId: ziel, vorCmid: vor);
 
-  test('einrücken: Stufe für Stufe cm_moveright, nur die Einrückung, kein cm_move; Freigabe nennt sie', () async {
-    final text = await rueck(11, 2);
-    expect(moodle.aktionen, ['cm_moveright 11', 'cm_moveright 11']);
-    expect(moodle.einzug[11], 2);
+  test('einrücken: cm_moveright, nur die Einrückung, kein cm_move; Freigabe nennt sie', () async {
+    final text = await rueck(11, 1);
+    expect(moodle.aktionen, ['cm_moveright 11']);
+    expect(moodle.einzug[11], 1);
     expect(text, contains('verified: true'));
-    expect(gefragt.single.punkte.join('\n'), contains('Einrückung von 0 auf 2'));
+    expect(gefragt.single.punkte.join('\n'), contains('Einrückung von 0 auf 1'));
   });
 
-  test('ausrücken: cm_moveleft, so oft wie Stufen fehlen', () async {
+  test('ausrücken: cm_moveleft', () async {
     final text = await rueck(12, 0);
-    expect(moodle.aktionen, ['cm_moveleft 12', 'cm_moveleft 12']);
+    expect(moodle.aktionen, ['cm_moveleft 12']);
     expect(moodle.einzug[12], 0);
     expect(text, contains('verified: true'));
   });
@@ -113,40 +113,33 @@ void main() {
   });
 
   test('schon auf der gewünschten Stufe: keine Freigabe, nichts geschrieben', () async {
-    final text = await rueck(12, 2);
+    final text = await rueck(12, 1);
     expect(gefragt, isEmpty);
     expect(moodle.aktionen, isEmpty);
     expect(text, contains('nichts geändert'));
   });
 
-  test('größer als 16 und kleiner als 0 brechen vor der Freigabe ab', () async {
-    for (final e in [17, -1]) {
+  test('größer als 1 und kleiner als 0 brechen vor der Freigabe ab', () async {
+    for (final e in [2, -1]) {
       await expectLater(rueck(11, e),
-          throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', contains('0 und 16'))));
+          throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', contains('0 und 1'))));
     }
     expect(gefragt, isEmpty);
     expect(moodle.aktionen, isEmpty);
   });
 
-  test('Grenze 16 wird erreicht', () async {
-    final text = await rueck(11, 16);
-    expect(moodle.aktionen, hasLength(16));
-    expect(moodle.einzug[11], 16);
-    expect(text, contains('verified: true'));
-  });
-
   test('Moodle ändert nichts: verified false, nicht wiederholt', () async {
     moodle.ignoriert = true;
-    final text = await rueck(11, 3);
+    final text = await rueck(11, 1);
     expect(text, contains('verified: false'));
     expect(text, contains('Nicht wiederholt'));
-    expect(moodle.aktionen, hasLength(3), reason: 'je Stufe ein Aufruf, kein zweiter Anlauf');
+    expect(moodle.aktionen, hasLength(1), reason: 'ein Aufruf, kein zweiter Anlauf');
   });
 
-  test('Moodle nimmt nur bis zu einer Grenze an: verified false mit gelesenem Stand', () async {
-    moodle.grenze = 2;
-    final text = await rueck(11, 4);
-    expect(text, contains('jetzt 2'));
+  test('Moodle nimmt die Stufe nicht an: verified false mit gelesenem Stand', () async {
+    moodle.grenze = 0;
+    final text = await rueck(11, 1);
+    expect(text, contains('jetzt 0'));
     expect(text, contains('verified: false'));
   });
 
@@ -159,7 +152,7 @@ void main() {
 
   test('Freigabe abgelehnt: nichts geschrieben', () async {
     antwort = false;
-    final text = await rueck(11, 2);
+    final text = await rueck(11, 1);
     expect(text, startsWith('Nicht verschoben'));
     expect(moodle.aktionen, isEmpty);
     expect(moodle.einzug[11], 0);
@@ -177,8 +170,8 @@ void main() {
     expect(moodle.aktionen, isEmpty);
   });
 
-  test('Anlegen: Einrückung außerhalb 0-16 bricht ab, bevor etwas gelesen oder gefragt wird', () async {
-    for (final e in [17, -1]) {
+  test('Anlegen: Einrückung außerhalb 0-1 bricht ab, bevor etwas gelesen oder gefragt wird', () async {
+    for (final e in [2, -1]) {
       await expectLater(
           aktivitaetAnlegen(moodle, freigaben,
               kurs: 5, abschnittId: 1, typ: 'page', name: 'ZZ Neu', arbeitsordner: '.', einrueckung: e),

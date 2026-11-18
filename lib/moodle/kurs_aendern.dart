@@ -394,16 +394,17 @@ Future<String> _abschnittSchalten(MoodleZugang moodle, Freigaben freigaben, Kurs
 // Moodle rückt eine Aktivität je Aufruf um eine Stufe ein (cm_moveright) oder
 // aus (cm_moveleft); es gibt keine Aktion „auf Stufe n". Die Zahl der Aufrufe
 // folgt aus der Einrückung, die die Kursstruktur jetzt zeigt. Die Grenzen
-// sind 0 und 16 (Feld indent). Gemessen im Testkurs: Die Aktionen heißen so, ein
-// Aufruf rückt um genau eine Stufe, die Einrückung bleibt beim Verschieben mit
-// cm_move erhalten, und die Kursstruktur zeigt sie sofort. Die Instanz im Test
-// ließ aber nur Stufe 0 und 1 zu; jede weitere Stufe lehnt Moodle ohne Fehler ab.
+// sind 0 und 1: Moodle lässt in Kursformaten mit Komponenten (Themenformat) nur
+// eine Stufe zu; seit Moodle 5.0 setzt cm_moveright fest auf 1 (in 4.x gilt die
+// Grenze 16 nur für Formate ohne Komponenten, die hier nicht unterstützt sind).
+// Gemessen im Testkurs: Die Aktionen heißen so, die Einrückung bleibt beim
+// Verschieben mit cm_move erhalten, und die Kursstruktur zeigt sie sofort.
 // Darum entscheidet allein das Zurücklesen: Zeigt die Kursstruktur nicht die
 // verlangte Einrückung, ist es verified: false, und es wird nicht wiederholt.
 
-const int einrueckungMax = 16;
+const int einrueckungMax = 1;
 
-/// Bricht vor jeder Freigabe ab, wenn die verlangte Einrückung außerhalb von 0–16 liegt.
+/// Bricht vor jeder Freigabe ab, wenn die verlangte Einrückung außerhalb von 0–1 liegt.
 void einrueckungPruefen(int einrueckung) {
   if (einrueckung < 0 || einrueckung > einrueckungMax) {
     throw MoodleFehler('einrueckung muss zwischen 0 und $einrueckungMax liegen (verlangt: $einrueckung). Nichts geändert.');

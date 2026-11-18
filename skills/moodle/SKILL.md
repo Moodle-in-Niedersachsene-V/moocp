@@ -619,8 +619,8 @@ Karte du aber nicht bearbeitest (`references/lernlandkarte.md`).
 
 Eine Aktivität steht auf der Kursseite eingerückt, wenn sie zu der darüberstehenden
 gehört, etwa ein Link zu einem Chatbot unter der Aufgabe, zu der er dient.
-`aktivitaet_anlegen` und `verschieben` nehmen dafür `einrueckung` (0 bis 16, aber viele Instanzen
-lassen nur eine Stufe zu, also 0 oder 1);
+`aktivitaet_anlegen` und `verschieben` nehmen dafür `einrueckung` (0 oder 1: Moodle kennt im Themenformat nur eine
+Einrückungsstufe);
 `verschieben` kann mit `kurs`, `cmid`, `name` und `einrueckung` allein nur einrücken,
 ohne die Stelle zu ändern. Das Anlegen rückt ohne eigene Freigabe ein, das Verschieben
 fragt wie jedes Verschieben. Meldet die Antwort bei der Einrückung `verified: false`,

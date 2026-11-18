@@ -1075,7 +1075,7 @@ Future<String> aktivitaetAnlegen(
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
   // Einrücken folgt direkt auf das Anlegen und braucht keine eigene Freigabe.
-  final einr = einrueckung == null || einrueckung == 0
+  final einr = einrueckung == null
       ? null
       : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 

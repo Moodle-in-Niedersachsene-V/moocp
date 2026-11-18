@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Wiederherstellung: Linkunterschiede bleiben erkennbar; Anhangsreparaturen schützen inzwischen geänderte Dateien und fremde Aktivitäten, und ihre vollständigen Befunde bleiben im Status erhalten.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach, ob Moodle die Einrückung übernommen hat.
 - Wiederherstellung: Die App vergleicht jetzt auch die Texte der wiederhergestellten Aktivitäten mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
 - Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.

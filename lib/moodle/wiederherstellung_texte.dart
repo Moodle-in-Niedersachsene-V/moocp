@@ -18,8 +18,9 @@
 // Einstellungen werden hier nie verglichen; der Bericht nennt das ausdrücklich.
 //
 // Vor dem Vergleich wird nur normalisiert, was sich beim Wiederherstellen von selbst ändert:
-// die Adresse der Instanz (Quelle und Ziel), Platzhalter und Pfade für Dateien, neu vergebene
-// Kennungen in Links auf Aktivitäten und Kurse, Zeilenenden und Leerraum. Alles andere
+// die Adresse der Instanz (Quelle und Ziel), Platzhalter und Pfade für Dateien,
+// Zeilenenden und Leerraum. Ohne belegte Zuordnung bleiben Objektkennungen erhalten;
+// Wiederherstellungsplatzhalter für Objektlinks bleiben eine Prüflücke. Alles andere
 // (Wörter, Tags, Linkziele, Dateinamen) bleibt, ein Unterschied dort ist eine Abweichung.
 // Ein Platzhalter der Sicherung, den die App nicht kennt, ist eine Prüflücke, nie Gleichheit.
 
@@ -156,16 +157,12 @@ Future<Map<String, String>?> zieltexteLesen(MoodleZugang moodle, int cmid) async
   };
 }
 
-final RegExp _viewById = RegExp(r'\$@([A-Z]+)VIEWBYID\*\d+@\$');
-final RegExp _indexById = RegExp(r'\$@([A-Z]+)INDEX\*\d+@\$');
 final RegExp _restToken = RegExp(r'\$@[A-Z0-9_*]+@\$');
 final RegExp _pluginfile = RegExp(r'/pluginfile\.php/\d+/[^/\s"\x27<>]+/[^/\s"\x27<>]+/(?:\d+/)?');
 final RegExp _draftfile = RegExp(r'/draftfile\.php/\d+/user/draft/\d+/');
 /// Moodle hängt bei Namensgleichheit im Dateibereich „ (n)“ vor die Endung an; der Text nennt dann
 /// den Namen mit Zähler. Ob es dieselbe Datei ist, belegt der Inhaltsvergleich der Anhänge.
 final RegExp _zaehler = RegExp(r'(@@PLUGINFILE@@/[^"\x27<>?#\s]*?)%20(?:%28|\()\d+(?:%29|\))(?=\.|["\x27<>?#\s]|$)');
-final RegExp _aktivitaetsId = RegExp(r'(/mod/[a-z0-9_]+/(?:view|index)\.php\?id=)\d+');
-final RegExp _kursId = RegExp(r'(/course/view\.php\?id=)\d+');
 
 /// Der Text ohne das, was sich beim Wiederherstellen von selbst ändert. [instanzen] sind die
 /// Adressen der Quell- und der Zielinstanz (mit Schema, ohne Schrägstrich am Ende).
@@ -176,11 +173,7 @@ String textNormalisiert(String roh, {Iterable<String> instanzen = const []}) {
   // Platzhalter der Sicherung (Quelle) auf die Form im Formular (Ziel) bringen.
   t = t
       .replaceAll(r'$@FILEPHP@$', '@@PLUGINFILE@@')
-      .replaceAll(r'$@SLASH@$', '/')
-      .replaceAllMapped(_viewById, (m) =>
-          m.group(1) == 'COURSE' ? '/course/view.php?id=0' : '/mod/${m.group(1)!.toLowerCase()}/view.php?id=0')
-      .replaceAllMapped(_indexById, (m) =>
-          m.group(1) == 'COURSE' ? '/course/view.php?id=0' : '/mod/${m.group(1)!.toLowerCase()}/index.php?id=0');
+      .replaceAll(r'$@SLASH@$', '/');
   for (final i in instanzen) {
     final ohneSchema = i.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '').replaceFirst(RegExp(r'/+$'), '');
     if (ohneSchema.isEmpty) continue;
@@ -189,9 +182,7 @@ String textNormalisiert(String roh, {Iterable<String> instanzen = const []}) {
   t = t
       .replaceAll(_pluginfile, '@@PLUGINFILE@@/')
       .replaceAll(_draftfile, '@@PLUGINFILE@@/')
-      .replaceAllMapped(_zaehler, (m) => m.group(1)!)
-      .replaceAllMapped(_aktivitaetsId, (m) => '${m.group(1)}0')
-      .replaceAllMapped(_kursId, (m) => '${m.group(1)}0');
+      .replaceAllMapped(_zaehler, (m) => m.group(1)!);
   // Leerraum zwischen zwei Tags ändert die Darstellung nicht.
   return t.replaceAll(RegExp(r'>\s+<'), '><').replaceAll(RegExp(r'\s+'), ' ').trim();
 }

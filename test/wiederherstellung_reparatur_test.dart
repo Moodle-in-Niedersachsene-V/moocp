@@ -12,6 +12,11 @@ import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
+import 'package:moocp/einstellungen.dart';
+import 'package:moocp/profil.dart';
+import 'package:moocp/mcp/mcp_dienst.dart';
+
+import 'mcp_client.dart';
 import 'package:moocp/moodle/formular_lesen.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/moodle/sicherung.dart';
@@ -322,12 +327,30 @@ void main() {
   late Vorgaenge vorgaenge;
   late Vorgang vorgang;
   late Freigaben freigaben;
+  late McpDienst dienst;
+  late McpTestClient client;
+  late Profil profil;
   final titel = <String>[];
   final punkte = <String>[];
 
   /// Was beim Öffnen einer Freigabe geschieht, bevor sie entschieden wird.
   void Function()? beiFreigabe;
   bool? antwort;
+
+  Future<void> starten(Freigaben entscheidungen) async {
+    dienst = McpDienst(
+      Einstellungen(schluessel: 'test', profile: [profil]),
+      zugang,
+      Protokoll(),
+      entscheidungen,
+      arbeit.path,
+      profil: profil,
+      sicherungsordner: sicherung.path,
+    );
+    await dienst.starten();
+    client = McpTestClient(profil.port);
+    await client.initialize();
+  }
 
   setUp(() async {
     moodle = _Moodle();
@@ -337,7 +360,21 @@ void main() {
     zugang = await MoodleZugang.fuerTest(Protokoll(), moodle.basis, benutzer: 'e.mustermann', passwort: 'test');
     final bytes = _archiv();
     File(p.join(sicherung.path, 'b.mbz')).writeAsBytesSync(bytes);
-    vorgaenge = Vorgaenge(sicherung.path);
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    profil = Profil(
+      kennung: 'stable',
+      name: 'Test',
+      adresse: moodle.basis.toString(),
+      port: port,
+      mcpName: 'test',
+      schluessel: 'test',
+    );
+    vorgaenge = Vorgaenge(sicherung.path,
+      profilKennung: profil.kennung,
+      instanzBasis: () => zugang.basis,
+    );
     vorgang = await vorgaenge.neuWiederherstellung(
         kurs: 12,
         datei: 'b.mbz',
@@ -345,7 +382,13 @@ void main() {
     await vorgaenge.aktualisieren(vorgang,
         wiederherstellung: WiederherstellungStand.fertig,
         text: 'Wiederhergestellt.',
-        wiederherstellungAktivitaeten: [(modul: 'page', titel: 'Infoblatt'), (modul: 'resource', titel: 'Handout')]);
+        wiederherstellungAktivitaeten: [(modul: 'page', titel: 'Infoblatt'), (modul: 'resource', titel: 'Handout')],
+    );
+    vorgang.importierteAktivitaeten = [
+      (cmid: 2, modul: 'page', titel: 'Infoblatt'),
+      (cmid: 3, modul: 'resource', titel: 'Handout'),
+    ];
+    await vorgaenge.aktualisieren(vorgang);
     titel.clear();
     punkte.clear();
     beiFreigabe = null;
@@ -360,9 +403,12 @@ void main() {
       final ja = antwort;
       if (ja != null) scheduleMicrotask(() => freigaben.entscheiden(ja));
     });
+    await starten(freigaben);
   });
 
   tearDown(() async {
+    await dienst.stoppen();
+    client.http.close(force: true);
     await moodle.stoppen();
     for (final d in [arbeit, sicherung]) {
       if (d.existsSync()) d.deleteSync(recursive: true);
@@ -381,9 +427,26 @@ void main() {
   }
 
   Future<String> reparieren(String ordner,
-          {int cmid = 2, String name = 'Infoblatt', int kurs = 12, String? vorgangId, Freigaben? mit}) =>
-      anhaengeReparieren(zugang, mit ?? freigaben, vorgaenge,
-          kurs: kurs, cmid: cmid, name: name, ordner: ordner, arbeitsordner: arbeit.path, vorgang: vorgangId);
+          {int cmid = 2, String name = 'Infoblatt', int kurs = 12, String? vorgangId, Freigaben? mit}) async {
+    if (mit != null) {
+      await dienst.stoppen();
+      client.http.close(force: true);
+      await starten(mit);
+    }
+    final r = await client.call('tools/call', {
+      'name': 'anhaenge_reparieren',
+      'arguments': {
+        'kurs': kurs,
+        'cmid': cmid,
+        'name': name,
+        'ordner': ordner,
+        'vorgang': ?vorgangId,
+      },
+    });
+    final text = (r['content'] as List).map((e) => e['text']).join('\n');
+    if (r['isError'] == true) throw MoodleFehler(text);
+    return text;
+  }
 
   group('Plan', () {
     ZielAufnahme ziel({
@@ -519,8 +582,46 @@ void main() {
       expect(moodle.akt[2]!.eingebettet['zwei.png'], _zwei);
       expect(moodle.akt[2]!.text, contains('@@PLUGINFILE@@/bild.png'));
       expect(moodle.schreiben.where((s) => s.startsWith('save')), ['save:2']);
-      final nachher = await vorgaenge.finde(vorgang.id);
-      expect(nachher!.text, contains('Anhangsreparatur: „Infoblatt" repariert und zurückgelesen'));
+      final status = await client.tool('wiederherstellung_status', {
+        'id': vorgang.id,
+      });
+      expect(status, contains('bild.png'));
+      expect(status, contains('SHA-1'));
+      expect(
+        status, contains('Anhangsreparatur: „Infoblatt" repariert und zurückgelesen'));
+    });
+
+    test('parallele Reparaturen behalten beide Befunde im Status', () async {
+      moodle.akt[2]!.eingebettet.remove('bild.png');
+      moodle.akt[3]!.manager.remove('/a.pdf');
+      final seite = await lesen(2);
+      final datei = await lesen(3);
+      ablegen(seite, 'dateien/bild.png', _bild);
+      ablegen(datei, 'bereiche/files/a.pdf', _pdf);
+      final resultate = await Future.wait([
+        reparieren(seite),
+        reparieren(datei, cmid: 3, name: 'Handout'),
+      ]);
+      expect(resultate.every((r) => r.contains('verified: true')), isTrue);
+      final status = await client.tool('wiederherstellung_status', {'id': vorgang.id});
+      expect(status, contains('bild.png'));
+      expect(status, contains('a.pdf'));
+      expect(status, contains('„Infoblatt" repariert und zurückgelesen'));
+      expect(status, contains('„Handout" repariert und zurückgelesen'));
+    });
+
+    test('späterer Status behält frühere Reparatur und neue Prüflücke', () async {
+      moodle.akt[2]!.eingebettet.remove('bild.png');
+      final ordner = await lesen(2);
+      ablegen(ordner, 'dateien/bild.png', _bild);
+      await reparieren(ordner);
+      moodle.status['zwei.png'] = 500;
+      await reparieren(ordner);
+      final status = await client.tool('wiederherstellung_status', {'id': vorgang.id});
+      expect(status, contains('bild.png'));
+      expect(status, contains('Rücklesen: Jede reparierte Datei'));
+      expect(status, contains('zwei.png'));
+      expect(status, contains('HTTP 500'));
     });
 
     test('verändertes Bild: ersetzen, nichts anderes angefasst', () async {
@@ -575,8 +676,12 @@ void main() {
       expect(text, contains('verified: false'));
       expect(text, contains('Abweichung'));
       expect(moodle.schreiben.where((s) => s.startsWith('save')), hasLength(1));
-      final nachher = await vorgaenge.finde(vorgang.id);
-      expect(nachher!.text, contains('nicht vollständig verifiziert'));
+      final status = await client.tool('wiederherstellung_status', {
+        'id': vorgang.id,
+      });
+      expect(status, contains('bild.png'));
+      expect(status, contains('Abweichung beim Rücklesen'));
+      expect(status, contains('nicht vollständig verifiziert'));
     });
 
     test('Stufe „keine": ohne Freigabe, mit Zähler für den Hinweis', () async {
@@ -623,7 +728,48 @@ void main() {
       ablegen(ordner, 'dateien/bild.png', _bild);
       beiFreigabe = () => moodle.akt[2]!.eingebettet['zwei.png'] = utf8.encode('inzwischen anders');
 
-      await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('seit dem Planen geändert'))));
+      await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('seit dem Planen geändert'),
+            ),
+          ),
+        );
+        expect(moodle.schreiben, isEmpty);
+      },
+    );
+
+    for (final fremd in [true, false]) {
+      test(
+        'fehlender Importnachweis verweigert Reparatur (fremd: $fremd)',
+        () async {
+          vorgang.importierteAktivitaeten = fremd
+              ? [(cmid: 99, modul: 'page', titel: 'Infoblatt')]
+              : null;
+          await vorgaenge.aktualisieren(vorgang);
+          moodle.akt[2]!.eingebettet.remove('bild.png');
+          final ordner = await lesen(2);
+          ablegen(ordner, 'dateien/bild.png', _bild);
+          await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>()));
+          expect(titel, isEmpty);
+          expect(moodle.schreiben, isEmpty);
+        },
+      );
+    }
+
+    test('anderer falscher Dateiinhalt während Freigabe bricht ab', () async {
+      moodle.akt[2]!.eingebettet['bild.png'] = utf8.encode('A');
+      final ordner = await lesen(2);
+      ablegen(ordner, 'dateien/bild.png', _bild);
+      beiFreigabe = () =>
+          moodle.akt[2]!.eingebettet['bild.png'] = utf8.encode('B');
+      await expectLater(
+        reparieren(ordner),
+        throwsA(
+          isA<MoodleFehler>().having(
+            (e) => e.meldung,
+            'Meldung',
+            contains('seit dem Planen geändert'),
+          ),
+        ),
+      );
       expect(moodle.schreiben, isEmpty);
     });
 
@@ -702,6 +848,7 @@ void main() {
             kurs: 12, cmid: 2, name: 'Infoblatt', ordner: fremd.path, arbeitsordner: arbeit.path),
         throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('Arbeitsordner'))),
       );
-    });
+    },
+      );
   });
 }

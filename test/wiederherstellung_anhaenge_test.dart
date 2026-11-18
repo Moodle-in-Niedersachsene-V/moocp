@@ -437,10 +437,10 @@ void main() {
 
     const quellInhalt = r'<p>Siehe <a href="https://moodle.schule.example/mod/page/view.php?id=41">Blatt 2</a></p>'
         r'<img class="img-fluid" src="$@FILEPHP@$$@SLASH@$bild.png" alt="Bild">';
-    const zielInhalt = '<p>Siehe <a href="https://m.example/mod/page/view.php?id=77">Blatt 2</a></p>\n'
+    const zielInhalt = '<p>Siehe <a href="https://m.example/mod/page/view.php?id=41">Blatt 2</a></p>\n'
         '<img class="img-fluid" src="@@PLUGINFILE@@/bild.png" alt="Bild">';
 
-    test('kürzere Zieldomain, neue Kennungen, Zeilenenden: keine falsche Differenz, verified', () async {
+    test('kürzere Zieldomain, unveränderte Linkziele, Zeilenenden: keine falsche Differenz, verified', () async {
       final r = await lauf(archivMit('<p>Intro</p>', quellInhalt), form('<p>Intro</p>\r\n', zielInhalt));
       expect(r.nachher!.verified, isTrue, reason: r.status);
       expect(r.nachher!.text, contains('Texte: verglichen, übereinstimmend.'));

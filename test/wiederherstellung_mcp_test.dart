@@ -343,6 +343,7 @@ void main() {
       'files.xml': image
           ? '<files><file id="1"><component>mod_page</component><filename>bild.png</filename><contenthash>0000000000000000000000000000000000000000</contenthash></file></files>'
           : '<files/>',
+      if (!quiz) 'activities/page_7/page.xml': '<activity><page><intro></intro><content></content></page></activity>',
       if (quiz) 'activities/quiz_7/quiz.xml': '<activity contextid="5"><quiz><question_instance><question_reference><questionbankentryid>1</questionbankentryid><version>1</version></question_reference></question_instance></quiz></activity>',
       if (quiz) 'questions.xml': '<questions>${lokal || geteilt ? '<question_category id="1"><contextid>${geteilt ? 6 : 5}</contextid></question_category>' : ''}<question_bank_entry id="1">${lokal || geteilt ? '<questioncategoryid>1</questioncategoryid>' : ''}<idnumber>ZZ-1</idnumber><question_version><question_versions><version>1</version><questions><question><name>ZZ Frage</name></question></questions></question_versions></question_version></question_bank_entry></questions>',
     }.entries) {

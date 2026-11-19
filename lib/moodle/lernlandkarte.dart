@@ -168,6 +168,16 @@ String? lernlandkarteRolle(Map karte, String id) {
   return null;
 }
 
+/// Kennungen der Orte mit Ziel. Ein Ziel ist eine Nummer ungleich 0 oder, in
+/// aufbereiteten Ständen, eine nicht leere Angabe (Modul, Titel).
+Set<String> verknuepfteOrte(Iterable<Map> orte) => {
+  for (final ort in orte)
+    if ((ort['linkedActivity'] is List &&
+            (ort['linkedActivity'] as List).isNotEmpty) ||
+        (ortsziel(ort['linkedActivity']) ?? 0) != 0)
+      '${ort['id']}',
+};
+
 /// Entfernt Ortsbeschriftungen für eine reine Darstellung. Ohne [nurOrte]
 /// gehen alle weg; mit [nurOrte] nur die der genannten Orte (Kennungen wie in
 /// `placestore`), alle anderen Beschriftungen bleiben Teil des Vergleichs. Die

@@ -325,12 +325,22 @@ String steuerSetzen(dom.Element form, Felder f, dom.Element e, Object? wert, Str
       }
       final optionen = e.querySelectorAll('option');
       final s = '$wert';
-      final nachText = _gleichnamigeOptionen(e, s);
+      var nachText = _gleichnamigeOptionen(e, s);
+      final jetzt = e.querySelectorAll('option').where((o) => o.attributes.containsKey('selected')).lastOrNull;
+      if (jetzt != null && nachText.contains(jetzt) && _text(jetzt) == s.trim()) {
+        // Unverändert: die gewählte Option bleibt, auch wenn andere gleich heißen.
+        nachText = [jetzt];
+      } else if (_mehrdeutig(nachText)) {
+        // Genau eine Option mit exakt gleicher Schreibweise geht vor reinen Groß-/Kleinschreibungstreffern.
+        final exakt = nachText.where((o) => _text(o) == s.trim()).toList();
+        if (exakt.length == 1) nachText = exakt;
+      }
       if (_mehrdeutig(nachText)) {
         // Nie still eine wählen: Es würde unter Umständen das falsche Ziel.
         final werte = nachText.map((o) => o.attributes['value'] ?? _text(o)).join(', ');
         throw MoodleFehler('$wo: „$s" passt auf mehrere Möglichkeiten (Werte $werte). '
-            'Nichts wurde geschrieben; der Name muss in Moodle eindeutig sein.');
+            'Nichts wurde geschrieben. Gib stattdessen den Wert der gemeinten Option an '
+            '(einer der genannten Werte), oder mach den Namen in Moodle eindeutig.');
       }
       final o = nachText.firstOrNull ??
           optionen.where((o) => o.attributes['value'] == s).firstOrNull;

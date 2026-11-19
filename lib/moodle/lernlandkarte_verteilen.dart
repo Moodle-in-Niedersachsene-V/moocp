@@ -409,10 +409,7 @@ String _kartenInhalt(Map<String, Object?> karte) {
   store.putIfAbsent('strokeopacity', () => 1);
   // Nur die Beschriftung verknüpfter Orte entsteht in Moodle aus dem Namen des
   // Ziels; die aller übrigen Orte und jede Formänderung zählen mit.
-  final verknuepft = {
-    for (final ort in (store['places'] as List).cast<Map>())
-      if ((ortsziel(ort['linkedActivity']) ?? 0) != 0) '${ort['id']}',
-  };
+  final verknuepft = verknuepfteOrte((store['places'] as List).cast<Map>());
   store['places'] = [
     for (final ort in (store['places'] as List).cast<Map>())
       Map<String, dynamic>.from(ort)..remove('linkedActivity'),

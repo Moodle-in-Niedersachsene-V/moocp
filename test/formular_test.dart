@@ -268,17 +268,36 @@ void main() {
     });
 
     test('Schreiben: ein mehrdeutiger Text bricht ab, ohne etwas zu setzen', () {
-      final form = html_parser.parse(mitZiel).querySelector('form')!;
+      final form = html_parser.parse(mitZiel.replaceFirst(' selected', '').replaceFirst('13"', '13" selected')).querySelector('form')!;
       final felder = formularFelder(form);
       expect(
         () => einstellungenSetzen(form, felder, {'ziel': 'Infoblatt'}),
-        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('mehrere Möglichkeiten'))),
+        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', allOf(contains('mehrere Möglichkeiten'), contains('11, 12'), contains('Wert')))),
       );
-      expect(felder.where((e) => e.key == 'ziel').single.value, '11');
-      // Eindeutiger Text und Wert gehen weiter.
-      expect(einstellungenSetzen(form, felder, {'ziel': 'Anderes'}).single.nachher, 'Anderes');
       expect(felder.where((e) => e.key == 'ziel').single.value, '13');
+      // Der Wert statt des Textes geht.
+      expect(einstellungenSetzen(form, felder, {'ziel': '12'}).single.nachher, 'Infoblatt');
+      expect(felder.where((e) => e.key == 'ziel').single.value, '12');
       expect(einstellungenSetzen(form, felder, {'ziel': '0'}).single.nachher, '(keine)');
+    });
+
+    test('Schreiben: unveränderter gewählter Text ist kein Fehler', () {
+      final form = html_parser.parse(mitZiel).querySelector('form')!;
+      final felder = formularFelder(form);
+      einstellungenSetzen(form, felder, {'ziel': 'Infoblatt'});
+      expect(felder.where((e) => e.key == 'ziel').single.value, '11');
+    });
+
+    test('Schreiben: genau ein exakter Treffer geht vor Groß-/Kleinschreibung', () {
+      const f = '''<form class="mform">
+<div id="fitem_id_ziel" class="mb-3 row fitem"><div class="col-md-3 col-form-label"><label for="id_ziel">Ziel</label></div>
+<div class="col-md-9 felement" data-fieldtype="select"><select name="ziel" id="id_ziel">
+<option value="0" selected>(keine)</option><option value="11">Blatt</option><option value="12">blatt</option></select></div></div>
+</form>''';
+      final form = html_parser.parse(f).querySelector('form')!;
+      final felder = formularFelder(form);
+      einstellungenSetzen(form, felder, {'ziel': 'blatt'});
+      expect(felder.where((e) => e.key == 'ziel').single.value, '12');
     });
   });
 }

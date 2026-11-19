@@ -76,6 +76,10 @@ die Meldung. Welche Schlüssel ein Typ hat, steht nach dem ersten Lesen in
 `einstellungen.json`; beim Anlegen nennt Moodle fehlende Pflichtangaben mit
 Feld und Beschriftung.
 
+Passt der Text eines Auswahlfelds auf mehrere gleich benannte Optionen (Befund
+beim Lesen, Abbruch beim Ändern), frag die Lehrkraft, welches Ziel gemeint ist,
+und gib dann den Wert der Option statt ihres Textes an.
+
 Den Namen setzt `aktivitaet_anlegen` selbst; beim Ändern ist er die
 Einstellung `name`. Sichtbarkeit nie über `einstellungen`, sondern mit
 `sichtbarkeit_setzen` — das geht über die Freigabe.

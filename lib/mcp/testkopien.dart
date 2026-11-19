@@ -297,10 +297,7 @@ extension Testkopien on Testbetrieb {
         karte = [
           ohneOrtsbeschriftung(
             daten['svgcode'],
-            nurOrte: {
-              for (final ort in (store['places'] as List).cast<Map>())
-                if (ort['linkedActivity'] != null) '${ort['id']}',
-            },
+            nurOrte: verknuepfteOrte((store['places'] as List).cast<Map>()),
           ),
           store,
         ];

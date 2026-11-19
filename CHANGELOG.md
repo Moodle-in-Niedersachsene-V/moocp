@@ -3,6 +3,7 @@
 ## 0.13.0
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach, ob Moodle die Einrückung übernommen hat.
+- Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
 - Wiederherstellung: Die App vergleicht jetzt auch die Texte der wiederhergestellten Aktivitäten mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
 - Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.

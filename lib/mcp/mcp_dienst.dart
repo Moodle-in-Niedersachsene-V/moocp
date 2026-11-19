@@ -723,6 +723,8 @@ class McpDienst implements AufrufKontext {
           'Prüft zuerst, dass Moodle noch den Stand vom Lesen zeigt, zeigt der Lehrkraft in der '
           'App eine Änderungsübersicht mit Zeilenvergleich und schreibt nur nach ihrer Freigabe. '
           'Danach Rückleseprobe (verified). Sichtbarkeit: sichtbarkeit_setzen. '
+          'Gruppenwahl und Bildergalerie: nur Beschreibungstext und gemessene normale Optionen bestehender Aktivitäten; '
+          'keine Gruppenauswahl, individuellen Gruppenlimits, Bilder oder Dateien ändern, kein Anlegen. '
           '${MoodleZugang.nurGruppenModule.map(typName).join(", ")}: nur groupmode und groupingid '
           'bestehender Aktivitäten, keine Texte, Dateien, anderen Einstellungen oder unverändertes '
           'Neuspeichern; Optionen frisch aus dem Formular lesen. Gibt es die gewünschte Gruppierung '

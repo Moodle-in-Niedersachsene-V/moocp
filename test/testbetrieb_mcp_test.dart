@@ -485,12 +485,33 @@ void main() {
       expect(text, contains('verified: false'), reason: text);
       expect(extern.erlaubteAenderung, '0');
     });
+    test('$art: Bildänderung hinter größer-Zeichen im Attribut wird abgelehnt', () async {
+      extern.modul = art;
+      extern.vorhanden = true;
+      extern.inhalt = '<p><img alt=">" src="${extern.basis}/draftfile.php/5/user/draft/9/a.png">'
+          '<img alt=">" src="${extern.basis}/draftfile.php/5/user/draft/9/b.png"></p>';
+      freigaben.stufe = Bestaetigungen.keine;
+      await starten();
+      await client.tool('aktivitaet_lesen', {'cmid': 70});
+      final datei = File('${ordner.path}/cm-70/introeditor.html');
+      final vorher = await datei.readAsString();
+      await datei.writeAsString(vorher.replaceAll('a.png', 'tausch.png').replaceAll('b.png', 'a.png').replaceAll('tausch.png', 'b.png'));
+      final text = await client.tool('aendern', {'ordner': 'cm-70'});
+      expect(text, contains('Bilder und Dateien ändern wird nicht unterstützt'), reason: text);
+      expect(extern.formularSpeicherungen, 0);
+    });
     test('$art: Anlegen über MCP bleibt gesperrt', () async {
       await starten();
       final liste = await client.call('tools/list');
       final tool = (liste['tools'] as List).cast<Map>().singleWhere((t) => t['name'] == 'aktivitaet_anlegen');
       final arten = ((tool['inputSchema'] as Map)['properties'] as Map)['typ'] as Map;
       expect(arten['enum'], isNot(contains(art)));
+      final fehler = await client.call('tools/call', {
+        'name': 'aktivitaet_anlegen',
+        'arguments': {'kurs': 12, 'abschnitt_id': 1, 'typ': art, 'name': 'ZZ Probe', 'ordner': 'entwurf'},
+      }, -32602);
+      expect(fehler['message'], contains('at typ'));
+
       expect(extern.formularSpeicherungen, 0);
     });
     test('$art: Auch unreferenzierte Bilddateien werden vor dem Schreiben abgelehnt', () async {
@@ -595,7 +616,7 @@ void main() {
     expect(text, contains('introeditor[text]'));
   });
 
-  test('Gruppenwahl: Texte und andere Einstellungen bleiben gesperrt', () async {
+  test('Gruppenwahl: Nicht gemessene Optionen bleiben gesperrt', () async {
     extern.modul = 'choicegroup';
     extern.vorhanden = true;
     freigaben.stufe = Bestaetigungen.keine;

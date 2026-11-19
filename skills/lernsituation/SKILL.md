@@ -28,7 +28,7 @@ hat ihn **nicht**. Er fragt danach.
 | 1 | **Kurs und Eingaben prüfen** — Steckbrief lesen; fehlt etwas, eine gebündelte Rückfrage | Lehrkraft liefert |
 | 2 | **Zwei bis drei Vorschläge** für die Lernsituation, kurz, mit Arbeitsweise, dazu der Ort im Kurs | Lehrkraft wählt |
 | 3 | **Ausarbeitung** als Entwurf im Arbeitsordner der App | Skill schreibt |
-| 4 | **Selbstprüfung** mit `scripts/pruefe-lernsituation.py` | Skill meldet Befunde |
+| 4 | **Selbstprüfung** mit `lernsituation_pruefen` | Skill meldet Befunde |
 | 5 | **In den Kurs**, verborgen, über den Skill `moodle` | Lehrkraft sieht es in Moodle an |
 
 Zwischen 2 und 3 liegt das Ja der Lehrkraft. Ohne Wahl keine Ausarbeitung. Das Ja gilt für Ausarbeitung und Übertragung zusammen: 3 bis 5 laufen in einem Zug, weil der Entwurf ein Beenden der App nicht übersteht.
@@ -122,7 +122,7 @@ Ein Ordner im **Arbeitsordner der App**, benannt nach der Lernsituation (`LS-<ku
 | Textseite | „Infoblatt 1: …" | Information, getrennt vom Arbeitsblatt | nach Bedarf |
 | Zeichnung | `Z-01-<kurztitel>.svg` in `dateien/` des Blatts | eingebunden mit Bildunterschrift „Abb. n: …" | wo ein Bild mehr sagt |
 
-**Jedes Blatt, das ausgeteilt wird, ist eine eigene Aktivität** — und jedes Blatt steht mit seiner Kennung im Ablaufplan der Handreichung („Arbeitsblatt 1", „Hilfe zu Arbeitsblatt 1"). Ein Blatt, das nirgends genannt ist, wird nie ausgeteilt; eine Kennung ohne Blatt ist ein Loch im Unterricht. Beides prüft das Skript in Schritt 4. **Ordner- und Dateinamen stehen nie im Text**, auch nicht in der Handreichung: In Moodle gibt es nur Aktivitäten, und jede Kennung in einem Verweis wird dort ein Link auf ihr Blatt — online zum Klicken, gedruckt bleibt der Text und trägt allein.
+**Jedes Blatt, das ausgeteilt wird, ist eine eigene Aktivität** — und jedes Blatt steht mit seiner Kennung im Ablaufplan der Handreichung („Arbeitsblatt 1", „Hilfe zu Arbeitsblatt 1"). Ein Blatt, das nirgends genannt ist, wird nie ausgeteilt; eine Kennung ohne Blatt ist ein Loch im Unterricht. Beides prüft `lernsituation_pruefen` in Schritt 4. **Ordner- und Dateinamen stehen nie im Text**, auch nicht in der Handreichung: In Moodle gibt es nur Aktivitäten, und jede Kennung in einem Verweis wird dort ein Link auf ihr Blatt — online zum Klicken, gedruckt bleibt der Text und trägt allein.
 
 **Der Name eines Blatts beginnt mit seiner Kennung** — „Arbeitsblatt 2: …", „Infoblatt 1: …", „Hilfe zu Arbeitsblatt 3: …", „Vertiefung zu Arbeitsblatt 2: …", „Lösung zu Arbeitsblatt 2: …" —, ohne führende Null. Er steht in `lernsituation.json` und wird der Name in der Kursübersicht; mit derselben Kennung verweisen die Blätter aufeinander, so findet man jedes genannte Blatt wieder, auf Papier wie in Moodle. Im Inhalt steht er nicht noch einmal: Moodle zeigt ihn darüber.
 
@@ -146,23 +146,15 @@ verzetteln, und in der Handreichung, damit die Lehrkraft den Takt hält.
 
 ### Schritt 4: Selbstprüfung
 
-```bash
-python scripts/pruefe-lernsituation.py <entwurf>
-```
+Das Werkzeug `lernsituation_pruefen` der App prüft den Entwurf, mit `entwurf` = Ordner des Entwurfs im Arbeitsordner. Die erste Zeile der Antwort nennt das Ergebnis: keine Befunde, Befunde oder nichts zu prüfen.
 
-Das Skript prüft, was sich prüfen lässt: `lernsituation.json` vollständig und jeder Ordner darin genannt, die Seite „SchuCu" mit der Tabelle nach Vorlage, vollständig und allein, jedes Arbeitsblatt mit Lösung, jedes Blatt in der Handreichung genannt und jede genannte Kennung vorhanden, Zeiten des Ablaufplans gegen den Zeitrichtwert, jede Aufgabe mit Zeitrahmen, Checkliste beantwortet, keine Platzhalter, kein Ordner- oder Dateiname im Text. Dazu, ob jedes Blatt für sich steht: Name mit Kennung, Zählung ab 1, jeder Verweis auf Abschnitt, Abbildung oder Aufgabe eines anderen Blatts trifft etwas, jedes Infoblatt wird von einem Arbeitsblatt unter „Dazu" oder in einer „Lies"-Zeile genannt. Und das HTML nach `references/html.md`: keine `style`-Attribute, Überschriften ab `<h3>`, Tabellen mit Klasse, jedes Bild mit Alternativtext in `dateien/` seines Blatts, kein Markdown. Die Befunde gehören in die Antwort, behoben oder benannt. Was das Skript nicht prüfen kann — ob die Situation realistisch ist, ob die Zeit reicht, ob die Aufgaben tragen — prüfst du selbst gegen die Checkliste in `references/didaktik.md` und sagst, wo du unsicher bist.
+Es prüft, was sich prüfen lässt: `lernsituation.json` vollständig und jeder Ordner darin genannt, die Seite „SchuCu" mit der Tabelle nach Vorlage, vollständig und allein, jedes Arbeitsblatt mit Lösung, jedes Blatt in der Handreichung genannt und jede genannte Kennung vorhanden, Zeiten des Ablaufplans gegen den Zeitrichtwert, jede Aufgabe mit Zeitrahmen, Checkliste beantwortet, keine Platzhalter, kein Ordner- oder Dateiname im Text. Dazu, ob jedes Blatt für sich steht: Name mit Kennung, Zählung ab 1, jeder Verweis auf Abschnitt, Abbildung oder Aufgabe eines anderen Blatts trifft etwas, jedes Infoblatt wird von einem Arbeitsblatt unter „Dazu" oder in einer „Lies"-Zeile genannt. Und das HTML nach `references/html.md`: keine `style`-Attribute, Überschriften ab `<h3>`, Tabellen mit Klasse, jedes Bild mit Alternativtext in `dateien/` seines Blatts, kein Markdown. Die Befunde gehören in die Antwort, behoben oder benannt. Was das Werkzeug nicht prüfen kann — ob die Situation realistisch ist, ob die Zeit reicht, ob die Aufgaben tragen — prüfst du selbst gegen die Checkliste in `references/didaktik.md` und sagst, wo du unsicher bist.
 
 ### Schritt 5: In den Kurs
 
-Gleich nach der Prüfung bringt der Skill `moodle` den Entwurf in den Kurs, so wie der Plan aus Schritt 2 es festgelegt hat: den Abschnitt anlegen, dann `lernsituation.json` Eintrag für Eintrag mit `aktivitaet_anlegen` — der Ordner des Eintrags ist der `ordner`, nichts wird umgeschrieben —, und jede weitere Aktivität gleich danach gefüllt: Spalten, Einträge, Wikiseiten, beim Test die Fragen in ihrer Sammlung, bei der Lernlandkarte erst zuletzt die Ziele ihrer Orte, wenn alle Aktivitäten stehen; der Ablauf steht im Skill `moodle`, `references/abschnitte.md`. Bleibt ein Befund, den du nicht beheben kannst, nennst du ihn vorher und fragst, ob trotzdem übertragen wird. Alles entsteht verborgen; ob die App dabei je Blatt eine Freigabe einholt, hängt an der eingestellten Stufe (`status`) — nenn im Plan, womit zu rechnen ist. Zum Schluss werden die Verweise zwischen den Blättern Links — das macht die App mit `links_setzen`, nicht du von Hand, eine Freigabe für alle Seiten zusammen — bei „mittel" keine, denn alles ist gerade verborgen angelegt; bei „alle" nennst du sie im Plan und kündigst sie vor dem Erscheinen an. Danach prüfst du den Stand in Moodle:
+Gleich nach der Prüfung bringt der Skill `moodle` den Entwurf in den Kurs, so wie der Plan aus Schritt 2 es festgelegt hat: den Abschnitt anlegen, dann `lernsituation.json` Eintrag für Eintrag mit `aktivitaet_anlegen` — der Ordner des Eintrags ist der `ordner`, nichts wird umgeschrieben —, und jede weitere Aktivität gleich danach gefüllt: Spalten, Einträge, Wikiseiten, beim Test die Fragen in ihrer Sammlung, bei der Lernlandkarte erst zuletzt die Ziele ihrer Orte, wenn alle Aktivitäten stehen; der Ablauf steht im Skill `moodle`, `references/abschnitte.md`. Bleibt ein Befund, den du nicht beheben kannst, nennst du ihn vorher und fragst, ob trotzdem übertragen wird. Alles entsteht verborgen; ob die App dabei je Blatt eine Freigabe einholt, hängt an der eingestellten Stufe (`status`) — nenn im Plan, womit zu rechnen ist. Zum Schluss werden die Verweise zwischen den Blättern Links — das macht die App mit `links_setzen`, nicht du von Hand, eine Freigabe für alle Seiten zusammen — bei „mittel" keine, denn alles ist gerade verborgen angelegt; bei „alle" nennst du sie im Plan und kündigst sie vor dem Erscheinen an. Danach prüfst du den Stand in Moodle, mit `lernsituation_pruefen` und `abschnitt_id` statt `entwurf`. Das sind dieselben Prüfungen, am frisch gelesenen Abschnitt (`kurs_uebersicht`, dann `aktivitaet_lesen` je Aktivität und `buch_lesen` für ein Buch; fehlt etwas, sagt das Werkzeug, was noch zu lesen ist), dazu die Links: jede Nennung eines Blatts ein Link auf seine Aktivität im Abschnitt, mit der Kennung oder dem ganzen Namen als Text, und keine für Lernende erreichbare Seite, die eine Lösung verlinkt. Die Lehrkraft sieht sich alles in Moodle an und entscheidet dort, was sichtbar wird.
 
-```bash
-python scripts/pruefe-lernsituation.py --moodle <arbeitsordner> <abschnitt_id>
-```
-
-Das sind dieselben Prüfungen, am frisch gelesenen Abschnitt (`kurs_uebersicht`, dann `aktivitaet_lesen` je Aktivität und `buch_lesen` für ein Buch; fehlt etwas, sagt das Skript, was noch zu lesen ist), dazu die Links: jede Nennung eines Blatts ein Link auf seine Aktivität im Abschnitt, mit der Kennung oder dem ganzen Namen als Text, und keine für Lernende erreichbare Seite, die eine Lösung verlinkt. Die Lehrkraft sieht sich alles in Moodle an und entscheidet dort, was sichtbar wird.
-
-Damit ist der Entwurf erledigt. Was sie nach dem Ansehen geändert haben möchte, ändert der Skill `moodle` am frisch gelesenen Stand in Moodle, nicht im Entwurf — auch wenn der Ordner noch da ist; sie kann inzwischen selbst etwas geändert haben. Nach jeder solchen Änderung an Blättern, Namen oder Verweisen läuft dieselbe Prüfung mit `--moodle` noch einmal, denn ein umbenanntes Blatt oder ein neuer Abschnitt reißt Verweise auf den anderen Seiten auf. Fehlt der Ordner vor Schritt 5, weil die App inzwischen beendet wurde, sagst du es, schreibst den Entwurf noch einmal hin und prüfst ihn neu; eine andere Kopie gibt es nicht.
+Damit ist der Entwurf erledigt. Was sie nach dem Ansehen geändert haben möchte, ändert der Skill `moodle` am frisch gelesenen Stand in Moodle, nicht im Entwurf — auch wenn der Ordner noch da ist; sie kann inzwischen selbst etwas geändert haben. Nach jeder solchen Änderung an Blättern, Namen oder Verweisen läuft `lernsituation_pruefen` mit `abschnitt_id` noch einmal, denn ein umbenanntes Blatt oder ein neuer Abschnitt reißt Verweise auf den anderen Seiten auf. Fehlt der Ordner vor Schritt 5, weil die App inzwischen beendet wurde, sagst du es, schreibst den Entwurf noch einmal hin und prüfst ihn neu; eine andere Kopie gibt es nicht.
 
 <!-- <<< gemeinsam/html-kurz.md - von build.py erzeugt, hier nicht bearbeiten -->
 ## HTML schreiben
@@ -183,7 +175,7 @@ Alles, was in Moodle steht, ist HTML: Textseite, Textfeld, Aufgabe, Buchkapitel,
 - **Kein Kopf, kein Fuß, keine Seitenzahl, kein Feld für Name und Datum** im Inhalt: Moodle zeigt den Namen darüber, und beim Drucken setzt der Druck Kopf und Fuß.
 - **Umlaute bleiben Umlaute** — „Uebertragungsmedium" auf einem Blatt ist ein Mangel, kein Ausweg.
 
-Die meisten dieser Regeln prüft die App beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; bei einer Lernsituation prüft sie das Prüfskript schon am Entwurf.
+Die meisten dieser Regeln prüft die App beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; bei einer Lernsituation prüft sie `lernsituation_pruefen` schon am Entwurf.
 <!-- >>> gemeinsam/html-kurz.md -->
 
 ## Die SchuCu-Tabelle: nur nach den Vorlagen
@@ -213,7 +205,7 @@ Datenzellen. Dazu gehören die Absätze unter der Tabelle: der Hinweis
 Beruflichen Gymnasium steht davor die Legende. Sonst steht auf der Seite
 nichts.
 
-**Die Tabelle ist eine Kurzform, die für sich steht**, ohne Verweis auf ein Blatt, weil die SchuCu-Seite bei einer Inspektion allein gelesen wird — und die Handreichung steht ohne sie. Was in welche Zelle gehört, wo es ausführlich steht und woher die Kompetenzbereiche im Beruflichen Gymnasium kommen: `references/vorlagen.md`, Abschnitt „Die SchuCu-Tabelle". Das Prüfskript vergleicht die Tabelle mit den Vorlagedateien.
+**Die Tabelle ist eine Kurzform, die für sich steht**, ohne Verweis auf ein Blatt, weil die SchuCu-Seite bei einer Inspektion allein gelesen wird — und die Handreichung steht ohne sie. Was in welche Zelle gehört, wo es ausführlich steht und woher die Kompetenzbereiche im Beruflichen Gymnasium kommen: `references/vorlagen.md`, Abschnitt „Die SchuCu-Tabelle". `lernsituation_pruefen` vergleicht die Tabelle mit den Vorlagedateien.
 
 ## Was eine Lernsituation ausmacht — die kurze Fassung
 

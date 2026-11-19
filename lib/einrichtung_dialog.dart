@@ -425,9 +425,6 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
               for (final f in s.skillFehler) _hinweis(f),
             ],
             if (s == null) _hinweis('Die Prüfung ist fehlgeschlagen; Einzelheiten stehen im Protokoll.'),
-            if (s != null && !s.python && s.gewaehlt.contains('lernsituation'))
-              _hinweis('Python nicht gefunden. Die Selbstprüfung des Skills lernsituation läuft ohne '
-                  'Python nicht; alles andere schon.'),
             if (_laeuft) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
             Padding(
               padding: const EdgeInsets.only(top: 12),

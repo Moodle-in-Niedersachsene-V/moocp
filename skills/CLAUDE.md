@@ -48,8 +48,8 @@ die Dokumentation auch hier gelten. Aufbau und Befehle für Menschen:
   lesen ist – das SKILL.md wird bei jedem Auftrag ganz geladen.
 - **Die Regeln sind an drei Stellen geprüft:** beim Lesen in der App
   (`lib/moodle/auswertung.dart`, etwa `_mehrAlsRahmen` für die enge
-  `style`-Ausnahme bei Rahmenlinien), am Entwurf im Prüfskript des Skills
-  `lernsituation` (`HtmlRegeln`, `mehr_als_rahmen`) und beschrieben in
+  `style`-Ausnahme bei Rahmenlinien), am Entwurf in `lernsituation_pruefen` für den Skill
+  `lernsituation` (`lib/moodle/lernsituation_pruefung.dart`, `HtmlRegeln`, `mehrAlsRahmen`) und beschrieben in
   `gemeinsam/html.md`. Wer eine Regel ändert, ändert alle drei. Die
   Formelfehler gehen denselben Weg (`lib/moodle/formeln.dart`,
   `formel_fehler`); sie sind keine Befunde, sondern brechen das Schreiben ab.
@@ -66,7 +66,7 @@ Jede Aktivität und jeder Fragetyp, den die App anlegt, hat neben dem Technische
 - **Anregungen, keine Vorschriften.** Ein Modell, das eine Liste erlaubter Einsätze bekommt, schlägt nur noch diese vor, und Lehrkräfte finden Einsätze, an die beim Schreiben niemand dachte. Darum steht überall der Satz, dass ein anderer Einsatz mit Grund willkommen ist. Bindend sind nur die **Grenzen**: Fakten darüber, was eine Art tut, was Lernende voneinander sehen und was die App nicht kann. Sie stehen nur drin, wenn sie gemessen oder im Skill schon als gemessen belegt sind; was an den Einstellungen hängt und nicht gemessen ist, steht als „prüft die Lehrkraft vor dem Einsatz" da. Regeln bleiben nur, wo ein Fehlgriff etwas anderes bewertet, als die Aufgabe meint (Zuordnung, AFB III, variierende Zahlen in `moodle-fragen`).
 - **Hybrid denken.** Papier und Gerät sind kein Entweder-oder. Die Arbeitsweise im Steckbrief des Kurses ist die Ausgangslage, keine Grenze; Vorschläge dagegen sind erwünscht, wenn sie dem Schritt dienen.
 - **Konkret vorschlagen.** Viele Lehrkräfte kennen die Möglichkeiten nicht. Ein Vorschlag ist ein Satz, den man umsetzen kann („das Blatt mit dem Handy fotografieren und in der Aufgabe abgeben"), mit dem, was vorbereitet sein muss.
-- **Kommt eine Art dazu**, bekommt sie ihren Abschnitt im selben Zug; eine Aktivität kommt außerdem in den Entwurf des Skills `lernsituation` (`references/vorlagen.md`, Prüfskript, Übertragung in `moodle/references/abschnitte.md`). Ohne das bleibt sie ungenutzt (Projekt-CLAUDE.md, Arbeitsregel „Unterstützt heißt mehr als anlegbar").
+- **Kommt eine Art dazu**, bekommt sie ihren Abschnitt im selben Zug; eine Aktivität kommt außerdem in den Entwurf des Skills `lernsituation` (`references/vorlagen.md`, `lernsituation_pruefen` in `lib/moodle/lernsituation_pruefung.dart`, Übertragung in `moodle/references/abschnitte.md`). Ohne das bleibt sie ungenutzt (Projekt-CLAUDE.md, Arbeitsregel „Unterstützt heißt mehr als anlegbar").
 
 ## Nach jeder Änderung
 

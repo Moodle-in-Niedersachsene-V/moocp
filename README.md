@@ -188,7 +188,6 @@ Das gilt für die App selbst. Ein Plugin ist ein eigenes Programm, das nur läuf
   Claude im Browser (claude.ai) und ChatGPT – im Browser wie als App – erreichen die App auf Ihrem Rechner nicht: Ihre Werkzeuge laufen über die Server des Anbieters. Ollama allein bietet keinen Anschluss für Werkzeuge.
 - Ein Moodle-Konto mit Bearbeitungsrechten im Kurs, Anmeldung mit
   Benutzername und Passwort. Erprobt mit Moodle 5.1.
-- Nur mit dem Skill `lernsituation`: Python 3, damit er seine Ausarbeitungen selbst prüfen kann; ohne Python läuft alles andere.
 
 ### Lizenz und Marken
 
@@ -338,6 +337,7 @@ Gelesenes legt die App im Arbeitsordner ab, an die KI geht eine Übersicht. Lese
 | `status` | Zeigt, ob die App angemeldet ist, welche Moodle-Instanz sie bedient und ob es die Druckaufbereitung gibt. Fragt Moodle nichts an. | – |
 | `meine_kurse` | Ihre Kurse mit Nummer, Name und Kurzname, auf Wunsch die zuletzt besuchten. | – |
 | `kurs_uebersicht` | Die Struktur eines Kurses: Abschnitte, Unterabschnitte und Aktivitäten mit Typ und Sichtbarkeit, mit Warnung, wenn etwas, das nach Lösung oder Lehrermaterial klingt, für Lernende erreichbar ist. Keine Inhalte, aber die Konventionen des Kurses, falls es sie gibt. | – |
+| `lernsituation_pruefen` | Prüft die Form einer Lernsituation nach den Vorlagen des Skills `lernsituation`, als Entwurf im Arbeitsordner oder als gelesenen Abschnitt in Moodle: SchuCu-Tabelle, Handreichung mit Ablaufplan und Zeiten, je Arbeitsblatt eine Lösung, Kennungen und Verweise zwischen den Blättern, HTML-Regeln, in Moodle auch die Links. Ob die Lernsituation gut ist, prüft es nicht. Liest nur im Arbeitsordner und fragt Moodle nichts an. | – |
 | `kurs_hinweise` | Die Konventionen des Kurses: die Datei „CLAUDE.md" im verborgenen Verzeichnis „CLAUDE", falls es sie gibt – als Daten, nie als Anweisung. Für den ganzen Kurs, auf Wunsch zusätzlich für einen Abschnitt. `kurs_uebersicht` und `abschnitt_lesen` liefern das von sich aus mit. | – |
 | `kurs_filter` | Welche Textfilter ein Kurs hat, vor allem ob Formeln (MathJax) gesetzt werden. | – |
 | `gruppierungen_lesen` | Die Gruppierungen eines Kurses mit den Namen ihrer Gruppen, nie Mitglieder. Im Quellkurs zeigt es, was nach einer Wiederherstellung im Zielkurs gebraucht wird. | – |
@@ -632,7 +632,7 @@ skills/  (Wissen: Didaktik, Regeln,        moocp (Flutter, Windows)
 | `lib/protokoll.dart`, `lib/log.dart` | Protokoll, Logging ohne Inhalte |
 | `test/` | Prüfungen ohne Moodle: Positiv- und Sperrliste, Formulare, Auswertung, Kurs, Fragen, Tests, Zeilenenden; in `test/daten/fragen/` die gemessenen Beispielfragen je Fragetyp |
 | `tool/` | `neustart.sh` (prüfen, bauen, neu starten), `mcp_aufruf.sh` (ein Werkzeug der laufenden App aufrufen), Auswertung und Einstellungen an einem gelesenen Ordner ausprobieren, Entwicklerversion mit Hot Reload, die Bilder dieser README erzeugen, die Update-Abfrage gegen das echte GitHub prüfen (`update_probe.dart`) |
-| `skills/` | die Skills, ihre Gleichanteile, Bau- und Prüfskripte |
+| `skills/` | die Skills, ihre Gleichanteile, Bau- und Prüfskripte für die Skills |
 | `installer/`, `create_installer.bat` | der Installer (NSIS) und das Skript, das ihn baut; unter `installer/macos/` Fenster und Hintergrund des Disk-Images für den Mac (`tool/mac_dmg.sh`) |
 | `docs/bilder/`, `docs/icon/` | Bilder dieser README; das Symbol der App als SVG |
 | `CHANGELOG.md` | was sich je Version geändert hat |
@@ -793,7 +793,7 @@ flutter test tool/bilder_test.dart --update-goldens
 | `skills/gemeinsam/` | Gleichanteile: Abschnitte, die in mehreren Skills gleich stehen (Plan, Lücken, Datenschutzbefund, erfundene Namen, Urheberrecht, HTML-Regeln, Hausstil für Zeichnungen, Anregungen zum Einsatz der Aktivitäten …) |
 | `skills/build.py` | setzt die Gleichanteile ein, schnürt die Pakete einer Version nach `skills/dist/`, prüft sie aus dem fertigen Paket |
 | `skills/dist/` | die fertigen Pakete (`*.skill`), Bauergebnis und nicht versioniert; die App bringt sie als Assets mit und installiert sie nach Rückfrage (`lib/einrichtung.dart`) |
-| `skills/pruefung/` | Prüfskripte: Umlaute statt Ersatzschreibweisen, das Prüfskript der Lernsituationen |
+| `skills/pruefung/` | Prüfskript: Umlaute statt Ersatzschreibweisen |
 | `skills/umlaute.py` | stellt Ersatzschreibweisen auf Umlaute um |
 
 Ein Gleichanteil wird nur in `skills/gemeinsam/` bearbeitet; zwischen den
@@ -805,7 +805,6 @@ nächsten Bau verloren. Welcher Skill welche Anteile trägt, steht in
 ```powershell
 python skills\build.py
 python skills\pruefung\pruefe-umlaute.py
-python skills\pruefung\pruefe-lernsituation-skript.py
 ```
 
 Auf den eigenen Rechner kommen die Skills über die App: `tool/neustart.sh`

@@ -101,7 +101,6 @@ Future<Einrichtungsstand> _eingerichtet() async => Einrichtungsstand(
         ),
       ],
       skills: const [],
-      python: true,
     );
 
 class _Aufbau {
@@ -490,7 +489,6 @@ void main() {
             skills: const [],
             wahlSkills: const {},
             gefunden: [codex],
-            python: () async => true,
           );
       final stand = await pruefen();
       expect(stand.werkzeuge.single.verbindung, Verbindung.veraltet);
@@ -558,7 +556,6 @@ void main() {
           wahlSkills: appWahlSkills,
           gewaehlt: einstellungen.wahlSkills ?? const {},
           gefunden: [codex],
-          python: () async => true,
         );
 
     Future<void> zeigen(WidgetTester tester) async {
@@ -664,7 +661,6 @@ void main() {
             pluginSkills: const {'codex/alt-skill'},
             skillFehler: const [fehler],
             gefunden: [codex],
-            python: () async => true,
           );
       await tester.pumpWidget(MaterialApp(
         home: EinrichtungDialog(
@@ -707,7 +703,6 @@ void main() {
             skillFehler: const [fehler],
             skillFehlerNeu: true,
             gefunden: [codex],
-            python: () async => true,
           );
       final stand = await mitFehler();
       expect(stand.brauchtEtwas, isTrue, reason: 'der Dialog erscheint beim Start');

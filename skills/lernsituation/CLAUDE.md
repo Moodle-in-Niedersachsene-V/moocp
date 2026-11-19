@@ -3,7 +3,7 @@
 Entwicklungsnotizen; nicht Teil des Pakets. Allgemeines zur Pflege der
 Skills: [../CLAUDE.md](../CLAUDE.md).
 
-Der Skill entwirft für einen Kurs – Prosa, Vorlagen und ein Prüfskript –,
+Der Skill entwirft für einen Kurs – Prosa und Vorlagen; geprüft wird mit dem Werkzeug `lernsituation_pruefen` der App (`lib/moodle/lernsituation_pruefung.dart`) –,
 schreibt den Entwurf als HTML in den Arbeitsordner der App und gibt ihn
 gleich nach der Prüfung an den Skill `moodle`. Lesen und Schreiben in Moodle
 bleiben bei `moodle`; vom Kurs kennt dieser Skill die Konventionen samt
@@ -11,8 +11,8 @@ Steckbrief und die Anregungen, welche Aktivität wofür taugt
 (`gemeinsam/einsatz.md`). Eine Lernsituation außerhalb von Moodle ist nicht
 vorgesehen: Was der Entwurf an Aktivitäten nicht tragen kann, nutzt der Skill
 nie, also wächst er mit jeder Aktivität, die die App kann. `references/beispiel/` ist zugleich Muster für den Agenten und
-Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
-ändert, lässt die Prüfung laufen.
+Fixture für `test/lernsituation_pruefung_test.dart` – wer das Beispiel
+ändert, lässt diesen Test laufen.
 
 ## Nicht verhandelbar
 
@@ -28,7 +28,7 @@ Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
 - **Erst zwei bis drei Vorschläge, dann die Ausarbeitung** – der Plan (A5) in
   seiner natürlichen Form.
 - **Jedes Blatt eine Aktivität, jede in der Handreichung genannt, jedes
-  Arbeitsblatt mit Lösung.** Das prüft das Skript.
+  Arbeitsblatt mit Lösung.** Das prüft `lernsituation_pruefen`.
 
 ## Entscheidungen
 
@@ -38,21 +38,21 @@ Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
   Stillschweigend weglassen gilt nicht.
 - **Binnendifferenzierung als Zusatzblatt** („Vertiefung" führt weiter, „Hilfe" stützt zum selben Ziel), nicht als drei Fassungen desselben Blatts – dreifache Pflege und eine Schublade für die Lernenden. Die Namen sagen, was das Blatt tut, nicht, für wen es ist. Verworfen: „Plus"/„Basis" (erklären sich nicht, sortieren in Stärkere und Schwächere, „Basis" liest sich als das Grundlegende für alle); „Zusatzaufgabe" (stößt sich mit den Aufgaben darauf).
 - **Der Entwurf ist HTML in der Form der Werkzeuge** (Festlegung des Nutzers): `lernsituation.json` mit Abschnitt und Aktivitäten (Reihenfolge, Typ, Name, Einstellungen), je Aktivität ein Ordner mit `page.html` bzw. `introeditor.html` und `dateien/`, ein Buch mit `kapitel.json` und `kapitel-<id>/content_editor.html` wie bei `buch_lesen`. Jedes Blatt wird einmal geschrieben, so wie es in Moodle steht; die Übertragung legt nur an. Verworfen: der Entwurf in Markdown mit Umwandlung beim Anlegen – er stammte aus der Zeit, als der Ordner ein bleibendes, lesbares Ergebnis sein sollte; seit Moodle maßgeblich ist (E17), liest ihn niemand, jedes Blatt wurde zweimal geschrieben, die Umwandlung war eine Fehlerquelle, und SchuCu-Tabelle, Kästen und Platz zum Ausfüllen standen ohnehin als HTML im Markdown.
-- **Ein Leser für Entwurf und Moodle:** Das Prüfskript liest beide in dieselbe Liste von Aktivitäten (Name, HTML) und prüft an einer Prüfform, in die `ZuMarkdown` das HTML bringt – die festen Formen lassen sich an Text einfacher lesen als an HTML. Die Prüfform lebt nur während der Prüfung. Nur am Entwurf: `lernsituation.json`, Ordner, HTML-Regeln (in Moodle meldet sie die App selbst); nur in Moodle: die Links.
-- **Die Links setzt die App** (`links_setzen`, `lib/moodle/links.dart`), geprüft werden sie im Skript (`links`). Die App kennt die Kennung nur allgemein – Namensanfang vor dem Doppelpunkt, mit Buchstaben vorn und Zahl hinten –, das Skript die festen Formen (`BLATT`, `ZIEL`). Für jede Kennung nach diesen Formen setzt die App genau die Links, die das Skript verlangt; wer eine Form ändert oder hinzufügt, prüft das an beiden Stellen, am einfachsten mit einer echten Übertragung und `--moodle` danach.
-- **Kennung im Namen** (Festlegung des Nutzers): „Arbeitsblatt n", „Infoblatt n", „Hilfe/Vertiefung zu Arbeitsblatt n", „Lösung zu …", ohne führende Null. Der Name ist der in der Kursübersicht, darum dieselbe Kennung in jedem Verweis; das Skript erkennt die Rolle einer Aktivität an ihm (dazu „SchuCu", „Lehrerhandreichung", „Handlungssituation"), nicht am Ordner. Die Ordner heißen `ab-nn-…`, `ib-nn-…` nur, damit sie sortieren; im Text steht keiner. „Blatt" passt auch digital – das Wort ist in der Schule vom Papier gelöst, Moodle selbst sagt Textseite und Verzeichnis. Verworfen: „AB-03"/„IB-01" im Titel (Insiderkürzel); „Aufgabe n" (stößt sich mit den Aufgaben auf dem Blatt, dem Moodle-Typ Aufgabe und „Lösung zu Aufgabe 3"); „Gut zu wissen n" (klingt freiwillig, obwohl die „Lies"-Zeile es verlangt, und passt in keinen Satz); „Info n" (so heißt ein Kasten); Auftrag, Arbeitsauftrag, Schritt, Lernaufgabe (alle schon belegt: Handlungssituation, Einordnung beim Beurteilen, Ablaufplan, Aufgaben darauf).
-- **Weitere Aktivitäten ohne Kennung, genannt in Anführungszeichen** (Festlegung des Nutzers): Board, Kanban, Wiki, Fortschrittsliste, Test, Verzeichnis, Datei, Link heißen, wozu sie da sind („Unsere VLAN-Aufteilung"), und Blätter wie Handreichung nennen den ganzen Namen in Anführungszeichen. Online zeigt das Icon den Typ, gedruckt findet man den Namen auf der Kursseite; eine Kennung wäre Ballast. `links_setzen` verlinkt nur in Anführungszeichen, damit ein Test namens „Test" nicht jedes Wort „Test" trifft; das Skript sucht dieselben Zeichen (`ZITIERT`). Jede steht im Ablaufplan, sonst benutzt sie niemand. Verworfen: Kennungen nach Typ oder Rolle („Pinnwand 1: …").
-- **Jedes Blatt steht für sich** (Festlegung des Nutzers): Zählung je Blatt ab 1, Verweise mit Kennung und Stelle, Teilen nur an einer inhaltlichen Grenze – jedes Blatt wird einzeln gedruckt, ausgeteilt und nachgelesen. Die Verweise haben feste Formen, weil das Skript nur feste Formen prüfen kann. Verwiesen wird nur vom Arbeitsblatt auf das, was es braucht („Dazu", „Lies"); das Skript meldet ein Infoblatt, das kein Arbeitsblatt nennt. Verworfen: Rückverweise auf dem Infoblatt („Gehört zu" im Kopf, „→ für" unter jedem Abschnitt) – sie doppelten „Dazu" und „Lies", mussten bei jeder Änderung an einem Arbeitsblatt nachgezogen werden, und Lehrkräfte empfanden sie als zu viel. Ebenso Zeichnungen als eigene Zeilen in der Materialübersicht: Sie gehören zu ihrem Blatt.
-- **Infoblätter sind kein Muss** (Festlegung des Nutzers): Neues Wissen kommt aus einem eigenen Infoblatt, aus Vorhandenem (Lehrbuch, Tabellenbuch, Programmhilfe, Netz) oder aus einer Recherche, die die Aufgabe ausdrücklich verlangt – die Klasse hat mehr Quellen als unsere Blätter, und Recherchieren ist selbst ein Lernziel. Welcher Weg, entscheidet die Lehrkraft im Vorschlag (Zeile „Information"); im Zweifel wird gefragt, statt vorsorglich ein Infoblatt anzulegen. Titel und Seiten von Büchern nennt die Lehrkraft, nie der Skill. Das Skript prüft nur Verweise auf eigene Infoblätter; ob eine Lehrbuchseite stimmt, kann es nicht wissen. Vorwissen aus früheren Lernsituationen steht in der Handreichung, nicht in einer „Lies"-Zeile.
-- **Die Form ist Vertrag, nicht Stil**, weil das Skript sie liest:
+- **Ein Leser für Entwurf und Moodle:** Die Prüfung liest beide in dieselbe Liste von Aktivitäten (Name, HTML) und prüft an einer Prüfform, in die `ZuMarkdown` das HTML bringt – die festen Formen lassen sich an Text einfacher lesen als an HTML. Die Prüfform lebt nur während der Prüfung. Nur am Entwurf: `lernsituation.json`, Ordner, HTML-Regeln (in Moodle meldet sie die App selbst); nur in Moodle: die Links.
+- **Die Links setzt die App** (`links_setzen`, `lib/moodle/links.dart`), geprüft werden sie in `lernsituation_pruefen` (`links`). Die App kennt die Kennung nur allgemein – Namensanfang vor dem Doppelpunkt, mit Buchstaben vorn und Zahl hinten –, `lernsituation_pruefen` die festen Formen (`BLATT`, `ZIEL`). Für jede Kennung nach diesen Formen setzt die App genau die Links, die `lernsituation_pruefen` verlangt; wer eine Form ändert oder hinzufügt, prüft das an beiden Stellen, am einfachsten mit einer echten Übertragung und `lernsituation_pruefen` mit `abschnitt_id` danach.
+- **Kennung im Namen** (Festlegung des Nutzers): „Arbeitsblatt n", „Infoblatt n", „Hilfe/Vertiefung zu Arbeitsblatt n", „Lösung zu …", ohne führende Null. Der Name ist der in der Kursübersicht, darum dieselbe Kennung in jedem Verweis; `lernsituation_pruefen` erkennt die Rolle einer Aktivität an ihm (dazu „SchuCu", „Lehrerhandreichung", „Handlungssituation"), nicht am Ordner. Die Ordner heißen `ab-nn-…`, `ib-nn-…` nur, damit sie sortieren; im Text steht keiner. „Blatt" passt auch digital – das Wort ist in der Schule vom Papier gelöst, Moodle selbst sagt Textseite und Verzeichnis. Verworfen: „AB-03"/„IB-01" im Titel (Insiderkürzel); „Aufgabe n" (stößt sich mit den Aufgaben auf dem Blatt, dem Moodle-Typ Aufgabe und „Lösung zu Aufgabe 3"); „Gut zu wissen n" (klingt freiwillig, obwohl die „Lies"-Zeile es verlangt, und passt in keinen Satz); „Info n" (so heißt ein Kasten); Auftrag, Arbeitsauftrag, Schritt, Lernaufgabe (alle schon belegt: Handlungssituation, Einordnung beim Beurteilen, Ablaufplan, Aufgaben darauf).
+- **Weitere Aktivitäten ohne Kennung, genannt in Anführungszeichen** (Festlegung des Nutzers): Board, Kanban, Wiki, Fortschrittsliste, Test, Verzeichnis, Datei, Link heißen, wozu sie da sind („Unsere VLAN-Aufteilung"), und Blätter wie Handreichung nennen den ganzen Namen in Anführungszeichen. Online zeigt das Icon den Typ, gedruckt findet man den Namen auf der Kursseite; eine Kennung wäre Ballast. `links_setzen` verlinkt nur in Anführungszeichen, damit ein Test namens „Test" nicht jedes Wort „Test" trifft; `lernsituation_pruefen` sucht dieselben Zeichen (`ZITIERT`). Jede steht im Ablaufplan, sonst benutzt sie niemand. Verworfen: Kennungen nach Typ oder Rolle („Pinnwand 1: …").
+- **Jedes Blatt steht für sich** (Festlegung des Nutzers): Zählung je Blatt ab 1, Verweise mit Kennung und Stelle, Teilen nur an einer inhaltlichen Grenze – jedes Blatt wird einzeln gedruckt, ausgeteilt und nachgelesen. Die Verweise haben feste Formen, weil `lernsituation_pruefen` nur feste Formen prüfen kann. Verwiesen wird nur vom Arbeitsblatt auf das, was es braucht („Dazu", „Lies"); `lernsituation_pruefen` meldet ein Infoblatt, das kein Arbeitsblatt nennt. Verworfen: Rückverweise auf dem Infoblatt („Gehört zu" im Kopf, „→ für" unter jedem Abschnitt) – sie doppelten „Dazu" und „Lies", mussten bei jeder Änderung an einem Arbeitsblatt nachgezogen werden, und Lehrkräfte empfanden sie als zu viel. Ebenso Zeichnungen als eigene Zeilen in der Materialübersicht: Sie gehören zu ihrem Blatt.
+- **Infoblätter sind kein Muss** (Festlegung des Nutzers): Neues Wissen kommt aus einem eigenen Infoblatt, aus Vorhandenem (Lehrbuch, Tabellenbuch, Programmhilfe, Netz) oder aus einer Recherche, die die Aufgabe ausdrücklich verlangt – die Klasse hat mehr Quellen als unsere Blätter, und Recherchieren ist selbst ein Lernziel. Welcher Weg, entscheidet die Lehrkraft im Vorschlag (Zeile „Information"); im Zweifel wird gefragt, statt vorsorglich ein Infoblatt anzulegen. Titel und Seiten von Büchern nennt die Lehrkraft, nie der Skill. `lernsituation_pruefen` prüft nur Verweise auf eigene Infoblätter; ob eine Lehrbuchseite stimmt, kann es nicht wissen. Vorwissen aus früheren Lernsituationen steht in der Handreichung, nicht in einer „Lies"-Zeile.
+- **Die Form ist Vertrag, nicht Stil**, weil `lernsituation_pruefen` sie liest:
   Aufgabenkopf `<h3>Aufgabe n (n min · Sozialform · AFB x)</h3>`, Ablaufplan
   mit den Spalten „Zeit" und „Material" und einer Summenzeile, Checkliste mit
   dritter Spalte „Woran man es sieht", Name mit Kennung, Abschnitte
   `<h3>n. …</h3>`, Bildunterschrift `<p><em>Abb. n: …</em></p>`, „Lies"-Zeile
   und „Dazu" als eigene Absätze und die Verweisformen. Wer die Vorlagen in `references/vorlagen.md`
-  ändert, ändert das Skript mit.
-- **Zeitrichtwert in UStd, Ablaufplan in Minuten**, 1 UStd = 45 min; das
-  Skript lässt 10 % Abweichung zu.
+  ändert, ändert `lernsituation_pruefen` mit.
+- **Zeitrichtwert in UStd, Ablaufplan in Minuten**, 1 UStd = 45 min;
+  `lernsituation_pruefen` lässt 10 % Abweichung zu.
 - **Beurteilen heißt Hilfestellung, nicht Urteil:** keine Punkte, sondern ein
   kurzer Bericht nach Priorität (Muss/Soll/Kann, je mit Beleg und Vorschlag);
   ist keine Lernsituation erkennbar, erklärt er, woran man das sieht und was
@@ -64,7 +64,7 @@ Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
 
 ## SchuCu-Tabelle
 
-- Die Vorlagen sind Dateien, das Skript liest sie:
+- Die Vorlagen sind Dateien, `lernsituation_pruefen` liest sie:
   `references/schucu-berufsschule.html` ist die Vorlage des Nutzers wörtlich;
   `schucu-bg.html` ist seine Vorlage mit drei von ihm festgelegten Änderungen
   (Titel und geplanter Zeitrichtwert über den Autoren, der Block „Situation"
@@ -82,7 +82,7 @@ Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
   und die kommt ohne die Tabelle aus – daher dort die Abschnitte Lernumgebung
   und Leistungsbewertung. Nur Autor, curricularer Bezug und die
   BG-Kompetenzbereiche stehen allein in der Tabelle. Verweise in der Tabelle
-  prüft das Skript bewusst nicht, auf Wunsch des Nutzers vorerst.
+  prüft `lernsituation_pruefen` bewusst nicht, auf Wunsch des Nutzers vorerst.
 - **Reihenfolge im Abschnitt** (Festlegung des Nutzers): SchuCu,
   Handreichung, dann die Handlungssituation und der Ablaufplan; die
   Lehrkraft soll ihre Informationen sofort sehen. Lösungen verborgen direkt
@@ -94,7 +94,7 @@ Fixture für `pruefung/pruefe-lernsituation-skript.py` – wer das Beispiel
   12 000 Zeichen ist eine Textseite). Ob „Buch drucken" mit der eigenen
   Druckaufbereitung der Instanz sauber druckt, ist nicht gemessen; der Nutzer
   geht davon aus.
-- Das Skript vergleicht das **Gerüst** – je Zelle Klasse, `colspan` und
+- `lernsituation_pruefen` vergleicht das **Gerüst** – je Zelle Klasse, `colspan` und
   Beschriftung, dazu die Absätze darunter –, nicht eine Feldliste.
 - **Das Design außerhalb von Moodle** steht hier und nicht im Paket, weil kein
   Ablauf des Skills ODT oder DOCX erzeugt; gedruckt wird aus Moodle. Gebraucht

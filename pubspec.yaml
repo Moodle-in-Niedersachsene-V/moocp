@@ -122,6 +122,10 @@ flutter:
   assets:
     - skills/dist/
     - LICENSE.md
+    # Die CD-Vorlagen der SchuCu-Tabelle für das Werkzeug lernsituation_pruefen
+    # (lib/moodle/lernsituation_pruefung.dart); der Skill ist ihre einzige Quelle.
+    - skills/lernsituation/references/schucu-berufsschule.html
+    - skills/lernsituation/references/schucu-bg.html
 
   # To add assets to your application, add an assets section, like this:
   # assets:

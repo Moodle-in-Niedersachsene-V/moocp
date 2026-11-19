@@ -1,7 +1,7 @@
 // Formelfehler: Stellen im HTML, an denen MathJax eine LaTeX-Formel nicht
 // oder falsch setzen würde. Die Regeln stehen für die KI in
-// skills/gemeinsam/html.md („Formeln"); dasselbe prüft das Prüfskript des
-// Skills lernsituation am Entwurf (formel_fehler).
+// skills/gemeinsam/html.md („Formeln"); dasselbe prüft lernsituation_pruefen
+// am Entwurf (lernsituation_pruefung.dart, _formelFehler).
 //
 // Ein Formelfehler ist ein Syntaxfehler, kein Schönheitsfehler: Die
 // Lernenden sehen kaputten Text. Deshalb bricht jedes Schreiben ab, dessen

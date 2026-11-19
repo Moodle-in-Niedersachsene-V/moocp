@@ -574,9 +574,12 @@ vergleicht sie mit deiner Datei (alles, was du geschrieben hast, muss da sein;
 was Moodle ergänzt, ist erlaubt), öffnet Bearbeitungsformular und Vorschau und
 speichert das Formular einmal unverändert als Entwurf – so steht fest, dass
 eine Kollegin die Frage von Hand weiterbearbeiten kann. Die Probeversion löscht
-sie wieder. Fällt eine Frage durch, löscht die App sie (nur das, was dieser
-Aufruf angelegt hat) und nennt den Befund; du besserst die Datei nach und
-importierst neu. **`verified: true` heißt: alle vier Teile bestanden.** Steht in
+sie wieder. Fällt eine Frage durch, nennt die App den Befund und ob sie
+aufgeräumt wurde. Fehlt ein direkter Herkunftsnachweis für ihre Nummer oder ist
+der Schreibausgang unklar, bleibt sie zur manuellen Prüfung stehen und kann
+weiterhin in Tests aktiv sein. Erkläre das der Lehrkraft mit der genannten
+Nummer; das ist kein Auftrag zum Löschen oder erneuten Importieren.
+**`verified: true` heißt: alle vier Teile bestanden.** Steht in
 der Antwort „nicht geprüft", hat sich ein Teil nicht prüfen lassen, etwa weil
 die Instanz den Status „Entwurf" nicht anbietet – das ist kein Durchfallen,
 aber auch kein `verified`, und du sagst es der Lehrkraft so. Prototypen legst
@@ -847,7 +850,10 @@ anderer Typ), ist nichts geschehen.
   improvisierst keinen dritten Weg; die Lehrkraft kann ihre Moodle-Administration
   bitten, das Plugin zu installieren.
 - **Wie bei jedem Schreiben:** `verified: true` heißt, die Rundlaufprobe ist
-  bestanden; durchgefallene Versionen hat die App schon wieder gelöscht. Nach
+  bestanden. Das Plugin meldet die neue Versionsnummer nicht direkt; die App
+  ermittelt sie durch Rücklesen. Durchgefallene importierte Versionen bleiben
+  deshalb zur manuellen Prüfung stehen und können in Tests aktiv sein. Gib
+  Nummer und Befund weiter; die App löscht nur direkt bestätigte Probeversionen. Nach
   einer Sperre („Ausgang unklar") wiederholst du nicht, sondern sagst es der
   Lehrkraft: Sie löst die Sperre selbst in der App.
 

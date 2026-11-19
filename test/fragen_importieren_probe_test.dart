@@ -53,13 +53,14 @@ void main() {
     expect(moodle.eintraege.single.typ, 'formulas');
   });
 
-  test('Verliert Moodle beim Anlegen etwas, wird die neue Frage wieder gelöscht', () async {
+  test('Verliert Moodle beim Anlegen etwas, bleibt eine nur aus Export bekannte Nummer geschützt', () async {
     moodle.beimSpeichern = (x) => x.replaceAll(RegExp(r'<answer.*?</answer>', dotAll: true), '');
     final r = await importieren('shortanswer', 'ZZ Neu', 'zz-neu');
     expect(r.verified, isFalse);
     expect(r.text, contains('NICHT bestanden'));
-    expect(moodle.eintraege.where((e) => e.versionen.isNotEmpty), isEmpty, reason: 'nichts Fehlerhaftes bleibt stehen');
-    expect(moodle.geloescht, hasLength(1));
+    expect(moodle.eintraege.single.versionen, hasLength(1));
+    expect(moodle.geloescht, isEmpty);
+    expect(r.text, contains('kann in Tests aktiv sein'));
   });
 
   test('Eine vorhandene Frage wird nie angefasst', () async {

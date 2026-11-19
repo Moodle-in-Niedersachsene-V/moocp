@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/moodle/fragen_version.dart';
+import 'package:moocp/moodle/fragen_xml.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -158,7 +159,7 @@ void main() {
     expect(schreibanfragen(), 0);
   });
 
-  test('Fällt die Rundlaufprobe durch, wird die neue Version gelöscht -- nur sie', () async {
+  test('Fehlgeschlagene Probe löscht keine nur aus dem Export ermittelte Version', () async {
     final e = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
     final alt = e.neueste;
     // Moodle „verliert" beim Speichern die Antwort.
@@ -166,9 +167,24 @@ void main() {
     final bericht = await los(datei([(alt, 'B')]));
     expect(bericht, contains('verified: false'));
     expect(bericht, contains('NICHT bestanden'));
-    expect(e.versionen.map((v) => v.id), [alt.id], reason: 'die fehlerhafte Version ist weg, die alte unverändert');
-    expect(moodle.geloescht, hasLength(1));
-    expect(moodle.geloescht.single, isNot(alt.id));
+    expect(e.versionen, hasLength(2));
+    expect(moodle.geloescht, isEmpty);
+    expect(bericht, contains('kann in Tests aktiv sein'));
+    expect(bericht, contains('Nicht erneut schreiben'));
+  });
+
+  test('Paralleles Speichern nach dem Import berechtigt niemals zum Löschen der fremden Version', () async {
+    final e = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    final alt = e.neueste;
+    late DoppelVersion fremd;
+    moodle.nachPluginImport = (d) => fremd = d.neueVersion(e, antwort: 'Von Hand');
+    final bericht = await los(datei([(alt, 'B')]));
+    expect(bericht, contains('verified: false'));
+    expect(e.versionen, hasLength(3));
+    expect(e.neueste.id, fremd.id);
+    expect(e.neueste.xml, contains('Von Hand'));
+    expect(moodle.geloescht, isEmpty);
+    expect(moodle.gespeichertMitStatus, isEmpty);
   });
 
   test('Nach einer Sperre (unklarer Ausgang) wird nicht wiederholt', () async {
@@ -182,5 +198,29 @@ void main() {
     final zweiter = await los(d);
     expect(zweiter, contains('Nicht erneut schreiben'));
     expect(moodle.pluginAufrufe.where((x) => x.startsWith('POST')), hasLength(1));
+  });
+
+  test('Eine neue STACK-Version ohne bestandene Fragetests erhält weder verified noch einen Notiznachweis', () async {
+    final e = moodle.legeAn('stack', 'ZZ STACK', 'zz-stack');
+    e.neueste.xml = stackXml({
+      'name': 'ZZ STACK', 'idnummer': 'zz-stack',
+      'fragetext': '<p>[[input:ans1]] [[validation:ans1]]</p>',
+      'eingaben': [{'name': 'ans1', 'typ': 'algebraic', 'tans': '1'}],
+      'prts': [{ 'name': 'prt1', 'knoten': [
+        {'test': 'AlgEquiv', 'sans': 'ans1', 'tans': '1', 'wahr': {'punkte': 1}, 'falsch': {'punkte': 0}}
+      ]}],
+      'tests': [{'eingaben': {'ans1': '1'}, 'erwartet': {'prt1': {'punkte': 1, 'abzug': 0, 'hinweis': 'prt1-1-T'}}}],
+    }, version: '2026010500');
+    moodle.stackTestHtml = '<div id="region-main"><p>Keine Fragetests</p></div>';
+    var nachweise = 0;
+    final bericht = await fragenVersionImportieren(zugang, freigaben, ao.path,
+        sammlung: FragenbankDoppel.sammlung, kategorie: 'ZZ Probe', datei: datei([(e.neueste, 'B')]),
+        beiBestanden: (_, _, _) => nachweise++);
+    expect(bericht, contains('verified: false'));
+    expect(bericht, contains('STACK-Fragetests'));
+    expect(nachweise, 0);
+    expect(moodle.anfragen.any((a) => a.contains('/question/type/stack/questiontestrun.php')), isTrue);
+    expect(e.versionen, hasLength(2));
+    expect(moodle.geloescht, hasLength(1), reason: 'nur die direkt bestätigte Probeversion wird gelöscht');
   });
 }

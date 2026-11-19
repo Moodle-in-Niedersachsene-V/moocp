@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.13.0
-- Fragen: Jede neu angelegte Frage und jede eingespielte Version wird nach dem Speichern aus Moodle zurückgelesen und geprüft (Export, Bearbeitungsformular, Vorschau, einmal unverändert als Entwurf speichern); eine Frage, die durchfällt, bleibt nicht stehen.
+- Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
 - Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.
 - Fragen: Jeder Fragetyp, den Ihr Moodle kennt, lässt sich anlegen, wenn er die Prüfung besteht; die KI liest und schreibt dazu Fragetyp-Notizen.
 - Speichern: Eine Sperre nach unklarem Ausgang heben Sie jetzt selbst in den Einstellungen auf.

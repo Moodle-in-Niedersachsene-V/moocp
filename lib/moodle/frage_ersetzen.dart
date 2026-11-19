@@ -154,8 +154,8 @@ Future<String> frageErsetzen(
   // gelöscht, bevor sie in einen Test kommt.
   final probe = await importProben(moodle, arbeitsordner, sammlung, i, n.neueIds, i.xml);
   b.write(probe.text);
-  if (!probe.ok) {
-    return '$b\nAbgebrochen: Die Rundlaufprobe der neuen Frage ist nicht bestanden, deshalb steht sie in keinem Test. '
+  if (!probe.ok || !probe.verified) {
+    return '$b\nAbgebrochen: Die Rundlaufprobe der neuen Frage ist nicht vollständig bestanden, deshalb steht sie in keinem Test. '
         'Tests und alte Frage unverändert. verified: false';
   }
   var neueId = n.neueIds[i.neu.single.id] ?? i.neu.single.id!;

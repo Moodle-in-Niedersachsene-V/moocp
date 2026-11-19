@@ -1968,8 +1968,9 @@ class McpDienst implements AufrufKontext {
           i.neu,
           (f) => stackTesten(moodle, sammlung: s, frage: f),
         );
-        // Die Rundlaufprobe (E38) urteilt; was durchfällt, löscht sie wieder.
-        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml, beiBestanden: _nachweis);
+        // Die Probe urteilt; ohne Herkunftsnachweis bleibt das Objekt stehen.
+        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml,
+            beiBestanden: i.ok && n.ok ? _nachweis : null);
         return '${i.text}${n.text}${r.text}'
             'verified: ${i.ok && n.ok && r.verified}'
             '${i.ok && n.ok && r.ok && !r.verified ? ' (ein Teil der Rundlaufprobe war nicht prüfbar, siehe oben)' : ''}\n';
@@ -1990,8 +1991,10 @@ class McpDienst implements AufrufKontext {
           'diese questionid> geht es trotzdem. Braucht das Moodle-Plugin „Import question as new version"; fehlt es, '
           'kommt ein fester Satz mit den Wegen, die bleiben, und nichts wird geändert. Eine Freigabe für die ganze '
           'Datei, mit Zeilenvergleich je Frage. Danach prüft das Werkzeug jede Frage (Rundlaufprobe: Export und '
-          'Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern) und löscht eine Version, die '
-          'durchfällt -- nur diese, nur in diesem Aufruf angelegt. verified heißt: alle Teile bestanden; was sich nicht '
+          'Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern). Die Probeversion wird '
+          'aufgeräumt. Das Plugin meldet die importierte Versionsnummer nicht direkt; sie wird durch Rücklesen '
+          'ermittelt. Bei Fehlern bleibt diese Version zur manuellen Prüfung stehen und kann in Tests aktiv sein. '
+          'verified bestätigt den zurückgelesenen Inhalt und die bestandene Probe, nicht die Herkunft der Nummer; was sich nicht '
           'prüfen ließ, steht als „nicht geprüft" da.',
       parameter: {
         'sammlung': sammlung,
@@ -2153,7 +2156,8 @@ class McpDienst implements AufrufKontext {
           'fragen_importieren, setzt sie in jedem genannten Test auf den Platz der alten (dieselbe Seite und '
           'Stelle, dieselben Punkte, die Seitenaufteilung bleibt) und löscht danach auf Wunsch die alte mit '
           'allen Versionen. Trägt die neue die Sachnummer der alten, geht sie nach dem Löschen an die neue. '
-          'Für Umbauten, die aendern nicht kann (Aufbau, STACK-Testfälle); für reine Inhaltsänderungen '
+          'Nur für Typwechsel oder Instanzen ohne Versionsimport-Plugin; der gemeinsame Verlauf geht verloren. '
+          'Für Umbauten desselben Typs fragen_version_importieren, für kleine Inhaltsänderungen '
           'frage_lesen und aendern. Prüft vorher Namen, Plätze und XML und bricht sonst ab, bevor etwas '
           'geschieht; besteht ein Nachweis nicht, kommt die neue Frage in keinen Test.',
       parameter: {

@@ -6,6 +6,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/moodle/rundlaufprobe.dart';
+import 'package:moocp/moodle/formular_lesen.dart';
+import 'package:moocp/moodle/schreibvorgang.dart';
 
 import 'hilfen/fragenbank_doppel.dart';
 
@@ -88,14 +90,31 @@ void main() {
     final r = await probe();
     expect(r.befunde.join(' '), contains('Speichern'));
     expect(moodle.geloescht, isEmpty);
+    expect(r.ausgangUnklar, isTrue);
+    expect(Schreibvorgang(zugang, Formularziel.frage(FragenbankDoppel.sammlung, eintrag.neueste.id)).offen, isTrue);
   });
 
-  test('Weicht die Probeversion ab, besteht die Probe nicht, und die Probeversion wird trotzdem gelöscht', () async {
+  test('Weicht die Probeversion vom Zielstand ab, bleibt die Sperre und es wird nicht weiter geschrieben', () async {
     moodle.beimEntwurf = (x) => x.replaceAll('<text>A</text></answer>', '<text>Z</text></answer>');
     final r = await probe();
     expect(r.befunde.join(' '), contains('Unverändert gespeichert'));
-    expect(moodle.geloescht, hasLength(1));
-    expect(eintrag.versionen, hasLength(1));
+    expect(r.ausgangUnklar, isTrue);
+    expect(moodle.geloescht, isEmpty);
+    expect(eintrag.versionen, hasLength(2));
+  });
+
+  test('Fehlt die Nummer nach dem Speichern, sperrt ein neuer Aufruf weitere Änderungen', () async {
+    final frage = eintrag.neueste.id;
+    moodle.entwurfOhneNummer = true;
+    final r = await probe();
+    expect(r.verified, isFalse);
+    expect(r.ausgangUnklar, isTrue);
+    expect(moodle.geloescht, isEmpty);
+    expect(Schreibvorgang(zugang, Formularziel.frage(FragenbankDoppel.sammlung, frage)).offen, isTrue);
+    final zweiter = await rundlaufProbe(zugang, ordner.path,
+        sammlung: FragenbankDoppel.sammlung, frage: frage, eingabe: eingabe, angelegt: Angelegt());
+    expect(zweiter.text(), contains('Nicht erneut schreiben'));
+    expect(moodle.gespeichertMitStatus, ['draft']);
   });
 
   test('Lässt sich die Probeversion nicht löschen, sagt die Antwort es', () async {

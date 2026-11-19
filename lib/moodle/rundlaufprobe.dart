@@ -24,11 +24,13 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:xml/xml.dart';
 
 import 'formular.dart';
+import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
 import 'fragen.dart';
 import 'fragen_vergleich.dart';
 import 'fragen_xml.dart';
 import 'moodle_zugang.dart';
+import 'schreibvorgang.dart';
 
 /// Die Fragennummern, die Moodle einem Aufruf als angelegt gemeldet hat --
 /// die Quelle der Löschberechtigung. Nur [melden] nimmt etwas hinein.
@@ -58,9 +60,12 @@ class ProbeErgebnis {
   /// Fragetyp-Notiz, fragetyp_notizen.dart); null, wenn sie nicht darin steht.
   String? moodleVersion;
 
-  /// Eine Probeversion, die nicht gelöscht werden konnte. Sie liegt als
-  /// Entwurf in der Fragenbank und gehört in die Antwort.
+  /// Eine nicht entfernte oder nicht eindeutig ermittelte Probeversion.
+  /// Nur ein zurückgelesener Entwurfsstatus erlaubt die Zusage „Entwurf“.
   bool probeBleibt = false;
+
+  /// Bei unklarem Schreibausgang sind auch weitere Aufräumversuche gesperrt.
+  bool ausgangUnklar = false;
 
   bool get bestanden => befunde.isEmpty;
 
@@ -216,20 +221,37 @@ Future<ProbeErgebnis> rundlaufProbe(
         'setzen. Gespeichert wird dann nicht, weil die Probeversion sonst in laufenden Tests landen könnte.');
     return r;
   }
+  final vorgang = Schreibvorgang(moodle, Formularziel.frage(sammlung, frage));
+  if (vorgang.offen) {
+    r.ausgangUnklar = true;
+    r.befunde.add(vorgang.hinweis);
+    return r;
+  }
+  final xmlSumme = schreibPruefsumme(_ohneStatus(aus.xml!));
+  vorgang.beginnen(
+    {'xml': xmlSumme, 'status': schreibPruefsumme(gewaehlt ?? 'ready')},
+    {'xml': xmlSumme, 'status': schreibPruefsumme('draft')},
+  );
   setze(form.felder, 'status', 'draft');
   int? probe;
   try {
     final antwort = await absenden(moodle, form, knoepfe: const ['submitbutton']);
     probe = int.tryParse(moodle.umleitungsziel(antwort)?.queryParameters['lastchanged'] ?? '');
   } on MoodleFehler catch (x) {
-    r.befunde.add('Moodle nimmt das unveränderte Speichern des Bearbeitungsformulars nicht an: ${x.meldung}. '
-        'Ohne KI ließe sich die Frage von Hand nicht weiterbearbeiten.');
+    r.ausgangUnklar = true;
+    r.befunde.add('Speichern des Bearbeitungsformulars: ${x.meldung}. ${vorgang.hinweis}');
+    return r;
+  } catch (x) {
+    r.ausgangUnklar = true;
+    r.befunde.add('Speichern des Bearbeitungsformulars: ${x.runtimeType}. ${vorgang.hinweis}');
     return r;
   }
   if (probe == null || probe == frage) {
     r.befunde.add('Das Speichern des Bearbeitungsformulars hat keine erkennbare Probeversion ergeben; ob eine '
         'Entwurfsversion stehen geblieben ist, ist unklar. In der Fragenbank nachsehen.');
     r.probeBleibt = true;
+    r.ausgangUnklar = true;
+    r.hinweise.add(vorgang.hinweis);
     return r;
   }
   // Ab hier gehört die Probeversion diesem Aufruf.
@@ -246,6 +268,16 @@ Future<ProbeErgebnis> rundlaufProbe(
       r.befunde.add('Unverändert gespeichert weicht die Frage ab: $x');
     }
   }
+  final gespeichert = await formularHolen(moodle,
+      '/question/bank/editquestion/question.php?cmid=$sammlung&id=$probe');
+  final probeStatus = gespeichert.form.querySelector('select[name="status"] option[selected]')?.attributes['value'];
+  if (r.befunde.isNotEmpty || probeStatus != 'draft') {
+    r.ausgangUnklar = true;
+    r.probeBleibt = true;
+    r.befunde.add('Der Zielstand der Probeversion ist nicht bestätigt. ${vorgang.hinweis}');
+    return r;
+  }
+  vorgang.abschliessen();
   final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, probe,
       alleVersionen: false, verbleibend: frage);
   if (!weg.weg) {
@@ -272,15 +304,16 @@ String _ohneStatus(String xml) {
   for (final h in d.findAllElements('hidden').toList()) {
     h.remove();
   }
+  for (final kommentar in d.descendants.whereType<XmlComment>().toList()) {
+    kommentar.remove();
+  }
   return d.toXmlString();
 }
 
-/// Die Rundlaufprobe für jede Frage, die ein Import gerade angelegt hat
-/// ([i]), samt dem Aufräumen: Was durchfällt, löscht dieser Aufruf wieder --
-/// die neue Frage mit allen ihren Versionen, die es nur durch diesen Aufruf
-/// gibt, nie etwas anderes. [neueIds]: Das Speichern einer CodeRunner-Frage
-/// über das Formular (importNachweise) hat eine neuere Version angelegt; sie
-/// gehört zu diesem Aufruf und wird geprüft statt der importierten.
+/// Die Rundlaufprobe für jede zurückgelesene Importfrage ([i]). Aufräumen ist
+/// nur für direkt bestätigte Versionsnummern erlaubt. [neueIds] enthält solche
+/// Nummern aus lastchanged beim Speichern einer CodeRunner-Frage über das
+/// Formular (importNachweise); geprüft wird diese statt der importierten.
 /// [xml] ist das geprüfte XML der Datei.
 Future<({String text, bool ok, bool verified})> importProben(
   MoodleZugang moodle,
@@ -296,7 +329,9 @@ Future<({String text, bool ok, bool verified})> importProben(
   final b = StringBuffer();
   var ok = true, verified = true;
   for (final f in i.neu.where((f) => f.id != null)) {
-    final angelegt = Angelegt()..melden(f.id!, f.name);
+    // i.neu stammt aus dem Kategorieexport, nicht aus einer direkten
+    // Anlegemeldung. Nur lastchanged beim Formularspeichern ist ein Beleg.
+    final angelegt = Angelegt();
     final ziel = neueIds[f.id] ?? f.id!;
     if (ziel != f.id) angelegt.melden(ziel, f.name);
     final q = eingaben.where((e) {
@@ -319,11 +354,29 @@ Future<({String text, bool ok, bool verified})> importProben(
       continue;
     }
     ok = verified = false;
-    final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, ziel, alleVersionen: true);
-    b.writeln('Rundlaufprobe „${f.name}" NICHT bestanden; die neue Frage wurde '
-        '${weg.weg ? 'wieder gelöscht' : 'NICHT gelöscht und liegt noch in der Fragenbank'}:');
+    if (r.ausgangUnklar) {
+      b.writeln('Rundlaufprobe „${f.name}": Ausgang unklar; nichts weiter geschrieben oder gelöscht. '
+          'Frage $ziel bleibt zur manuellen Prüfung stehen und kann in Tests aktiv sein.');
+      b.write(r.text());
+      break;
+    }
+    if (!angelegt.enthaelt(ziel)) {
+      b.writeln('Rundlaufprobe „${f.name}" NICHT bestanden. Frage $ziel wurde weder gelöscht noch auf Entwurf gesetzt: '
+          'Die Nummer stammt nur aus dem Kategorieexport; ihre Herkunft ist nicht direkt bestätigt. '
+          'Sie kann in Tests aktiv sein. Die Lehrkraft prüft sie in der Fragenbank.');
+      b.write(r.text());
+      continue;
+    }
+    final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, ziel, alleVersionen: false,
+        verbleibend: ziel == f.id ? null : f.id);
+    b.writeln('Rundlaufprobe „${f.name}" NICHT bestanden; die direkt bestätigte Version $ziel wurde '
+        '${weg.weg ? 'wieder gelöscht' : 'NICHT gelöscht und liegt noch in der Fragenbank'}. '
+        'Die importierte Frage ${f.id} bleibt zur manuellen Prüfung stehen und kann in Tests aktiv sein:');
     b.write(r.text());
-    if (!weg.weg) b.writeln('  ${weg.text}');
+    if (!weg.weg) {
+      b.writeln('  ${weg.text} Der Status der zurückgebliebenen Version ist nicht bestätigt; '
+          'sie kann in Tests aktiv sein. Die Lehrkraft prüft sie in der Fragenbank.');
+    }
   }
   return (text: b.toString(), ok: ok, verified: verified);
 }

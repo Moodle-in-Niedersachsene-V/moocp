@@ -14,11 +14,14 @@
 //   3. Gibt es die Plugin-Seite? Sonst der feste Satz [pluginFehlt].
 //   4. Eine Freigabe für die ganze Datei, mit Zeilenvergleich je Frage.
 //   5. Je Frage: Stand erneut prüfen, Datei mit genau dieser Frage senden,
-//      Rundlaufprobe, bei Misserfolg die neue Version löschen (nur sie).
+//      Rundlaufprobe; die nur durch Rücklesen ermittelte Version nie löschen.
 //
 // Das Plugin meldet Erfolg und Fehler nur als Hinweis auf der Seite, auf die es
 // umleitet (die Fragenübersicht, die Klarnamen zeigt -- ihr folgt die App
 // nicht, A1). Ob eine Version entstanden ist, zeigt deshalb allein der Export.
+// Das ist kein Herkunftsnachweis: Ein paralleles Speichern kann die neueste
+// Version austauschen. Daher berechtigt diese Nummer weder zum Löschen noch
+// zum Setzen auf Entwurf. Nur die direkt gemeldete Probeversion wird gelöscht.
 
 import 'dart:convert';
 import 'dart:io';
@@ -31,10 +34,12 @@ import 'formular.dart';
 import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
 import 'fragen.dart';
+import 'fragen_vergleich.dart';
 import 'fragen_xml.dart';
 import 'moodle_zugang.dart';
 import 'rundlaufprobe.dart';
 import 'schreibvorgang.dart';
+import 'stack.dart';
 import 'zeilenvergleich.dart';
 
 /// Der feste Satz, wenn die Instanz keine neue Version aus XML kann. Die KI
@@ -104,8 +109,9 @@ Future<String> fragenVersionImportieren(
         '„${z.aktuell.name}" (${z.aktuell.typ}, Sachnummer ${z.aktuell.idnummer}): neue Version nach questionid ${z.aktuell.id}',
       'Verlauf, Sachnummer und Plätze in Tests bleiben; Tests mit „neueste Version" nehmen die neue Version sofort.',
       if (uebergehen != null) 'ACHTUNG: Eine inzwischen gespeicherte Version $uebergehen wird übergangen; sie bleibt im Verlauf.',
-      'Danach prüft moocp jede Frage (Export, Formular, Vorschau, einmal unverändert als Entwurf speichern) und löscht '
-          'eine Version, die durchfällt -- nur diese.',
+      'Danach prüft moocp jede Frage (Export, Formular, Vorschau, einmal unverändert als Entwurf speichern). '
+          'Die Probeversion wird aufgeräumt. Das Plugin meldet die importierte Versionsnummer nicht direkt; '
+          'deshalb bleibt eine durchgefallene importierte Version zur manuellen Prüfung stehen und kann in Tests aktiv sein.',
     ],
     vergleich: vergleich,
     knopf: 'Einspielen',
@@ -263,23 +269,50 @@ Future<({bool ok, bool verified, String text})> _eine(MoodleZugang moodle, Strin
         'der Stand ist nicht eindeutig). ${vorgang.hinweis}');
   }
   final neu = nachher.single;
+  if (neu.id == null) {
+    return (ok: false, verified: false, text: '$kopf: Die neue Versionsnummer ist nicht erkennbar. ${vorgang.hinweis}');
+  }
+  final export = await frageExport(moodle, sammlung, neu.id!);
+  final abweichungen = export.xml == null ? ['Die zurückgelesene Version lässt sich nicht exportieren.']
+      : fragenVergleichen(eingabe, export.xml!);
+  if (abweichungen.isNotEmpty) {
+    return (ok: false, verified: false, text: '$kopf: Rundlaufprobe NICHT bestanden. '
+        'Zurückgelesene Version ${neu.id}: ${abweichungen.join(' ')} '
+        'Ihre Herkunft ist nicht direkt bestätigt; sie wurde weder gelöscht noch auf Entwurf gesetzt '
+        'und kann in Tests aktiv sein. Die Lehrkraft prüft sie in der Fragenbank. ${vorgang.hinweis}');
+  }
+  // Bestätigt den beobachteten Zielinhalt, nicht die Herkunft der Version.
   vorgang.abschliessen();
-  final angelegt = Angelegt()..melden(neu.id!, neu.name);
+  final angelegt = Angelegt();
 
-  // Rundlaufprobe. Fällt sie durch, wird genau diese Version gelöscht.
+  // Eine vom Plugin nicht direkt gemeldete Nummer ist keine Löschberechtigung.
   final probe = await rundlaufProbe(moodle, arbeitsordner, sammlung: sammlung, frage: neu.id!, eingabe: eingabe, angelegt: angelegt);
   final b = StringBuffer();
+  if (probe.ausgangUnklar) {
+    return (ok: false, verified: false, text: '$kopf: Ausgang der Probe unklar; nichts weiter geschrieben oder gelöscht. '
+        'Version ${neu.id} bleibt zur manuellen Prüfung stehen und kann in Tests aktiv sein.\n${probe.text()}');
+  }
+  if (probe.bestanden && neu.typ == 'stack') {
+    try {
+      final nachweis = await stackTesten(moodle, sammlung: sammlung, frage: neu.id!);
+      b.writeln('Nachweis STACK:\n$nachweis');
+      if (!nachweis.contains('verified: true')) {
+        probe.befunde.add('Die STACK-Fragetests sind nicht bestanden.');
+      }
+    } on MoodleFehler catch (x) {
+      probe.befunde.add('Die STACK-Fragetests ließen sich nicht prüfen: ${x.meldung}');
+    }
+  }
   if (!probe.bestanden) {
-    final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, neu.id!,
-        alleVersionen: false, verbleibend: z.aktuell.id);
-    b.writeln('$kopf: Rundlaufprobe NICHT bestanden, die neue Version ${neu.id} wurde '
-        '${weg.weg ? 'wieder gelöscht (die alte Version ${z.aktuell.id} ist unverändert)' : 'NICHT gelöscht und liegt noch in der Fragenbank'}.');
+    b.writeln('$kopf: Rundlaufprobe NICHT bestanden. Zurückgelesene Version ${neu.id} '
+        'wurde weder gelöscht noch auf Entwurf gesetzt: Das Plugin bestätigt ihre Herkunft nicht direkt. '
+        'Sie kann in Tests aktiv sein; die Lehrkraft prüft sie in der Fragenbank.');
     b.write(probe.text());
-    if (!weg.weg) b.writeln('  ${weg.text}');
     return (ok: false, verified: false, text: b.toString().trimRight());
   }
   if (probe.verified) beiBestanden?.call(z.aktuell.typ, eingabe, probe.moodleVersion);
-  b.writeln('$kopf: neue Version ${neu.id} nach ${z.aktuell.id}. Rundlaufprobe ${probe.verified ? 'bestanden' : 'ohne Befund, aber nicht vollständig'}.');
+  b.writeln('$kopf: zurückgelesene Version ${neu.id} nach ${z.aktuell.id}. Rundlaufprobe ${probe.verified ? 'bestanden' : 'ohne Befund, aber nicht vollständig'}. '
+      'Die Versionsnummer wurde durch Rücklesen ermittelt; das Plugin liefert keinen direkten Herkunftsnachweis.');
   b.write(probe.text());
   return (ok: true, verified: probe.verified, text: b.toString().trimRight());
 }

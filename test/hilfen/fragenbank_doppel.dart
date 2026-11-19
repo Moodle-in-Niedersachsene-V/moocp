@@ -55,6 +55,8 @@ class FragenbankDoppel {
   bool formularFehler = false;
   bool vorschauFehler = false;
   bool entwurfAbgelehnt = false;
+  bool entwurfOhneNummer = false;
+  String? stackTestHtml;
 
   /// Das Plugin weist die Datei ab: Es leitet um, legt aber nichts an.
   bool pluginLegtNichtAn = false;
@@ -247,11 +249,14 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       gespeichertMitStatus.add(f['status']);
       final nv = DoppelVersion(_naechsteId++, e.neueste.nr + 1, roh, status: f['status'] ?? 'ready');
       e.versionen.add(nv);
-      return _um(r, '/question/edit.php?cmid=$sammlung&lastchanged=${nv.id}');
+      return _um(r, '/question/edit.php?cmid=$sammlung${entwurfOhneNummer ? '' : '&lastchanged=${nv.id}'}');
     }
     if (pfad == '/question/bank/previewquestion/preview.php') {
       if (vorschauFehler) return _text(r, _seite('<div class="errormessage">Frage nicht darstellbar</div>'));
       return _text(r, _seite('<div class="que"><p>Vorschau</p></div>'));
+    }
+    if (pfad == '/question/type/stack/questiontestrun.php' && stackTestHtml != null) {
+      return _text(r, stackTestHtml!);
     }
     if (pfad == '/question/bank/importasversion/import.php') {
       pluginAufrufe.add('${r.method} ${r.uri.query}');

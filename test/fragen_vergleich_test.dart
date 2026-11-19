@@ -44,6 +44,22 @@ void main() {
     expect(b.single, contains('question/answer[2]'));
   });
 
+  test('Fehlende wiederholte Unterelemente werden auch bei gleichem Text gemeldet', () {
+    const eingabe = '<question type="shortanswer"><name><text>ZZ Doppelt</text></name>'
+        '<answer><text>A</text><text>A</text></answer></question>';
+    const ausgabe = '<question type="shortanswer"><name><text>ZZ Doppelt</text></name>'
+        '<answer><text>A</text></answer></question>';
+    expect(fragenVergleichen(_quiz(eingabe), _quiz(ausgabe)).join(' '), contains('fehlt im Export'));
+    expect(fragenVergleichen(_quiz(eingabe), _quiz(eingabe)), isEmpty);
+  });
+
+  test('Zwei identische Antworten verlangen auch zwei Antworten im Export', () {
+    const antwort = '<answer fraction="100"><text>A</text></answer>';
+    const kopf = '<question type="shortanswer"><name><text>ZZ Doppelt</text></name>';
+    expect(fragenVergleichen(_quiz('$kopf$antwort$antwort</question>'), _quiz('$kopf$antwort</question>')),
+        isNotEmpty);
+  });
+
   test('Ein abweichender Text nennt erwartet und gefunden', () {
     final aus = _ausgabe.replaceFirst('<text>2</text>', '<text>4</text>');
     final b = fragenVergleichen(_quiz(_eingabe), _quiz(aus));

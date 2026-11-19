@@ -1165,6 +1165,52 @@ class MoodleZugang {
           ) &&
           (wertIn(f, 'makecopy') ?? '0') == '0',
     ),
+    // Vorschau einer Frage (Rundlaufprobe, rundlaufprobe.dart): lädt sie ohne
+    // Moodle-Fehler? Der erste Aufruf legt einen Vorschauversuch an und leitet
+    // mit previewid um (wie beim Bildschirmfoto, browserliste.dart); die Seite
+    // zeigt die Frage, keine Personendaten.
+    Erlaubt(
+      'GET',
+      r'^/question/bank/previewquestion/preview\.php$',
+      'Vorschau einer Frage (Rundlaufprobe)',
+      parameter: (q) =>
+          _nurSchluessel(q, {'id', 'cmid', 'courseid', 'previewid', 'restartversion'}) &&
+          _zahl(q['id']) &&
+          _zahl(q['cmid']) &&
+          q.values.every(_zahl),
+    ),
+    // Neue Version aus XML (fragen_version_importieren, fragen_version.dart):
+    // die Seite des Plugins qbank_importasversion. Einziger Aufrufer; die
+    // Seiten zum Verlauf einer Frage und die Fragenübersicht bleiben ungelesen,
+    // sie zeigen Namen (A1). Aufbau der Seite: Quelltext des Plugins, import.php.
+    // Ob es die Seite auf der Instanz gibt, zeigt der Aufruf selbst (404 oder
+    // Fehlerseite statt Formular, fragen_version.dart).
+    Erlaubt(
+      'GET',
+      r'^/question/bank/importasversion/import\.php$',
+      'Plugin „Frage als neue Version importieren": Formular',
+      parameter: (q) =>
+          _nurSchluessel(q, {'id', 'cmid', 'courseid', 'returnurl'}) && _zahl(q['id']) && _zahl(q['cmid']),
+    ),
+    // Nie force (ließe Warnungen des Plugins durch) und nie die Schaltfläche
+    // „Schlagwörter zusammenführen": Es soll genau das in Moodle stehen, was
+    // die Datei sagt, und die Rundlaufprobe prüft es.
+    Erlaubt(
+      'POST',
+      r'^/question/bank/importasversion/import\.php$',
+      'Plugin „Frage als neue Version importieren": Datei absenden',
+      // Moodle-Formulare senden an die Adresse ohne Query; id und cmid stehen
+      // als versteckte Felder im Formular.
+      parameter: (q) => _nurSchluessel(q, {'id', 'cmid', 'courseid', 'returnurl'}),
+      formular: (f) =>
+          _zahl(wertIn(f, 'cmid')) &&
+          _marke(f, RegExp(r'^_qf__qbank_importasversion_form_import_form$')) &&
+          _zahl(wertIn(f, 'newfile')) &&
+          _zahl(wertIn(f, 'id')) &&
+          const {'0', ''}.contains(wertIn(f, 'force') ?? '0') &&
+          wertIn(f, 'mergetagsbutton') == null &&
+          _gesetzt(wertIn(f, 'sesskey')),
+    ),
     // Fragen löschen (fragen.dart, fragenLoeschen). Ohne confirm zeigt
     // delete.php nur die Rückfrage und ändert nichts; bestätigt wird mit
     // deren Formular, so wie Moodle es ausgibt -- je nach Moodle als

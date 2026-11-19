@@ -482,7 +482,7 @@ Future<({String text, bool ok, Map<int, int> neueIds})> importNachweise(MoodleZu
 
 /// Eine Frage einzeln als Moodle-XML, oder die Fehlerseite, mit der Moodle
 /// den Export ablehnt.
-Future<({String? xml, String? fehlercode, String meldung})> _frageExport(
+Future<({String? xml, String? fehlercode, String meldung})> frageExport(
     MoodleZugang moodle, int sammlung, int frage) async {
   final s = await moodle.sesskey();
   final r = await moodle.lesen('/question/bank/exporttoxml/exportone.php?id=$frage&cmid=$sammlung&sesskey=$s');
@@ -547,7 +547,7 @@ Future<List<FrageKurz>> loeschenPruefen(MoodleZugang moodle, int sammlung, List<
   if (ids.toSet().length != ids.length) throw MoodleFehler('Eine Frage ist doppelt genannt.');
   final gefunden = <FrageKurz>[];
   for (final (id, name) in fragen) {
-    final e = await _frageExport(moodle, sammlung, id);
+    final e = await frageExport(moodle, sammlung, id);
     final f = e.xml == null ? null : fragenAusXml(e.xml!).where((x) => x.id == id).firstOrNull;
     if (f == null) {
       throw MoodleFehler('Abgebrochen, nichts gelöscht: Frage $id ist in Sammlung $sammlung nicht zu finden'
@@ -564,7 +564,8 @@ Future<List<FrageKurz>> loeschenPruefen(MoodleZugang moodle, int sammlung, List<
 typedef _Rueckfrage = ({Uri adresse, dom.Element? form, Uri? link, String? hinweis, String seite});
 
 Future<_Rueckfrage> _loeschRueckfrage(
-    MoodleZugang moodle, String arbeitsordner, int sammlung, List<FrageKurz> fragen) async {
+    MoodleZugang moodle, String arbeitsordner, int sammlung, List<FrageKurz> fragen,
+    {bool alleVersionen = true}) async {
   final ids = [for (final f in fragen) f.id!];
   // Die Rückfrage liegt danach im Arbeitsordner, damit sich nachsehen lässt,
   // was Moodle gefragt hat.
@@ -575,7 +576,7 @@ Future<_Rueckfrage> _loeschRueckfrage(
   // aufgerufen wird sie nicht (moodle_zugang.dart, _loeschRueckfrage).
   final zurueck = Uri.encodeQueryComponent('/question/edit.php?cmid=$sammlung');
   final r = await moodle.lesen('/question/bank/deletequestion/delete.php?cmid=$sammlung&deleteselected=1'
-      '&deleteall=1&returnurl=$zurueck&${ids.map((i) => 'q$i=1').join('&')}');
+      '&deleteall=${alleVersionen ? 1 : 0}&returnurl=$zurueck&${ids.map((i) => 'q$i=1').join('&')}');
   final seite = File(p.join(ordner, 'loeschen-rueckfrage.html'));
   await seite.writeAsString(r.text, encoding: utf8);
   final doc = html_parser.parse(r.text);
@@ -635,7 +636,7 @@ Future<(String, bool)> _loeschAbsenden(
   final b = StringBuffer();
   var alleWeg = true;
   for (final f in fragen) {
-    final e = await _frageExport(moodle, sammlung, f.id!);
+    final e = await frageExport(moodle, sammlung, f.id!);
     if (e.xml == null && _frageFehlt.contains(e.fehlercode)) {
       b.writeln('  gelöscht: „${f.name}" (${f.id})');
     } else if (e.xml != null) {
@@ -653,6 +654,12 @@ Future<(String, bool)> _loeschAbsenden(
 /// Löscht bereits geprüfte Fragen ohne eigene Freigabe -- für frage_ersetzen,
 /// dessen Freigabe das Löschen schon zeigt. Moodles Rückfrage wird erst jetzt
 /// geholt, weil sie davon abhängt, ob die Frage noch in einem Test steckt.
+///
+/// Mit [alleVersionen] false wählt die Rückfrage nur die genannte Version
+/// (`deleteall=0`), nicht den ganzen Fragenbank-Eintrag mit seinem Verlauf --
+/// so löscht die Rundlaufprobe (rundlaufprobe.dart) ihre Probeversion.
 Future<(String, bool)> loeschenOhneFreigabe(
-        MoodleZugang moodle, String arbeitsordner, int sammlung, List<FrageKurz> fragen) async =>
-    _loeschAbsenden(moodle, sammlung, fragen, await _loeschRueckfrage(moodle, arbeitsordner, sammlung, fragen));
+        MoodleZugang moodle, String arbeitsordner, int sammlung, List<FrageKurz> fragen,
+        {bool alleVersionen = true}) async =>
+    _loeschAbsenden(
+        moodle, sammlung, fragen, await _loeschRueckfrage(moodle, arbeitsordner, sammlung, fragen, alleVersionen: alleVersionen));

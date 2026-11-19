@@ -34,6 +34,7 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_verschieben.dart';
 import '../moodle/fragen_version.dart';
 import '../moodle/fragetyp_notizen.dart';
 import '../moodle/rundlaufprobe.dart';
@@ -2153,6 +2154,55 @@ class McpDienst implements AufrufKontext {
               ((f['id'] as num).toInt(), f['name'] as String),
           ],
           sicherungsOrdner: _fragenSicherungen,
+        );
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_verschieben',
+      titel: 'Fragen verschieben',
+      beschreibung:
+          'Verschiebt Fragen mit allen Versionen in eine andere Kategorie desselben Kurses, auch in eine andere '
+          'Fragensammlung. Tests behalten die Fragen. Je Frage die AKTUELLE questionid (fragen_lesen) und der Name, '
+          'wie er jetzt in Moodle steht; passt ein Name nicht, steht eine Frage nicht in der Quellsammlung oder ist '
+          'die Sachnummer im Ziel schon vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Die App fragt in '
+          'einem Dialog (Stufe „mittel“ und „alle“). Die Antwort sagt je Frage, wo sie jetzt steht, und meldet '
+          'verified nur, wenn jede im Ziel steht und ihre Sachnummer gleich blieb; ältere Versionen und Verweise '
+          'von Tests sind „nicht geprüft“. Zieht ein Zufallsplatz eines Tests aus der Quellkategorie, hat er danach '
+          'weniger Fragen zur Auswahl: vorher mit test_lesen nachsehen und der Lehrkraft sagen.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'fragen': JsonSchema.array(
+          items: JsonSchema.object(
+            properties: {
+              'id': JsonSchema.integer(description: 'questionid'),
+              'name': JsonSchema.string(description: 'Name der Frage, wie er jetzt in Moodle steht'),
+            },
+            required: ['id', 'name'],
+          ),
+          description: 'Die Fragen, je {id, name}',
+        ),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'cmid der Fragensammlung, in die verschoben wird (aus fragensammlungen, gleicher Kurs)',
+        ),
+        'ziel_kategorie': JsonSchema.string(description: 'Kategorie-id oder Name in der Zielsammlung (aus fragen_lesen)'),
+      },
+      pflicht: ['kurs', 'sammlung', 'fragen', 'ziel_sammlung', 'ziel_kategorie'],
+      ausfuehren: (a) {
+        final liste = a['fragen'];
+        if (liste is! List || liste.any((f) => f is! Map || f['id'] is! num || f['name'] is! String)) {
+          throw MoodleFehler('fragen: eine Liste aus {id, name}.');
+        }
+        return fragenVerschieben(
+          moodle,
+          freigaben,
+          kurs: _zahl(a, 'kurs'),
+          sammlung: _zahl(a, 'sammlung'),
+          fragen: [for (final f in liste.cast<Map>()) ((f['id'] as num).toInt(), f['name'] as String)],
+          zielSammlung: _zahl(a, 'ziel_sammlung'),
+          zielKategorie: '${a['ziel_kategorie']}',
         );
       },
     );

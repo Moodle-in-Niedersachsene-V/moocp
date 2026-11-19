@@ -77,21 +77,24 @@ Für eine Neuordnung von Grund auf: Kategorien anlegen, dann die Fragen je
 Kategorie als eigenes XML importieren. Das hat den Vorteil, dass du die
 Struktur vorher mit dem Nutzer abstimmen kannst.
 
-### Nachträgliches Verschieben: nicht über die App
+### Nachträgliches Verschieben: `fragen_verschieben`
 
-In Moodle geht es so: Fragen ankreuzen → „Mit Auswahl" → „Verschieben
-nach …". Auf der Testinstanz **öffnete sich dieser Dialog nicht**: Das
-JavaScript-Modul `qbank_bulkmove/bulk_move` ließ sich nicht laden („No define
-call"), während andere Module einwandfrei luden. Geht der Dialog auch bei der
-Lehrkraft nicht auf, ist das etwas für die Administration — meist genügt ein
-Leeren der Caches.
+```
+fragen_verschieben(kurs, sammlung, fragen: [{id, name}, …],
+                   ziel_sammlung, ziel_kategorie)
+```
 
-Die App kann Fragen nicht verschieben; ein Umweg über
-Formularparameter trägt nicht (sechs Varianten geprüft), und das
-Bearbeitungsformular einer **bestehenden** Frage hat kein Kategoriefeld. Sag
-dem Nutzer offen, dass das Verschieben in Moodle von Hand erfolgen muss, und
-biete bei vielen Fragen den Weg über
-Kategorie-anlegen-und-neu-importieren an.
+Das Werkzeug verschiebt Fragen mit allen Versionen in eine andere Kategorie
+desselben Kurses, auch in eine andere Sammlung (`fragensammlungen`). Tests
+behalten die Fragen: Ihre Plätze zeigen auf die Frage, nicht auf die Kategorie.
+Das Werkzeug prüft vorher Namen, ob die Fragen in der Quellsammlung stehen und
+ob die Sachnummer im Ziel frei ist (sonst bricht es ab, ohne etwas zu
+schreiben), fragt in der App und liest danach je Frage zurück. Zufallsplätze von
+Tests hängen an der Kategorie: Wer aus einer Kategorie verschiebt, aus der ein
+Zufallsplatz zieht, verkleinert dessen Auswahl.
+
+Eine Kategorie selbst (umbenennen, verschieben) kann die App nicht; sag der
+Lehrkraft, dass sie das in Moodle von Hand erledigt.
 
 **Kein Ausweg ist Export-und-Neuimport für bestehende Fragen**, die schon in
 Tests stecken: Dabei entstehen neue Fragen mit neuen ids. Tests, die auf die

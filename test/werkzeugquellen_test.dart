@@ -61,6 +61,7 @@ const _eingebaut = [
   'fragetyp_notiz_schreiben',
   'kategorie_anlegen',
   'fragen_loeschen',
+  'fragen_verschieben',
   'frage_ersetzen',
   'stack_xml',
   'coderunner_xml',

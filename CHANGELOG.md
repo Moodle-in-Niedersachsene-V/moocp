@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Fragen: Fragen lassen sich mit allen Versionen in eine andere Kategorie desselben Kurses verschieben; Tests behalten sie, und eine schon vergebene Sachnummer im Ziel verhindert das Verschieben.
 - Fragen löschen: moocp fragt auf jeder Stufe, jede Frage einzeln zum Abhaken, und sichert die Fragen vorher als XML-Datei; Fragen in Tests werden nur verborgen, und die Antwort sagt es.
 - Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
 - Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.

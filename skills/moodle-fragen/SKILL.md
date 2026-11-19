@@ -26,6 +26,7 @@ diesen.
 | Fragen anlegen | `fragetyp_notiz_lesen`, dann `fragen_importieren`, dazu die Bauhilfen `stack_xml`, `coderunner_xml` |
 | Fragen ändern | `fragen_lesen`, XML bearbeiten, `fragen_version_importieren` (neue Version, Verlauf bleibt); kleine Änderungen auch `frage_lesen`, dann `aendern`; Typwechsel und Instanzen ohne das Plugin: `frage_ersetzen` |
 | Wissen zum Fragetyp | `fragetyp_notiz_lesen`, `fragetyp_notiz_schreiben` |
+| Fragen verschieben | `fragen_lesen` (Quelle und Ziel), dann `fragen_verschieben` |
 | Fragen löschen | `fragen_lesen`, dann `fragen_loeschen` |
 | STACK | `stack_cas`, `stack_testen`, `stack_varianten` |
 | Tests | `test_lesen`, `test_aendern`; anlegen und Einstellungen über `aktivitaet_anlegen`, `aktivitaet_lesen`, `aendern` |
@@ -70,6 +71,19 @@ App das bewusst nicht kann.
 - **Anlegen** von Fragen, Kategorien, Sammlungen und Tests: erst der Plan, dann ein Ja, dann die Arbeit (Abschnitt „Erst der Plan, dann das Schreiben"). Der Auftrag „erstelle einen Test zu Thema X mit 8 Fragen" ist der Anlass für den Plan, nicht die Freigabe — Typ, Punkte, AFB, Kategorie und Formulierung stehen im Plan, weil sie die Lehrkraft entscheidet.
 - **Ändern bestehender Fragen**: erst lesen, dann ändern. Eine Frage, die schon
   in einem Test benutzt wird, ändert sich für alle Tests mit.
+- **Fragen verschieben** (`fragen_verschieben`): erst der Plan im Chat — welche
+  Fragen (Name, Typ, Sachnummer), aus welcher Kategorie in welche Kategorie
+  welcher Sammlung — und ein Ja der Lehrkraft, dann der Aufruf. Verschoben wird
+  nur innerhalb eines Kurses (`kurs`, die Sammlungen aus `fragensammlungen`), die
+  Fragen mit allen Versionen und mit ihren Plätzen in Tests. Die Nummern kommen
+  frisch aus `fragen_lesen`, die Namen so, wie sie dort stehen. Ist die Sachnummer
+  im Ziel schon vergeben, bricht das Werkzeug ab; schlag dann vor, eine der beiden
+  Fragen umzunummerieren (`aendern`), und frag nach. Zieht ein Zufallsplatz
+  eines Tests aus der Quellkategorie, hat er danach weniger zur Auswahl; schau
+  mit `test_lesen` in die Tests der Sammlung, soweit du sie kennst, und sag es.
+  Die Antwort nennt je Frage, wo sie steht; was sie „nicht geprüft" nennt (ältere
+  Versionen, Verweise von Tests), gibst du so weiter. Ein Export und Neuimport
+  ist kein Ersatz dafür.
 - **Fragen löschen** (`fragen_loeschen`) nur, wenn der Auftrag es ausdrücklich
   verlangt. Liste vorher im Chat jede Frage einzeln auf — Name, Typ, Sachnummer,
   Zahl der Versionen und die Tests, in denen sie steckt, soweit `fragen_lesen`
@@ -529,7 +543,7 @@ Unterscheidung ist folgenreich:
 
 Frag im Zweifel, wohin eine neue Frage soll, oder leg sie in die geteilte
 Sammlung und sag es dazu. Leg sie gleich in die richtige Kategorie: Zwischen
-Kategorien verschieben kann die App nicht (`references/sammlungen.md`).
+Kategorien verschieben kann die App nicht; Fragen zwischen Kategorien schon (`fragen_verschieben`, `references/sammlungen.md`).
 
 ## Fragen lesen
 

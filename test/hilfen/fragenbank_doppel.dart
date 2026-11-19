@@ -27,7 +27,7 @@ class DoppelVersion {
 
 class DoppelEintrag {
   DoppelEintrag(this.kategorie, this.idnummer, this.typ);
-  final int kategorie;
+  int kategorie;
   final String idnummer;
   final String typ;
   final List<DoppelVersion> versionen = [];
@@ -47,6 +47,21 @@ class FragenbankDoppel {
 
   /// Kategorien: id -> Name.
   final Map<int, String> kategorien = {1: 'ZZ Probe'};
+
+  /// Zu welcher Fragensammlung (cmid) eine Kategorie gehört; ohne Eintrag: [sammlung].
+  final Map<int, int> bankVon = {};
+
+  /// Die Sammlungen, die die Übersicht des Kurses (`banks.php`) nennt: cmid -> Name.
+  final Map<int, String> kursBanken = {12: 'ZZ Bank'};
+
+  /// Legt eine Kategorie in einer anderen Sammlung an (Kontext-id 60 + cmid).
+  void legeKategorieAn(int id, String name, {int bank = sammlung}) {
+    kategorien[id] = name;
+    bankVon[id] = bank;
+  }
+
+  int _bank(int kategorie) => bankVon[kategorie] ?? sammlung;
+  static int _kontext(int bank) => bank == sammlung ? 55 : 60 + bank;
   final List<DoppelEintrag> eintraege = [];
 
   // --- Schalter -------------------------------------------------------------
@@ -83,6 +98,22 @@ class FragenbankDoppel {
 
   /// Verborgene Versionen: Moodle exportiert sie nicht (Fehlerseite mit anderem Code).
   final Set<int> verborgen = {};
+
+  // --- core_question_move_questions ------------------------------------------
+  /// Moodle legt bei einer Sachnummer-Kollision im Ziel still `_1` an (Messung der Quelle, nicht der Instanz).
+  bool kollisionMitSuffix = false;
+
+  /// Der Dienst antwortet mit einem Fehler und ändert nichts.
+  bool verschiebenAbgelehnt = false;
+
+  /// Der Dienst meldet Erfolg und ändert nichts.
+  bool verschiebenWirktNicht = false;
+
+  /// Wird aufgerufen, kurz bevor ein Dienstaufruf verschiebt.
+  void Function()? beiVerschieben;
+
+  /// Die Argumente jedes Aufrufs von core_question_move_questions.
+  final List<Map<String, dynamic>> verschiebeAufrufe = [];
 
   /// Wird aufgerufen, kurz bevor ein bestätigtes Löschen ausgeführt wird.
   void Function()? beiLoeschen;
@@ -178,11 +209,12 @@ class FragenbankDoppel {
     if (pfad == '/my/') return _text(r, _seite('<p>Start</p>'));
 
     if (pfad == '/question/bank/importquestions/import.php') {
+      final cmid = int.tryParse(r.uri.queryParameters['cmid'] ?? '') ?? sammlung;
       if (r.method == 'GET') {
-        return _text(r, _seite('''<form class="mform" method="post" action="/question/bank/importquestions/import.php?cmid=$sammlung">
+        return _text(r, _seite('''<form class="mform" method="post" action="/question/bank/importquestions/import.php?cmid=$cmid">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="_qf__qbank_importquestions_import_form" value="1">
 <input type="hidden" name="newfile" value="9">
-<select name="category">${_optionen()}</select><select name="format"><option value="xml" selected>xml</option></select>
+<select name="category">${_optionen(cmid)}</select><select name="format"><option value="xml" selected>xml</option></select>
 <input type="hidden" name="catfromfile" value="1"><input type="hidden" name="contextfromfile" value="1"><input type="hidden" name="matchgrades" value="error"><input type="hidden" name="stoponerror" value="1">
 </form>'''));
       }
@@ -209,16 +241,18 @@ class FragenbankDoppel {
       return r.response.close();
     }
     if (pfad == '/question/bank/exportquestions/export.php') {
+      final cmid = int.tryParse(r.uri.queryParameters['cmid'] ?? '') ?? sammlung;
       if (r.method == 'GET') {
-        return _text(r, _seite('''<form class="mform" method="post" action="/question/bank/exportquestions/export.php?cmid=$sammlung">
+        return _text(r, _seite('''<form class="mform" method="post" action="/question/bank/exportquestions/export.php?cmid=$cmid">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="_qf__qbank_exportquestions_export_form" value="1">
-<select name="category">${_optionen()}</select><select name="format"><option value="xml" selected>xml</option></select>
+<select name="category">${_optionen(cmid)}</select><select name="format"><option value="xml" selected>xml</option></select>
 <input type="hidden" name="cattofile" value="1"><input type="hidden" name="contexttofile" value="1"></form>'''));
       }
       final f = Uri.splitQueryString(koerper);
-      return _um(r, '/pluginfile.php/55/question/export/${f['category']!.split(',').first}/export.xml');
+      final kat = f['category']!.split(',').first;
+      return _um(r, '/pluginfile.php/${_kontext(_bank(int.parse(kat)))}/question/export/$kat/export.xml');
     }
-    if (pfad.startsWith('/pluginfile.php/55/question/export/')) {
+    if (RegExp(r'^/pluginfile\.php/\d+/question/export/').hasMatch(pfad)) {
       final kat = int.parse(pfad.split('/')[5]);
       final b = StringBuffer('<?xml version="1.0" encoding="UTF-8"?>\n<quiz>\n');
       for (final e in eintraege.where((e) => e.kategorie == kat)) {
@@ -228,6 +262,47 @@ class FragenbankDoppel {
       }
       b.write('</quiz>');
       return _text(r, b.toString());
+    }
+    if (pfad == '/question/banks.php') {
+      return _text(r, _seite('<div id="region-main">${[
+        for (final b in kursBanken.entries) '<a href="/mod/qbank/view.php?id=${b.key}">${b.value}</a>'
+      ].join()}</div>'));
+    }
+    if (pfad == '/lib/ajax/service.php') {
+      final aufruf = (jsonDecode(koerper) as List).single as Map;
+      r.response.headers.contentType = ContentType.json;
+      final fehler = {
+        'error': true,
+        'exception': {'errorcode': 'cannotfindcate', 'message': 'Abgelehnt'}
+      };
+      if (aufruf['methodname'] != 'core_question_move_questions') {
+        r.response.write(jsonEncode([fehler]));
+        return r.response.close();
+      }
+      final a = (aufruf['args'] as Map).cast<String, dynamic>();
+      verschiebeAufrufe.add(a);
+      final kat = a['newcategoryid'] as int;
+      if (verschiebenAbgelehnt || !kategorien.containsKey(kat) || _kontext(_bank(kat)) != a['newcontextid']) {
+        r.response.write(jsonEncode([fehler]));
+        return r.response.close();
+      }
+      beiVerschieben?.call();
+      for (final s in '${a['questionids']}'.split(',')) {
+        final e = eintragVon(int.parse(s));
+        if (e == null || verschiebenWirktNicht) continue;
+        e.kategorie = kat;
+        // Eine Sachnummer-Kollision löst Moodle selbst; der Dienst fragt nicht.
+        if (kollisionMitSuffix &&
+            eintraege.any((x) => x != e && x.kategorie == kat && x.idnummer == e.idnummer)) {
+          eintraege[eintraege.indexOf(e)] = DoppelEintrag(kat, '${e.idnummer}_1', e.typ)
+            ..versionen.addAll(e.versionen.map((v) =>
+                DoppelVersion(v.id, v.nr, v.xml.replaceAll('<idnumber>${e.idnummer}</idnumber>', '<idnumber>${e.idnummer}_1</idnumber>'))));
+        }
+      }
+      r.response.write(jsonEncode([
+        {'error': false, 'data': '/question/edit.php?cmid=${a['newcontextid']}&cat=$kat'}
+      ]));
+      return r.response.close();
     }
     if (pfad == '/question/bank/exporttoxml/exportone.php') {
       final v = version(int.parse(r.uri.queryParameters['id']!));
@@ -333,9 +408,9 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
 
   String _ausgeliefert(DoppelVersion v) => beimExport?.call(v.xml) ?? v.xml;
 
-  String _optionen() => [
-        for (final k in kategorien.entries)
-          '<option value="${k.key},55">${k.value} (${eintraege.where((e) => e.kategorie == k.key && e.versionen.isNotEmpty).length})</option>'
+  String _optionen(int cmid) => [
+        for (final k in kategorien.entries.where((k) => _bank(k.key) == cmid))
+          '<option value="${k.key},${_kontext(cmid)}">${k.value} (${eintraege.where((e) => e.kategorie == k.key && e.versionen.isNotEmpty).length})</option>'
       ].join();
 
   Future<void> _um(HttpRequest r, String ziel) async {

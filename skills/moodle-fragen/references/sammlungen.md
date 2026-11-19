@@ -103,8 +103,8 @@ schreiben), fragt in der App und liest danach je Frage zurück. Zufallsplätze v
 Tests hängen an der Kategorie: Wer aus einer Kategorie verschiebt, aus der ein
 Zufallsplatz zieht, verkleinert dessen Auswahl.
 
-Eine Kategorie selbst (umbenennen, verschieben) kann die App nicht; sag der
-Lehrkraft, dass sie das in Moodle von Hand erledigt.
+Eine Kategorie selbst umbenennen oder verschieben geht mit `kategorie_aendern`
+(Abschnitt „Umbenennen und verschieben“ oben).
 
 **Kein Ausweg ist Export-und-Neuimport für bestehende Fragen**, die schon in
 Tests stecken: Dabei entstehen neue Fragen mit neuen ids. Tests, die auf die

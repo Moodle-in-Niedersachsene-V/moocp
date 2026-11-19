@@ -54,6 +54,9 @@ class FragenbankDoppel {
   /// Die Sammlungen, die die Übersicht des Kurses (`banks.php`) nennt: cmid -> Name.
   final Map<int, String> kursBanken = {12: 'ZZ Bank'};
 
+  /// Ein Schutzdienst hält die Übersicht der Sammlungen (`banks.php`) an.
+  bool schutzBeiBanken = false;
+
   /// Die Zusammenstellungsseiten von Tests (`mod/quiz/edit.php`): cmid -> HTML.
   final Map<int, String> quizSeiten = {};
 
@@ -150,6 +153,10 @@ class FragenbankDoppel {
   bool kollisionMitSuffix = false;
 
   /// Der Dienst antwortet mit einem Fehler und ändert nichts.
+  /// Pro Dienstaufruf (Nummer ab 1): null normal, 'schutz' (Schutzdienst vor Moodle),
+  /// 'wirkung-dann-fehler' (Moodle verschiebt, meldet aber einen Fehler).
+  String? Function(int aufruf)? verschiebeVerhalten;
+
   bool verschiebenAbgelehnt = false;
 
   /// Der Dienst meldet Erfolg und ändert nichts.
@@ -318,6 +325,11 @@ class FragenbankDoppel {
       return _text(r, seite);
     }
     if (pfad == '/question/banks.php') {
+      if (schutzBeiBanken) {
+        r.response.headers.set('server', 'cloudflare');
+        r.response.headers.set('cf-mitigated', 'challenge');
+        return _text(r, '<html><title>Just a moment...</title></html>', status: 403);
+      }
       return _text(r, _seite('<div id="region-main">${[
         for (final b in kursBanken.entries) '<a href="/mod/qbank/view.php?id=${b.key}">${b.value}</a>'
       ].join()}</div>'));
@@ -344,11 +356,19 @@ class FragenbankDoppel {
       final a = (aufruf['args'] as Map).cast<String, dynamic>();
       verschiebeAufrufe.add(a);
       final kat = a['newcategoryid'] as int;
+      final verhalten = verschiebeVerhalten?.call(verschiebeAufrufe.length);
+      if (verhalten == 'schutz') {
+        r.response.headers.set('server', 'cloudflare');
+        r.response.headers.set('cf-mitigated', 'challenge');
+        return _text(r, '<html><title>Just a moment...</title></html>', status: 403);
+      }
+      final fehlerNachWirkung = verhalten == 'wirkung-dann-fehler';
       if (verschiebenAbgelehnt || !kategorien.containsKey(kat) || _kontext(_bank(kat)) != a['newcontextid']) {
         r.response.write(jsonEncode([fehler]));
         return r.response.close();
       }
       beiVerschieben?.call();
+      final antwortFehler = fehlerNachWirkung;
       for (final s in '${a['questionids']}'.split(',')) {
         final e = eintragVon(int.parse(s));
         if (e == null || verschiebenWirktNicht) continue;
@@ -360,6 +380,10 @@ class FragenbankDoppel {
             ..versionen.addAll(e.versionen.map((v) =>
                 DoppelVersion(v.id, v.nr, v.xml.replaceAll('<idnumber>${e.idnummer}</idnumber>', '<idnumber>${e.idnummer}_1</idnumber>'))));
         }
+      }
+      if (antwortFehler) {
+        r.response.write(jsonEncode([fehler]));
+        return r.response.close();
       }
       r.response.write(jsonEncode([
         {'error': false, 'data': '/question/edit.php?cmid=${a['newcontextid']}&cat=$kat'}

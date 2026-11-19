@@ -40,7 +40,7 @@ import 'moodle_zugang.dart';
 
 class Platz {
   Platz(this.slotid, this.frage, this.typ, this.name, this.punkte, this.seite,
-      {this.bankCmid, this.bankName, this.zufallBankCmid, this.festeVersion = false});
+      {this.bankCmid, this.bankName, this.zufallBankCmid, this.festeVersion = false, this.bankOhneLink = false});
   final int slotid;
   final int? frage;
   final String? typ;
@@ -53,6 +53,10 @@ class Platz {
   /// Test gehört, also ohne Abzeichen. Nur aus dem Link gelesen, nie abgerufen.
   final int? bankCmid;
   final String? bankName;
+
+  /// Das Abzeichen einer geteilten Bank ist da, aber ohne Link (Moodle verlinkt es
+  /// nur, wenn das Konto die Bank ansehen darf): welche Bank, ist dann nicht lesbar.
+  final bool bankOhneLink;
 
   /// Bank eines Zufallsplatzes (cmid aus `a.mod_quiz_random_qbank_link`); bei
   /// der eigenen Bank des Tests ist es dessen cmid.
@@ -137,23 +141,24 @@ class TestAufbau {
 
 extension TestHerkunft on TestAufbau {
   String _bank(int cmid, String? name) {
-    if (cmid == this.cmid) return 'der eigenen Bank des Tests';
+    if (cmid == this.cmid) return 'der Bank dieses Tests (cmid $cmid)';
     final bekannt = kursBanken?[cmid];
     if (bekannt != null) return 'Bank „${bekannt.name}" (cmid $cmid) in diesem Kurs';
     final n = name == null ? '' : ', „$name"';
     if (kursBanken == null) return 'Bank${name == null ? '' : ' „$name"'} (cmid $cmid), Kurs der Bank nicht ermittelt';
-    return 'Bank in einem anderen Kurs (cmid $cmid$n)';
+    return 'Bank nicht in der Bankliste dieses Kurses (cmid $cmid$n; vermutlich ein anderer Kurs, oder das Konto sieht sie hier nicht)';
   }
 
   /// Wo die Fragen liegen, aus der Zusammenstellung abgelesen (nur lesen).
-  /// Ohne Abzeichen liegt eine Frage in der Bank des Tests; ob es die eigene
-  /// oder die eines anderen Tests ist, steht nicht auf der Seite -- das
+  /// Ohne Abzeichen heißt nur: keine geteilte Bank, die Frage liegt in der Bank
+  /// eines Tests; ob in der eigenen oder der eines anderen, steht nicht auf der Seite -- das
   /// beantwortet nur der Vergleich der questionid mit [quelle] (nicht
   /// gemessen: ob Moodle beim Kopieren in einen anderen Kurs die Bank des
   /// Quelltests weiter verwendet).
   String herkunftText({TestAufbau? quelle}) {
     final fest = plaetze.where((p) => !p.zufall).toList();
-    final ohneBank = fest.where((p) => p.bankCmid == null).toList();
+    final ohneLink = fest.where((p) => p.bankOhneLink).toList();
+    final ohneBank = fest.where((p) => p.bankCmid == null && !p.bankOhneLink).toList();
     final je = <int, List<Platz>>{};
     for (final p in fest.where((p) => p.bankCmid != null)) {
       (je[p.bankCmid!] ??= []).add(p);
@@ -165,12 +170,18 @@ extension TestHerkunft on TestAufbau {
     final ohneAngabe = plaetze.where((p) => p.zufall && p.zufallBankCmid == null).length;
     String plaetzeText(int n) => n == 1 ? '1 Platz verweist' : '$n Plätze verweisen';
     final zeilen = <String>[];
-    final nurEigen = je.isEmpty && ohneAngabe == 0 && zufall.keys.every((c) => c == cmid);
+    final nurEigen = je.isEmpty && ohneLink.isEmpty && ohneAngabe == 0 && zufall.keys.every((c) => c == cmid);
     if (nurEigen && plaetze.isNotEmpty) {
-      zeilen.add('Alle Fragen liegen in der eigenen Bank des Tests.');
+      zeilen.add('Kein Platz zeigt das Abzeichen einer geteilten Bank: Die Fragen liegen in der Bank eines Tests, '
+          'vermutlich der eigenen (die Seite sagt nicht, in welcher).');
     } else {
       if (ohneBank.isNotEmpty) {
-        zeilen.add('${ohneBank.length} ${ohneBank.length == 1 ? 'Platz liegt' : 'Plätze liegen'} in der eigenen Bank des Tests.');
+        zeilen.add('${ohneBank.length} ${ohneBank.length == 1 ? 'Platz zeigt' : 'Plätze zeigen'} kein Abzeichen einer '
+            'geteilten Bank (also in der Bank eines Tests, vermutlich der eigenen).');
+      }
+      if (ohneLink.isNotEmpty) {
+        zeilen.add('${plaetzeText(ohneLink.length)} auf eine geteilte Bank${ohneLink.first.bankName == null || ohneLink.first.bankName!.isEmpty ? '' : ' („${ohneLink.first.bankName}")'}, '
+            'deren cmid nicht lesbar ist (Moodle zeigt den Link nur mit dem Recht, die Bank anzusehen).');
       }
       for (final e in je.entries) {
         zeilen.add('${plaetzeText(e.value.length)} auf ${_bank(e.key, e.value.first.bankName)}.');
@@ -180,7 +191,7 @@ extension TestHerkunft on TestAufbau {
       }
       if (ohneAngabe > 0) zeilen.add('$ohneAngabe Zufallsplatz/-plätze ohne lesbare Bank: nicht geprüft.');
     }
-    if (je.isNotEmpty || zufall.keys.any((c) => c != cmid)) {
+    if (je.isNotEmpty || ohneLink.isNotEmpty || zufall.keys.any((c) => c != cmid)) {
       zeilen.add('Änderungen oder Löschen in einer geteilten Bank wirken auch auf die anderen Tests, die sie nutzen.');
     }
     if (quelle != null) {
@@ -240,12 +251,14 @@ TestAufbau testAuswerten(int cmid, String seite) {
     // Abzeichen der geteilten Bank und Link der Zufallsplätze: nur geparst. Die Seite
     // dahinter (/question/edit.php) zeigt „Erstellt von" und wird nie abgerufen (A1).
     final badge = li.querySelector('.sharedbank a[href]');
+    final abzeichen = li.querySelector('.sharedbank');
     final bankUrl = Uri.tryParse(badge?.attributes['href'] ?? '');
     final zufallUrl = Uri.tryParse(li.querySelector('a.mod_quiz_random_qbank_link')?.attributes['href'] ?? '');
     final version = li.querySelector('select.version-selection option[selected]')?.attributes['value'];
     plaetze.add(Platz(id, frage, typ, name, _zahl(li.querySelector('.instancemaxmark')?.text), zuSeite[id],
         bankCmid: int.tryParse(bankUrl?.queryParameters['cmid'] ?? ''),
-        bankName: badge?.text.replaceAll(RegExp(r'\s+'), ' ').trim(),
+        bankName: (badge ?? abzeichen)?.text.replaceAll(RegExp(r'\s+'), ' ').trim(),
+        bankOhneLink: abzeichen != null && badge == null,
         zufallBankCmid: int.tryParse(zufallUrl?.queryParameters['cmid'] ?? ''),
         festeVersion: version != null && version != '0'));
   }
@@ -283,8 +296,12 @@ Future<TestAufbau> testLesen(MoodleZugang moodle, int cmid, {bool banken = false
   if (banken && t.kurs != null) {
     try {
       t.kursBanken = {for (final b in await fragensammlungenLesen(moodle, t.kurs!)) b.cmid: b};
+    } on SchutzPruefung {
+      rethrow; // E34: ein Schutzdienst ist ein Fehler, nie ein „nicht ermittelt"
+    } on SitzungAbgelaufen {
+      rethrow;
     } on Exception {
-      // Die Herkunft ist eine Zugabe: Fehler hier stören weder test_lesen noch Duplizieren oder Wiederherstellen.
+      // Die Herkunft ist eine Zugabe: Sonstige Fehler hier stören weder test_lesen noch Duplizieren oder Wiederherstellen.
       t.kursBanken = null;
     }
   }

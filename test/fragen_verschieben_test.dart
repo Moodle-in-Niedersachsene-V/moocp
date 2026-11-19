@@ -217,6 +217,45 @@ void main() {
     expect(moodle.verschiebeAufrufe, hasLength(1));
   });
 
+  test('Schutzdienst bei Frage 2 von 3: Frage 1 ist als verschoben gemeldet, Frage 3 unberührt, die Schleife hält an', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    final b = moodle.legeAn('shortanswer', 'ZZ Zwei', 'zz-2');
+    final c = moodle.legeAn('shortanswer', 'ZZ Drei', 'zz-3');
+    moodle.verschiebeVerhalten = (n) => n == 2 ? 'schutz' : null;
+    final bericht = await freigegeben(los([a, b, c]));
+    expect(bericht, contains('verified: false'));
+    expect(bericht, contains('verschoben: „ZZ Eins"'));
+    expect(bericht, contains('UNKLAR: „ZZ Zwei"'));
+    expect(bericht, contains('Angehalten: 1 weitere'));
+    expect(moodle.verschiebeAufrufe, hasLength(2), reason: 'Frage 3 wird nicht angefasst');
+    expect(a.kategorie, 2);
+    expect(c.kategorie, 1);
+  });
+
+  test('Moodle meldet Fehler, die Frage steht aber im Ziel: verschoben, Vorgang geschlossen (E37)', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    moodle.verschiebeVerhalten = (n) => 'wirkung-dann-fehler';
+    final bericht = await freigegeben(los([a]));
+    expect(bericht, contains('verified: true'));
+    expect(bericht, contains('obwohl Moodle einen Fehler meldete'));
+    moodle.verschiebeVerhalten = null;
+    // Der Vorgang ist zu: Die Frage lässt sich wieder zurückverschieben.
+    moodle.legeKategorieAn(4, 'ZZ Zurück');
+    final f = los([a], kategorie: 'ZZ Zurück');
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    expect(await f, contains('verified: true'));
+  });
+
+  test('Ein Fehler bei Frage 1 von 2 hält die Schleife an', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    final b = moodle.legeAn('shortanswer', 'ZZ Zwei', 'zz-2');
+    moodle.verschiebenAbgelehnt = true;
+    final bericht = await freigegeben(los([a, b]));
+    expect(bericht, contains('Angehalten: 1 weitere'));
+    expect(moodle.verschiebeAufrufe, hasLength(1));
+  });
+
   test('Positivliste: der Dienst nur mit einer questionid und der lokalen returnurl', () {
     bool dienst(Map<String, Object?> args) => zugang.erlaubt(
         'POST',

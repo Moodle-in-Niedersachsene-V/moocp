@@ -49,22 +49,35 @@ void main() {
   group('Herkunftstext', () {
     test('alle Fragen in der eigenen Bank', () {
       final t = testAuswerten(5001, _seite(_eigen(1, 11, 'ZZ A') + _eigen(2, 12, 'ZZ B')));
-      expect(t.herkunftText(), 'Alle Fragen liegen in der eigenen Bank des Tests.');
+      // Ohne Abzeichen weiß die Seite nur: keine geteilte Bank. Die eigene Bank behauptet der Text nicht.
+      expect(t.herkunftText(), allOf(contains('Kein Platz zeigt das Abzeichen einer geteilten Bank'), contains('vermutlich der eigenen')));
+      expect(t.herkunftText(), isNot(contains('Alle Fragen liegen')));
     });
 
-    test('geteilte Bank im Kurs wird mit Namen genannt, fremde als Bank in einem anderen Kurs', () {
+    test('Abzeichen ohne Link (kein Recht, die Bank anzusehen) gilt nie als eigene Bank', () {
+      const ohneLink = '<li class="activity slot qtype_multichoice" id="slot-1"><span class="activityname">ZZ A</span>'
+          '<a href="/question/bank/editquestion/question.php?cmid=5002&id=11">bearbeiten</a>'
+          '<div class="sharedbank"><span class="badge">ZZ Bank</span></div><span class="instancemaxmark">1,00</span></li>';
+      final t = testAuswerten(5001, _seite(ohneLink));
+      expect(t.plaetze.single.bankOhneLink, isTrue);
+      final text = t.herkunftText();
+      expect(text, allOf(contains('cmid nicht lesbar'), contains('„ZZ Bank"'), contains('wirken auch auf die anderen Tests')));
+      expect(text, isNot(contains('Kein Platz zeigt')));
+    });
+
+    test('geteilte Bank im Kurs wird mit Namen genannt, fremde als Bank nicht in der Bankliste dieses Kurses', () {
       final t = testAuswerten(5001, _seite(_geteilt(1, 11, 'ZZ A', 31, 'ZZ Bank') + _geteilt(2, 12, 'ZZ B', 40, 'ZZ Fremd') + _geteilt(3, 13, 'ZZ C', 40, 'ZZ Fremd')))
         ..kursBanken = {31: Fragensammlung(31, 'ZZ Bank', true)};
       final text = t.herkunftText();
       expect(text, contains('1 Platz verweist auf Bank „ZZ Bank" (cmid 31) in diesem Kurs'));
-      expect(text, contains('2 Plätze verweisen auf Bank in einem anderen Kurs (cmid 40, „ZZ Fremd")'));
+      expect(text, contains('2 Plätze verweisen auf Bank nicht in der Bankliste dieses Kurses (cmid 40, „ZZ Fremd"'));
       expect(text, isNot(contains('Alle Fragen liegen')));
     });
 
     test('Zufallsplätze: eigene Bank des Tests oder Bank mit cmid', () {
       final t = testAuswerten(5001, _seite(_zufall(1, 5001) + _zufall(2, 31)))..kursBanken = {31: Fragensammlung(31, 'ZZ Bank', true)};
       final text = t.herkunftText();
-      expect(text, contains('1 Zufallsplatz zieht aus der eigenen Bank des Tests'));
+      expect(text, contains('1 Zufallsplatz zieht aus der Bank dieses Tests (cmid 5001)'));
       expect(text, contains('1 Zufallsplatz zieht aus Bank „ZZ Bank" (cmid 31) in diesem Kurs'));
     });
 
@@ -92,7 +105,7 @@ void main() {
       final t = testAuswerten(5001, _seite(_eigen(1, 11, 'ZZ A') + _geteilt(2, 12, 'ZZ B', 31, 'ZZ Bank')))..kursBanken = {};
       final text = t.text();
       expect(text, contains('Herkunft:'));
-      expect(text, contains('Bank in einem anderen Kurs (cmid 31, „ZZ Bank")'));
+      expect(text, contains('Bank nicht in der Bankliste dieses Kurses (cmid 31, „ZZ Bank"'));
     });
   });
 
@@ -112,9 +125,15 @@ void main() {
         ..[31] = 'ZZ Bank';
       moodle.quizSeiten[5001] = _seite(_geteilt(1, 11, 'ZZ A', 31, 'ZZ Bank') + _geteilt(2, 12, 'ZZ B', 40, 'ZZ Fremd') + _zufall(3, 40));
       final t = await testLesen(zugang, 5001, banken: true);
-      expect(t.herkunftText(), allOf(contains('in diesem Kurs'), contains('in einem anderen Kurs (cmid 40')));
+      expect(t.herkunftText(), allOf(contains('in diesem Kurs'), contains('nicht in der Bankliste dieses Kurses (cmid 40')));
       expect(moodle.anfragen.where((a) => a.contains('/question/edit.php')), isEmpty);
       expect(moodle.anfragen.any((a) => a.contains('/question/banks.php?courseid=12')), isTrue);
+    });
+
+    test('Ein Schutzdienst vor der Bankliste ist ein Fehler, kein „nicht ermittelt"', () async {
+      moodle.schutzBeiBanken = true;
+      moodle.quizSeiten[5001] = _seite(_eigen(1, 11, 'ZZ A'));
+      await expectLater(testLesen(zugang, 5001, banken: true), throwsA(isA<SchutzPruefung>()));
     });
 
     test('ohne banken: keine Anfrage an die Bankliste', () async {

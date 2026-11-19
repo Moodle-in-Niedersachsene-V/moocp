@@ -2178,6 +2178,7 @@ class McpDienst implements AufrufKontext {
           description: 'Die Fragen, je {id, name}',
         ),
       },
+      zerstoerend: true,
       pflicht: ['sammlung', 'fragen'],
       ausfuehren: (a) {
         final liste = a['fragen'];
@@ -2879,7 +2880,7 @@ class McpDienst implements AufrufKontext {
           'Name, Punkten und questionid, Summe der Punkte, Beste Bewertung, Fragen je Seite, ob die Fragen '
           'gemischt werden (je Testabschnitt), und Befunde '
           '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche) '
-          'und die Herkunft der Fragen (eigene Bank des Tests oder geteilte Fragensammlung, im Kurs oder in einem anderen). '
+          'und die Herkunft der Fragen (ohne Abzeichen: Bank eines Tests, vermutlich der eigenen; sonst geteilte Fragensammlung, in der Bankliste des Kurses oder nicht). '
           'Einstellungen des Tests: aktivitaet_lesen. Nur lesen.',
       parameter: {
         'cmid': JsonSchema.integer(

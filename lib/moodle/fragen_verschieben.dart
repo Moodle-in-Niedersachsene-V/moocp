@@ -165,8 +165,12 @@ Future<String> fragenVerschieben(MoodleZugang moodle, Freigaben freigaben,
   }
 
   // Eine Frage je Aufruf, die questionid der neuesten Version; der Eintrag zieht mit allen Versionen.
+  // Nach der ersten Frage, deren Ausgang nicht eindeutig gut ist, hört die Schleife auf: Ein Fehler
+  // an der Sitzung, am Schutzdienst, am Ziel oder an der Instanz wiederholte sich sonst für jede Frage.
   final b = StringBuffer();
   var alleGut = true;
+  var fertig = 0;
+  Object? abbruch;
   for (final g in p.fragen) {
     final vorgang = vorgaenge[g.frage.id]!;
     final kopf = _kopf(g.frage);
@@ -183,12 +187,13 @@ Future<String> fragenVerschieben(MoodleZugang moodle, Freigaben freigaben,
         // Pflicht: Ohne returnurl bricht Moodle 5.1 den Dienst mit einem Typfehler ab. Die Adresse wird nicht abgerufen.
         'returnurl': '/question/edit.php?cmid=$zielSammlung',
       });
-    } on SitzungAbgelaufen {
-      vorgang.verwerfen();
-      rethrow;
-    } on SchutzPruefung {
-      vorgang.verwerfen();
-      rethrow;
+    } on SitzungAbgelaufen catch (x) {
+      // Der Aufruf kam vielleicht nicht an: Der Ausgang steht erst nach dem Zurücklesen fest, das ohne Sitzung scheitert.
+      abbruch = x;
+      ursache = x.meldung;
+    } on SchutzPruefung catch (x) {
+      abbruch = x;
+      ursache = x.meldung;
     } on MoodleFehler catch (x) {
       ursache = x.meldung;
     } catch (x) {
@@ -196,15 +201,36 @@ Future<String> fragenVerschieben(MoodleZugang moodle, Freigaben freigaben,
     }
     // Zurücklesen, auch nach einem Fehler: Der Ausgang muss feststehen (E37).
     final r = await _zuruecklesen(moodle, sammlung, zielSammlung, ziel, g);
-    if (ursache != null) {
-      alleGut = false;
-      b.writeln('  UNKLAR: $kopf -- Moodle hat den Aufruf abgelehnt oder er ist gescheitert ($ursache). ${r.text} ${vorgang.hinweis}');
+    if (r.verschoben && r.gut) {
+      // Eindeutig: Die Frage steht im Ziel, wie sie sein soll -- auch wenn Moodle einen Fehler meldete.
+      vorgang.abschliessen();
+      b.writeln('  verschoben${ursache == null ? '' : ', obwohl Moodle einen Fehler meldete ($ursache)'}: $kopf -- ${r.text}');
+      fertig++;
+      if (abbruch != null) break;
       continue;
     }
-    if (r.verschoben) vorgang.abschliessen();
-    if (!r.gut) alleGut = false;
-    b.writeln('  ${r.gut ? 'verschoben' : (r.verschoben ? 'verschoben, aber Befund' : 'NICHT verschoben')}: $kopf -- ${r.text}');
-    if (!r.verschoben) b.writeln('    ${vorgang.hinweis}');
+    alleGut = false;
+    // Sitzung und Schutzdienst weisen den Aufruf ab, bevor Moodle etwas tut (wie vorher): Der Vorgang
+    // bleibt dort nicht offen, eine Wiederholung nach neuer Anmeldung ist erlaubt.
+    if (abbruch != null && !r.verschoben) vorgang.verwerfen();
+    if (ursache != null) {
+      b.writeln('  UNKLAR: $kopf -- Moodle hat den Aufruf abgelehnt oder er ist gescheitert ($ursache). ${r.text} ${vorgang.hinweis}');
+    } else {
+      b.writeln('  ${r.verschoben ? 'verschoben, aber Befund' : 'NICHT verschoben'}: $kopf -- ${r.text}');
+      if (r.verschoben) {
+        vorgang.abschliessen();
+      } else {
+        b.writeln('    ${vorgang.hinweis}');
+      }
+    }
+    fertig++;
+    break;
+  }
+  final offen = p.fragen.length - fertig;
+  if (offen > 0) {
+    alleGut = false;
+    b.writeln('  Angehalten: $offen weitere Frage(n) wurden nicht angefasst, weil die letzte nicht eindeutig gut ausging. '
+        'Mit fragen_lesen nachsehen, was wo steht, dann den Rest neu aufrufen.');
   }
   return '${alleGut ? 'Verschoben' : 'Nicht alles wie freigegeben verschoben'}: ${p.fragen.length} Frage(n) nach „${ziel.name}" '
       '(Sammlung $zielSammlung). verified: $alleGut\n$b'

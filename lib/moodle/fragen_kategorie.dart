@@ -202,6 +202,9 @@ Future<_Plan> _pruefen(MoodleZugang moodle,
   final baum = _Baum(kats, i);
   final k = baum.wurzel;
   nameBestaetigen(name, k.name, 'Kategorie $kategorie');
+  if (k.kontext == null) {
+    throw MoodleFehler('Abgebrochen, nichts geändert: Der Kontext der Kategorie „${k.name}" ist nicht erkennbar.');
+  }
   final umbenennen = neuerName != null && neuerName != k.name;
   if (!umbenennen && !wirdVerschoben) {
     throw MoodleFehler('Nichts zu ändern: Weder ein neuer Name noch ein neuer Elternteil genannt (oder der Name ist schon so).');

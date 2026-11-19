@@ -603,7 +603,7 @@ Future<String> fragenLoeschen(MoodleZugang moodle, Freigaben freigaben, String a
 
 /// Welche der Fragen laut Moodles Rückfrage in Benutzung sind: Moodle setzt
 /// vor jede benutzte Version ein `* ` und nennt sie sonst „Name (Version n)".
-/// Die Zuordnung läuft über den Namen am Zeilenanfang; Fragen mit gleichem
+/// Die Zuordnung läuft über den ganzen Namen vor „(Version n)"; Fragen mit gleichem
 /// Namen lassen sich so nicht trennen, dann gilt vorsichtig beide als benutzt.
 /// Nicht gemessen: die Zeilenform auf einer Instanz; fehlt die Liste, gilt
 /// keine Frage als benutzt und das Zurücklesen entscheidet.
@@ -612,8 +612,10 @@ Set<int?> _inBenutzung(List<String> zeilen, List<FrageKurz> fragen) {
   for (final z in zeilen) {
     if (!z.startsWith('* ')) continue;
     final text = z.substring(2).trim();
+    // „Name (Version n)": nur der Name davor zählt, damit „Frage" nicht „Frage 2" mitmeint.
+    final name = RegExp(r'^(.*?)\s*\([^()]*\d+\)$').firstMatch(text)?.group(1) ?? text;
     for (final f in fragen) {
-      if (text.startsWith(f.name)) aus.add(f.id);
+      if (name == f.name.trim()) aus.add(f.id);
     }
   }
   return aus;
@@ -639,6 +641,23 @@ Future<List<({FrageKurz frage, String xml})>> loeschenPruefen(
     }
     nameBestaetigen(name, f.name, 'Frage $id');
     gefunden.add((frage: f, xml: e.xml!));
+  }
+  // Der Einzelexport nimmt jede Version und prüft die Sammlung nicht: Eine ältere Version
+  // würde als „aktuelle" gesichert, eine Frage aus einer anderen Sammlung gelöscht, obwohl
+  // `sammlung` etwas anderes sagt. Gelöscht wird nur, was der Export der Kategorien dieser
+  // Sammlung als neueste Version zeigt.
+  final kategorien = await kategorienLesen(moodle, sammlung);
+  final aktuell = <int?>{};
+  for (final k in kategorien) {
+    if (k.anzahl == 0) continue;
+    aktuell.addAll(fragenAusXml(await exportieren(moodle, sammlung, k)).map((x) => x.id));
+  }
+  for (final g in gefunden) {
+    if (!aktuell.contains(g.frage.id)) {
+      throw MoodleFehler('Abgebrochen, nichts gelöscht: Frage ${g.frage.id} „${g.frage.name}" ist nicht die neueste '
+          'Version einer Frage in Sammlung $sammlung (ältere Version oder andere Sammlung). Gebraucht wird die '
+          'aktuelle questionid aus fragen_lesen dieser Sammlung.');
+    }
   }
   return gefunden;
 }

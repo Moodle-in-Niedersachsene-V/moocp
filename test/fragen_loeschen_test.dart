@@ -181,4 +181,42 @@ void main() {
     await expectLater(los(alle), throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', contains('25'))));
     expect(freigaben.aktuell, isNull);
   });
+  test('Eine ältere Version als id: Abbruch vor Sicherung und Freigabe, nichts gelöscht', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    final alt = a.neueste.id;
+    moodle.neueVersion(a, antwort: 'B');
+    await expectLater(
+      fragenLoeschen(zugang, freigaben, ao.path,
+          sammlung: FragenbankDoppel.sammlung, fragen: [(alt, 'ZZ Eins')], sicherungsOrdner: sicherungen.path),
+      throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', allOf(contains('$alt'), contains('nichts gelöscht')))),
+    );
+    expect(freigaben.aktuell, isNull);
+    expect(loeschAnfragen(), 0);
+    expect(dateien(), isEmpty);
+  });
+
+  test('Eine Frage aus einer anderen Sammlung: Abbruch vor Sicherung und Freigabe, nichts gelöscht', () async {
+    moodle.kategorien[2] = 'ZZ Fremd';
+    moodle.bankVon[2] = 13;
+    final fremd = moodle.legeAn('shortanswer', 'ZZ Fremd', 'zz-9', kategorie: 2);
+    await expectLater(
+      los([fremd]),
+      throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', contains('nichts gelöscht'))),
+    );
+    expect(freigaben.aktuell, isNull);
+    expect(loeschAnfragen(), 0);
+    expect(dateien(), isEmpty);
+  });
+
+  test('Ein Name, der Anfang eines anderen ist, gilt nicht als benutzt', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Frage', 'zz-1');
+    final b = moodle.legeAn('shortanswer', 'ZZ Frage 2', 'zz-2');
+    moodle.inBenutzung.add(b.neueste.id);
+    final f = los([a, b]);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.abhaken.firstWhere((z) => z.contains('questionid ${a.neueste.id}')), isNot(contains('verbirgt')));
+    expect(anfrage.abhaken.firstWhere((z) => z.contains('questionid ${b.neueste.id}')), contains('verbirgt'));
+    freigaben.entscheiden(false);
+    await f;
+  });
 }

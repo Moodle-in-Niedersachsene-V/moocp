@@ -906,7 +906,7 @@ Testplatz. Eine Änderung an der Frage wirkt deshalb **sofort in jedem Test**,
 der sie benutzt. Gibt es dort bereits Versuche, verschiebt das rückwirkend
 Bewertungen. Vorher fragen; `test_lesen` meldet vorhandene Versuche.
 
-**In der Kopie eines Tests** (Abschnitt „Bestehendes überarbeiten") kann es sein, dass keine eigenen Fragen stehen: Verweist die Kopie auf eine geteilte Fragensammlung, sind es dieselben Fragen wie im Original. Ob das so ist, sagt `test_lesen` (Zeile „Herkunft", je Platz die Bank, bei einer Bank außerhalb des Kurses „Bank in einem anderen Kurs") und nach `duplizieren`, `uebertragen` und Wiederherstellen die Antwort der Kopie. **Ruf nach dem Kopieren eines Tests und vor jeder Änderung an seinen Fragen `test_lesen` auf** und gib der Lehrkraft das Ergebnis weiter: eigene Kopien, geteilt mit dem Original, oder nicht entscheidbar (feste Version). Bei „eigene Bank des Tests" lässt sich nur am Vergleich mit dem Original erkennen, ob die Fragen eigene Kopien sind; die Antwort von `duplizieren` macht diesen Vergleich. Wo Fragen geteilt sind, ändert eine Änderung der Frage sie auch im Original — und dort womöglich rückwirkend Bewertungen. Soll eine Frage nur im neuen Test anders sein, tauschst du sie mit `frage_ersetzen` nur in diesem Test aus, mit `loeschen: false`. Welcher Weg für welche Frage gilt, steht im Plan.
+**In der Kopie eines Tests** (Abschnitt „Bestehendes überarbeiten") kann es sein, dass keine eigenen Fragen stehen: Verweist die Kopie auf eine geteilte Fragensammlung, sind es dieselben Fragen wie im Original. Ob das so ist, sagt `test_lesen` (Zeile „Herkunft", je Platz die Bank, bei einer Bank, die nicht in der Bankliste des Kurses steht, „Bank nicht in der Bankliste dieses Kurses") und nach `duplizieren`, `uebertragen` und Wiederherstellen die Antwort der Kopie. **Ruf nach dem Kopieren eines Tests und vor jeder Änderung an seinen Fragen `test_lesen` auf** und gib der Lehrkraft das Ergebnis weiter: eigene Kopien, geteilt mit dem Original, oder nicht entscheidbar (feste Version). Bei „kein Abzeichen einer geteilten Bank" (die Fragen liegen dann in der Bank eines Tests, vermutlich der eigenen) lässt sich nur am Vergleich mit dem Original erkennen, ob die Fragen eigene Kopien sind; die Antwort von `duplizieren` macht diesen Vergleich. Wo Fragen geteilt sind, ändert eine Änderung der Frage sie auch im Original — und dort womöglich rückwirkend Bewertungen. Soll eine Frage nur im neuen Test anders sein, tauschst du sie mit `frage_ersetzen` nur in diesem Test aus, mit `loeschen: false`. Welcher Weg für welche Frage gilt, steht im Plan.
 
 **Struktur ändert man so nicht.** Eine zusätzliche Antwort, ein weiterer
 Knoten im Rückmeldebaum oder ein zusätzliches Eingabefeld entstehen im
@@ -1035,9 +1035,9 @@ Einen **neuen Test** legt `aktivitaet_anlegen(… typ: "quiz")` an (Skill
 
 `test_lesen(cmid)` — Plätze mit Seite, slotid, Typ, Name, Punkten und
 questionid, Summe, Beste Bewertung, Fragen je Seite, ob gemischt wird, und
-Befunde. Dazu die Herkunft der Fragen: in der eigenen Bank des Tests oder in
-einer geteilten Fragensammlung (cmid, Name, im Kurs oder in einem anderen
-Kurs), bei Zufallsplätzen die Bank, aus der sie ziehen. Nur gelesen, die Bank
+Befunde. Dazu die Herkunft der Fragen: ohne Abzeichen einer geteilten Bank
+(also in der Bank eines Tests, vermutlich der eigenen) oder in einer geteilten
+Fragensammlung (cmid, Name, in der Bankliste des Kurses oder nicht), bei Zufallsplätzen die Bank, aus der sie ziehen. Nur gelesen, die Bank
 selbst wird dabei nicht geöffnet.
 
 `test_aendern(cmid, name, aktionen)` — alle Aktionen nach **einer** Freigabe,

@@ -72,6 +72,7 @@ Future<String> fragenVersionImportieren(
   required String kategorie,
   required String datei,
   int? uebergehen,
+  BeiBestanden? beiBestanden,
 }) async {
   // --- 1. Prüfen; nichts wird geschrieben ------------------------------------
   final pfad = imArbeitsordner(datei, arbeitsordner);
@@ -119,7 +120,7 @@ Future<String> fragenVersionImportieren(
   final b = StringBuffer();
   var alleOk = true, verified = true;
   for (final (i, z) in zuordnungen.indexed) {
-    final r = await _eine(moodle, arbeitsordner, sammlung, k, z, uebergehen);
+    final r = await _eine(moodle, arbeitsordner, sammlung, k, z, beiBestanden);
     b.writeln(r.text);
     if (!r.verified) verified = false;
     if (!r.ok) {
@@ -213,7 +214,7 @@ Future<Formular> _pluginFormular(MoodleZugang moodle, int sammlung, int frage) a
 }
 
 Future<({bool ok, bool verified, String text})> _eine(MoodleZugang moodle, String arbeitsordner, int sammlung, Kategorie k,
-    _Zuordnung z, int? uebergehen) async {
+    _Zuordnung z, BeiBestanden? beiBestanden) async {
   final name = z.aktuell.name, idn = z.aktuell.idnummer;
   final kopf = '„$name" (Sachnummer $idn)';
   final vorgang = Schreibvorgang(moodle, Formularziel.frage(sammlung, z.aktuell.id!));
@@ -277,6 +278,7 @@ Future<({bool ok, bool verified, String text})> _eine(MoodleZugang moodle, Strin
     if (!weg.weg) b.writeln('  ${weg.text}');
     return (ok: false, verified: false, text: b.toString().trimRight());
   }
+  if (probe.verified) beiBestanden?.call(z.aktuell.typ, eingabe, probe.moodleVersion);
   b.writeln('$kopf: neue Version ${neu.id} nach ${z.aktuell.id}. Rundlaufprobe ${probe.verified ? 'bestanden' : 'ohne Befund, aber nicht vollständig'}.');
   b.write(probe.text());
   return (ok: true, verified: probe.verified, text: b.toString().trimRight());

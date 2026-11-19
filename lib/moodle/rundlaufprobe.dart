@@ -54,6 +54,10 @@ class ProbeErgebnis {
   /// Weitere Auskünfte, etwa eine Probeversion, die stehen bleibt.
   final List<String> hinweise = [];
 
+  /// Die Moodle-Version, soweit die Vorschauseite sie nennt (nur für die
+  /// Fragetyp-Notiz, fragetyp_notizen.dart); null, wenn sie nicht darin steht.
+  String? moodleVersion;
+
   /// Eine Probeversion, die nicht gelöscht werden konnte. Sie liegt als
   /// Entwurf in der Fragenbank und gehört in die Antwort.
   bool probeBleibt = false;
@@ -111,6 +115,11 @@ Future<({bool weg, String text})> loescheAngelegtes(
   }
   return (weg: alleWeg, text: text);
 }
+
+/// Wird gerufen, wenn eine Frage die Probe in allen vier Teilen bestanden hat
+/// (verified): Fragetyp, das geprüfte XML und die Moodle-Version (oder null).
+/// Daraus entsteht der Nachweis für eine Fragetyp-Notiz (fragetyp_notizen.dart).
+typedef BeiBestanden = void Function(String typ, String xml, String? moodleVersion);
 
 /// Die Fehlermeldung einer Moodle-Seite, oder null. Ein Hinweiskasten im
 /// Text der Frage (Bootstrap `alert-danger`, A8) ist keine Fehlermeldung.
@@ -188,6 +197,7 @@ Future<ProbeErgebnis> rundlaufProbe(
       if (ziel == null) break;
       a = await moodle.lesen('${ziel.path}${ziel.hasQuery ? '?${ziel.query}' : ''}');
     }
+    r.moodleVersion = RegExp(r'"(?:moodleversion|moodle_version|release)"\s*:\s*"([0-9][0-9.]*)').firstMatch(a.text)?.group(1);
     final fehler = a.status != 200 ? 'HTTP ${a.status}' : seitenFehler(a.text);
     if (fehler != null) {
       r.befunde.add('Die Vorschau der Frage zeigt einen Fehler: $fehler');
@@ -278,8 +288,9 @@ Future<({String text, bool ok, bool verified})> importProben(
   int sammlung,
   Importiert i,
   Map<int, int> neueIds,
-  String xml,
-) async {
+  String xml, {
+  BeiBestanden? beiBestanden,
+}) async {
   final doc = XmlDocument.parse(xml);
   final eingaben = [for (final q in doc.rootElement.findElements('question')) if (q.getAttribute('type') != 'category') q];
   final b = StringBuffer();
@@ -304,6 +315,7 @@ Future<({String text, bool ok, bool verified})> importProben(
       b.writeln('Rundlaufprobe „${f.name}" (${r.verified ? 'bestanden' : 'ohne Befund, nicht vollständig'}):');
       b.write(r.text());
       if (!r.verified) verified = false;
+      if (r.verified) beiBestanden?.call(f.typ, quizXml([q.toXmlString()]), r.moodleVersion);
       continue;
     }
     ok = verified = false;

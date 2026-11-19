@@ -52,6 +52,10 @@ enum EinstellungenErgebnis {
 
   /// Die Plugins ansehen und ändern: Der Aufrufer öffnet [PluginsDialog].
   plugins,
+
+  /// Offene Sperren nach unklaren Schreibvorgängen ansehen und aufheben: Der
+  /// Aufrufer öffnet den Dialog (sperren_dialog.dart, E37).
+  sperren,
 }
 
 class EinstellungenDialog extends StatefulWidget {
@@ -243,6 +247,25 @@ class _EinstellungenDialogState extends State<EinstellungenDialog> {
                           EinstellungenErgebnis.einrichten,
                         ),
                   child: const Text('Verbindung und Skills prüfen'),
+                ),
+              ),
+              const Divider(height: 32),
+              Text('Offene Sperren', style: Theme.of(context).textTheme.titleSmall),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Blieb nach einer Änderung unklar, ob Moodle sie gespeichert hat, ändert moocp dasselbe '
+                  'Objekt nicht noch einmal. Hier heben Sie eine solche Sperre auf, wenn Sie in Moodle '
+                  'nachgesehen haben.',
+                  style: klein,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: OutlinedButton(
+                  key: const Key('sperren'),
+                  onPressed: _sucht ? null : () => Navigator.pop(context, EinstellungenErgebnis.sperren),
+                  child: const Text('Offene Sperren ansehen …'),
                 ),
               ),
               if (widget.plugins != null && widget.plugins!.eintraege.isNotEmpty) ...[

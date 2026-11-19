@@ -35,6 +35,7 @@ import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
 import '../moodle/fragen_version.dart';
+import '../moodle/fragetyp_notizen.dart';
 import '../moodle/rundlaufprobe.dart';
 import '../moodle/fortschrittsliste.dart';
 import '../moodle/fragen.dart';
@@ -116,6 +117,8 @@ class McpDienst implements AufrufKontext {
     this.antwortfrist = const Duration(minutes: 1),
     this.werkzeugquellen = const [],
     this.schucuVorlagen,
+    this.notizenOrdner,
+    this.fragetypNotizGeliefert,
   });
 
   final Einstellungen einstellungen;
@@ -164,6 +167,31 @@ class McpDienst implements AufrufKontext {
   /// Sie sind Assets der App; laden kann sie nur Flutter, deshalb kommt der
   /// Zugriff von main.dart. Ohne ihn meldet das Werkzeug, dass sie fehlen.
   final Future<Map<String, String>> Function()? schucuVorlagen;
+
+  /// Lokale Fragetyp-Notizen dieses Profils (E38); ohne Angabe der dauerhafte
+  /// Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? notizenOrdner;
+
+  /// Die mit dem Skill gelieferte Notiz zu einem Typ (Asset der App; laden kann
+  /// sie nur Flutter, deshalb kommt der Zugriff von main.dart).
+  final Future<String?> Function(String typ)? fragetypNotizGeliefert;
+
+  late final FragetypNotizen _notizen = FragetypNotizen(
+    lokalerOrdner: notizenOrdner ?? p.join(einstellungenOrdner, 'fragetyp-notizen', profil.kennung),
+    geliefert: fragetypNotizGeliefert ?? (_) async => null,
+  );
+
+  /// Der Nachweis für eine Notiz nach bestandener Probe; ein Fehler dabei
+  /// ändert nichts am Urteil über die Frage.
+  void _nachweis(String typ, String xml, String? moodleVersion) {
+    try {
+      _notizen.nachweis(typ, xml, moodleVersion);
+    } on MoodleFehler {
+      // Ein Typname außerhalb des erlaubten Musters bekommt keine Notiz.
+    } on FileSystemException {
+      // Ohne Nachweis gibt es keine Notiz; die Frage bleibt, wie sie ist.
+    }
+  }
 
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
@@ -1941,7 +1969,7 @@ class McpDienst implements AufrufKontext {
           (f) => stackTesten(moodle, sammlung: s, frage: f),
         );
         // Die Rundlaufprobe (E38) urteilt; was durchfällt, löscht sie wieder.
-        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml);
+        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml, beiBestanden: _nachweis);
         return '${i.text}${n.text}${r.text}'
             'verified: ${i.ok && n.ok && r.verified}'
             '${i.ok && n.ok && r.ok && !r.verified ? ' (ein Teil der Rundlaufprobe war nicht prüfbar, siehe oben)' : ''}\n';
@@ -1988,7 +2016,55 @@ class McpDienst implements AufrufKontext {
         kategorie: '${a['kategorie']}',
         datei: _text(a, 'datei'),
         uebergehen: a['uebergehen'] is num ? (a['uebergehen'] as num).toInt() : null,
+        beiBestanden: _nachweis,
       ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_lesen',
+      titel: 'Fragetyp-Notiz lesen',
+      beschreibung:
+          'Liest die Notiz zu einem Fragetyp, BEVOR du eine Frage dieses Typs baust: bewiesenes Minimalbeispiel, '
+          'Pflichtstruktur, Stolpersteine, Ausbaustufen. Eine Notiz dieser Instanz geht der mitgelieferten vor; die '
+          'Antwort nennt die Quelle und die Moodle-Version, für die sie bewiesen ist. Gibt es keine, sagt die Antwort, '
+          'wie du ohne vorgehst. Nur lesen.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle, etwa multichoice, ddwtos, gapselect'),
+      },
+      pflicht: ['typ'],
+      nurLesen: true,
+      ausfuehren: (a) => _notizen.lesen(_text(a, 'typ')),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_schreiben',
+      titel: 'Fragetyp-Notiz festhalten',
+      beschreibung:
+          'Hält fest, was über einen Fragetyp auf dieser Instanz bewiesen ist -- nur nachdem eine Frage dieses Typs '
+          'in diesem Profil die Rundlaufprobe bestanden hat (fragen_importieren oder fragen_version_importieren '
+          'meldete verified: true), und nur nachdem die Lehrkraft im Chat zugestimmt hat: erst fragen, dann '
+          'aufrufen. Das Minimalbeispiel setzt die App aus der bestandenen Probe ein; du lieferst Pflichtstruktur, '
+          'Stolpersteine (Symptom, Ursache, Abhilfe) und Ausbaustufen als Text. Schreibt nur eine lokale Datei der '
+          'App, nichts in Moodle.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle'),
+        'pflichtstruktur': JsonSchema.string(description: 'Was die Frage dieses Typs mindestens enthalten muss'),
+        'stolpersteine': JsonSchema.string(description: 'Was schiefging oder schiefgehen kann: Symptom, Ursache, Abhilfe'),
+        'ausbaustufen': JsonSchema.string(description: 'Was über das Minimalbeispiel hinaus bewiesen ist (oder: noch nichts)'),
+      },
+      pflicht: ['typ', 'pflichtstruktur', 'stolpersteine', 'ausbaustufen'],
+      ausfuehren: (a) async {
+        final pfad = await _notizen.schreiben(
+          _text(a, 'typ'),
+          pflichtstruktur: _text(a, 'pflichtstruktur'),
+          stolpersteine: _text(a, 'stolpersteine'),
+          ausbaustufen: _text(a, 'ausbaustufen'),
+        );
+        return 'Notiz festgehalten (lokal, für dieses Instanzprofil): $pfad. Sie gilt vor der mitgelieferten Notiz. '
+            'Bewährte Notizen können über ein Issue oder einen Pull Request in den Skill kommen.';
+      },
     );
 
     _aufrufe.registrieren(

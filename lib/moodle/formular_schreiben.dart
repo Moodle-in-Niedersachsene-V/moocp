@@ -2146,6 +2146,10 @@ Future<String> aendernStatus(
         return 'Vorgang $vorgang abgeschlossen (verified: true).';
       }
       if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      if (j.status == Schreibstatus.aufgehoben) {
+        return 'Vorgang $vorgang: Die Lehrkraft hat die Sperre in der App aufgehoben (verified: false). Neu lesen, '
+            'bevor etwas geändert wird.';
+      }
       // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
       // Frage zurückzulesen wäre ein falscher Nachweis.
       if (ziel.art == Zielart.frage) {

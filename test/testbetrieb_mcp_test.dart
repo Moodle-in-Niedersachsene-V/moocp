@@ -29,6 +29,11 @@ class TestMoodle {
   String modul = 'page';
   String gruppenmodus = '1';
   String gruppierung = '0';
+  String erlaubteAenderung = '0';
+  bool optionIgnorieren = false;
+  String ausgewaehlteGruppen = ';41;42';
+  String gruppenLimit = '3';
+  bool gruppenNachSpeichernAendern = false;
   String projektGruppierung = '8';
   bool gruppierungIgnorieren = false;
   bool inhaltNachSpeichernAendern = false;
@@ -222,7 +227,14 @@ class TestMoodle {
           }
           vorhanden = true;
           name = f['name']!;
-          inhalt = f['page[text]']!;
+          inhalt = f[const {'choicegroup', 'lightboxgallery'}.contains(modul) ? 'introeditor[text]' : 'page[text]']!;
+          if (const {'choicegroup', 'lightboxgallery'}.contains(modul) && !optionIgnorieren) {
+            erlaubteAenderung = f[modul == 'choicegroup' ? 'allowupdate' : 'captionfull']!;
+          }
+          if (modul == 'choicegroup') {
+            ausgewaehlteGruppen = gruppenNachSpeichernAendern ? ';41' : f['serializedselectedgroups']!;
+            gruppenLimit = f['group_41_limit']!;
+          }
           formularSpeicherungen++;
           if (const {'collabora', 'choicegroup'}.contains(modul)) {
             if (inhaltNachSpeichernAendern) inhalt = '$inhalt fremd';
@@ -274,8 +286,10 @@ class TestMoodle {
           <input name="modulename" value="$modul"><input name="update" value="70"><input name="name" value="$name">
           ${const {'collabora', 'choicegroup'}.contains(modul) ? '<div class="fitem row"><label class="col-form-label">Gruppenmodus</label><div class="felement" data-fieldtype="select"><select name="groupmode"><option value="0" ${gruppenmodus == "0" ? "selected" : ""}>Keine Gruppen</option><option value="1" ${gruppenmodus == "1" ? "selected" : ""}>Getrennte Gruppen</option></select></div></div><div class="fitem row"><label class="col-form-label">Gruppierung</label><div class="felement" data-fieldtype="select"><select name="groupingid"><option value="0" ${gruppierung == "0" ? "selected" : ""}>Keine</option><option value="$projektGruppierung" ${gruppierung == projektGruppierung ? "selected" : ""}>ZZ Projektgruppen</option><option value="9" ${gruppierung == "9" ? "selected" : ""}>ZZ Projektgruppen erweitert</option></select></div></div>' : ""}
           <select name="visible"><option value="0" selected>Verborgen</option><option value="1">Sichtbar</option></select>
-          <textarea name="page[text]">${const HtmlEscape().convert(inhalt)}</textarea>
-          <input name="page[format]" value="1"><input name="page[itemid]" value="9">
+          ${const {'choicegroup', 'lightboxgallery'}.contains(modul) ? '<div class="fitem row"><label class="col-form-label">Änderung</label><div class="felement" data-fieldtype="select"><select name="${modul == 'choicegroup' ? 'allowupdate' : 'captionfull'}"><option value="0" ${erlaubteAenderung == '0' ? 'selected' : ''}>Nein</option><option value="1" ${erlaubteAenderung == '1' ? 'selected' : ''}>Ja</option></select></div></div>' : ''}
+          ${modul == 'choicegroup' ? '<input type="hidden" name="serializedselectedgroups" value="$ausgewaehlteGruppen"><input type="hidden" name="group_41_limit" value="$gruppenLimit"><input type="hidden" name="group_42_limit" value="0"><select name="availableGroups" multiple><option value="41">ZZ Gruppe A</option><option value="42">ZZ Gruppe B</option></select><select name="selectedGroups" multiple></select>' : ''}
+          <textarea name="${const {'choicegroup', 'lightboxgallery'}.contains(modul) ? 'introeditor' : 'page'}[text]">${const HtmlEscape().convert(inhalt)}</textarea>
+          <input name="${const {'choicegroup', 'lightboxgallery'}.contains(modul) ? 'introeditor' : 'page'}[format]" value="1"><input name="${const {'choicegroup', 'lightboxgallery'}.contains(modul) ? 'introeditor' : 'page'}[itemid]" value="9">
           <input type="submit" name="submitbutton" value="Speichern"></form>''',
           );
         }
@@ -437,6 +451,138 @@ void main() {
     },
   );
 
+  test('Gruppenwahl: Beschreibung und Option über MCP mit Freigabe speichern', () async {
+    extern.modul = 'choicegroup';
+    extern.vorhanden = true;
+    await starten(kurse: {});
+    await client.tool('aktivitaet_lesen', {'cmid': 70});
+    await File('${ordner.path}/cm-70/introeditor.html').writeAsString('<p>Neue Beschreibung</p>');
+    final angefragt = Completer<void>();
+    freigaben.addListener(() {
+      if (freigaben.aktuell != null && !angefragt.isCompleted) angefragt.complete();
+    });
+    final aufruf = client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {'allowupdate': 'Ja'}});
+    await Future.any([angefragt.future, aufruf.then((text) => fail('Keine Freigabe: $text'))]).timeout(const Duration(seconds: 5));
+    expect(extern.formularSpeicherungen, 0);
+    freigaben.entscheiden(true);
+    final text = await aufruf;
+    expect(text, contains('verified: true'), reason: text);
+    expect(extern.inhalt, '<p>Neue Beschreibung</p>');
+    expect(extern.erlaubteAenderung, '1');
+    expect(extern.ausgewaehlteGruppen, ';41;42');
+    expect(extern.gruppenLimit, '3');
+  });
+
+  for (final art in ['choicegroup', 'lightboxgallery']) {
+    test('$art: Ignorierte Option ist nicht verifiziert', () async {
+      extern.modul = art;
+      extern.vorhanden = true;
+      extern.optionIgnorieren = true;
+      freigaben.stufe = Bestaetigungen.keine;
+      await starten();
+      await client.tool('aktivitaet_lesen', {'cmid': 70});
+      final text = await client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {art == 'choicegroup' ? 'allowupdate' : 'captionfull': 'Ja'}});
+      expect(text, contains('verified: false'), reason: text);
+      expect(extern.erlaubteAenderung, '0');
+    });
+    test('$art: Bildänderung hinter größer-Zeichen im Attribut wird abgelehnt', () async {
+      extern.modul = art;
+      extern.vorhanden = true;
+      extern.inhalt = '<p><img alt=">" src="${extern.basis}/draftfile.php/5/user/draft/9/a.png">'
+          '<img alt=">" src="${extern.basis}/draftfile.php/5/user/draft/9/b.png"></p>';
+      freigaben.stufe = Bestaetigungen.keine;
+      await starten();
+      await client.tool('aktivitaet_lesen', {'cmid': 70});
+      final datei = File('${ordner.path}/cm-70/introeditor.html');
+      final vorher = await datei.readAsString();
+      await datei.writeAsString(vorher.replaceAll('a.png', 'tausch.png').replaceAll('b.png', 'a.png').replaceAll('tausch.png', 'b.png'));
+      final text = await client.tool('aendern', {'ordner': 'cm-70'});
+      expect(text, contains('Bilder und Dateien ändern wird nicht unterstützt'), reason: text);
+      expect(extern.formularSpeicherungen, 0);
+    });
+    test('$art: Anlegen über MCP bleibt gesperrt', () async {
+      await starten();
+      final liste = await client.call('tools/list');
+      final tool = (liste['tools'] as List).cast<Map>().singleWhere((t) => t['name'] == 'aktivitaet_anlegen');
+      final arten = ((tool['inputSchema'] as Map)['properties'] as Map)['typ'] as Map;
+      expect(arten['enum'], isNot(contains(art)));
+      final fehler = await client.call('tools/call', {
+        'name': 'aktivitaet_anlegen',
+        'arguments': {'kurs': 12, 'abschnitt_id': 1, 'typ': art, 'name': 'ZZ Probe', 'ordner': 'entwurf'},
+      }, -32602);
+      expect(fehler['message'], contains('at typ'));
+
+      expect(extern.formularSpeicherungen, 0);
+    });
+    test('$art: Auch unreferenzierte Bilddateien werden vor dem Schreiben abgelehnt', () async {
+      extern.modul = art;
+      extern.vorhanden = true;
+      await starten();
+      await client.tool('aktivitaet_lesen', {'cmid': 70});
+      await Directory('${ordner.path}/cm-70/dateien').create(recursive: true);
+      await File('${ordner.path}/cm-70/dateien/neu.png').writeAsBytes([1, 2, 3]);
+      final text = await client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {art == 'choicegroup' ? 'allowupdate' : 'captionfull': 'Ja'}});
+      expect(text, contains('Bilder und Dateien ändern wird nicht unterstützt'));
+      expect(extern.formularSpeicherungen, 0);
+    });
+  }
+
+  test('Bildergalerie: Beschreibung und normale Option werden zurückgelesen', () async {
+    extern.modul = 'lightboxgallery';
+    extern.vorhanden = true;
+    freigaben.stufe = Bestaetigungen.keine;
+    await starten();
+    await client.tool('aktivitaet_lesen', {'cmid': 70});
+    await File('${ordner.path}/cm-70/introeditor.html').writeAsString('<p>Galeriebeschreibung</p>');
+    final text = await client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {'captionfull': 'Ja'}});
+    expect(text, contains('verified: true'), reason: text);
+    expect(extern.inhalt, '<p>Galeriebeschreibung</p>');
+    expect(extern.erlaubteAenderung, '1');
+  });
+
+  test('Gruppenwahl: Geänderte Gruppenauswahl beim Speichern ist nicht verifiziert', () async {
+    extern.modul = 'choicegroup';
+    extern.vorhanden = true;
+    extern.gruppenNachSpeichernAendern = true;
+    freigaben.stufe = Bestaetigungen.keine;
+    await starten();
+    await client.tool('aktivitaet_lesen', {'cmid': 70});
+    final text = await client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {'allowupdate': 'Ja'}});
+    expect(text, contains('verified: false'), reason: text);
+    expect(text, contains('Gruppenauswahl und Gruppenlimits unverändert'));
+  });
+
+  test('Gruppenwahl: Gruppenauswahl ändern wird vor dem Schreiben abgelehnt', () async {
+    extern.modul = 'choicegroup';
+    extern.vorhanden = true;
+    await starten();
+    await client.tool('aktivitaet_lesen', {'cmid': 70});
+    final text = await client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {'serializedselectedgroups': ';41'}});
+    expect(text, contains('Gruppenauswahl, Gruppenlimits, Bilder und Dateien können nicht geändert werden'));
+    expect(extern.formularSpeicherungen, 0);
+  });
+
+  for (final zustimmen in [false, true]) {
+    test('Gruppenwahl: ${zustimmen ? 'Gruppenänderung während Freigabe' : 'Ablehnung'} verhindert Speichern', () async {
+      extern.modul = 'choicegroup';
+      extern.vorhanden = true;
+      await starten(kurse: {});
+      await client.tool('aktivitaet_lesen', {'cmid': 70});
+      final angefragt = Completer<void>();
+      freigaben.addListener(() {
+        if (freigaben.aktuell != null && !angefragt.isCompleted) angefragt.complete();
+      });
+      final aufruf = client.tool('aendern', {'ordner': 'cm-70', 'einstellungen': {'allowupdate': 'Ja'}});
+      await angefragt.future.timeout(const Duration(seconds: 5));
+      if (zustimmen) extern.gruppenLimit = '7';
+      freigaben.entscheiden(zustimmen);
+      final text = await aufruf;
+      expect(text, contains(zustimmen ? 'Gruppenauswahl oder Gruppenlimits seit dem Lesen geändert' : 'Nicht gespeichert'));
+      expect(extern.formularSpeicherungen, 0);
+      expect(extern.erlaubteAenderung, '0');
+    });
+  }
+
   test('Gruppenwahl: Gruppenmodus und Gruppierung werden über MCP geändert und zurückgelesen', () async {
     extern.modul = 'choicegroup';
     extern.vorhanden = true;
@@ -444,7 +590,7 @@ void main() {
     await starten();
     final gelesen = await client.tool('aktivitaet_lesen', {'cmid': 70});
     expect(gelesen, contains('choicegroup'));
-    expect(gelesen, contains('Gruppenmodus (groupmode) und Gruppierung'));
+    expect(gelesen, contains('Beschreibung und normale Optionen'));
     final text = await client.tool('aendern', {
       'ordner': 'cm-70',
       'einstellungen': {'groupmode': 'Getrennte Gruppen', 'groupingid': 'ZZ Projektgruppen'},
@@ -467,10 +613,10 @@ void main() {
     });
     expect(text, contains('verified: false'), reason: text);
     expect(text, contains('übrige Felder unverändert'));
-    expect(text, contains('page[text]'));
+    expect(text, contains('introeditor[text]'));
   });
 
-  test('Gruppenwahl: Texte und andere Einstellungen bleiben gesperrt', () async {
+  test('Gruppenwahl: Nicht gemessene Optionen bleiben gesperrt', () async {
     extern.modul = 'choicegroup';
     extern.vorhanden = true;
     freigaben.stufe = Bestaetigungen.keine;
@@ -480,7 +626,7 @@ void main() {
       'ordner': 'cm-70',
       'einstellungen': {'visible': 'Sichtbar'},
     });
-    expect(text, contains('Nur Gruppenmodus (groupmode) und Gruppierung'));
+    expect(text, contains('Nur Beschreibung und normale Optionen'));
     expect(extern.formularSpeicherungen, 0);
   });
 

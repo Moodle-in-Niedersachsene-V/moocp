@@ -717,6 +717,8 @@ class McpDienst implements AufrufKontext {
           'App eine Änderungsübersicht mit Zeilenvergleich und schreibt nur nach ihrer Freigabe. '
           'Danach Rückleseprobe (verified). Bei Ausgang unklar nicht wiederholen, sondern aendern_status '
           'mit der Vorgangsnummer aufrufen. Sichtbarkeit: sichtbarkeit_setzen. '
+          'Gruppenwahl und Bildergalerie: nur Beschreibungstext und gemessene normale Optionen bestehender Aktivitäten; '
+          'keine Gruppenauswahl, individuellen Gruppenlimits, Bilder oder Dateien ändern, kein Anlegen. '
           '${MoodleZugang.nurGruppenModule.map(typName).join(", ")}: nur groupmode und groupingid '
           'bestehender Aktivitäten, keine Texte, Dateien, anderen Einstellungen oder unverändertes '
           'Neuspeichern; Optionen frisch aus dem Formular lesen. Gibt es die gewünschte Gruppierung '

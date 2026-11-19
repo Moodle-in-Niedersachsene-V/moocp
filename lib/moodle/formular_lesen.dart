@@ -242,7 +242,10 @@ class FormularGelesen {
         modul != 'learningmap' &&
         !MoodleZugang.schreibbareModule.contains(modul)) {
       b.writeln(
-        MoodleZugang.nurGruppenModule.contains(modul)
+        MoodleZugang.optionsModule.containsKey(modul)
+            ? 'Prüflücke: Beschreibung und normale Optionen bestehender Aktivitäten sind änderbar. '
+                  'Gruppenauswahl, individuelle Gruppenlimits, Bilder und Dateien ändern sowie Anlegen werden nicht unterstützt.'
+            : MoodleZugang.nurGruppenModule.contains(modul)
             ? 'Prüflücke: Typ „$modul" ändert aendern nur in Gruppenmodus (groupmode) und Gruppierung '
                   '(groupingid); alles andere ist gelesen, nicht änderbar. '
                   'Die Verweisprüfung erfasst nur Textfelder; Auswahlfelder werden nicht geprüft.'

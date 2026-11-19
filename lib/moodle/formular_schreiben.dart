@@ -80,6 +80,7 @@ String typName(String? typ) => switch (typ) {
   'forum' => 'Forum',
   'collabora' => 'Collabora',
   'choicegroup' => 'Gruppenwahl',
+  'lightboxgallery' => 'Bildergalerie',
   _ => typ ?? '?',
 };
 
@@ -1180,6 +1181,34 @@ List<String> uebrigeFelderAbweichung(Felder vorher, Felder nachher) {
   ]..sort();
 }
 
+// Die Gruppenlisten werden von JavaScript aus diesen Hidden-Feldern aufgebaut.
+// Weder selectedGroups noch availableGroups sind die gespeicherte Auswahl.
+Map<String, String> _wahlgruppen(Felder felder) => {
+  for (final e in felder)
+    if (e.key == 'serializedselectedgroups' ||
+        RegExp(r'^group_\d+_limit$').hasMatch(e.key)) e.key: e.value,
+};
+
+bool _gleicheWahlgruppen(Felder a, Felder b) {
+  final vorher = _wahlgruppen(a), nachher = _wahlgruppen(b);
+  return vorher.length == nachher.length &&
+      vorher.entries.every((e) => nachher[e.key] == e.value);
+}
+
+// Auch unreferenzierte Dateien prüfen: Ein Galerie-Upload darf nicht als
+// erfolgreiche Beschreibungseinstellung verschwinden.
+bool _dateienGeaendert(String quelle, String stand) {
+  Map<String, List<int>> lesen(String basis) => {
+    for (final teil in ['dateien', 'bereiche'])
+      if (Directory(p.join(basis, teil)).existsSync())
+        for (final f in Directory(p.join(basis, teil)).listSync(recursive: true).whereType<File>())
+          p.relative(f.path, from: basis): f.readAsBytesSync(),
+  };
+  final a = lesen(quelle), b = lesen(stand);
+  return a.length != b.length || a.entries.any((e) =>
+      !b.containsKey(e.key) || !gleicheBytes(e.value, b[e.key]!));
+}
+
 /// Das Hauptformular aus dem gespeicherten Stand (`.stand`-Ordner); null, wenn es fehlt.
 dom.Element? _gespeichertesFormular(String stand) {
   final datei = File(p.join(stand, 'formular.html'));
@@ -1220,11 +1249,30 @@ void _pruefeStand(
   }
   if (ziel.art == Zielart.aktivitaet &&
       !MoodleZugang.schreibbareModule.contains(f.modul) &&
+      !MoodleZugang.optionsModule.containsKey(f.modul) &&
       !nurGruppenAenderung) {
     throw MoodleFehler(
       'Ändern geht bisher für ${MoodleZugang.schreibbareModule.map(typName).join(", ")}; '
       '${ziel.bezeichnung} ist ${typName(f.modul)}.',
     );
+  }
+  if (MoodleZugang.optionsModule.containsKey(f.modul) ||
+      MoodleZugang.optionsModule.containsKey(vorherModul)) {
+    if (f.modul != vorherModul || vorher == null ||
+        wertIn(werte, 'course') != '${f.kurs}' ||
+        wertIn(f.felder, 'update') != '${ziel.id}') {
+      throw MoodleFehler('Aktivitätsart oder Kurs geändert. Neu lesen; nichts gespeichert.');
+    }
+    final erlaubt = MoodleZugang.optionsModule[f.modul]!;
+    final unzulaessig = einstellungen.where((k) => !erlaubt.contains(k)).toList();
+    if (unzulaessig.isNotEmpty || bereiche.isNotEmpty) {
+      throw MoodleFehler('${typName(f.modul)}: Nur Beschreibung und normale Optionen; '
+          'Gruppenauswahl, Gruppenlimits, Bilder und Dateien können nicht geändert werden. '
+          'Nicht unterstützt: ${unzulaessig.join(', ')}. Nichts gespeichert.');
+    }
+    if (f.modul == 'choicegroup' && !_gleicheWahlgruppen(werte, f.felder)) {
+      throw MoodleFehler('Gruppenauswahl oder Gruppenlimits seit dem Lesen geändert. Nichts gespeichert; neu lesen.');
+    }
   }
   const hinweis =
       'Nichts überschrieben. Erst neu lesen und die Änderung auf dem neuen Stand aufbauen.';
@@ -1372,6 +1420,13 @@ Future<Aenderung?> _vorbereiten(
   final vorgang = Schreibvorgang(moodle, ziel);
   if (vorgang.offen) throw MoodleFehler(vorgang.hinweis);
   final stand = p.join(quelle, '.stand');
+  final gespeichertesFormular = _gespeichertesFormular(stand);
+  final gespeicherteArt = gespeichertesFormular == null ? null :
+      wertIn(formularFelder(gespeichertesFormular), 'modulename');
+  if (MoodleZugang.optionsModule.containsKey(gespeicherteArt) &&
+      _dateienGeaendert(quelle, stand)) {
+    throw MoodleFehler('${typName(gespeicherteArt)}: Bilder und Dateien ändern wird nicht unterstützt. Nichts gespeichert.');
+  }
   final lokal = felderIn(quelle);
   final alt = felderIn(stand);
   final unbekannt = lokal.keys.where((k) => !alt.containsKey(k)).toList();
@@ -1380,6 +1435,17 @@ Future<Aenderung?> _vorbereiten(
       '${unbekannt.map((k) => '$k.html').join(", ")}: kein Editorfeld dieses Formulars '
       '(vorhanden: ${alt.keys.join(", ")}).',
     );
+  }
+
+  if (MoodleZugang.optionsModule.containsKey(gespeicherteArt)) {
+    String medien(String text) => html_parser.parseFragment(text)
+        .querySelectorAll('img, iframe, video, audio, source, picture, object, embed, svg')
+        .map((e) => e.outerHtml).join('\u0000');
+    if (lokal.entries.any((e) =>
+        (e.key != 'introeditor' && e.value != alt[e.key]) ||
+        medien(e.value) != medien(alt[e.key] ?? ''))) {
+      throw MoodleFehler('${typName(gespeicherteArt)}: Nur Beschreibungstext und normale Optionen; Bilder und Dateien ändern wird nicht unterstützt. Nichts gespeichert.');
+    }
   }
 
   // Eingebundene Dateien einordnen.
@@ -1486,14 +1552,14 @@ Future<Aenderung?> _vorbereiten(
         !neuSpeichern,
   );
   final gruppenStand = <String, String>{
-    if (MoodleZugang.nurGruppenModule.contains(vorab.modul))
+    if (MoodleZugang.nurGruppenModule.contains(vorab.modul) || vorab.modul == 'choicegroup')
       for (final k in MoodleZugang.gruppenFelder) k: wertIn(vorab.felder, k) ?? '',
   };
   gruppierungPruefen(vorab.form, einstellungen['groupingid'], vorab.kurs);
   final probeFelder = [...vorab.felder];
   final probeSetzen = einstellungenSetzen(vorab.form, probeFelder, einstellungen);
   final gruppenWahl = <String, String>{
-    if (MoodleZugang.nurGruppenModule.contains(vorab.modul))
+    if (MoodleZugang.nurGruppenModule.contains(vorab.modul) || vorab.modul == 'choicegroup')
       for (final k in MoodleZugang.gruppenFelder) k: wertIn(probeFelder, k) ?? '',
   };
   final kurs = vorab.kurs;
@@ -1768,15 +1834,33 @@ Future<(String, bool)> _schreibenMitProbe(
   if (a.gruppenWahl.isNotEmpty) {
     final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
     final rueckWerte = rueckForm == null ? <MapEntry<String, String>>[] : formularFelder(rueckForm);
-    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs && g.name == a.vorab.name,
+    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs && (a.einstellungen.containsKey('name') || g.name == a.vorab.name),
         '${typName(a.vorab.modul)}: Aktivitätsart, Kurs und Name');
     for (final e in a.gruppenWahl.entries) {
       probe.pruefe(wertIn(rueckWerte, e.key) == e.value, '${typName(a.vorab.modul)}: exakter Wert ${e.key}');
     }
     // Alles andere muss unverändert sein: Der Typ ist nur für diese zwei Felder gemessen.
-    final anders = uebrigeFelderAbweichung(a.vorab.felder, rueckWerte);
+    final anders = MoodleZugang.nurGruppenModule.contains(a.vorab.modul)
+        ? uebrigeFelderAbweichung(a.vorab.felder, rueckWerte) : <String>[];
     probe.pruefe(anders.isEmpty,
         '${typName(a.vorab.modul)}: übrige Felder unverändert${anders.isEmpty ? '' : ' (abweichend: ${anders.join(', ')})'}');
+  }
+  if (MoodleZugang.optionsModule.containsKey(a.vorab.modul)) {
+    final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
+    final anders = rueckForm == null ? ['Formular fehlt'] :
+        uebrigeFelderAbweichung(a.vorab.felder, formularFelder(rueckForm))
+          .where((k) => !a.einstellungen.keys.any((e) => k == e || k.startsWith('$e[')) &&
+              !a.zuSchreiben.any((e) => k.startsWith('$e['))).toList();
+    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs,
+        'Aktivitätsart und Kurs unverändert');
+    probe.pruefe(anders.isEmpty,
+        'übrige Felder unverändert${anders.isEmpty ? '' : ' (abweichend: ${anders.join(', ')})'}');
+  }
+  if (a.vorab.modul == 'choicegroup') {
+    final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
+    probe.pruefe(rueckForm != null &&
+        _gleicheWahlgruppen(a.vorab.felder, formularFelder(rueckForm)),
+        'Gruppenauswahl und Gruppenlimits unverändert');
   }
   final text = [
     'Gespeichert: ${_was(a.ziel, a.vorab)} „${g.name}" (${zurueck.bezeichnung}${a.wo}).',

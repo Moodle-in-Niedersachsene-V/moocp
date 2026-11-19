@@ -557,13 +557,24 @@ class MoodleZugang {
     'checklist', 'wiki', 'board', 'kanban', 'url', 'resource',
   };
 
+  /// Nur bestehende Formulare: kein Anlegen und keine Dateiverwaltung.
+  /// Werte und Auswahloptionen werden aus dem jeweiligen Formular ermittelt.
+  static const Map<String, Set<String>> optionsModule = {
+    'choicegroup': {'name', 'showdescription', 'multipleenrollmentspossible',
+      'maxenrollments', 'showresults', 'publish', 'allowupdate', 'showunanswered',
+      'onlyactive', 'limitanswers', 'generallimitation', 'sortgroupsby',
+      'defaultgroupdescriptionstate', 'timerestrict', 'timeopen', 'timeclose',
+      'groupmode', 'groupingid'},
+    'lightboxgallery': {'name', 'showdescription', 'perpage', 'captionfull',
+      'captionpos', 'sortby', 'autoresizegroup', 'resize', 'comments', 'ispublic', 'extinfo'},
+  };
+
   /// Aktivitätstypen, bei denen `aendern` ausschließlich Gruppenmodus und
   /// Gruppierung ändert -- keine Texte, Dateien oder anderen Einstellungen,
   /// kein Anlegen. Ein Typ kommt erst hinein, wenn sein Formular so im
-  /// Testkurs gemessen ist (E33); `choicegroup` steht ungemessen darin, abgesichert
-  /// durch den Vergleich aller übrigen Felder beim Zurücklesen. Die Positivliste und die Prüfungen in
+  /// Testkurs gemessen ist (E33). Die Positivliste und die Prüfungen in
   /// formular_schreiben.dart richten sich nach dieser einen Stelle.
-  static const Set<String> nurGruppenModule = {'collabora', 'choicegroup'};
+  static const Set<String> nurGruppenModule = {'collabora'};
 
   /// Die Felder, die bei [nurGruppenModule] geändert werden dürfen.
   static const List<String> gruppenFelder = ['groupmode', 'groupingid'];
@@ -987,6 +998,9 @@ class MoodleZugang {
         return _zahl(wertIn(f, 'course')) &&
             (schreibbareModule.contains(modul) &&
                     wertIn(f, '_qf__mod_${modul}_mod_form') != null ||
+                optionsModule.containsKey(modul) &&
+                    wertIn(f, '_qf__mod_${modul}_mod_form') != null &&
+                    _zahl(wertIn(f, 'update')) ||
                 nurGruppenModule.contains(modul) &&
                     wertIn(f, '_qf__mod_${modul}_mod_form') != null &&
                     _zahl(wertIn(f, 'update')) &&

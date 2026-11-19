@@ -25,6 +25,8 @@
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../freigabe.dart';
 import '../uebertragung_lauf.dart';
 import 'formular_lesen.dart';
@@ -405,6 +407,12 @@ String _kartenInhalt(Map<String, Object?> karte) {
   // Beim Wiederherstellen gemessen: neue mapid, ergänzte Formatversion und
   // strokeopacity=1. Nur fehlende Deckkraft entspricht dem Standardwert 1.
   store.putIfAbsent('strokeopacity', () => 1);
+  // Nur die Beschriftung verknüpfter Orte entsteht in Moodle aus dem Namen des
+  // Ziels; die aller übrigen Orte und jede Formänderung zählen mit.
+  final verknuepft = {
+    for (final ort in (store['places'] as List).cast<Map>())
+      if ((ortsziel(ort['linkedActivity']) ?? 0) != 0) '${ort['id']}',
+  };
   store['places'] = [
     for (final ort in (store['places'] as List).cast<Map>())
       Map<String, dynamic>.from(ort)..remove('linkedActivity'),
@@ -412,6 +420,7 @@ String _kartenInhalt(Map<String, Object?> karte) {
   return jsonEncode([
     ohneOrtsbeschriftung(
       lernlandkartenSvgVergleich(karte['svgcode'] as String),
+      nurOrte: verknuepft,
     ),
     _kanonischeMap(store),
   ]);
@@ -428,6 +437,13 @@ Map<String, Object?> _kanonischeMap(Map<dynamic, dynamic> quelle) => {
       final wert => wert,
     },
 };
+
+/// Für Tests: der Vergleich der Kartenkopie mit ihrer Quelle.
+@visibleForTesting
+bool gleicherKartenInhaltFuerTest(
+  Map<String, Object?> a,
+  Map<String, Object?> b,
+) => _gleicherKartenInhalt(a, b);
 
 bool _gleicherKartenInhalt(Map<String, Object?> a, Map<String, Object?> b) {
   final av = (a['placestore'] as Map)['version'];

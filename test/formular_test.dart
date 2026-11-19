@@ -246,4 +246,39 @@ void main() {
     // Der Platzhalter ist etwas anderes.
     expect(wieImEditor(platzhalterFelder({'f': uebergeben})['f']!), isNot(wieImEditor(uebergeben)));
   });
+
+  group('gleichnamige Optionen eines Auswahlfelds', () {
+    const mitZiel = '''<form class="mform">
+<div id="fitem_id_ziel" class="mb-3 row fitem"><div class="col-md-3 col-form-label"><label for="id_ziel">Ziel</label></div>
+<div class="col-md-9 felement" data-fieldtype="select"><select name="ziel" id="id_ziel">
+<option value="0">(keine)</option><option value="11" selected>Infoblatt</option><option value="12">Infoblatt</option><option value="13">Anderes</option></select></div></div>
+</form>''';
+    const eindeutig = '''<form class="mform">
+<div id="fitem_id_ziel" class="mb-3 row fitem"><div class="col-md-3 col-form-label"><label for="id_ziel">Ziel</label></div>
+<div class="col-md-9 felement" data-fieldtype="select"><select name="ziel" id="id_ziel">
+<option value="0">(keine)</option><option value="11" selected>Infoblatt</option><option value="13">Anderes</option></select></div></div>
+</form>''';
+
+    test('Lesen: das Feld mit mehrdeutigem gewähltem Text ist ein Befund', () {
+      final befund = mehrdeutigeAuswahlfelder(html_parser.parse(mitZiel).querySelector('form')!);
+      expect(befund, hasLength(1));
+      expect(befund.single, contains('Ziel'));
+      expect(befund.single, contains('ziel'));
+      expect(mehrdeutigeAuswahlfelder(html_parser.parse(eindeutig).querySelector('form')!), isEmpty);
+    });
+
+    test('Schreiben: ein mehrdeutiger Text bricht ab, ohne etwas zu setzen', () {
+      final form = html_parser.parse(mitZiel).querySelector('form')!;
+      final felder = formularFelder(form);
+      expect(
+        () => einstellungenSetzen(form, felder, {'ziel': 'Infoblatt'}),
+        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('mehrere Möglichkeiten'))),
+      );
+      expect(felder.where((e) => e.key == 'ziel').single.value, '11');
+      // Eindeutiger Text und Wert gehen weiter.
+      expect(einstellungenSetzen(form, felder, {'ziel': 'Anderes'}).single.nachher, 'Anderes');
+      expect(felder.where((e) => e.key == 'ziel').single.value, '13');
+      expect(einstellungenSetzen(form, felder, {'ziel': '0'}).single.nachher, '(keine)');
+    });
+  });
 }

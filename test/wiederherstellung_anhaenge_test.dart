@@ -133,7 +133,7 @@ class _Moodle extends MoodleZugang {
   }
 
   @override
-  Future<Antwort> lesen(String pfadMitQuery) async {
+  Future<Antwort> lesen(String pfadMitQuery, {Future<void>? abbruch}) async {
     abrufe.add(pfadMitQuery);
     return seiten[pfadMitQuery] ?? _antwort(404, utf8.encode('nicht gefunden'));
   }

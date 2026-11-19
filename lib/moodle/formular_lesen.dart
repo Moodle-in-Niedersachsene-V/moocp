@@ -363,6 +363,7 @@ Future<List<Dateibereich>> _bereicheLesen(
   List<Map<String, Object?>> roh,
   String ziel,
   String? sesskey,
+  Future<void>? abbruch,
 ) async {
   final aus = <Dateibereich>[];
   for (final b in roh) {
@@ -417,7 +418,7 @@ Future<List<Dateibereich>> _bereicheLesen(
           continue;
         }
         try {
-          final d = await moodle.lesen(url);
+          final d = await moodle.lesen(url, abbruch: abbruch);
           if (d.status != 200) {
             bereich.nichtGelesen.add('$pfad$name (HTTP ${d.status})');
             continue;
@@ -437,6 +438,9 @@ Future<List<Dateibereich>> _bereicheLesen(
           }
           bereich.dateien['$pfad$name'] = dateiAuswerten(name, d.bytes);
         } on MoodleFehler catch (x) {
+          // Nur diese Datei fehlt -- nicht: Moodle antwortet nicht (dann
+          // wartete jede weitere Datei wieder bis zur Zeitgrenze).
+          if (moodleAntwortetNicht(x)) rethrow;
           bereich.nichtGelesen.add('$pfad$name (${x.meldung})');
         }
       }
@@ -454,9 +458,20 @@ Future<Map<int, (String, String)>> _zielTitel(
   Set<int> cmids,
   List<String> hinweise, {
   int grenze = 10,
+  Future<void>? abbruch,
 }) async {
   final titel = <int, (String, String)>{};
   if (cmids.isEmpty) return titel;
+  // Antwortet Moodle nicht, bleibt es bei dieser einen Wartezeit: Die Titel
+  // sind ein Befund am Rand des Lesens, kein Grund, jede weitere Seite
+  // einzeln bis zur Zeitgrenze zu versuchen.
+  bool moodleHaengt(MoodleFehler x) {
+    if (x is MoodleAbgebrochen) throw x;
+    if (!moodleAntwortetNicht(x)) return false;
+    hinweise.add('Titel der Verweise nicht geprüft: Moodle antwortet nicht (${x.meldung}).');
+    return true;
+  }
+
   if (kurs != null) {
     try {
       final k = await kursLesen(moodle, kurs);
@@ -464,13 +479,14 @@ Future<Map<int, (String, String)>> _zielTitel(
         if (cmids.contains(c.cmid)) titel[c.cmid] = (c.name, c.modul);
       }
     } on MoodleFehler catch (x) {
+      if (moodleHaengt(x)) return titel;
       hinweise.add('Kursstruktur nicht abrufbar (${x.meldung}).');
     }
   }
   final rest = cmids.where((c) => !titel.containsKey(c)).take(grenze).toList();
   for (final c in rest) {
     try {
-      final r = await moodle.lesen('/course/modedit.php?update=$c');
+      final r = await moodle.lesen('/course/modedit.php?update=$c', abbruch: abbruch);
       final form = hauptformular(html_parser.parse(r.text));
       String? wert(String n) => form
           ?.querySelectorAll('input')
@@ -479,8 +495,9 @@ Future<Map<int, (String, String)>> _zielTitel(
           ?.attributes['value'];
       final name = wert('name');
       if (name != null) titel[c] = (name, wert('modulename') ?? '?');
-    } on MoodleFehler {
-      // nicht prüfbar, etwa ohne Bearbeitungsrecht im anderen Kurs
+    } on MoodleFehler catch (x) {
+      if (moodleHaengt(x)) return titel;
+      // sonst nicht prüfbar, etwa ohne Bearbeitungsrecht im anderen Kurs
     }
   }
   final offen = cmids.where((c) => !titel.containsKey(c)).toList();
@@ -593,14 +610,20 @@ Future<T> ordnerSperre<T>(String pfad, Future<T> Function() tu) {
   });
 }
 
+///
+/// [abbruch] erfüllt sich, wenn der Client nicht mehr auf das Werkzeug wartet:
+/// Die Anfrage an Moodle wird dann geschlossen und die Sperre des Ordners
+/// frei, sonst stünde ein erneuter Aufruf hinter dem abgebrochenen, bis der
+/// dessen Zeitgrenze erreicht.
 Future<FormularGelesen> formularLesen(
   MoodleZugang moodle,
   Formularziel ziel,
-  String arbeitsordner,
-) {
+  String arbeitsordner, {
+  Future<void>? abbruch,
+}) {
   return ordnerSperre(
     ordnerSchluessel(ziel, arbeitsordner),
-    () => formularLesenOhneSperre(moodle, ziel, arbeitsordner),
+    () => formularLesenOhneSperre(moodle, ziel, arbeitsordner, abbruch: abbruch),
   );
 }
 
@@ -608,9 +631,10 @@ Future<FormularGelesen> formularLesen(
 Future<FormularGelesen> formularLesenOhneSperre(
   MoodleZugang moodle,
   Formularziel ziel,
-  String arbeitsordner,
-) async {
-  final r = await moodle.lesen(ziel.adresse);
+  String arbeitsordner, {
+  Future<void>? abbruch,
+}) async {
+  final r = await moodle.lesen(ziel.adresse, abbruch: abbruch);
   if (r.status != 200) {
     throw MoodleFehler(
       'Das Bearbeitungsformular von ${ziel.bezeichnung} ist nicht abrufbar (HTTP ${r.status}).',
@@ -685,12 +709,25 @@ Future<FormularGelesen> formularLesenOhneSperre(
   await File(p.join(ziel0.path, '.stand', 'einstellungen.json'))
       .writeAsString(einstellungenJson, encoding: utf8);
   final sesskey = wert('sesskey');
-  final bereiche = await _bereicheLesen(
-    moodle,
-    form,
-    bereicheRoh,
-    ziel0.path,
-    sesskey,
+  // Antwortet Moodle nicht mehr, bleibt kein halb gelesener Ordner zurück:
+  // Er sähe wie ein Stand aus, hat aber nicht einmal den Quelltext.
+  Future<T> ganzOderGarNicht<T>(Future<T> Function() lesen) async {
+    try {
+      return await lesen();
+    } on MoodleFehler catch (x) {
+      if (moodleAntwortetNicht(x)) {
+        try {
+          await ziel0.delete(recursive: true);
+        } on FileSystemException {
+          // Der Fehler von Moodle ist die Meldung; ein Rest bleibt dann liegen.
+        }
+      }
+      rethrow;
+    }
+  }
+
+  final bereiche = await ganzOderGarNicht(
+    () => _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch),
   );
 
   // Referenzierte Dateien einsammeln: src und href, die auf Datei-Adressen
@@ -727,7 +764,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
       name = '${p.basenameWithoutExtension(name)}-$i$ext';
     }
     try {
-      final d = await moodle.lesen(e.key);
+      final d = await ganzOderGarNicht(() => moodle.lesen(e.key, abbruch: abbruch));
       if (d.status != 200) {
         fehlend.add('$name (HTTP ${d.status})');
         continue;
@@ -740,6 +777,9 @@ Future<FormularGelesen> formularLesenOhneSperre(
       dateien.add(GeleseneDatei(name, d.bytes.length, d.inhaltstyp, e.value));
       dateiinfo[name] = dateiAuswerten(name, d.bytes);
     } on MoodleFehler catch (x) {
+      // Nur dieses Bild fehlt (HTTP-Status, gesperrt, zu groß) -- nicht:
+      // Moodle antwortet nicht. Dann nicht jedes weitere Bild versuchen.
+      if (moodleAntwortetNicht(x)) rethrow;
       fehlend.add('$name (${x.meldung})');
     }
   }
@@ -774,7 +814,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
           .whereType<int>(),
     );
   }
-  final titel = await _zielTitel(moodle, kurs, verlinkt, hinweise);
+  final titel = await ganzOderGarNicht(() => _zielTitel(moodle, kurs, verlinkt, hinweise, abbruch: abbruch));
   // Verknüpft oder fremd nur bei lesbarer Kursstruktur; sonst nicht prüfbar.
   Set<int>? lokaleCmids;
   if (karte != null && kurs != null) {

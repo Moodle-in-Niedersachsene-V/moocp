@@ -2,6 +2,7 @@
 
 ## 0.13.0
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
+- Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
 - Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind.
 - Wiederherstellung: Linkunterschiede bleiben erkennbar; Anhangsreparaturen schützen inzwischen geänderte Dateien und fremde Aktivitäten, und ihre vollständigen Befunde bleiben im Status erhalten.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.

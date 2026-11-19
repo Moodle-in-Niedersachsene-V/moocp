@@ -86,6 +86,21 @@ class MoodleNichtErreichbar extends MoodleFehler {
   MoodleNichtErreichbar(super.meldung);
 }
 
+/// Der Client wartet nicht mehr auf das Werkzeug (sein Zeitlimit, ein Abbruch
+/// in der Sitzung): Die lesende Anfrage an Moodle ist geschlossen, nichts
+/// weiter gelesen. Nie bei einer schreibenden Anfrage -- die liefe sonst mit
+/// unklarem Ausgang weiter (E37).
+class MoodleAbgebrochen extends MoodleFehler {
+  MoodleAbgebrochen() : super('Abgebrochen: Der Client wartet nicht mehr auf das Werkzeug; nichts weiter gelesen.');
+}
+
+/// Ob [x] sagt, dass Moodle selbst nicht antwortet oder die Anfrage nicht
+/// ausgeführt wurde -- nicht, dass eine einzelne Datei fehlt. Wer viele
+/// Anfragen nacheinander stellt (die Bilder einer Aktivität), macht dann nicht
+/// mit der nächsten weiter: Jede wartete wieder bis zur Zeitgrenze, und das
+/// Ergebnis wäre ein Teilstand, der wie ein Befund aussieht.
+bool moodleAntwortetNicht(MoodleFehler x) => x is MoodleNichtErreichbar || x is SchutzPruefung || x is MoodleAbgebrochen;
+
 /// Moodle hat die Zugangsdaten ausdrücklich abgelehnt: Das zählte bei Moodle
 /// als Fehlversuch. Nur dann sind gespeicherte Zugangsdaten nachweislich
 /// falsch und werden verworfen (E7); jede andere MoodleFehler-Art sagt nichts
@@ -438,6 +453,15 @@ class MoodleZugang {
   /// nie eine abschicken und liegen lassen.
   static const Duration verbindungsgrenze = Duration(seconds: 20);
   static const Duration antwortgrenze = Duration(minutes: 2);
+
+  /// Ab dieser Dauer nennt das Protokoll bei einer Anfrage Dauer und Größe
+  /// der Antwort; schnellere Anfragen bleiben unverändert.
+  static const Duration langsamAbStandard = Duration(seconds: 5);
+
+  // Nur der Testbau ändert die Fristen ([fuerTest]); sonst gelten die
+  // Standardwerte.
+  Duration _antwortgrenze = antwortgrenze;
+  Duration _langsamAb = langsamAbStandard;
 
   final Protokoll protokoll;
 
@@ -1769,6 +1793,8 @@ class MoodleZugang {
     required String benutzer,
     required String passwort,
     String? schreibvorgaengeOrdner,
+    Duration? antwortfrist,
+    Duration? langsamAb,
   }) async {
     if (!testbetriebAktiv) throw StateError('Testzugang nur im Testbau verfügbar.');
     if (basis.scheme != 'http' || basis.host != '127.0.0.1') {
@@ -1777,6 +1803,8 @@ class MoodleZugang {
     final z = MoodleZugang(protokoll, schreibvorgaengeOrdner: schreibvorgaengeOrdner ??
         p.join(Directory.systemTemp.path, 'moocp-test-schreibvorgaenge', '${basis.port}-${Random.secure().nextInt(1 << 32)}'));
     z._testInstanz = true;
+    if (antwortfrist != null) z._antwortgrenze = antwortfrist;
+    if (langsamAb != null) z._langsamAb = langsamAb;
     z._basis = basis;
     z._benutzer = benutzer;
     z._passwort = passwort;
@@ -2037,12 +2065,15 @@ class MoodleZugang {
 
   /// Liest eine Adresse mit der Sitzung. Landet die Anfrage auf der
   /// Anmeldeseite, wird einmal neu angemeldet und wiederholt.
-  Future<Antwort> lesen(String pfadMitQuery) async {
+  ///
+  /// [abbruch]: Erfüllt es sich, schließt die App die laufende Anfrage und
+  /// bricht mit [MoodleAbgebrochen] ab, statt bis zur Zeitgrenze zu warten.
+  Future<Antwort> lesen(String pfadMitQuery, {Future<void>? abbruch}) async {
     _pruefeAngemeldet();
     final uri = pfadMitQuery.startsWith('http')
         ? Uri.parse(pfadMitQuery)
         : _adresse(pfadMitQuery);
-    return _lesen(uri, _werkzeuge);
+    return _lesen(uri, _werkzeuge, abbruch: abbruch);
   }
 
   /// Liest [uri] wie [lesen], für [aufrufer]: Die Adresse und jedes
@@ -2054,11 +2085,11 @@ class MoodleZugang {
     return _lesen(uri, aufrufer, hoechstens: hoechstens);
   }
 
-  Future<Antwort> _lesen(Uri uri, Aufrufer aufrufer, {int? hoechstens}) async {
-    var r = await _mitUmleitungen(uri, aufrufer, hoechstens);
+  Future<Antwort> _lesen(Uri uri, Aufrufer aufrufer, {int? hoechstens, Future<void>? abbruch}) async {
+    var r = await _mitUmleitungen(uri, aufrufer, hoechstens, abbruch);
     if (_istAnmeldeseite(r.adresse)) {
       await _neuAnmelden();
-      r = await _mitUmleitungen(uri, aufrufer, hoechstens);
+      r = await _mitUmleitungen(uri, aufrufer, hoechstens, abbruch);
       if (_istAnmeldeseite(r.adresse)) {
         throw MoodleFehler(
           'Nach der Neuanmeldung landet die Anfrage wieder auf der Anmeldeseite.',
@@ -2291,11 +2322,11 @@ class MoodleZugang {
         final req = await client.getUrl(aktuell);
         req.followRedirects = false;
         _cookies.forEach((k, v) => req.cookies.add(Cookie(k, v)));
-        res = await req.close().timeout(antwortgrenze);
+        res = await req.close().timeout(_antwortgrenze);
         _protokolliere(aufrufer, Art.moodle, 'GET', aktuell, res.statusCode);
         final ort = res.statusCode >= 300 && res.statusCode < 400 ? res.headers.value(HttpHeaders.locationHeader) : null;
         if (umleitungen == 0 || ort == null) break;
-        await res.drain<void>().timeout(antwortgrenze);
+        await res.drain<void>().timeout(_antwortgrenze);
         if (gefolgt >= umleitungen) throw MoodleFehler('Zu viele Umleitungen ab ${aufrufer.pfadImProtokoll(uri)}; nichts übernommen.');
         final naechste = aktuell.resolve(ort);
         if (_istAnmeldeseite(naechste)) {
@@ -2323,7 +2354,7 @@ class MoodleZugang {
       if (erwartet > maxBytes) throw DownloadZuGross(maxBytes);
       senke = teil.openWrite();
       var gelesen = 0;
-      await for (final d in res.timeout(antwortgrenze)) {
+      await for (final d in res.timeout(_antwortgrenze)) {
         if (abgebrochen) throw MoodleFehler('Abgebrochen; nichts übernommen.');
         gelesen += d.length;
         if (gelesen > maxBytes) throw DownloadZuGross(maxBytes);
@@ -2382,11 +2413,11 @@ class MoodleZugang {
 
   bool _istAnmeldeseite(Uri u) => u.path == '/login/index.php';
 
-  Future<Antwort> _mitUmleitungen(Uri start, Aufrufer aufrufer, int? hoechstens) async {
+  Future<Antwort> _mitUmleitungen(Uri start, Aufrufer aufrufer, int? hoechstens, [Future<void>? abbruch]) async {
     var uri = start;
     // Die erste Anfrage und danach höchstens [umleitungenHoechstens] Ziele.
     for (var i = 0; i <= umleitungenHoechstens; i++) {
-      final r = await _roh('GET', uri, aufrufer: aufrufer, hoechstens: hoechstens);
+      final r = await _roh('GET', uri, aufrufer: aufrufer, hoechstens: hoechstens, abbruch: abbruch);
       final ziel = _umleitung(r);
       if (ziel == null) return r;
       // Umleitung auf die Anmeldeseite: nicht folgen, Aufrufer entscheidet.
@@ -2503,6 +2534,14 @@ class MoodleZugang {
     return _roh(methode, uri, rumpf: rumpf, browser: true);
   }
 
+  /// Ob sich [f] schon erfüllt hat, ohne zu warten.
+  static Future<bool> _erfuellt(Future<void> f) async {
+    var fertig = false;
+    unawaited(f.then((_) => fertig = true, onError: (_) => fertig = true));
+    await Future<void>.delayed(Duration.zero);
+    return fertig;
+  }
+
   Future<Antwort> _roh(
     String methode,
     Uri uri, {
@@ -2512,6 +2551,7 @@ class MoodleZugang {
     bool browser = false,
     Aufrufer? aufrufer,
     int? hoechstens,
+    Future<void>? abbruch,
   }) async {
     // Ohne Angabe die App selbst -- auch die Anmeldung, wenn ein Plugin sie
     // ausgelöst hat.
@@ -2531,6 +2571,21 @@ class MoodleZugang {
     final schreibt = rumpf != null
         ? schreibendeDienste.contains(dienst)
         : methode != 'GET' || uri.queryParameters.containsKey('sesskey');
+    // Nur eine lesende Anfrage lässt sich abbrechen: Eine schreibende, mitten
+    // im Senden geschlossen, hätte einen unklaren Ausgang (E37).
+    var abgebrochen = false;
+    if (abbruch != null && !schreibt) {
+      unawaited(
+        abbruch.then((_) {
+          abgebrochen = true;
+          client.close(force: true);
+        }),
+      );
+    }
+    MoodleAbgebrochen abbruchFehler() {
+      protokoll.eintrag(Art.info, '$methode ${aufrufer!.pfadImProtokoll(uri)}: abgebrochen, der Client wartet nicht mehr (Phase $phase, ${dauer.elapsedMilliseconds} ms)');
+      return MoodleAbgebrochen();
+    }
     MoodleNichtErreichbar transportFehler(String grund) {
       final diagnose = '$grund (Phase $phase, ${dauer.elapsedMilliseconds} ms, $empfangen Bytes)';
       protokoll.eintrag(Art.fehler, '$methode ${aufrufer!.pfadImProtokoll(uri)}: $diagnose');
@@ -2539,6 +2594,7 @@ class MoodleZugang {
           : 'Moodle nicht erreichbar. Später erneut lesen.'}');
     }
     try {
+      if (abgebrochen || (abbruch != null && !schreibt && await _erfuellt(abbruch))) throw abbruchFehler();
       final req = await client.openUrl(methode, uri);
       req.followRedirects = false;
       _cookies.forEach((k, v) => req.cookies.add(Cookie(k, v)));
@@ -2598,7 +2654,7 @@ class MoodleZugang {
         req.add(body);
       }
       phase = 'Senden/Antwortkopf';
-      final res = await req.close().timeout(antwortgrenze);
+      final res = await req.close().timeout(_antwortgrenze);
       phase = 'Antwortinhalt';
       for (final c in res.cookies) {
         if (c.value.isEmpty || c.value == 'deleted') {
@@ -2609,7 +2665,7 @@ class MoodleZugang {
       }
       final bytes = BytesBuilder(copy: false);
       var zuGross = false;
-      await for (final d in res.timeout(antwortgrenze)) {
+      await for (final d in res.timeout(_antwortgrenze)) {
         if (hoechstens != null && bytes.length + d.length > hoechstens) {
           // Nicht weiterlesen: Das Verlassen der Schleife beendet die Antwort,
           // und die Verbindung schließt finally.
@@ -2623,6 +2679,7 @@ class MoodleZugang {
         _protokolliere(aufrufer, Art.moodle, methode, uri, res.statusCode, hinweis: ' (zu groß, abgebrochen)');
         throw AntwortZuGross(hoechstens!);
       }
+      if (abgebrochen) throw abbruchFehler();
       final roh = bytes.takeBytes();
       final schutz = schutzErkennen(
         res.statusCode,
@@ -2662,7 +2719,7 @@ class MoodleZugang {
         anhang: anhang,
         browser: browser,
         hinweis:
-            '${switch (schutz) {
+            '${dauer.elapsed >= _langsamAb ? ' (langsam: ${dauer.elapsedMilliseconds} ms, $empfangen Byte)' : ''}${switch (schutz) {
               Schutz.pruefung => ' (Schutzdienst: Prüfung verlangt',
               Schutz.sperre => ' (Schutzdienst: abgewiesen',
               null => '',
@@ -2675,11 +2732,16 @@ class MoodleZugang {
         throw SchutzPruefung(sperre: schutz == Schutz.sperre);
       }
       return a;
+    } on MoodleAbgebrochen {
+      rethrow;
     } on SocketException {
+      if (abgebrochen) throw abbruchFehler();
       throw transportFehler('Verbindung abgebrochen (SocketException)');
     } on TimeoutException {
-      throw transportFehler('Keine Antwort innerhalb der Zeitgrenze (${antwortgrenze.inSeconds} s)');
+      if (abgebrochen) throw abbruchFehler();
+      throw transportFehler('Keine Antwort innerhalb der Zeitgrenze (${_antwortgrenze.inSeconds} s)');
     } on IOException catch (e) {
+      if (abgebrochen) throw abbruchFehler();
       // Nur der Typ: Betriebssystemmeldungen können Instanzadressen enthalten.
       throw transportFehler('Verbindung abgebrochen (${e.runtimeType})');
     } finally {

@@ -4,6 +4,16 @@
 // Neuverknüpfung, Rücklesen, Protokoll); nur Moodle ist ein lokaler HTTP-Server
 // mit erfundenen Daten. Der Server kopiert wirklich: Jedes Ziel bekommt neue,
 // fortlaufende Aktivitätsnummern, in jedem zweiten Ziel in umgekehrter Reihenfolge.
+//
+// Zeitgrenze: Die meisten Tests fahren vollständige Übertragungen (Sichern,
+// Prüfen, Wiederherstellen, Rücklesen). Unter Last kann dafür die Standardgrenze
+// von 30 Sekunden zu knapp sein. Die Reihenfolge bestimmen Completer, nicht
+// Wartezeiten. Die gemeinsame Grenze gilt zur Vereinfachung auch für die
+// kürzeren Zielkontext- und Verknüpfungstests ohne Wiederherstellung; dort
+// werden dadurch hängende Tests später erkannt.
+@Timeout(Duration(minutes: 3))
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

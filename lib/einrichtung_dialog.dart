@@ -319,7 +319,10 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
         value: ws.gewaehlt,
         onChanged: _laeuft ? null : (v) => _werkzeugWaehlen(w.id, v ?? false),
         title: Text(w.name, style: Theme.of(context).textTheme.titleSmall),
-        subtitle: Text(ws.gewaehlt ? w.datenziel : '${w.datenziel} -- nicht gewählt'),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(ws.gewaehlt ? w.datenziel : '${w.datenziel} -- nicht gewählt'),
+          Text(w.wirkt),
+        ]),
       ),
       _zeile('Verbindung', '${w.id}/verbindung', ws.gewaehlt ? ws.verbunden : ws.verbindung == Verbindung.fehlt,
           _verbindungText(ws)),
@@ -430,6 +433,11 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(_schluss, style: Theme.of(context).textTheme.titleSmall),
             ),
+            // Im Abschluss noch einmal, wo es wirkt, damit niemand im
+            // normalen Chat nach moocp sucht.
+            if (_fertig && s != null)
+              for (final ws in s.werkzeuge)
+                if (ws.gewaehlt) Text('${ws.werkzeug.name}: ${ws.werkzeug.wirkt}'),
           ]),
         ),
       ),

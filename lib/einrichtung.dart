@@ -11,10 +11,11 @@
 // Eingerichtet werden Claude Code, Codex CLI und LM Studio. Alle drei sind
 // MCP-Clients, die auf demselben Rechner laufen, Skills im Format
 // `SKILL.md` laden und eigene Werkzeuge für Dateien haben -- mehr braucht
-// diese App von einem Client nicht. Die ChatGPT-App gehört nicht dazu: Sie
-// erreicht nur öffentliche HTTPS-Server, und der Weg über OpenAIs Tunnel
+// diese App von einem Client nicht. Der normale Chat der ChatGPT-App gehört
+// nicht dazu: Er erreicht nur öffentliche HTTPS-Server, und der Weg über OpenAIs Tunnel
 // führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6) und brächte
-// trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ollama ist ein
+// trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ihre Codex-Sitzungen
+// teilen dagegen `~/.codex` mit Codex CLI und sehen die Einträge. Ollama ist ein
 // Modellserver und gar kein MCP-Client.
 //
 // Hier steht nur die Logik, ohne Oberfläche, damit sie sich an einem
@@ -143,6 +144,12 @@ abstract class KiWerkzeug {
   /// benutzen. Der Hinweis zum Datenschutz (README, Installer) gilt deshalb
   /// für jedes Werkzeug, auch für LM Studio.
   String get datenziel;
+
+  /// Wo die Verbindung zur App wirkt, in einem Satz. Steht im Dialog unter
+  /// dem Namen und im Abschluss. Nur Clients auf diesem Rechner erreichen die
+  /// App (E6); der normale Chat von Claude Desktop und der ChatGPT-App ist
+  /// keiner, ChatGPT und Claude im Browser auch nicht.
+  String get wirkt;
 
   /// Ob das Werkzeug auf diesem Rechner benutzt wird. Nicht gefundene
   /// Werkzeuge erscheinen nicht im Dialog und werden nicht eingerichtet.
@@ -408,6 +415,10 @@ class ClaudeCode extends KiWerkzeug {
   String get name => 'Claude Code';
   @override
   String get datenziel => 'Inhalte gehen an das eingestellte Modell, in der Regel bei Anthropic';
+  @override
+  // Claude Desktop bringt Claude Code im Reiter „Code" mit und teilt dessen
+  // Konfiguration; der normale Chat sieht die Einträge nicht.
+  String get wirkt => 'Wirkt in Claude Code und im Reiter „Code" von Claude Desktop, nicht im normalen Chat.';
 
   /// Pfad der claude-Programmdatei (unter Windows claude.exe); null, wenn sie nicht gefunden wurde.
   String? get exe {
@@ -544,6 +555,11 @@ class CodexCli extends KiWerkzeug {
   String get datenziel =>
       'Inhalte gehen an das eingestellte Modell, in der Regel bei OpenAI. Der Moodle-Schlüssel steht im '
       'Klartext in config.toml im Codex-Ordner (in der Regel ~/.codex)';
+
+  @override
+  // Codex-Sitzungen der ChatGPT-App teilen ~/.codex mit der Kommandozeile und
+  // sehen die Einträge; der normale Chat der App ist kein Client.
+  String get wirkt => 'Wirkt in Codex und in Codex-Sitzungen der ChatGPT-App, nicht im normalen Chat der App.';
 
   /// CODEX_HOME verlegt Konfiguration und Skills; sonst `~/.codex`.
   Directory get heim => Directory(_v(umgebung, 'CODEX_HOME') ?? p.join(_heimPflicht(umgebung), '.codex'));
@@ -781,6 +797,8 @@ class LmStudio extends KiWerkzeug {
   String get name => 'LM Studio (Bionic)';
   @override
   String get datenziel => 'Inhalte gehen an das eingestellte Modell, lokal oder in der Cloud';
+  @override
+  String get wirkt => 'Wirkt im Agenten Bionic, nicht im klassischen LM Studio.';
 
   Directory get heim => Directory(p.join(_heimPflicht(umgebung), '.lmstudio'));
 

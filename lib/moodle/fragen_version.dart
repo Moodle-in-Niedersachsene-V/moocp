@@ -204,8 +204,8 @@ void _standPruefen(List<_Zuordnung> zs, int? uebergehen) {
 
 /// Das Formular des Plugins für genau diese Frage. Alles außer einem Formular
 /// mit Dateifeld heißt: Das Plugin fehlt oder ist abgeschaltet ([pluginFehlt]).
-/// Wie Moodle bei einem fehlenden Plugin antwortet (404, Fehlerseite), ist am
-/// Prüfstand gemessen; jede Antwort ohne dieses Formular zählt hier gleich.
+/// Eine Fehlerseite und ein fehlendes Skript bieten keinen verwendbaren
+/// Upload; beide Fälle liefern deshalb denselben festen Hinweis.
 Future<Formular> _pluginFormular(MoodleZugang moodle, int sammlung, int frage) async {
   final Formular f;
   try {

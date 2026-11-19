@@ -1,6 +1,7 @@
 # Fragetyp-Notiz: truefalse
-Moodle-Version: 5.1 (Testinstanz)
-Beweis: Import, Export und Vergleich sowie Vorschau auf der Testinstanz (Messung der Beispieldatei test/daten/fragen/kerntypen-test.xml). Die Rundlaufprobe mit Speichern des Formulars (E38) ist für diesen Typ noch nicht gelaufen; eine Notiz dieser Instanz, die nach bestandener Probe entsteht, geht dieser vor.
+Moodle-Version: 5.1 für das XML-Muster; bei der Rundlaufprobe nicht ermittelt
+Probe bestanden am: 2026-11-19
+Beweis: Das XML-Muster aus test/daten/fragen/kerntypen-test.xml besteht auf der Testinstanz die vollständige Rundlaufprobe: Export und Vergleich, Bearbeitungsformular, Vorschau, unverändert als Entwurf speichern und Probeversion entfernen. Auch der Import geänderten XMLs als neue Version besteht diese Probe. Eine Notiz dieser Instanz geht der mitgelieferten vor.
 
 ## Minimalbeispiel
 ```xml

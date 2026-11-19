@@ -201,8 +201,9 @@ Future<String> _frageLesenOhneSperre(
   }
   final z = g.zusammenfassung();
   return '$z\n${xmlHinweis}Speichern erzeugt eine NEUE Version mit neuer questionid; Tests mit '
-      '„neueste Version" nutzen sie sofort. Strukturänderungen (andere Antwortzahl, anderer Typ) gehen so '
-      'nicht -- dafür neu anlegen.';
+      '„neueste Version" nutzen sie sofort. Strukturänderungen desselben Typs (andere Antwortzahl, neue Lücken) '
+      'gehen über fragen_version_importieren mit bearbeitetem XML. Nur bei Typwechsel oder fehlendem '
+      'Versionsimport-Plugin frage_ersetzen verwenden; dabei geht der gemeinsame Verlauf verloren.';
 }
 
 // ---------------------------------------------------------------------------

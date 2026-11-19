@@ -20,8 +20,15 @@ Wiederholung: Moodle könnte den ursprünglichen Auftrag noch verarbeiten.
 Abweichungen und nicht prüfbare Ziele bleiben gesperrt. Die App wiederholt
 keinen POST automatisch nach einem Transportfehler.
 
+Eine Sperre, die sich nicht klärt, kann die Lehrkraft in der App aufheben: mit
+der Maus und mit Wartezeit wie bei einer Freigabe (E4), nie über MCP. Die nächste
+Änderung beginnt danach mit frischem Lesen (E17); die Aufhebung steht im Protokoll.
+
 ## Verworfen
 
 Ein höheres Zeitlimit oder eine automatische Wiederholung ersetzt keinen
 Zustandsnachweis und könnte einen bereits ausgeführten Vorgang doppelt ausführen.
 Eine Sperre nur im Arbeitsordner ginge beim erneuten Lesen oder Neustarten verloren.
+Eine Sperre ohne Ausweg ließe die Lehrkraft machtlos vor einem Objekt, das sie
+selbst schon geprüft hat. Das Aufheben im Chat ist verworfen: Die KI könnte das Ja
+selbst geben.

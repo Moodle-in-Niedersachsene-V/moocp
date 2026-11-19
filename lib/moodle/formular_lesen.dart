@@ -637,13 +637,79 @@ Future<FormularGelesen> formularLesen(
   );
 }
 
+/// Ergänzt den Stand vor dem Austausch um weitere Dateien: [stand] ist der
+/// Ordner, der erst nach Erfolg zum Ergebnisordner wird, nicht dieser selbst.
+typedef VorVeroeffentlichung = Future<void> Function(String stand, FormularGelesen gelesen);
+
 /// Nur innerhalb einer [ordnerSperre] aufrufen, sonst wartet der Aufruf auf sich selbst.
+///
+/// Gelesen wird in einen Nachbarordner `.lesen-<ordnerName>` im Arbeitsordner
+/// (gleiches Laufwerk, daher ein Umbenennen statt Kopieren) und erst nach
+/// Erfolg gegen den Ergebnisordner getauscht. Scheitert oder bricht das Lesen
+/// ab, bleibt der vorherige vollständige Stand unberührt; ein halber Stand wird
+/// nie veröffentlicht. Der Nachbarordner liegt unter derselben Sperre wie der
+/// Ergebnisordner und beginnt mit einem Punkt, damit ihn niemand für ein
+/// Ergebnis hält.
 Future<FormularGelesen> formularLesenOhneSperre(
   MoodleZugang moodle,
   Formularziel ziel,
   String arbeitsordner, {
   Future<void>? abbruch,
+  VorVeroeffentlichung? vorVeroeffentlichung,
 }) async {
+  final endgueltig = Directory(p.join(arbeitsordner, ziel.ordnerName));
+  final stand = Directory(p.join(arbeitsordner, '.lesen-${ziel.ordnerName}'));
+  // Ein Rest eines früheren, hart beendeten Lesens; Löschfehler gehen weiter.
+  if (await stand.exists()) await stand.delete(recursive: true);
+  final FormularGelesen ergebnis;
+  try {
+    ergebnis = await _formularInStandLesen(
+      moodle, ziel, endgueltig.path, stand.path, abbruch);
+    if (vorVeroeffentlichung != null) {
+      await vorVeroeffentlichung(stand.path, ergebnis);
+    }
+  } catch (_) {
+    // Die ursprüngliche Ursache bleibt die Meldung; ein Rest wird beim
+    // nächsten Lesen derselben Frage entfernt.
+    try {
+      await stand.delete(recursive: true);
+    } on FileSystemException {
+      // siehe oben
+    }
+    rethrow;
+  }
+  await _standAustauschen(stand, endgueltig);
+  return ergebnis;
+}
+
+/// Tauscht [stand] gegen [endgueltig]: den alten Ordner erst beiseite
+/// umbenennen, dann den neuen hineinbenennen, dann den alten löschen. So gibt
+/// es nie einen Zeitpunkt ohne vollständigen Ordner, und unter Windows, wo
+/// ein geöffneter Ordner sich nicht löschen, wohl aber oft umbenennen lässt,
+/// bleibt der Austausch möglich (E24). Schlägt das Hineinbenennen fehl, wird
+/// der alte Ordner zurückbenannt. Löschfehler des alten Ordners gehen weiter:
+/// Der neue Stand liegt dann schon vollständig bereit.
+Future<void> _standAustauschen(Directory stand, Directory endgueltig) async {
+  final alt = Directory('${stand.path}-alt');
+  if (await alt.exists()) await alt.delete(recursive: true);
+  final hatAlten = await endgueltig.exists();
+  if (hatAlten) await endgueltig.rename(alt.path);
+  try {
+    await stand.rename(endgueltig.path);
+  } catch (_) {
+    if (hatAlten) await alt.rename(endgueltig.path);
+    rethrow;
+  }
+  if (hatAlten) await alt.delete(recursive: true);
+}
+
+Future<FormularGelesen> _formularInStandLesen(
+  MoodleZugang moodle,
+  Formularziel ziel,
+  String endgueltigerPfad,
+  String standPfad,
+  Future<void>? abbruch,
+) async {
   final r = await moodle.lesen(ziel.adresse, abbruch: abbruch);
   if (r.status != 200) {
     throw MoodleFehler(
@@ -676,8 +742,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
     );
   }
 
-  final ziel0 = Directory(p.join(arbeitsordner, ziel.ordnerName));
-  if (await ziel0.exists()) await ziel0.delete(recursive: true);
+  final ziel0 = Directory(standPfad);
   await Directory(p.join(ziel0.path, 'dateien')).create(recursive: true);
   await Directory(p.join(ziel0.path, '.stand', 'dateien'))
       .create(recursive: true);
@@ -719,26 +784,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
   await File(p.join(ziel0.path, '.stand', 'einstellungen.json'))
       .writeAsString(einstellungenJson, encoding: utf8);
   final sesskey = wert('sesskey');
-  // Antwortet Moodle nicht mehr, bleibt kein halb gelesener Ordner zurück:
-  // Er sähe wie ein Stand aus, hat aber nicht einmal den Quelltext.
-  Future<T> ganzOderGarNicht<T>(Future<T> Function() lesen) async {
-    try {
-      return await lesen();
-    } on MoodleFehler catch (x) {
-      if (moodleAntwortetNicht(x)) {
-        try {
-          await ziel0.delete(recursive: true);
-        } on FileSystemException {
-          // Der Fehler von Moodle ist die Meldung; ein Rest bleibt dann liegen.
-        }
-      }
-      rethrow;
-    }
-  }
-
-  final bereiche = await ganzOderGarNicht(
-    () => _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch),
-  );
+  final bereiche = await _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch);
 
   // Referenzierte Dateien einsammeln: src und href, die auf Datei-Adressen
   // dieser Moodle-Instanz zeigen.
@@ -774,7 +820,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
       name = '${p.basenameWithoutExtension(name)}-$i$ext';
     }
     try {
-      final d = await ganzOderGarNicht(() => moodle.lesen(e.key, abbruch: abbruch));
+      final d = await moodle.lesen(e.key, abbruch: abbruch);
       if (d.status != 200) {
         fehlend.add('$name (HTTP ${d.status})');
         continue;
@@ -824,7 +870,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
           .whereType<int>(),
     );
   }
-  final titel = await ganzOderGarNicht(() => _zielTitel(moodle, kurs, verlinkt, hinweise, abbruch: abbruch));
+  final titel = await _zielTitel(moodle, kurs, verlinkt, hinweise, abbruch: abbruch);
   // Verknüpft oder fremd nur bei lesbarer Kursstruktur; sonst nicht prüfbar.
   Set<int>? lokaleCmids;
   if (karte != null && kurs != null) {
@@ -853,7 +899,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
     kurs,
     _nameIn(form),
     modul,
-    ziel0.path,
+    endgueltigerPfad,
     felder,
     dateien,
     fehlend,

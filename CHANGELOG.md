@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Lesen: Ein abgebrochenes oder fehlgeschlagenes Lesen lässt den zuletzt gelesenen Stand im Arbeitsordner unverändert, statt einen halben zu hinterlassen.
 - Sammelspeichern: Wurde ein Ordner während der Freigabe neu gelesen, wird keine Seite des Stapels geschrieben.
 - Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
 - Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.

@@ -178,8 +178,21 @@ Future<String> frageLesen(MoodleZugang moodle, String arbeitsordner, {required i
 
 Future<String> _frageLesenOhneSperre(
     MoodleZugang moodle, String arbeitsordner, Formularziel ziel, int sammlung, int frage) async {
-  final g = await formularLesenOhneSperre(moodle, ziel, arbeitsordner);
   // Dazu die Frage als XML: vollständig, auch für Typen mit vielen Feldern.
+  // Sie geht in den Stand vor dem Austausch, damit der Ergebnisordner nie ohne
+  // sie veröffentlicht wird.
+  var xmlHinweis = '';
+  final g = await formularLesenOhneSperre(moodle, ziel, arbeitsordner,
+      vorVeroeffentlichung: (stand, g) => _frageXmlLegen(moodle, stand, g, sammlung, frage, (h) => xmlHinweis = h));
+  final z = g.zusammenfassung();
+  return '$z\n${xmlHinweis}Speichern erzeugt eine NEUE Version mit neuer questionid; Tests mit '
+      '„neueste Version" nutzen sie sofort. Strukturänderungen desselben Typs (andere Antwortzahl, neue Lücken) '
+      'gehen über fragen_version_importieren mit bearbeitetem XML. Nur bei Typwechsel oder fehlendem '
+      'Versionsimport-Plugin frage_ersetzen verwenden; dabei geht der gemeinsame Verlauf verloren.';
+}
+
+Future<void> _frageXmlLegen(
+    MoodleZugang moodle, String stand, FormularGelesen g, int sammlung, int frage, void Function(String) hinweis) async {
   var xmlHinweis = '';
   try {
     final s = await moodle.sesskey();
@@ -190,7 +203,7 @@ Future<String> _frageLesenOhneSperre(
       xml = link == null ? '' : (await moodle.lesen(link)).text;
     }
     if (xml.trimLeft().startsWith('<?xml')) {
-      await File(p.join(g.ordner, 'frage.xml')).writeAsString(xml, encoding: utf8);
+      await File(p.join(stand, 'frage.xml')).writeAsString(xml, encoding: utf8);
       // Der Einzelexport lässt die Datensätze einer berechneten Frage weg
       // (gemessen: calculated mit geteilten Datensätzen); vollständig stehen
       // sie im Export ihrer Kategorie.
@@ -200,11 +213,7 @@ Future<String> _frageLesenOhneSperre(
   } on MoodleFehler catch (x) {
     xmlHinweis = 'Einzelexport nicht möglich (${x.meldung}).\n';
   }
-  final z = g.zusammenfassung();
-  return '$z\n${xmlHinweis}Speichern erzeugt eine NEUE Version mit neuer questionid; Tests mit '
-      '„neueste Version" nutzen sie sofort. Strukturänderungen desselben Typs (andere Antwortzahl, neue Lücken) '
-      'gehen über fragen_version_importieren mit bearbeitetem XML. Nur bei Typwechsel oder fehlendem '
-      'Versionsimport-Plugin frage_ersetzen verwenden; dabei geht der gemeinsame Verlauf verloren.';
+  hinweis(xmlHinweis);
 }
 
 // ---------------------------------------------------------------------------

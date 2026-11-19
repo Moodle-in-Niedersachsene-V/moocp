@@ -355,7 +355,7 @@ Gelesenes legt die App im Arbeitsordner ab, an die KI geht eine Übersicht. Lese
 | `board_lesen` | Die Spalten eines Boards; Notizen anderer werden nur gezählt. | – |
 | `kanban_lesen` | Spalten und Karten des gemeinsamen Kanban-Boards, ohne Ersteller und Zuweisungen. | – |
 | `bewertungsschema_lesen` | Die Definition einer Rubrik oder Bewertungsrichtlinie – nie eine Bewertung. | – |
-| `test_lesen` | Die Zusammenstellung eines Tests (Plätze, Punkte, Fragen) – nie Ergebnisse. | – |
+| `test_lesen` | Die Zusammenstellung eines Tests (Plätze, Punkte, Fragen) und woher die Fragen kommen: aus der eigenen Bank des Tests oder aus einer geteilten Fragensammlung, und ob diese zum Kurs gehört – nie Ergebnisse. | – |
 | `fragensammlungen` | Die Fragensammlungen eines Kurses. | – |
 | `fragetypen` | Welche Fragetypen die App anlegen kann, dazu STACK-Version und CodeRunner-Prototypen der Instanz. | – |
 | `fragen_lesen` | Die Kategorien einer Sammlung und die Fragen einer Kategorie als Moodle-XML, ohne „Erstellt von". | – |
@@ -375,7 +375,7 @@ Was die KI mit den hier aufgeführten Werkzeugen ohne Klick anlegt, ist für Ler
 | `abschnitt_anlegen` | Legt einen Abschnitt an, am Ende oder hinter einem anderen. Verborgen, auf Wunsch sichtbar. | wenn sichtbar, sonst bei „alle" |
 | `buchkapitel_anlegen` | Legt ein Kapitel oder Unterkapitel an. Ein Kapitel erscheint sofort, wenn das Buch für Lernende sichtbar ist. Hält ein Schutzdienst das Anlegen an, legt die App das Kapitel mit dem Platzhalter „Inhalt folgt." an und bittet Sie, den Inhalt selbst im Browser zu speichern. | wenn das Buch sichtbar ist, sonst bei „alle"; die Bitte, selbst zu speichern, immer |
 | `wikiseite_schreiben` | Legt eine Seite in einem gemeinsamen Wiki an oder ersetzt den Inhalt einer vorhandenen – auch das, was andere geschrieben haben. | Ersetzen: **ja**, außer im gerade verborgen angelegten Wiki; Anlegen: wenn das Wiki sichtbar ist, sonst bei „alle" |
-| `duplizieren` | Kopiert eine Aktivität oder einen Abschnitt samt Inhalt, ohne Daten von Lernenden. Nummer und Name müssen zusammenpassen. | bei „alle" |
+| `duplizieren` | Kopiert eine Aktivität oder einen Abschnitt samt Inhalt, ohne Daten von Lernenden. Nummer und Name müssen zusammenpassen. Bei einem Test sagt die Antwort, ob die Fragen der Kopie dieselben sind wie im Original. | bei „alle" |
 | `kategorie_anlegen` | Legt in einer bestehenden Fragensammlung eine Kategorie an, auf Wunsch unter einer anderen. Eine neue Fragensammlung ist dagegen eine Aktivität (`aktivitaet_anlegen`, Typ `qbank`). | bei „alle" |
 | `gruppierung_anlegen` | Legt eine Gruppierung an, dazu die Gruppen, die es im Kurs noch nicht gibt, und ordnet sie zu. Ohne Mitglieder. Bei einer bestehenden Gruppierung ergänzt es nur fehlende Gruppen, entfernt aber nichts. Gerufen wird es erst nach der Zustimmung der Lehrkraft. | bei „alle" |
 | `fragen_importieren` | Legt Fragen aus einer XML-Datei im Arbeitsordner in einer Kategorie an, nach Prüfung der Datei. Danach prüft die App jede Frage (Rundlaufprobe: Export und Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern). Automatisch aufgeräumt werden nur direkt bestätigte Versionsnummern; ohne Herkunftsnachweis oder bei unklarem Ausgang bleibt die Frage zur manuellen Prüfung stehen. `verified` heißt: alle Teile bestanden. Lernende sehen sie erst in einem Test. | bei „alle", eine für die ganze Datei |

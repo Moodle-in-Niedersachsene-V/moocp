@@ -2878,7 +2878,8 @@ class McpDienst implements AufrufKontext {
           'Liest die Zusammenstellung eines Tests (nie Ergebnisse): Plätze mit Seite, slotid, Typ, '
           'Name, Punkten und questionid, Summe der Punkte, Beste Bewertung, Fragen je Seite, ob die Fragen '
           'gemischt werden (je Testabschnitt), und Befunde '
-          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche). '
+          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche) '
+          'und die Herkunft der Fragen (eigene Bank des Tests oder geteilte Fragensammlung, im Kurs oder in einem anderen). '
           'Einstellungen des Tests: aktivitaet_lesen. Nur lesen.',
       parameter: {
         'cmid': JsonSchema.integer(
@@ -2888,7 +2889,7 @@ class McpDienst implements AufrufKontext {
       pflicht: ['cmid'],
       nurLesen: true,
       ausfuehren: (a) async =>
-          (await testLesen(moodle, _zahl(a, 'cmid'))).text(),
+          (await testLesen(moodle, _zahl(a, 'cmid'), banken: true)).text(),
     );
 
     _aufrufe.registrieren(

@@ -54,6 +54,9 @@ class FragenbankDoppel {
   /// Die Sammlungen, die die Übersicht des Kurses (`banks.php`) nennt: cmid -> Name.
   final Map<int, String> kursBanken = {12: 'ZZ Bank'};
 
+  /// Die Zusammenstellungsseiten von Tests (`mod/quiz/edit.php`): cmid -> HTML.
+  final Map<int, String> quizSeiten = {};
+
   /// Legt eine Kategorie an (Kontext-id 60 + cmid, die erste Sammlung hat 55);
   /// ohne [eltern] liegt sie unter der Top-Kategorie ihrer Sammlung.
   void legeKategorieAn(int id, String name, {int bank = sammlung, int? eltern}) {
@@ -305,6 +308,14 @@ class FragenbankDoppel {
       }
       b.write('</quiz>');
       return _text(r, b.toString());
+    }
+    if (pfad == '/mod/quiz/edit.php') {
+      final seite = quizSeiten[int.tryParse(r.uri.queryParameters['cmid'] ?? '')];
+      if (seite == null) {
+        r.response.statusCode = 404;
+        return _text(r, _seite('<p>nicht gefunden</p>'));
+      }
+      return _text(r, seite);
     }
     if (pfad == '/question/banks.php') {
       return _text(r, _seite('<div id="region-main">${[

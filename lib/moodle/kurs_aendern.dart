@@ -39,6 +39,7 @@ import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
+import 'test.dart';
 
 Future<Object?> kursAktion(MoodleZugang moodle, int kurs, String aktion, List<int> ids,
     {int? zielAbschnitt, int? zielCmid}) async {
@@ -701,11 +702,25 @@ Future<String> _aktivitaetDuplizieren(MoodleZugang moodle, Freigaben freigaben, 
 
   final g = await _formulareVergleichen(moodle, probe, Formularziel.aktivitaet(c.cmid),
       Formularziel.aktivitaet(kopieId), arbeitsordner, ohne: const {'name', 'visible', 'cmidnumber'});
+  // Bei einem Test: Liegen die Fragen der Kopie in derselben Bank und sind es dieselben Fragen
+  // wie im Original? Zwei Lesezugriffe auf die Zusammenstellung und eine auf die Bankliste;
+  // scheitert das, bleibt die Kopie gültig und die Antwort sagt, dass es nicht geprüft ist.
+  String? herkunft;
+  if (c.modul == 'quiz') {
+    try {
+      final kopieTest = await testLesen(moodle, kopieId, banken: true);
+      final quelleTest = await testLesen(moodle, c.cmid);
+      herkunft = 'Herkunft der Fragen in der Kopie: ${kopieTest.herkunftText(quelle: quelleTest)}';
+    } on MoodleFehler catch (e) {
+      herkunft = 'Herkunft der Fragen nicht geprüft (${e.meldung}); mit test_lesen nachsehen.';
+    }
+  }
   return [
     'Dupliziert: ${typName(c.modul)} „${c.name}" (cmid ${c.cmid}) in $kursText. Kopie: „${kopie.name}", '
         'cmid $kopieId, in „${s.nachId[stelle]?.titel}", Position ${i + 1} von ${liste.length}, verborgen.',
     if (fehler != null) 'Moodle meldete dabei: ${fehler.meldung}',
     probe.text,
+    ?herkunft,
     if (origUnter != null && kopieUnter != null) _zuordnung(s, origUnter, kopieUnter),
     'Die Kopie ist gelesen, zum Bearbeiten: ${g.ordner} (Name ändern mit aendern, Einstellung name). '
         'Sichtbar machen mit sichtbarkeit_setzen, wenn sie fertig ist.',

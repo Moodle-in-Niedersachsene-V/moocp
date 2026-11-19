@@ -56,6 +56,7 @@ const _eingebaut = [
   'fragen_lesen',
   'frage_lesen',
   'fragen_importieren',
+  'fragen_version_importieren',
   'kategorie_anlegen',
   'fragen_loeschen',
   'frage_ersetzen',

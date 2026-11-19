@@ -34,6 +34,8 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_version.dart';
+import '../moodle/rundlaufprobe.dart';
 import '../moodle/fortschrittsliste.dart';
 import '../moodle/fragen.dart';
 import '../moodle/gruppierung.dart';
@@ -1938,8 +1940,55 @@ class McpDienst implements AufrufKontext {
           i.neu,
           (f) => stackTesten(moodle, sammlung: s, frage: f),
         );
-        return '${i.text}${n.text}';
+        // Die Rundlaufprobe (E38) urteilt; was durchfällt, löscht sie wieder.
+        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml);
+        return '${i.text}${n.text}${r.text}'
+            'verified: ${i.ok && n.ok && r.verified}'
+            '${i.ok && n.ok && r.ok && !r.verified ? ' (ein Teil der Rundlaufprobe war nicht prüfbar, siehe oben)' : ''}\n';
       },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_version_importieren',
+      titel: 'Fragen als neue Version einspielen',
+      beschreibung:
+          'Spielt Fragen aus einer Moodle-XML-Datei im Arbeitsordner als NEUE VERSION der vorhandenen Fragen ein '
+          '(Verlauf, Sachnummer und Plätze in Tests bleiben; Tests mit „neueste Version" nehmen sie sofort). '
+          'Jede Frage der Datei wird über ihre Sachnummer (<idnumber>) EINER Frage der Kategorie zugeordnet; kein '
+          'Treffer, mehrdeutig oder anderer Typ bricht ab, bevor etwas geschieht. Die Datei geht von der Version '
+          'aus, die fragen_lesen geliefert hat (der Kommentar „question: <id>" bleibt vor jeder Frage stehen); ist '
+          'inzwischen eine neuere gespeichert, bricht das Werkzeug ab und nennt sie -- nur mit uebergehen: <genau '
+          'diese questionid> geht es trotzdem. Braucht das Moodle-Plugin „Import question as new version"; fehlt es, '
+          'kommt ein fester Satz mit den Wegen, die bleiben, und nichts wird geändert. Eine Freigabe für die ganze '
+          'Datei, mit Zeilenvergleich je Frage. Danach prüft das Werkzeug jede Frage (Rundlaufprobe: Export und '
+          'Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern) und löscht eine Version, die '
+          'durchfällt -- nur diese, nur in diesem Aufruf angelegt. verified heißt: alle Teile bestanden; was sich nicht '
+          'prüfen ließ, steht als „nicht geprüft" da.',
+      parameter: {
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.string(
+          description: 'Kategorie-id oder Name, in der die Fragen stehen (aus fragen_lesen)',
+        ),
+        'datei': JsonSchema.string(
+          description: 'Pfad der XML-Datei im Arbeitsordner',
+        ),
+        'uebergehen': JsonSchema.integer(
+          description:
+              'Optional: die questionid der neueren Version, die der Aufruf ausdrücklich übergehen darf (so, wie die '
+              'Abbruchmeldung sie nennt). Nur nach Rückfrage bei der Lehrkraft setzen.',
+        ),
+      },
+      pflicht: ['sammlung', 'kategorie', 'datei'],
+      ausfuehren: (a) => fragenVersionImportieren(
+        moodle,
+        freigaben,
+        ao,
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: '${a['kategorie']}',
+        datei: _text(a, 'datei'),
+        uebergehen: a['uebergehen'] is num ? (a['uebergehen'] as num).toInt() : null,
+      ),
     );
 
     _aufrufe.registrieren(

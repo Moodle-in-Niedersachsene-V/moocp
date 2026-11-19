@@ -264,3 +264,54 @@ String _ohneStatus(String xml) {
   }
   return d.toXmlString();
 }
+
+/// Die Rundlaufprobe für jede Frage, die ein Import gerade angelegt hat
+/// ([i]), samt dem Aufräumen: Was durchfällt, löscht dieser Aufruf wieder --
+/// die neue Frage mit allen ihren Versionen, die es nur durch diesen Aufruf
+/// gibt, nie etwas anderes. [neueIds]: Das Speichern einer CodeRunner-Frage
+/// über das Formular (importNachweise) hat eine neuere Version angelegt; sie
+/// gehört zu diesem Aufruf und wird geprüft statt der importierten.
+/// [xml] ist das geprüfte XML der Datei.
+Future<({String text, bool ok, bool verified})> importProben(
+  MoodleZugang moodle,
+  String arbeitsordner,
+  int sammlung,
+  Importiert i,
+  Map<int, int> neueIds,
+  String xml,
+) async {
+  final doc = XmlDocument.parse(xml);
+  final eingaben = [for (final q in doc.rootElement.findElements('question')) if (q.getAttribute('type') != 'category') q];
+  final b = StringBuffer();
+  var ok = true, verified = true;
+  for (final f in i.neu.where((f) => f.id != null)) {
+    final angelegt = Angelegt()..melden(f.id!, f.name);
+    final ziel = neueIds[f.id] ?? f.id!;
+    if (ziel != f.id) angelegt.melden(ziel, f.name);
+    final q = eingaben.where((e) {
+      final idn = e.getElement('idnumber')?.innerText.trim() ?? '';
+      final name = e.getElement('name')?.getElement('text')?.innerText.trim() ?? '';
+      return f.idnummer != null ? idn == f.idnummer : name == f.name;
+    }).firstOrNull;
+    if (q == null) {
+      ok = verified = false;
+      b.writeln('Rundlaufprobe „${f.name}" (${f.id}): Die Frage steht nicht mehr in der Eingabe; nicht geprüft.');
+      continue;
+    }
+    final r = await rundlaufProbe(moodle, arbeitsordner,
+        sammlung: sammlung, frage: ziel, eingabe: quizXml([q.toXmlString()]), angelegt: angelegt);
+    if (r.bestanden) {
+      b.writeln('Rundlaufprobe „${f.name}" (${r.verified ? 'bestanden' : 'ohne Befund, nicht vollständig'}):');
+      b.write(r.text());
+      if (!r.verified) verified = false;
+      continue;
+    }
+    ok = verified = false;
+    final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, ziel, alleVersionen: true);
+    b.writeln('Rundlaufprobe „${f.name}" NICHT bestanden; die neue Frage wurde '
+        '${weg.weg ? 'wieder gelöscht' : 'NICHT gelöscht und liegt noch in der Fragenbank'}:');
+    b.write(r.text());
+    if (!weg.weg) b.writeln('  ${weg.text}');
+  }
+  return (text: b.toString(), ok: ok, verified: verified);
+}

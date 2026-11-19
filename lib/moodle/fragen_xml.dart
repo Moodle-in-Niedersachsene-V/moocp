@@ -8,12 +8,10 @@
 // unerwarteter Stelle. Bei CodeRunner verweigert die Bauhilfe vier Fragen,
 // die sonst still danebengehen.
 //
-// Warum die Prüfung vor dem Import: Anlegbar sind nur Typen, deren XML
-// gemessen ist (von Hand angelegt, exportiert, eine EIGENE Frage danach
-// geschrieben, importiert, erneut exportiert und verglichen, Vorschau
-// angesehen) -- die Kerntypen und stack, coderunner, ddmatch, mtf, gapfill.
-// Ein halber Import ist schwerer aufzuräumen als keiner: Enthält das XML
-// einen anderen Typ, wird gar nichts hochgeladen.
+// Warum die Prüfung vor dem Import: Ein halber Import ist schwerer
+// aufzuräumen als keiner: Fällt eine Frage durch (Prototyp, fehlende
+// Pflichtelemente), wird gar nichts hochgeladen. Welche Typen es gibt, sagt
+// die Instanz; ob eine Frage taugt, die Rundlaufprobe (rundlaufprobe.dart).
 
 import 'dart:convert';
 import 'dart:io';
@@ -29,9 +27,10 @@ import 'stack_skripte.dart';
 
 // kernAnlegbar, zusatzAnlegbar und nurLesen gibt die Übersicht „Unterstützte
 // Aktivitäten und Fragetypen" in README.md (Teil 2) wieder; dort im selben Zug
-// nachziehen.
+// nachziehen. Sie sagen, wofür es von Hand gemessenes XML und Fragetyp-Notizen
+// gibt, nicht mehr, was angelegt werden darf (E38).
 
-/// Kern-Fragetypen, die angelegt werden können.
+/// Kern-Fragetypen mit gemessenem XML.
 const Set<String> kernAnlegbar = {
   'multichoice', 'truefalse', 'shortanswer', 'numerical', 'matching', 'match', 'essay', //
   'description', 'cloze', 'multianswer', 'gapselect', 'ddwtos', 'calculated', 'calculatedsimple',
@@ -553,12 +552,12 @@ class FrageImXml {
     if (typ == 'category') continue;
     final name = q.getElement('name')?.getElement('text')?.innerText.trim() ?? '';
     final wer = '„$name" ($typ)';
-    if (nurLesen.contains(typ)) {
-      fehler.add('$wer: braucht Hintergrundgrafik und Koordinaten -- nur über die Oberfläche anlegbar');
-    } else if (!kernAnlegbar.contains(typ) && !zusatzAnlegbar.contains(typ)) {
-      fehler.add('$wer: Typ nicht anlegbar (XML nicht gemessen). Anlegbar: '
-          '${[...kernAnlegbar, ...zusatzAnlegbar].join(", ")}');
-    }
+    // Anlegbar ist jeder Typ, den die Instanz kennt, wenn er die Rundlaufprobe
+    // besteht (rundlaufprobe.dart, E38); eine Liste gemessener Typen ist keine
+    // Voraussetzung mehr. Was die Probe nicht ersetzt: Prototypen werden nie
+    // angelegt (CodeRunner unten), und die Zusatznachweise für STACK und
+    // CodeRunner bleiben.
+    if (typ.isEmpty) fehler.add('$wer: Frage ohne Typ (type="…")');
     if (name.isEmpty) fehler.add('Frage vom Typ $typ ohne <name>');
     // ordering braucht <shownumcorrect/>; fehlt es, bricht der Import mit
     // „Fehler beim Schreiben der Datenbank" ab. layouttype, selecttype,

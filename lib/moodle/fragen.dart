@@ -211,10 +211,13 @@ Future<String> _frageLesenOhneSperre(
 
 /// Ergebnis eines Imports, für die Nachweise danach (STACK, CodeRunner).
 class Importiert {
-  Importiert(this.text, this.neu, this.ok);
+  Importiert(this.text, this.neu, this.ok, this.xml);
   final String text;
   final List<FrageKurz> neu;
   final bool ok;
+
+  /// Das geprüfte XML, das hochgeladen wurde (Eingabe der Rundlaufprobe).
+  final String xml;
 }
 
 Future<Importiert> fragenImportieren(MoodleZugang moodle, Freigaben freigaben, String arbeitsordner,
@@ -292,10 +295,10 @@ Future<Importiert> importAusfuehren(
   final ok = neu.length == erwartet && probleme.isEmpty;
   final b = StringBuffer()
     ..writeln('${ok ? 'Importiert' : 'Import UNVOLLSTÄNDIG'}: ${neu.length} von $erwartet Fragen in '
-        '„${k.name}" (Sammlung cmid $sammlung). verified: $ok')
+        '„${k.name}" (Sammlung cmid $sammlung). nachgezählt: $ok')
     ..writeln([for (final f in neu) '  ${f.zeile()}'].join('\n'));
   if (probleme.isNotEmpty) b.writeln('Moodle meldet: $probleme');
-  return Importiert(b.toString(), neu, ok);
+  return Importiert(b.toString(), neu, ok, xml);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,8 +373,10 @@ Future<String?> stackVersion(MoodleZugang moodle, int sammlung) async {
 
 Future<String> fragetypen(MoodleZugang moodle, int sammlung) async {
   final b = StringBuffer()
-    ..writeln('Anlegbar (XML gemessen): ${[...kernAnlegbar.where((t) => t != 'matching' && t != 'cloze'), ...zusatzAnlegbar].join(", ")}.')
-    ..writeln('Nur lesbar: ${nurLesen.join(", ")} und alle übrigen Zusatztypen.');
+    ..writeln('Anlegbar ist jeder Typ, den diese Moodle-Instanz kennt, wenn er die Rundlaufprobe besteht (Export und '
+        'Vergleich, Formular, Vorschau, unverändert als Entwurf speichern). Prototypen nie. Gemessenes XML und '
+        'Hilfen gibt es für: ${[...kernAnlegbar.where((t) => t != 'matching' && t != 'cloze'), ...zusatzAnlegbar].join(", ")}; '
+        'sonst eine Beispielfrage aus der Fragensammlung exportieren und daran bauen.');
   try {
     final v = await stackVersion(moodle, sammlung);
     b.writeln('STACK: ${v == null ? 'nicht gefunden (nicht installiert?)' : 'Version $v'}');

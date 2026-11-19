@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.
 - Neu: moocp für den Mac (ab macOS 12, Apple Silicon und Intel), als Disk-Image zum Ziehen auf „Programme“; wie man die App beim ersten Start freigibt, zeigt die README mit Bildern.

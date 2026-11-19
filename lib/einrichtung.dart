@@ -1270,27 +1270,6 @@ Future<bool> _eintragDa(KiWerkzeug w, [String name = mcpName]) async {
 }
 
 // ---------------------------------------------------------------------------
-// Python
-// ---------------------------------------------------------------------------
-
-/// Ob `python` läuft. Der Skill lernsituation ruft sein Prüfskript mit Python
-/// auf; installieren kann die App Python nicht, nur darauf hinweisen. Der
-/// Platzhalter „python.exe" aus dem Microsoft Store endet ohne Python mit
-/// einem Fehlercode und zählt deshalb richtig als „fehlt".
-Future<bool> pythonVorhanden() async {
-  // Auf dem Mac heißt Python oft nur python3; der Skill ruft im Text `python`
-  // auf, das ist dort eine offene Lücke.
-  for (final name in Platform.isWindows ? const ['python'] : const ['python3', 'python']) {
-    try {
-      if (await _ausfuehren(name, ['--version']) == 0) return true;
-    } catch (_) {
-      // Den nächsten Namen probieren.
-    }
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
 // Alles zusammen
 // ---------------------------------------------------------------------------
 
@@ -1354,7 +1333,6 @@ class Einrichtungsstand {
   Einrichtungsstand({
     required this.werkzeuge,
     required this.skills,
-    required this.python,
     this.wahlSkills = const {},
     this.gewaehlt = const {},
     this.skillFehler = const [],
@@ -1377,8 +1355,6 @@ class Einrichtungsstand {
 
   /// Alle Skills, die die Einrichtung kennt ([skillPaketeFinden]).
   final List<SkillPaket> skills;
-
-  final bool python;
 
   /// Die wählbaren Skills mit dem Satz, der im Dialog dabeisteht; alle anderen
   /// in [skills] sind immer dabei.
@@ -1415,8 +1391,7 @@ class Einrichtungsstand {
 
   /// Ob der Dialog erscheinen muss: weil etwas zu tun ist oder weil ein
   /// unbrauchbares Skill-Paket eines Plugins noch nicht gesehen ist
-  /// ([skillFehlerNeu]). Python allein zählt nicht: Das kann die App nicht
-  /// beheben, der Hinweis stünde sonst bei jedem Start da.
+  /// ([skillFehlerNeu]).
   bool get brauchtEtwas => brauchtEinrichtung || skillFehlerNeu;
 
   /// Ob „Installieren" etwas bewirken kann.
@@ -1477,7 +1452,6 @@ Future<Einrichtungsstand> einrichtungPruefen({
   Set<String> gesehen = const {},
   List<String> skillFehler = const [],
   bool skillFehlerNeu = false,
-  Future<bool> Function() python = pythonVorhanden,
   List<KiWerkzeug>? gefunden,
 }) async {
   final gewollt = _gewollt(skills, wahlSkills, gewaehlt);
@@ -1549,7 +1523,6 @@ Future<Einrichtungsstand> einrichtungPruefen({
   return Einrichtungsstand(
     werkzeuge: werkzeuge,
     skills: skills,
-    python: await python(),
     wahlSkills: wahlSkills,
     gewaehlt: gewaehlt,
     skillFehler: [...skillFehler, ...konflikte],

@@ -112,7 +112,6 @@ void main() {
       fremd: einstellungen.fremdeSkillOrdner,
       skillFehler: ps.fehler,
       gefunden: [codex, lm],
-      python: () async => true,
     );
     einstellungen.pluginSkillOrdner = pluginSkillsGemerkt(
       gemerkt: einstellungen.pluginSkillOrdner,
@@ -451,7 +450,6 @@ void main() {
         wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
         gesehen: gesehen,
         gefunden: [codex, lm],
-        python: () async => true,
       );
 
       final erst = await mit(const {});
@@ -660,7 +658,6 @@ void main() {
             skillFehler: fehler,
             skillFehlerNeu: neu,
             gefunden: [codex],
-            python: () async => true,
           );
       await codex.eintragen(47811, 'abc');
       final gesehen = await stand(neu: false);

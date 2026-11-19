@@ -32,6 +32,7 @@ import 'profile_dialog.dart';
 import 'log.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
+import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
 import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
@@ -259,9 +260,18 @@ Instanz _instanzFuer(
       ordner,
       profil: pr,
       werkzeugquellen: _werkzeugquellen(plugins),
+      schucuVorlagen: _schucuVorlagen,
     ),
   );
 }
+
+/// Die CD-Vorlagen der SchuCu-Tabelle für lernsituation_pruefen: Assets aus
+/// dem Skill lernsituation (pubspec.yaml), geladen über den rootBundle, der zu
+/// Flutter gehört -- die Prüfung selbst bleibt ohne Flutter.
+Future<Map<String, String>> _schucuVorlagen() async => {
+  for (final MapEntry(key: art, value: datei) in schucuVorlagenDateien.entries)
+    art: await rootBundle.loadString('$schucuVorlagenOrdner/$datei', cache: false),
+};
 
 /// Aufruf durch die Deinstallation (installer/moocp.nsi): die
 /// Einrichtung in den KI-Werkzeugen entfernen und mit dem Code aus [Entfernt]
@@ -1101,14 +1111,6 @@ class _HauptseiteState extends State<Hauptseite> {
     // nichts auf; das Protokoll nennt Plugin und Grund, der Dialog auch.
     for (final f in stand?.skillFehler ?? const <String>[]) {
       widget.protokoll.eintrag(Art.fehler, 'KI-Werkzeuge einrichten: $f');
-    }
-    if (stand != null &&
-        !stand.python &&
-        stand.gewaehlt.contains('lernsituation')) {
-      widget.protokoll.eintrag(
-        Art.info,
-        'Python nicht gefunden: Die Selbstprüfung des Skills lernsituation läuft nicht',
-      );
     }
     if (!immer && stand != null && !stand.brauchtEtwas) {
       widget.protokoll.eintrag(

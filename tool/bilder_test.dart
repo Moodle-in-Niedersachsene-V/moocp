@@ -140,7 +140,7 @@ void main() {
                 skills: const [],
                 stand: const {},
                 entfernen: const {}),
-          ], skills: const [], python: true);
+          ], skills: const []);
       await tester.pumpWidget(MoocpApp(einstellungen, protokoll, moodle, dienst, freigaben, arbeitsordner,
           einrichtungsstand: eingerichtet));
       await tester.pumpAndSettle();

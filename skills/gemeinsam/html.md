@@ -2,16 +2,16 @@
  * Bootstrap-Klassen. build.py setzt ihn in references/html.md von moodle,
  * moodle-fragen und lernsituation; die Kurzfassung (html-kurz.md) steht im
  * SKILL.md. Dieselben Regeln prüfen die App beim Lesen
- * (lib/moodle/auswertung.dart) und das Prüfskript des Skills lernsituation am
- * Entwurf (HtmlRegeln); die Grenze für Rahmenlinien steht in allen drei --
+ * (lib/moodle/auswertung.dart) und lernsituation_pruefen am Entwurf einer
+ * Lernsituation (lib/moodle/lernsituation_pruefung.dart, HtmlRegeln); die Grenze für Rahmenlinien steht in allen drei --
  * wer sie ändert, ändert alle. Ebenso die Formelfehler (lib/moodle/formeln.dart,
- * formel_fehler im Prüfskript); an ihnen bricht die App das Schreiben ab.
+ * formelFehler in lernsituation_pruefung.dart); an ihnen bricht die App das Schreiben ab.
  */
 # HTML schreiben
 
 Alles, was in Moodle steht, ist HTML: Textseite, Textfeld, Aufgabe, Buchkapitel, Beschreibung eines Abschnitts, Fragetext, Feedback und Erwartungshorizont — und die Blätter einer Lernsituation schon im Entwurf. Für alles gelten dieselben Regeln. Was ein Skill zusätzlich braucht, steht bei ihm: die Stellen einer Frage, an denen gar kein HTML stehen darf, die Druckaufbereitung mancher Instanzen, die festen Formen der Blätter einer Lernsituation.
 
-Die Regeln sind keine Geschmacksfrage. Die App prüft die meisten beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; das Prüfskript des Skills `lernsituation` prüft sie am Entwurf, bevor etwas in Moodle steht. Wo hier „gemessen" steht, ist es auf der Testinstanz ausprobiert: Probeknoten in eine Seite gehängt, die berechneten Stile ausgelesen, eine erfundene Klasse als Kontrolle; „wirkt nicht" heißt, es sieht aus wie ohne Klasse.
+Die Regeln sind keine Geschmacksfrage. Die App prüft die meisten beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; `lernsituation_pruefen` prüft sie bei einer Lernsituation schon am Entwurf, bevor etwas in Moodle steht. Wo hier „gemessen" steht, ist es auf der Testinstanz ausprobiert: Probeknoten in eine Seite gehängt, die berechneten Stile ausgelesen, eine erfundene Klasse als Kontrolle; „wirkt nicht" heißt, es sieht aus wie ohne Klasse.
 
 ## Bedeutung, nicht Aussehen
 

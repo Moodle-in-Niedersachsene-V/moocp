@@ -31,6 +31,7 @@ const _eingebaut = [
   'aendern',
   'aendern_mehrere',
   'links_setzen',
+  'lernsituation_pruefen',
   'aktivitaet_anlegen',
   'abschnitt_anlegen',
   'sichtbarkeit_setzen',

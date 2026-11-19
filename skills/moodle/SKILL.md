@@ -642,7 +642,7 @@ Alles, was in Moodle steht, ist HTML: Textseite, Textfeld, Aufgabe, Buchkapitel,
 - **Kein Kopf, kein Fuß, keine Seitenzahl, kein Feld für Name und Datum** im Inhalt: Moodle zeigt den Namen darüber, und beim Drucken setzt der Druck Kopf und Fuß.
 - **Umlaute bleiben Umlaute** — „Uebertragungsmedium" auf einem Blatt ist ein Mangel, kein Ausweg.
 
-Die meisten dieser Regeln prüft die App beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; bei einer Lernsituation prüft sie das Prüfskript schon am Entwurf.
+Die meisten dieser Regeln prüft die App beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; bei einer Lernsituation prüft sie `lernsituation_pruefen` schon am Entwurf.
 <!-- >>> gemeinsam/html-kurz.md -->
 
 ### Zeichnungen

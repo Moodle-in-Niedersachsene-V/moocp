@@ -42,6 +42,7 @@ import '../moodle/kurs_aendern.dart';
 import '../moodle/kursfilter.dart';
 import '../moodle/kurshinweise.dart';
 import '../moodle/links.dart';
+import '../moodle/lernsituation_pruefung.dart';
 import '../moodle/lernlandkarte.dart';
 import '../moodle/lernlandkarte_zielkontext.dart';
 import '../moodle/lernlandkarte_verteilen.dart';
@@ -111,6 +112,7 @@ class McpDienst implements AufrufKontext {
     this.uebertragungsprotokollPfad,
     this.antwortfrist = const Duration(minutes: 1),
     this.werkzeugquellen = const [],
+    this.schucuVorlagen,
   });
 
   final Einstellungen einstellungen;
@@ -153,6 +155,12 @@ class McpDienst implements AufrufKontext {
   /// Quellen; die eingebauten Werkzeuge bleiben fester Code und laufen nicht
   /// darüber.
   final List<WerkzeugQuelle> werkzeugquellen;
+
+  /// Lädt die CD-Vorlagen der SchuCu-Tabelle für lernsituation_pruefen,
+  /// Schulform -> HTML (lernsituation_pruefung.dart, schucuVorlagenDateien).
+  /// Sie sind Assets der App; laden kann sie nur Flutter, deshalb kommt der
+  /// Zugriff von main.dart. Ohne ihn meldet das Werkzeug, dass sie fehlen.
+  final Future<Map<String, String>> Function()? schucuVorlagen;
 
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
@@ -819,6 +827,74 @@ class McpDienst implements AufrufKontext {
           auslassen: {for (final x in aus) (x as num).toInt()},
           arbeitsordner: ao,
         );
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'lernsituation_pruefen',
+      titel: 'Lernsituation prüfen',
+      beschreibung:
+          'Prüft die Form einer Lernsituation nach den Vorlagen des Skills lernsituation -- '
+          'nicht, ob sie gut ist. Mit entwurf den Entwurf im Arbeitsordner (Ordner mit '
+          'lernsituation.json), mit abschnitt_id den Stand in Moodle, wie kurs_uebersicht, '
+          'aktivitaet_lesen und buch_lesen ihn in den Arbeitsordner gelegt haben. Geprüft werden: '
+          'Handreichung mit Ablaufplan (Zeiten, Summenzeile, Zeitrichtwert, je Zeile ein Schritt), '
+          'Materialübersicht und Checkliste; die Seite „SchuCu" mit nichts als der Tabelle nach '
+          'einer der CD-Vorlagen; je Arbeitsblatt eine Lösung mit denselben Aufgaben; Name mit '
+          'Kennung; Aufgabenköpfe (n min · Sozialform · AFB x) gegen „Zeit gesamt"; Zählung je '
+          'Blatt ab 1 und Verweise auf Abschnitte, Abbildungen und Aufgaben anderer Blätter; jedes '
+          'Infoblatt von einem Arbeitsblatt genannt; weitere Aktivitäten in Anführungszeichen '
+          'genannt; Links, Bilder und Zeichnungen. Nur am Entwurf: lernsituation.json, Ordner und '
+          'dateien/, HTML-Regeln, Formelfehler, Platzhalter, Markdown-Reste, Namen des Entwurfs im '
+          'Text und was jede weitere Aktivität für die Übertragung braucht. Nur in Moodle: jede '
+          'Nennung eines Blatts ist ein Link mit passendem Text, keine für Lernende erreichbare '
+          'Seite verlinkt eine Lösung. Die erste Zeile nennt das Ergebnis: keine Befunde, Befunde '
+          'oder nichts zu prüfen. Liest nur im Arbeitsordner, fragt Moodle nicht an. Nur lesen.',
+      parameter: {
+        'entwurf': JsonSchema.string(
+          description:
+              'Ordner des Entwurfs im Arbeitsordner (mit lernsituation.json), relativ zum '
+              'Arbeitsordner oder absolut',
+        ),
+        'abschnitt_id': JsonSchema.integer(
+          description:
+              'Stattdessen der Stand in Moodle: die id des Abschnitts aus kurs_uebersicht '
+              '(„[id …]"), nachdem er gelesen ist',
+        ),
+      },
+      nurLesen: true,
+      ausfuehren: (a) async {
+        final entwurf = a['entwurf'];
+        final abschnitt = a['abschnitt_id'];
+        final mitEntwurf = entwurf is String && entwurf.trim().isNotEmpty;
+        if (mitEntwurf == (abschnitt != null)) {
+          throw MoodleFehler(
+            'Genau eines angeben: entwurf (Ordner des Entwurfs im Arbeitsordner) oder '
+            'abschnitt_id (ein gelesener Abschnitt aus Moodle).',
+          );
+        }
+        final laden = schucuVorlagen;
+        if (laden == null) {
+          throw MoodleFehler(
+            'Die Vorlagen der SchuCu-Tabelle fehlen in dieser App -- ohne sie lässt sich '
+            'nichts prüfen.',
+          );
+        }
+        final vorlagen = await laden();
+        if (mitEntwurf) {
+          return entwurfPruefen(
+            imArbeitsordner(entwurf.trim(), ao),
+            arbeitsordner: ao,
+            vorlagen: vorlagen,
+            anzeige: entwurf.trim(),
+          ).antwort;
+        }
+        return moodlePruefen(
+          ao,
+          _zahl(a, 'abschnitt_id'),
+          vorlagen: vorlagen,
+        ).antwort;
       },
     );
 

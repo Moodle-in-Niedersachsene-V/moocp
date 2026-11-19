@@ -1,8 +1,8 @@
 # Vorlagen: so sieht der Entwurf aus
 
-Die Form ist verbindlich, weil `scripts/pruefe-lernsituation.py` sie liest. Was in den Vorlagen in spitzen Klammern steht — `<Titel>`, `<n>` —, wird ersetzt, und das Skript meldet jeden Platzhalter, der stehen bleibt, ob als `<Titel>` oder als `&lt;Titel&gt;`. In den HTML-Vorlagen der SchuCu-Tabelle heißen die Platzhalter `&lt;…&gt;` und `...`; auch die meldet es.
+Die Form ist verbindlich, weil das Werkzeug `lernsituation_pruefen` sie liest. Was in den Vorlagen in spitzen Klammern steht — `<Titel>`, `<n>` —, wird ersetzt, und das Werkzeug meldet jeden Platzhalter, der stehen bleibt, ob als `<Titel>` oder als `&lt;Titel&gt;`. In den HTML-Vorlagen der SchuCu-Tabelle heißen die Platzhalter `&lt;…&gt;` und `...`; auch die meldet es.
 
-Die Blätter sind HTML. Es gelten die Regeln in `references/html.md` — keine `style`-Attribute, Überschriften ab `<h3>`, Tabellen mit Klasse, Bilder aus `dateien/` —, und das Skript prüft sie am Entwurf. Hier stehen die festen Formen, die dazukommen.
+Die Blätter sind HTML. Es gelten die Regeln in `references/html.md` — keine `style`-Attribute, Überschriften ab `<h3>`, Tabellen mit Klasse, Bilder aus `dateien/` —, und `lernsituation_pruefen` prüft sie am Entwurf. Hier stehen die festen Formen, die dazukommen.
 
 ## Der Entwurf
 
@@ -85,7 +85,7 @@ Zu **jedem** Arbeitsblatt — auch Hilfe und Vertiefung — gibt es eine Lösung
 
 ## Jedes Blatt steht für sich
 
-Jedes Blatt — Arbeitsblatt, Infoblatt, Hilfe, Vertiefung, Lösung — wird einzeln gedruckt, einzeln ausgeteilt und Wochen später einzeln nachgelesen; in Moodle ist es eine eigene Seite. Wer es in der Hand hat, hat die anderen Blätter nicht unbedingt dabei. Daraus folgen sechs Regeln. Die Formen der Verweise sind fest, weil das Skript sie liest.
+Jedes Blatt — Arbeitsblatt, Infoblatt, Hilfe, Vertiefung, Lösung — wird einzeln gedruckt, einzeln ausgeteilt und Wochen später einzeln nachgelesen; in Moodle ist es eine eigene Seite. Wer es in der Hand hat, hat die anderen Blätter nicht unbedingt dabei. Daraus folgen sechs Regeln. Die Formen der Verweise sind fest, weil `lernsituation_pruefen` sie liest.
 
 1. **Die Zählung beginnt auf jedem Blatt neu:** Abschnitte bei `<h3>1. …</h3>`, Abbildungen bei „Abb. 1", Aufgaben bei 1. Keine Zählung über Blätter hinweg und keine Präfixe wie „Abb. L3" — sonst beginnt ein Blatt bei Abb. 5, und wer es allein liest, sucht Abb. 1 bis 4.
 2. **Ein Bezug auf ein anderes Blatt nennt dessen Kennung und die Stelle,** in genau diesen Formen: „Infoblatt 1, Abschnitt 4" (auch „Abschnitte 1 bis 3", „Abschnitte 2 und 4"), „Abb. 1 auf Infoblatt 2", „Abb. 1 in der Lösung zu Arbeitsblatt 3", „Aufgabe 3 auf Arbeitsblatt 1" oder „Arbeitsblatt 1, Aufgabe 3". „Abb. 1" ohne Kennung meint immer das eigene Blatt. Im Entwurf ist der Verweis Text; in Moodle wird die Kennung ein Link auf ihr Blatt: online führt er mit einem Klick hin, gedruckt bleibt der Text — und der trägt allein, weil jedes Blatt mit seiner Kennung beginnt.
@@ -97,7 +97,7 @@ Jedes Blatt — Arbeitsblatt, Infoblatt, Hilfe, Vertiefung, Lösung — wird ein
    - **Recherche als Teil der Aufgabe:** ausdrücklich verlangt, gern auch ausführlich, in einer Zeile „**Recherchiere:**" mit einem Hinweis, wo man anfängt, und was dabei herauskommen soll.
 
    Vorwissen aus früheren Lernsituationen gehört in die Handreichung („Vorwissen, Anschluss und Anrede"), nicht in eine „Lies"-Zeile. Was nirgends steht und nicht recherchiert werden soll, setzt keine Aufgabe voraus.
-6. **Nach jeder Teilung oder Umnummerierung werden alle Verweise nachgezogen:** „Lies"-Zeilen und „Dazu" der Arbeitsblätter, Verweise in den Einleitungen, die Lösungen und die Handreichung (Ablaufplan, Schritte, Materialübersicht). Das Skript meldet jeden Verweis, der ins Leere zeigt, und jedes Infoblatt, das kein Arbeitsblatt nennt.
+6. **Nach jeder Teilung oder Umnummerierung werden alle Verweise nachgezogen:** „Lies"-Zeilen und „Dazu" der Arbeitsblätter, Verweise in den Einleitungen, die Lösungen und die Handreichung (Ablaufplan, Schritte, Materialübersicht). `lernsituation_pruefen` meldet jeden Verweis, der ins Leere zeigt, und jedes Infoblatt, das kein Arbeitsblatt nennt.
 
 **Ist ein Blatt zu lang,** prüfe erst, ob es zusammengehört. Geteilt wird nur an einer inhaltlichen Grenze, nicht nach Länge. Die Prüffrage: Lässt sich jeder Teil unter einem eigenen Titel erklären, und gehören zu jedem Teil ganze Aufgaben eines Arbeitsblatts? Gibt es keine solche Grenze, bleibt es ein Blatt und wird gekürzt, nicht zerschnitten — ein nach Länge geteiltes Blatt beginnt mitten im Gedanken und erklärt mit Zeichnungen, die auf dem ersten stehen. Das neue Blatt bekommt einen eigenen Titel, eine eigene Einleitung, eine eigene Zählung ab 1 und die nächste freie Nummer.
 
@@ -187,7 +187,7 @@ Nichts als die SchuCu-Tabelle: der Inhalt von `references/schucu-berufsschule.ht
 
 Dazu, was die Vorlage nur andeutet:
 
-- **Ablaufplan:** Die Summenzeile ist Pflicht; das Skript vergleicht sie mit dem Zeitrichtwert und rechnet die Zeilen nach. Material sind die Kennungen der Blätter („Arbeitsblatt 1", „Hilfe zu Arbeitsblatt 1") und die Namen weiterer Aktivitäten in Anführungszeichen („Unsere VLAN-Aufteilung"), durch Komma getrennt, oder „—".
+- **Ablaufplan:** Die Summenzeile ist Pflicht; `lernsituation_pruefen` vergleicht sie mit dem Zeitrichtwert und rechnet die Zeilen nach. Material sind die Kennungen der Blätter („Arbeitsblatt 1", „Hilfe zu Arbeitsblatt 1") und die Namen weiterer Aktivitäten in Anführungszeichen („Unsere VLAN-Aufteilung"), durch Komma getrennt, oder „—".
 - **Die Schritte im Einzelnen:** je Zeile des Ablaufplans ein `<h4>Schritt n: …</h4>` mit seiner Liste. Keine Zeile ohne Schritt.
 - **Materialübersicht:** erste Spalte der Name des Blatts oder der weiteren Aktivität, genau wie er in `lernsituation.json` steht — in Moodle heißt die Aktivität so, und der Eintrag wird ein Link mit diesem Text. Zeichnungen und interaktive Elemente stehen nicht darin: Sie gehören zu ihrem Blatt und kommen mit ihm.
 - **Quellen und fremde Inhalte:** Kommen fremde Inhalte vor, endet die Handreichung mit `<h3>Quellen und fremde Inhalte</h3>` und einer Tabelle „Wo verwendet · Was · Herkunft · Lizenz · Angabe" (unten). Die Lehrkraft sieht so auf einen Blick, was sie verteilt.
@@ -208,7 +208,7 @@ lehrerhandreichung/
 
 Die Tabelle steht allein auf der Seite „SchuCu", Zeichen für Zeichen nach der Vorlage — nur so kommt das Corporate Design unverändert in Moodle an. Daraus folgt:
 
-- **Nichts an der Vorlage ändern außer dem Zelleninhalt**: keine Zeile dazu oder weg, keine Reihenfolge, keine Klasse, kein `colspan`, kein `style`, nicht den Kopflink „offizielle Erläuterungen", nicht die `&nbsp;` in den Abstandszellen. Auch die Absätze unter der Tabelle gehören zur Vorlage: „Inhalte können teilweise mit KI generiert sein." bleibt wörtlich stehen, im Beruflichen Gymnasium unter der Legende. Das Skript vergleicht den Aufbau mit der Vorlagedatei.
+- **Nichts an der Vorlage ändern außer dem Zelleninhalt**: keine Zeile dazu oder weg, keine Reihenfolge, keine Klasse, kein `colspan`, kein `style`, nicht den Kopflink „offizielle Erläuterungen", nicht die `&nbsp;` in den Abstandszellen. Auch die Absätze unter der Tabelle gehören zur Vorlage: „Inhalte können teilweise mit KI generiert sein." bleibt wörtlich stehen, im Beruflichen Gymnasium unter der Legende. `lernsituation_pruefen` vergleicht den Aufbau mit der Vorlagedatei.
 - **In den Zellen einfaches HTML**: `<strong>`, `<em>`, `<code>`, `<a href>`, `<br>`, `<ul><li>`.
 - Die Tabelle ist eine der zwei Ausnahmen von „keine `style`-Attribute" (die andere: Rahmenlinien in Tabellen, `references/html.md`); die übrigen Regeln in `references/html.md` gelten für die Tabelle nicht, für alles andere auf der Seite schon.
 
@@ -227,7 +227,7 @@ Die Anforderungen stammen aus der Leitlinie SchuCu-BBS („Grundlegende Anforder
 | Zelle | Inhalt | ausführlich | Vorlage |
 |---|---|---|---|
 | **Titel** | kurz, prägnant, beschreibt die Handlung — in der Regel Substantiv und Verb: „Firmennetz in VLANs trennen" | Name des Abschnitts | beide |
-| **gepl. Zeitrichtwert** | `<n> UStd (<n·45> min)` — aus dem erwarteten Arbeitsaufwand, Bezug sind die Zeitrichtwerte des Ordnungsmittels. Das Skript liest den Wert. | Handreichung: Summenzeile des Ablaufplans | beide |
+| **gepl. Zeitrichtwert** | `<n> UStd (<n·45> min)` — aus dem erwarteten Arbeitsaufwand, Bezug sind die Zeitrichtwerte des Ordnungsmittels. `lernsituation_pruefen` liest den Wert. | Handreichung: Summenzeile des Ablaufplans | beide |
 | **Autor\*(en)** | Name der Lehrkraft — nie erfinden; fehlt er: „vom Nutzer zu ergänzen" | — nur hier | beide |
 | **Curricularer Bezug** | Vorgaben aus dem Ordnungsmittel — Rahmenlehrplan mit Lernfeld, Rahmenrichtlinie mit Lerngebiet, Modul, Qualifizierungsbaustein, im Beruflichen Gymnasium das Kerncurriculum —, wörtlich oder mit Fundstelle; fehlt er: „vom Nutzer zu ergänzen" | — nur hier | beide |
 | **Handlungssituation** | die **Kurzfassung**, zwei bis drei Sätze für Kolleginnen und Kollegen; mit dem Rahmen (Modellunternehmen, Einrichtung, Fall). Dieselbe steht als Beschreibung des Abschnitts. | Handreichung: erster Schritt; für die Lernenden auf dem ersten Arbeitsblatt oder im Textfeld „Handlungssituation" | beide |
@@ -245,7 +245,7 @@ Die Anforderungen stammen aus der Leitlinie SchuCu-BBS („Grundlegende Anforder
 Die Vorlage hat zwei Stellen, die vom **Fach** abhängen:
 
 - **Unter „Curricularer Bezug"** steht klein der Verweis auf den Lehrplan bzw. das Kerncurriculum des Fachs: Linktext = sein Titel, Adresse ausgeschrieben im `href`. Ist er nicht bekannt, steht im `<span>` statt des Links „Lehrplan vom Nutzer zu ergänzen".
-- **Unter der Tabelle** steht in `<p style="font-size: 8pt;">` die Legende: **alle** Kompetenzbereiche des Kerncurriculums mit Buchstaben. In der Tabellenzelle darüber bleiben nur die abgedeckten stehen. Das Skript prüft, dass jeder Buchstabe in der Zelle in der Legende vorkommt.
+- **Unter der Tabelle** steht in `<p style="font-size: 8pt;">` die Legende: **alle** Kompetenzbereiche des Kerncurriculums mit Buchstaben. In der Tabellenzelle darüber bleiben nur die abgedeckten stehen. `lernsituation_pruefen` prüft, dass jeder Buchstabe in der Zelle in der Legende vorkommt.
 
 Beides kommt aus dem Kerncurriculum des Fachs — **nie erfinden**. Liefert die Lehrkraft es nicht, fragst du in Schritt 1 danach. Bekannt ist:
 
@@ -275,7 +275,7 @@ Steht die Handlungssituation nicht auf Arbeitsblatt 1, ist sie eine eigene Aktiv
 
 Regeln:
 
-- Die Aufgabenüberschrift trägt **immer** `(<n> min · <Sozialform> · AFB <I|II|III>)` in genau dieser Reihenfolge. Das Skript liest sie.
+- Die Aufgabenüberschrift trägt **immer** `(<n> min · <Sozialform> · AFB <I|II|III>)` in genau dieser Reihenfolge. `lernsituation_pruefen` liest sie.
 - Die Summe der Aufgabenzeiten ist die „Zeit gesamt" im Kopf.
 - Anrede durchgehend, wie in Schritt 1 erfragt.
 - Kein Inhalt, der auf ein Infoblatt gehört. Wenn die Aufgabe eine Erklärung braucht, ist das ein Infoblatt.

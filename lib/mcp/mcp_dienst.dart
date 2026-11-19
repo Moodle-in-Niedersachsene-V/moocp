@@ -118,6 +118,7 @@ class McpDienst implements AufrufKontext {
     this.werkzeugquellen = const [],
     this.schucuVorlagen,
     this.notizenOrdner,
+    this.fragenSicherungsOrdner,
     this.fragetypNotizGeliefert,
   });
 
@@ -171,6 +172,12 @@ class McpDienst implements AufrufKontext {
   /// Lokale Fragetyp-Notizen dieses Profils (E38); ohne Angabe der dauerhafte
   /// Ordner der App je Profil, außerhalb des Arbeitsordners.
   final String? notizenOrdner;
+
+  /// Ordner der XML-Sicherungen vor dem Löschen von Fragen (E9); ohne Angabe
+  /// der dauerhafte Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? fragenSicherungsOrdner;
+
+  String get _fragenSicherungen => fragenSicherungsOrdner ?? p.join(einstellungenOrdner, 'fragen-sicherungen', profil.kennung);
 
   /// Die mit dem Skill gelieferte Notiz zu einem Typ (Asset der App; laden kann
   /// sie nur Flutter, deshalb kommt der Zugriff von main.dart).
@@ -2106,9 +2113,12 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Löscht Fragen einer Fragensammlung endgültig, jede mit allen Versionen. Je Frage die AKTUELLE '
           'questionid (fragen_lesen) und der Name, wie er jetzt in Moodle steht; passt ein Name nicht, bricht '
-          'das Werkzeug ab, bevor etwas geschieht. Nur nach Freigabe in der App. Steckt eine Frage in einem '
-          'Test, löscht Moodle sie nicht, sondern verbirgt sie nur -- das Zurücklesen meldet es. Nicht '
-          'rückgängig zu machen.',
+          'das Werkzeug ab, bevor etwas geschieht. Die App fragt IMMER in einem Dialog, auf jeder Stufe, '
+          'jede Frage einzeln zum Abhaken (höchstens 25 je Aufruf); rufe das Werkzeug erst auf, nachdem die '
+          'Lehrkraft im Chat ausdrücklich Ja gesagt hat. Vorher legt die App die aktuelle Version jeder Frage '
+          'als XML-Sicherung ab (der Pfad steht in der Antwort); lässt sich eine Frage nicht exportieren, '
+          'wird nichts gelöscht. Steckt eine Frage in einem Test, löscht Moodle sie nicht, sondern verbirgt '
+          'sie nur -- die Antwort nennt das je Frage. Nicht rückgängig zu machen.',
       parameter: {
         'sammlung': sammlung,
         'fragen': JsonSchema.array(
@@ -2142,6 +2152,7 @@ class McpDienst implements AufrufKontext {
             for (final f in liste.cast<Map>())
               ((f['id'] as num).toInt(), f['name'] as String),
           ],
+          sicherungsOrdner: _fragenSicherungen,
         );
       },
     );
@@ -2219,6 +2230,7 @@ class McpDienst implements AufrufKontext {
           ],
           loeschen: a['loeschen'] as bool,
           stackTesten: (f) => stackTesten(moodle, sammlung: s, frage: f),
+          sicherungsOrdner: _fragenSicherungen,
         );
       },
     );

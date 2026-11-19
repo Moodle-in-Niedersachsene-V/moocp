@@ -76,6 +76,17 @@ class FragenbankDoppel {
   /// Das Löschen wirkt nicht.
   bool loeschenWirktNicht = false;
 
+  /// Versions-ids, die ein Test nutzt: Moodle markiert sie in der Rückfrage mit
+  /// `* ` und verbirgt sie beim Löschen nur (Gemessenes steht in fragen.dart;
+  /// der Export einer verborgenen Frage ist dort als nicht gemessen vermerkt).
+  final Set<int> inBenutzung = {};
+
+  /// Verborgene Versionen: Moodle exportiert sie nicht (Fehlerseite mit anderem Code).
+  final Set<int> verborgen = {};
+
+  /// Wird aufgerufen, kurz bevor ein bestätigtes Löschen ausgeführt wird.
+  void Function()? beiLoeschen;
+
   /// Nach dem ersten Import als Version greift ein „Anderer" ein: eine weitere Version.
   void Function(FragenbankDoppel d)? nachPluginImport;
 
@@ -220,6 +231,10 @@ class FragenbankDoppel {
     }
     if (pfad == '/question/bank/exporttoxml/exportone.php') {
       final v = version(int.parse(r.uri.queryParameters['id']!));
+      if (v != null && verborgen.contains(v.id)) {
+        return _text(r, _seite('<div class="errormessage">Datei nicht gefunden</div><a href="https://docs.moodle.org/501/de/error/moodle/filenotfound">Mehr</a>'),
+            status: 404);
+      }
       if (v == null) {
         return _text(r, _seite('<div class="errormessage">Ungültiger Datensatz</div><a href="https://docs.moodle.org/501/de/error/moodle/invalidrecord">Mehr</a>'),
             status: 500);
@@ -284,13 +299,23 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       final q = {...r.uri.queryParameters, if (koerper.isNotEmpty) ...Uri.splitQueryString(koerper)};
       if (!q.containsKey('confirm')) {
         final ids = q.keys.where((k) => RegExp(r'^q\d+$').hasMatch(k)).map((k) => k.substring(1)).join(',');
-        return _text(r, _seite('''<form method="post" action="/question/bank/deletequestion/delete.php">
+        final zeilen = [
+          for (final s in ids.split(','))
+            if (eintragVon(int.parse(s)) case final e?)
+              for (final v in e.versionen) '${inBenutzung.contains(v.id) ? '* ' : ''}${v.name} (Version ${v.nr})',
+        ].join('<br />');
+        return _text(r, _seite('''<div id="modal-body">$zeilen</div><form method="post" action="/question/bank/deletequestion/delete.php">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="cmid" value="$sammlung">
 <input type="hidden" name="deleteselected" value="$ids"><input type="hidden" name="deleteall" value="${q['deleteall'] ?? '0'}">
 <input type="hidden" name="confirm" value="${'a' * 32}"><input type="submit" name="x" value="Löschen"></form>'''));
       }
+      beiLoeschen?.call();
       for (final s in q['deleteselected']!.split(',')) {
         final id = int.parse(s);
+        if (inBenutzung.contains(id)) {
+          verborgen.add(id);
+          continue;
+        }
         geloescht.add(id);
         if (loeschenWirktNicht) continue;
         final e = eintragVon(id);

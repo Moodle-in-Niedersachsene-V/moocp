@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Fragen löschen: moocp fragt auf jeder Stufe, jede Frage einzeln zum Abhaken, und sichert die Fragen vorher als XML-Datei; Fragen in Tests werden nur verborgen, und die Antwort sagt es.
 - Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
 - Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
 - Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.

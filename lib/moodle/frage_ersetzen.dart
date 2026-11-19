@@ -27,6 +27,7 @@ import '../freigabe.dart';
 import 'formular.dart';
 import 'formular_schreiben.dart';
 import 'fragen.dart';
+import 'fragen_sicherung.dart';
 import 'fragen_xml.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
@@ -57,6 +58,7 @@ Future<String> frageErsetzen(
   required List<(int, String)> tests,
   required bool loeschen,
   required Future<String> Function(int frage) stackTesten,
+  required String sicherungsOrdner,
 }) async {
   // --- Prüfen; nichts wird geschrieben -----------------------------------
   if (tests.isEmpty) {
@@ -64,7 +66,8 @@ Future<String> frageErsetzen(
         'geht mit fragen_importieren und fragen_loeschen.');
   }
   if ({for (final (c, _) in tests) c}.length != tests.length) throw MoodleFehler('Ein Test ist doppelt genannt.');
-  final alt = (await loeschenPruefen(moodle, sammlung, [(frage, name)])).single;
+  final altGeprueft = (await loeschenPruefen(moodle, sammlung, [(frage, name)])).single;
+  final alt = altGeprueft.frage;
 
   final pfad = imArbeitsordner(datei, arbeitsordner);
   if (!File(pfad).existsSync()) throw MoodleFehler('Datei $pfad gibt es nicht.');
@@ -106,8 +109,18 @@ Future<String> frageErsetzen(
     plaene.add((t, c, plaetze));
   }
 
+  // Löscht der Aufruf die alte Frage, gilt dieselbe Regel wie bei fragen_loeschen (E20): Die
+  // Sicherung der alten Frage liegt vor der Freigabe da, und die Freigabe fragt auf jeder Stufe.
+  final sicherung =
+      loeschen ? await fragenSichern(sicherungsOrdner, sammlung, [(id: alt.id!, xml: altGeprueft.xml)]) : null;
+  void verwerfen() {
+    if (sicherung != null && File(sicherung).existsSync()) File(sicherung).deleteSync();
+  }
+
   // --- Freigabe ----------------------------------------------------------
-  final ja = await freigaben.anfragen(FreigabeAnfrage(
+  final bool ja;
+  try {
+    ja = await freigaben.anfragen(FreigabeAnfrage(
     titel: 'Frage ersetzen?',
     punkte: [
       'Fragensammlung cmid $sammlung, Kategorie „${k.name}"',
@@ -122,7 +135,8 @@ Future<String> frageErsetzen(
         if (t.hatVersuche) 'ACHTUNG: Zu „${c.name}" gibt es bereits Versuche -- der Tausch verschiebt Bewertungen.',
       loeschen
           ? 'Danach die alte Frage endgültig löschen, mit allen Versionen. Steckt sie noch in einem anderen Test, '
-              'verbirgt Moodle sie nur.'
+              'verbirgt Moodle sie nur. Vorher gesichert als XML: $sicherung -- gesichert ist die aktuelle '
+              'Version, nicht ihr Verlauf.'
           : 'Die alte Frage bleibt in der Sammlung.',
       if (nachher)
         loeschen
@@ -132,7 +146,18 @@ Future<String> frageErsetzen(
     vergleich: const [],
     knopf: 'Ersetzen',
     ohneEntscheidung: 'wird nichts geändert',
+    ab: loeschen ? Bestaetigungen.keine : Bestaetigungen.mittel,
+    abhaken: [
+      if (loeschen)
+        'Ich habe geprüft: „${alt.name}" (${alt.typ}, questionid ${alt.id}) wird mit allen Versionen endgültig '
+            'gelöscht; gesichert ist nur ihre aktuelle Version.',
+    ],
   ));
+  } catch (_) {
+    verwerfen();
+    rethrow;
+  }
+  if (!ja) verwerfen();
   if (!ja) return 'Nicht ersetzt: in der App abgelehnt oder nicht rechtzeitig freigegeben. Nichts geändert.';
 
   // --- Ausführen ---------------------------------------------------------

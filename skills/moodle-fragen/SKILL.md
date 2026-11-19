@@ -71,13 +71,22 @@ App das bewusst nicht kann.
 - **Ändern bestehender Fragen**: erst lesen, dann ändern. Eine Frage, die schon
   in einem Test benutzt wird, ändert sich für alle Tests mit.
 - **Fragen löschen** (`fragen_loeschen`) nur, wenn der Auftrag es ausdrücklich
-  verlangt, und mit jeder Frage im Plan: Name, Typ, Sachnummer. Gelöscht wird
-  jede Frage mit allen Versionen; es ist nicht rückgängig zu machen. Die
-  Nummern kommen frisch aus `fragen_lesen`, die Namen so, wie sie dort stehen.
-  Steckt eine Frage in einem Test, verbirgt Moodle sie nur; das Werkzeug meldet
-  das, und dann gehört in die Antwort, in welchem Test sie noch steckt, falls
-  bekannt. Leere Kategorien löscht die App nicht — das erledigt die Lehrkraft
-  in Moodle.
+  verlangt. Liste vorher im Chat jede Frage einzeln auf — Name, Typ, Sachnummer,
+  Zahl der Versionen und die Tests, in denen sie steckt, soweit `fragen_lesen`
+  und `test_lesen` es zeigen — und ruf das Werkzeug erst auf, wenn die
+  Lehrkraft darauf ausdrücklich Ja gesagt hat. Gelöscht wird jede Frage mit
+  allen Versionen; es ist nicht rückgängig zu machen. Die Nummern kommen frisch
+  aus `fragen_lesen`, die Namen so, wie sie dort stehen. Die App fragt dann auf
+  jeder Stufe noch einmal, und die Lehrkraft hakt jede Frage einzeln ab (höchstens
+  25 je Aufruf, mehr in mehreren Aufrufen). Vorher legt die App die aktuelle
+  Version jeder Frage als XML-Sicherung ab; die Antwort nennt den Pfad, und
+  zurück kommt eine Frage über `fragen_importieren`. Gesichert ist nur die
+  aktuelle Version, nicht der Verlauf; eine Frage, die sich nicht exportieren
+  lässt (etwa eine verborgene), wird deshalb nicht gelöscht. Steckt eine Frage
+  in einem Test, verbirgt Moodle sie nur; die Antwort sagt das je Frage, und
+  dann gehört in deinen Bericht, in welchem Test sie noch steckt, falls
+  bekannt. Dasselbe gilt für `frage_ersetzen` mit `loeschen: true`. Leere
+  Kategorien löscht die App nicht — das erledigt die Lehrkraft in Moodle.
 - **Wenn es bereits Versuche gibt** (`test_lesen` meldet das): anhalten und
   nachfragen. Punkte- oder Fragenänderungen verschieben dann rückwirkend
   Bewertungen.
@@ -139,7 +148,7 @@ ein Ja im Chat ersetzt sie nicht.
 
 Was du gerade selbst verborgen angelegt hast, ist dabei noch nichts Bestehendes: Es zu füllen oder zu ändern, solange es verborgen ist — die Spalten eines neuen Boards, die Fragen eines neuen Tests, die Links zwischen den Blättern einer neuen Lernsituation —, gehört zum Anlegen und fragt wie dieses erst bei „alle". Kopien zählen nicht dazu; bei ihnen zeigt die Freigabe, was sich gegenüber dem Original ändert.
 
-**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
+**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
 <!-- >>> gemeinsam/plan.md -->
 
 <!-- <<< gemeinsam/ueberarbeiten.md - von build.py erzeugt, hier nicht bearbeiten -->

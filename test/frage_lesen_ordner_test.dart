@@ -3,11 +3,13 @@
 // ist ein lokales Test-Doppel auf 127.0.0.1; der Arbeitsordner ist ein
 // Temp-Verzeichnis. Es geht um den Arbeitsordner frage-<id>, der beim Lesen
 // neu angelegt wird.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/moodle/formular_lesen.dart';
 import 'package:moocp/moodle/fragen.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/protokoll.dart';
@@ -22,6 +24,14 @@ class _Doppel {
 
   /// Wie oft die Frage-Seite abgerufen wurde.
   int formulare = 0;
+
+  /// Das Bild bricht mitten im Lesen ab (Verbindung zu), solange gesetzt.
+  bool bildAbbrechen = false;
+
+  /// Hält die Antwort auf das Bild an, bis es sich erfüllt; [bildAngefragt]
+  /// meldet, dass die Anfrage da ist.
+  Completer<void>? bildHalten;
+  Completer<void>? bildAngefragt;
 
   static const benutzer = 'e.mustermann';
   static const passwort = 'test-geheim-47';
@@ -72,6 +82,15 @@ class _Doppel {
 </form>'''));
     }
     if (pfad == '/draftfile.php/55/user/draft/9/bild.png') {
+      if (bildAbbrechen) {
+        final socket = await r.response.detachSocket(writeHeaders: false);
+        socket.destroy();
+        return;
+      }
+      if (bildHalten != null) {
+        if (bildAngefragt?.isCompleted == false) bildAngefragt!.complete();
+        await bildHalten!.future;
+      }
       r.response
         ..statusCode = HttpStatus.ok
         ..headers.contentType = ContentType('image', 'png')
@@ -98,6 +117,13 @@ class _Doppel {
   }
 }
 
+// Zum bekannten gelegentlichen Fehlschlag dieser Datei: Eine Ursache ist nicht
+// nachgewiesen. Mit dem Lesen in einen Nachbarordner entfällt der Verdacht,
+// ein Lesen lösche den Ordner unter einem anderen weg (ausgeschlossen: Sperre
+// je Ordner, Austausch statt Löschen, die Tests unten belegen es). Übrig
+// bleiben zwei lastabhängige Möglichkeiten, die sich hier nicht erzwingen
+// ließen: die 30-Sekunden-Grenze eines Tests auf der ausgelasteten Box und
+// „Directory not empty" beim Aufräumen im tearDown.
 void main() {
   late _Doppel doppel;
   late Directory arbeitsordner;
@@ -159,5 +185,100 @@ void main() {
     for (final f in [34, 35, 36, 37]) {
       erwarteStand(p.join(arbeitsordner.path, 'frage-$f'));
     }
+  });
+
+  group('Austausch statt Löschen', () {
+    String ordner() => p.join(arbeitsordner.path, 'frage-34');
+
+    /// Reste im Arbeitsordner: Nachbarordner dürfen nach dem Lesen nicht bleiben.
+    void keineReste() {
+      final namen = arbeitsordner
+          .listSync()
+          .map((e) => p.basename(e.path))
+          .toList();
+      expect(namen.where((n) => n.startsWith('.lesen-')), isEmpty);
+    }
+
+    test('Ein Fehler mitten im Lesen erhält den vorherigen vollständigen Stand', () async {
+      await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
+      doppel.bildAbbrechen = true;
+      await expectLater(
+        frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34),
+        throwsA(isA<MoodleFehler>()),
+      );
+      erwarteStand(ordner());
+      keineReste();
+      // Danach geht das Lesen wieder.
+      doppel.bildAbbrechen = false;
+      await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
+      erwarteStand(ordner());
+    });
+
+    test('Ein Fehler beim ersten Lesen hinterlässt keinen Ergebnisordner', () async {
+      doppel.bildAbbrechen = true;
+      await expectLater(
+        frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34),
+        throwsA(isA<MoodleFehler>()),
+      );
+      expect(Directory(ordner()).existsSync(), isFalse);
+      keineReste();
+    });
+
+    test('Ein Abbruch mitten im Lesen erhält den vorherigen Stand, und der Ordner ist während des Lesens da', () async {
+      await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
+      doppel.bildHalten = Completer<void>();
+      doppel.bildAngefragt = Completer<void>();
+      final abbruch = Completer<void>();
+      final ziel = Formularziel.frage(12, 34);
+      final lesen = formularLesen(zugang, ziel, arbeitsordner.path, abbruch: abbruch.future);
+      final ergebnis = expectLater(lesen, throwsA(isA<MoodleFehler>()));
+      await doppel.bildAngefragt!.future;
+      // Mitten im Lesen: der alte Stand ist unberührt vollständig lesbar.
+      erwarteStand(ordner());
+      abbruch.complete();
+      await ergebnis;
+      doppel.bildHalten!.complete();
+      erwarteStand(ordner());
+      keineReste();
+    });
+
+    test('Ein folgendes Lesen derselben Frage wartet auf das abgebrochene und liest vollständig', () async {
+      doppel.bildHalten = Completer<void>();
+      doppel.bildAngefragt = Completer<void>();
+      final abbruch = Completer<void>();
+      final ziel = Formularziel.frage(12, 34);
+      final erstes = formularLesen(zugang, ziel, arbeitsordner.path, abbruch: abbruch.future);
+      final erstesErgebnis = expectLater(erstes, throwsA(isA<MoodleFehler>()));
+      await doppel.bildAngefragt!.future;
+      final zweites = frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
+      doppel.bildHalten!.complete(); // gilt ab jetzt für alle Bildanfragen
+      abbruch.complete();
+      await erstesErgebnis;
+      await zweites;
+      erwarteStand(ordner());
+      keineReste();
+    });
+
+    test('Ein Rest eines hart beendeten Lesens stört das nächste nicht', () async {
+      final rest = Directory(p.join(arbeitsordner.path, '.lesen-frage-34'))..createSync();
+      File(p.join(rest.path, 'halb.html')).writeAsStringSync('x');
+      Directory('${rest.path}-alt').createSync();
+      await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
+      erwarteStand(ordner());
+      expect(File(p.join(ordner(), 'halb.html')).existsSync(), isFalse);
+      keineReste();
+    });
+
+    test('Ein gescheitertes Lesen einer Frage lässt eine gleichzeitig gelesene andere vollständig', () async {
+      await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 35);
+      doppel.bildAbbrechen = true;
+      final ergebnisse = await Future.wait([
+        frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34).then((_) => 'ok', onError: (_) => 'fehler'),
+        frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 35).then((_) => 'ok', onError: (_) => 'fehler'),
+      ]);
+      expect(ergebnisse, ['fehler', 'fehler']);
+      erwarteStand(p.join(arbeitsordner.path, 'frage-35'));
+      keineReste();
+    });
   });
 }

@@ -31,6 +31,11 @@ const Duration _anzeigeAb = Duration(milliseconds: 800);
 /// Fragen (einmalig), prüfen und anbieten. Rückgabe: true, wenn ein
 /// Installer gestartet wurde -- dann beendet der Aufrufer die App.
 ///
+/// Mit [paket] (Mac, Linux, update.dart: updatePaket) bietet die App nichts
+/// zum Installieren an, sondern sagt nur Bescheid: „Update herunterladen"
+/// öffnet die Datei des Pakets mit [imBrowserOeffnen], und die Lehrkraft
+/// spielt sie ein wie bei der Installation. Dann ist die Rückgabe immer false.
+///
 /// [manuell] ist der Weg über „Jetzt nach Updates suchen" in den
 /// Einstellungen: Dann sagt die App auch, wenn es nichts Neues gibt oder
 /// die Abfrage scheitert. Beim Start bleibt beides still im Protokoll --
@@ -42,6 +47,8 @@ Future<bool> updateSchritt(
   required String eigene,
   bool manuell = false,
   bool sitzungLaeuft = false,
+  UpdatePaket? paket,
+  Future<void> Function(Uri adresse)? imBrowserOeffnen,
 }) async {
   if (einstellungen.updatePruefen == null) {
     final ja = await showDialog<bool>(
@@ -65,7 +72,7 @@ Future<bool> updateSchritt(
   einstellungen.updateZuletzt = tagesdatum(jetzt);
   await _speichern(einstellungen, protokoll);
 
-  final update = Update(protokoll);
+  final update = Update(protokoll, paket: paket);
   NeueVersion? neu;
   String? fehler;
   var abgebrochen = false;
@@ -111,6 +118,20 @@ Future<bool> updateSchritt(
   if (neu == null) {
     if (manuell) {
       await _melden(context, fehler ?? 'moocp $eigene ist die neueste Version.');
+    }
+    return false;
+  }
+  if (paket != null) {
+    final laden = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _HinweisDialog(neu: neu!, eigene: eigene, paket: paket),
+    );
+    if (laden == true && imBrowserOeffnen != null) {
+      await imBrowserOeffnen(neu.datei);
+      protokoll.eintrag(Art.info, 'Update: ${neu.dateiname} im Browser zum Herunterladen geöffnet');
+    } else {
+      protokoll.eintrag(Art.info, 'Update: Version ${neu.version} jetzt nicht heruntergeladen');
     }
     return false;
   }
@@ -188,7 +209,7 @@ class UpdateFrageDialog extends StatelessWidget {
         width: 520,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('moocp kann einmal täglich bei GitHub nachsehen, ob es eine neue Version '
-              'gibt, und sie auf Wunsch gleich installieren.'),
+              'gibt, und sie Ihnen mit ihren Neuerungen anbieten.'),
           const SizedBox(height: 12),
           const Text('Dazu fragt die App bei GitHub nur nach dem neuesten Release von moocp und der '
               'Plugins, denen Sie zugestimmt haben. '
@@ -276,17 +297,6 @@ class _AngebotDialogState extends State<_AngebotDialog> {
   int? _gesamt;
   String? _fehler;
 
-  /// Für den Kasten mit den Änderungen: Der Text eines Releases kann lang
-  /// sein, und ohne sichtbaren Balken sieht niemand, dass darunter noch
-  /// etwas steht.
-  final _rollen = ScrollController();
-
-  @override
-  void dispose() {
-    _rollen.dispose();
-    super.dispose();
-  }
-
   double? get _anteil {
     final g = _gesamt;
     if (g == null || g <= 0) return null;
@@ -345,21 +355,7 @@ class _AngebotDialogState extends State<_AngebotDialog> {
           Text(widget.einleitung),
           if (text.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text('Was sich ändert:', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 4),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: Scrollbar(
-                controller: _rollen,
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  controller: _rollen,
-                  // Platz für den Balken, sonst liegt er auf dem Text.
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Text(text, style: klein),
-                ),
-              ),
-            ),
+            _Aenderungen(text),
           ],
           const SizedBox(height: 12),
           Text(widget.hinweis, style: klein),
@@ -413,6 +409,97 @@ class _AngebotDialogState extends State<_AngebotDialog> {
                 child: Text(_fehler == null ? 'Herunterladen und installieren' : 'Nochmal versuchen'),
               ),
             ],
+    );
+  }
+}
+
+/// „Was sich ändert": der Text des Releases in einem Kasten mit Balken. Der
+/// Text kann lang sein, und ohne sichtbaren Balken sieht niemand, dass
+/// darunter noch etwas steht.
+class _Aenderungen extends StatefulWidget {
+  const _Aenderungen(this.text);
+  final String text;
+
+  @override
+  State<_Aenderungen> createState() => _AenderungenState();
+}
+
+class _AenderungenState extends State<_Aenderungen> {
+  final _rollen = ScrollController();
+
+  @override
+  void dispose() {
+    _rollen.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Was sich ändert:', style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 4),
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: Scrollbar(
+          controller: _rollen,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            controller: _rollen,
+            // Platz für den Balken, sonst liegt er auf dem Text.
+            padding: const EdgeInsets.only(right: 12),
+            child: Text(widget.text, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// Mac und Linux: Es gibt eine neue Version, und so kommt sie auf den
+/// Rechner. Die App lädt nichts selbst; „Update herunterladen" gibt die
+/// Adresse der Datei an den Browser (E24).
+class _HinweisDialog extends StatelessWidget {
+  const _HinweisDialog({required this.neu, required this.eigene, required this.paket});
+  final NeueVersion neu;
+  final String eigene;
+  final UpdatePaket paket;
+
+  String get _anleitung => switch (paket) {
+        UpdatePaket.dmg => 'Der Browser lädt ${neu.dateiname}. Beenden Sie moocp, öffnen Sie die Datei '
+            'und ziehen Sie moocp auf „Programme“; die alte Version ersetzen Sie dabei. Beim '
+            'ersten Start der neuen Version fragt macOS noch einmal wie bei der Installation.',
+        UpdatePaket.run => 'Der Browser lädt ${neu.dateiname}. Beenden Sie moocp und führen Sie die '
+            'Datei aus wie bei der Installation (sh ${neu.dateiname}).',
+        UpdatePaket.appImage => 'Der Browser lädt ${neu.dateiname}. Beenden Sie moocp, machen Sie die '
+            'neue Datei ausführbar und starten Sie sie statt der alten.',
+        UpdatePaket.deb => 'Der Browser lädt ${neu.dateiname}. Beenden Sie moocp und installieren Sie '
+            'die Datei wie bei der Installation (sudo apt install ./${neu.dateiname}).',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final klein = Theme.of(context).textTheme.bodySmall;
+    return AlertDialog(
+      title: Text('Version ${neu.version} ist verfügbar'),
+      content: SizedBox(
+        width: 560,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Sie verwenden moocp $eigene.'),
+          if (neu.beschreibung.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _Aenderungen(neu.beschreibung),
+          ],
+          const SizedBox(height: 12),
+          Text(
+              '$_anleitung Einstellungen, gespeicherte Anmeldedaten und die Einrichtung der '
+              'KI-Werkzeuge bleiben erhalten.',
+              style: klein),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Jetzt nicht')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Update herunterladen')),
+      ],
     );
   }
 }

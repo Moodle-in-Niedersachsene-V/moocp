@@ -7,9 +7,12 @@
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
 - Wiederherstellung: Die App vergleicht auch die Texte einschließlich bedeutenden Leerraums mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
 - Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.
+- Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.
+- Neu: moocp für den Mac (ab macOS 12, Apple Silicon und Intel), als Disk-Image zum Ziehen auf „Programme“; wie man die App beim ersten Start freigibt, zeigt die README mit Bildern.
+- Updates auf dem Mac und unter Linux: moocp meldet neue Versionen mit ihren Neuerungen und öffnet die passende Datei mit „Update herunterladen“ im Browser.
 
 ## 0.12.0
 - Freigaben: Liegt eine Freigabe nach einem anderen Dialog wieder oben, nimmt sie erst nach der kurzen Wartezeit wieder Klicks an; ihre Knöpfe sind mit der Tastatur nicht mehr zu erreichen. Endet ein Werkzeug mit einem Fehler, erfährt die KI trotzdem, was davor ohne Ihre Freigabe geschrieben wurde.

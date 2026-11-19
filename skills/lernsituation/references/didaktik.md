@@ -193,7 +193,7 @@ Faustregeln, an denen sich die Schätzung messen lässt:
 **Plausibilitätsprüfung**, bevor die Ausarbeitung übergeben wird:
 
 1. Summe der Zeilen im Ablaufplan = Zeitrichtwert in Minuten (± eine
-   Pufferzeile). Das Skript rechnet nach.
+   Pufferzeile). `lernsituation_pruefen` rechnet nach.
 2. Jede Aufgabenzeit auf dem Blatt passt zur Zeile im Ablaufplan.
 3. Keine Gruppenarbeit unter 15 Minuten, keine Präsentationsrunde ohne
    Nachfragezeit, keine Reflexion in 5 Minuten.

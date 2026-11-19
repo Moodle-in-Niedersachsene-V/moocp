@@ -32,6 +32,7 @@ import 'profile_dialog.dart';
 import 'log.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
+import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
 import 'moodle/moodle_zugang.dart';
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
@@ -205,6 +206,7 @@ Future<void> main(List<String> argumente) async {
       weitere: instanzen.sublist(1),
       instanzErstellen: instanzErstellen,
       updatefaehig: updateMoeglich(argumente, Platform.environment),
+      updatePaket: updatePaket(argumente, Platform.environment),
       pluginUpdatefaehig: pluginUpdateMoeglich(argumente),
       pluginsLaden: () =>
           Plugins.laden(einstellungen, protokoll, Directory(pluginsOrdner)),
@@ -258,9 +260,18 @@ Instanz _instanzFuer(
       ordner,
       profil: pr,
       werkzeugquellen: _werkzeugquellen(plugins),
+      schucuVorlagen: _schucuVorlagen,
     ),
   );
 }
+
+/// Die CD-Vorlagen der SchuCu-Tabelle für lernsituation_pruefen: Assets aus
+/// dem Skill lernsituation (pubspec.yaml), geladen über den rootBundle, der zu
+/// Flutter gehört -- die Prüfung selbst bleibt ohne Flutter.
+Future<Map<String, String>> _schucuVorlagen() async => {
+  for (final MapEntry(key: art, value: datei) in schucuVorlagenDateien.entries)
+    art: await rootBundle.loadString('$schucuVorlagenOrdner/$datei', cache: false),
+};
 
 /// Aufruf durch die Deinstallation (installer/moocp.nsi): die
 /// Einrichtung in den KI-Werkzeugen entfernen und mit dem Code aus [Entfernt]
@@ -378,6 +389,7 @@ class MoocpApp extends StatelessWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.updatePaket,
     this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
@@ -416,8 +428,13 @@ class MoocpApp extends StatelessWidget {
   final Future<Plugins> Function()? pluginsLaden;
 
   /// Ob diese App sich selbst aktualisieren kann (update.dart,
-  /// updateMoeglich). Nur dann wird geprüft und überhaupt gefragt.
+  /// updateMoeglich, nur Windows).
   final bool updatefaehig;
+
+  /// Mac und Linux: das Paket, aus dem die installierte App stammt
+  /// (update.dart, updatePaket); die Prüfung sagt dann nur Bescheid. Ohne
+  /// [updatefaehig] und ohne Paket wird nicht geprüft und nicht gefragt.
+  final UpdatePaket? updatePaket;
 
   /// Ersatz für die Prüfung der Einrichtung, nur für die README-Bilder
   /// (tool/bilder_test.dart): Die echte Prüfung sähe auf dem Rechner nach,
@@ -451,6 +468,7 @@ class MoocpApp extends StatelessWidget {
         instanzErstellen: instanzErstellen,
         einrichtungsstand: einrichtungsstand,
         updatefaehig: updatefaehig,
+        updatePaket: updatePaket,
         pluginUpdatefaehig: pluginUpdatefaehig,
         pluginsLaden: pluginsLaden,
         laufendePlugins: laufendePlugins,
@@ -473,6 +491,7 @@ class Hauptseite extends StatefulWidget {
     this.instanzErstellen,
     this.einrichtungsstand,
     this.updatefaehig = false,
+    this.updatePaket,
     this.pluginUpdatefaehig = false,
     this.pluginsLaden,
     this.laufendePlugins,
@@ -493,6 +512,7 @@ class Hauptseite extends StatefulWidget {
   final Instanz Function(Profil profil)? instanzErstellen;
   final Future<Einrichtungsstand> Function()? einrichtungsstand;
   final bool updatefaehig;
+  final UpdatePaket? updatePaket;
   final Future<Plugins> Function()? pluginsLaden;
   final Stream<void>? fokus;
 
@@ -705,12 +725,14 @@ class _HauptseiteState extends State<Hauptseite> {
     _version = await _eigeneVersion();
     if (_version.isEmpty) return false;
     await updateStandMelden(widget.einstellungen, _version, widget.protokoll);
-    if (!mounted || !widget.updatefaehig) return false;
+    if (!mounted || (!widget.updatefaehig && widget.updatePaket == null)) return false;
     return updateSchritt(
       context,
       einstellungen: widget.einstellungen,
       protokoll: widget.protokoll,
       eigene: _version,
+      paket: widget.updatePaket,
+      imBrowserOeffnen: imBrowserOeffnen,
     );
   }
 
@@ -830,7 +852,9 @@ class _HauptseiteState extends State<Hauptseite> {
         einstellungen: widget.einstellungen,
         protokoll: widget.protokoll,
         eigene: _version,
-        updateMoeglich: widget.updatefaehig,
+        updateMoeglich: widget.updatefaehig || widget.updatePaket != null,
+        updatePaket: widget.updatePaket,
+        imBrowserOeffnen: imBrowserOeffnen,
         sitzungLaeuft: _dienst.laeuft,
         profilname: _profilnameAnzeige,
         mcpName: _mehrere ? _profil.mcpName : null,
@@ -1087,14 +1111,6 @@ class _HauptseiteState extends State<Hauptseite> {
     // nichts auf; das Protokoll nennt Plugin und Grund, der Dialog auch.
     for (final f in stand?.skillFehler ?? const <String>[]) {
       widget.protokoll.eintrag(Art.fehler, 'KI-Werkzeuge einrichten: $f');
-    }
-    if (stand != null &&
-        !stand.python &&
-        stand.gewaehlt.contains('lernsituation')) {
-      widget.protokoll.eintrag(
-        Art.info,
-        'Python nicht gefunden: Die Selbstprüfung des Skills lernsituation läuft nicht',
-      );
     }
     if (!immer && stand != null && !stand.brauchtEtwas) {
       widget.protokoll.eintrag(

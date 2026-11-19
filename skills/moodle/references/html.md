@@ -3,7 +3,7 @@
 
 Alles, was in Moodle steht, ist HTML: Textseite, Textfeld, Aufgabe, Buchkapitel, Beschreibung eines Abschnitts, Fragetext, Feedback und Erwartungshorizont — und die Blätter einer Lernsituation schon im Entwurf. Für alles gelten dieselben Regeln. Was ein Skill zusätzlich braucht, steht bei ihm: die Stellen einer Frage, an denen gar kein HTML stehen darf, die Druckaufbereitung mancher Instanzen, die festen Formen der Blätter einer Lernsituation.
 
-Die Regeln sind keine Geschmacksfrage. Die App prüft die meisten beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; das Prüfskript des Skills `lernsituation` prüft sie am Entwurf, bevor etwas in Moodle steht. Wo hier „gemessen" steht, ist es auf der Testinstanz ausprobiert: Probeknoten in eine Seite gehängt, die berechneten Stile ausgelesen, eine erfundene Klasse als Kontrolle; „wirkt nicht" heißt, es sieht aus wie ohne Klasse.
+Die Regeln sind keine Geschmacksfrage. Die App prüft die meisten beim Lesen jeder Aktivität und nennt Verstöße unter „Befunde"; `lernsituation_pruefen` prüft sie bei einer Lernsituation schon am Entwurf, bevor etwas in Moodle steht. Wo hier „gemessen" steht, ist es auf der Testinstanz ausprobiert: Probeknoten in eine Seite gehängt, die berechneten Stile ausgelesen, eine erfundene Klasse als Kontrolle; „wirkt nicht" heißt, es sieht aus wie ohne Klasse.
 
 ## Bedeutung, nicht Aussehen
 

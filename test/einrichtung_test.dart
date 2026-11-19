@@ -506,25 +506,23 @@ void main() {
     });
     void claudeEintrag() => datei('heim/.claude.json', jsonEncode(eintrag('http://127.0.0.1:47811/mcp', 'abc')));
     Directory skills(String werkzeug, String name) => Directory(p.join(heim, werkzeug, 'skills', name));
-    Future<Einrichtungsstand> pruefen({Set<String> abgewaehlt = const {}, bool python = true}) => einrichtungPruefen(
+    Future<Einrichtungsstand> pruefen({Set<String> abgewaehlt = const {}}) => einrichtungPruefen(
         umgebung: u,
         port: 47811,
         schluessel: 'abc',
         skills: [paket],
         wahlSkills: appWahlSkills,
-        abgewaehlt: abgewaehlt,
-        python: () async => python);
+        abgewaehlt: abgewaehlt);
 
-    test('Dialog nur, wenn etwas zu tun ist -- fehlendes Python allein zählt nicht', () async {
+    test('Dialog nur, wenn etwas zu tun ist', () async {
       claudeEintrag();
       datei('lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.281/claude.exe');
-      var s = await pruefen(python: false);
+      var s = await pruefen();
       expect(s.brauchtEtwas, isTrue, reason: 'Skill fehlt');
       skillInstallieren(paket, skills('.claude', 'moodle'));
-      s = await pruefen(python: false);
+      s = await pruefen();
       expect(s.brauchtEtwas, isFalse);
       expect(s.bereit, isTrue);
-      expect(s.python, isFalse);
 
       Directory(p.join(tmp.path, 'lokal')).deleteSync(recursive: true);
       s = await pruefen();
@@ -654,8 +652,7 @@ void main() {
         schluessel: 'abc',
         skills: [moodle, ls],
         wahlSkills: appWahlSkills,
-        gewaehlt: gewaehlt,
-        python: () async => true);
+        gewaehlt: gewaehlt);
     Set<String> entfernen(Einrichtungsstand s) => s.werkzeuge.single.entfernen;
 
     // Neu angefangen: nichts gewählt, lernsituation gehört nicht dazu.
@@ -713,8 +710,7 @@ void main() {
           skills: [fest, zusatz],
           wahlSkills: wahl,
           gewaehlt: gewaehlt,
-          gefunden: [codex],
-          python: () async => true);
+          gefunden: [codex]);
 
       var s = await pruefen({});
       expect(s.wahlSkills, wahl);

@@ -2,8 +2,8 @@
  * Element gebaut wird. build.py setzt ihn in references/elemente.md beider
  * Skills. Wofür sich eins anbietet, steht in einsatz.md. Was die App erzwingt
  * (Rahmen, Kopf, Prüfungen) und warum, steht in lib/moodle/elemente.dart;
- * dieselben Prüfungen am Entwurf im Prüfskript des Skills lernsituation
- * (element_fehler, code_in_datei) -- wer eine ändert, ändert alle drei.
+ * dieselben Prüfungen am Entwurf in lernsituation_pruefen
+ * (lib/moodle/lernsituation_pruefung.dart: elementFehler, codeInDatei) -- wer eine ändert, ändert alle drei.
  */
 # Interaktive Elemente bauen
 

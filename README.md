@@ -1,6 +1,6 @@
 # moocp
 
-Eine KI als Kollege im Moodle-Kurs – Claude, Codex oder ein Modell in LM Studio – über eine kleine Windows-App, die genau das an Moodle heranlässt, was für die Arbeit an Kursinhalten nötig ist, und sonst nichts. moocp arbeitet mit Moodle™.
+Eine KI als Kollege im Moodle-Kurs – Claude, Codex oder ein Modell in LM Studio – über eine kleine App für Windows, macOS und Linux, die genau das an Moodle heranlässt, was für die Arbeit an Kursinhalten nötig ist, und sonst nichts. moocp arbeitet mit Moodle™.
 
 > [!IMPORTANT]
 > **Nutzung auf eigene Verantwortung.** moocp ist ein privates Open-Source-Projekt. Es wird weder von einer Schule, einem Land oder Schulträger noch von Moodle HQ, Anthropic, OpenAI oder LM Studio angeboten, geprüft oder unterstützt. Die Software kommt ohne Gewähr (siehe [Lizenz](LICENSE.md)); sie liest und ändert Ihre Moodle-Kurse, und Fehler sind nicht ausgeschlossen. Probieren Sie sie zuerst in einem Testkurs aus.
@@ -25,7 +25,31 @@ Eine KI als Kollege im Moodle-Kurs – Claude, Codex oder ein Modell in LM Studi
 Der kürzeste Weg zum ersten Ergebnis; ausführlich steht alles im [Benutzerhandbuch](#3-benutzerhandbuch).
 
 1. **Ein KI-Werkzeug installieren**: [Claude Desktop](https://claude.com/download) – anmelden und einmal den Reiter „Code" öffnen –, [Codex CLI](https://github.com/openai/codex) oder [LM Studio](https://lmstudio.ai).
-2. **moocp installieren**: `moocp_setup_<Version>.exe` unter „Releases" dieses Repositorys herunterladen und ausführen; Windows 10 oder 11, Administratorrechte braucht es nicht. Beim ersten Mal warnt Windows, weil der Installer nicht signiert ist: „Weitere Informationen", dann „Trotzdem ausführen".
+2. **moocp installieren**: die Datei für Ihr System unter „Releases" dieses Repositorys herunterladen.
+
+   <details open>
+   <summary><b>Windows</b> (10 oder 11)</summary>
+
+   `moocp_setup_<Version>.exe` ausführen; Administratorrechte braucht es nicht. Warnt Windows, weil der Installer nicht signiert ist: „Weitere Informationen", dann „Trotzdem ausführen".
+
+   </details>
+   <details>
+   <summary><b>macOS</b> (ab 12, Apple Silicon oder Intel)</summary>
+
+   1. `moocp_<Version>_macos.dmg` öffnen und moocp auf „Programme" ziehen.
+   2. moocp aus „Programme" starten. macOS hält es beim ersten Mal an: „Fertig".
+   3. Systemeinstellungen › Datenschutz & Sicherheit, ganz unten „Dennoch öffnen", dann noch einmal „Dennoch öffnen" und mit Touch ID oder Passwort eines Administrators bestätigen.
+
+   Mit Bildern: [Installation auf dem Mac](#installation-auf-dem-mac).
+
+   </details>
+   <details>
+   <summary><b>Linux</b> (Debian 13)</summary>
+
+   `sh moocp_setup_<Version>.run` in der grafischen Sitzung ausführen; Administratorrechte braucht es nicht.
+
+   </details>
+
 3. **KI-Werkzeuge einrichten**: Beim ersten Start fragt die App, ob sie nach Updates sehen darf, und zeigt dann den Dialog „KI-Werkzeuge einrichten" – dort „Installieren". Wer an einer berufsbildenden Schule unterrichtet, setzt vorher den Haken bei `lernsituation`.
 4. **Bei Moodle anmelden**: Adresse, Benutzername und Passwort in die App eingeben. Oben rechts steht danach „bei Moodle angemeldet" und „MCP auf 127.0.0.1:…".
 5. **Im KI-Werkzeug eine neue Sitzung starten** – eine, die vorher lief, kennt die App noch nicht – und loslegen, am besten in einem Testkurs. Sagen Sie einfach, was Sie brauchen, und kopieren Sie die Adresse aus der Adresszeile des Browsers dazu – Kurs, Abschnitt oder Seite, die KI liest heraus, was sie braucht:
@@ -157,16 +181,15 @@ Das gilt für die App selbst. Ein Plugin ist ein eigenes Programm, das nur läuf
 
 ### Voraussetzungen
 
-- Windows 10 oder 11
+- Windows 10 oder 11, macOS ab 12 (Apple Silicon oder Intel) oder Linux (Debian 13)
 - Eines dieser KI-Werkzeuge auf demselben Rechner:
   - [Claude Code](https://claude.com/claude-code), am einfachsten als Claude-Desktop-App mit dem Reiter „Code";
   - [Codex CLI](https://github.com/openai/codex) von OpenAI, ab Version 0.77;
-  - [LM Studio](https://lmstudio.ai) mit seinem Agenten Bionic (eigenes Programm, einmal gestartet), mit einem lokalen oder einem Cloud-Modell. Das Modell muss mit vielen Werkzeugen und langen Anleitungen zurechtkommen; kleine lokale Modelle tun das oft nicht.
+  - [LM Studio](https://lmstudio.ai) mit seinem Agenten Bionic (eigenes Programm, einmal gestartet; nur unter Windows), mit einem lokalen oder einem Cloud-Modell. Das Modell muss mit vielen Werkzeugen und langen Anleitungen zurechtkommen; kleine lokale Modelle tun das oft nicht.
 
   Claude im Browser (claude.ai) und ChatGPT – im Browser wie als App – erreichen die App auf Ihrem Rechner nicht: Ihre Werkzeuge laufen über die Server des Anbieters. Ollama allein bietet keinen Anschluss für Werkzeuge.
 - Ein Moodle-Konto mit Bearbeitungsrechten im Kurs, Anmeldung mit
   Benutzername und Passwort. Erprobt mit Moodle 5.1.
-- Nur mit dem Skill `lernsituation`: Python 3, damit er seine Ausarbeitungen selbst prüfen kann; ohne Python läuft alles andere.
 
 ### Lizenz und Marken
 
@@ -192,12 +215,36 @@ Moodle™ ist eine eingetragene Marke von Moodle Pty Ltd, Claude eine Marke von 
 
 ### Installation unter Linux
 
-Unter Linux (Debian 13) gibt es denselben Ablauf mit einer einzelnen Datei: `sh moocp_setup_<Version>.run` in einer grafischen Sitzung (auch in einer xrdp-Sitzung). Die Datei finden Sie unter „Releases" dieses Repositorys; selbst bauen geht auch (Teil 4). Nach Updates sucht die App unter Linux nicht selbst: Eine neue Version laden Sie dort herunter. Der Assistent zeigt dieselben Seiten wie unter Windows: den Hinweis zur Nutzung (mit zehn Sekunden Wartezeit), die Lizenz, den Zielordner (Vorschlag `~/.local/opt/moocp`), das Installieren und „Fertig stellen" mit „moocp starten". Administratorrechte braucht er nicht. Danach steht moocp im Startmenü und, wenn es den Ordner gibt, als Verknüpfung auf dem Schreibtisch. Eine neue Version wird genauso installiert; Einstellungen und gespeicherte Anmeldedaten bleiben, und eine laufende App beendet der Installer nie, er bittet, sie zu schließen. Entfernen: im Startmenü mit der Aktion „moocp deinstallieren" (Rechtsklick auf den Eintrag) oder mit `~/.local/opt/moocp/moocp-deinstallieren`; das entfernt auch Einstellungen, gespeicherte Anmeldedaten, Arbeitsordner und die Einrichtung in Claude Code und Codex CLI. Das Einrichten der KI-Werkzeuge beim ersten Start (Schritt 2 oben) gilt unter Linux für Claude Code und Codex CLI.
+Unter Linux (Debian 13) gibt es denselben Ablauf mit einer einzelnen Datei: `sh moocp_setup_<Version>.run` in einer grafischen Sitzung (auch in einer xrdp-Sitzung). Die Datei finden Sie unter „Releases" dieses Repositorys; selbst bauen geht auch (Teil 4). Eine neue Version installiert sich unter Linux nicht selbst: Ist die tägliche Suche an, sagt die App Bescheid, zeigt die Neuerungen und öffnet mit „Update herunterladen“ das Paket, mit dem Sie installiert haben, im Browser (siehe [Updates](#updates)). Der Assistent zeigt dieselben Seiten wie unter Windows: den Hinweis zur Nutzung (mit zehn Sekunden Wartezeit), die Lizenz, den Zielordner (Vorschlag `~/.local/opt/moocp`), das Installieren und „Fertig stellen" mit „moocp starten". Administratorrechte braucht er nicht. Danach steht moocp im Startmenü und, wenn es den Ordner gibt, als Verknüpfung auf dem Schreibtisch. Eine neue Version wird genauso installiert; Einstellungen und gespeicherte Anmeldedaten bleiben, und eine laufende App beendet der Installer nie, er bittet, sie zu schließen. Entfernen: im Startmenü mit der Aktion „moocp deinstallieren" (Rechtsklick auf den Eintrag) oder mit `~/.local/opt/moocp/moocp-deinstallieren`; das entfernt auch Einstellungen, gespeicherte Anmeldedaten, Arbeitsordner und die Einrichtung in Claude Code und Codex CLI. Das Einrichten der KI-Werkzeuge beim ersten Start (Schritt 2 oben) gilt unter Linux für Claude Code und Codex CLI.
 
 Zwei weitere Pakete liegen ebenfalls unter „Releases":
 
 - **AppImage** (`moocp_<Version>-x86_64.AppImage`): eine Datei ohne Installation, ausführbar machen und starten. GTK 3, libsecret, EGL und GLES (`libegl1`, `libgles2`) müssen auf dem Rechner sein; zum Starten braucht es FUSE 2 (`libfuse2t64`), sonst `--appimage-extract-and-run`. Mit `--installieren` zeigt es denselben Assistenten wie oben und legt moocp mit Startmenü-Eintrag unter `~/.local/opt/moocp` an. Gebaut auf Debian 13, läuft es auf Distributionen mit mindestens derselben glibc (2.38).
 - **Debian-Paket** (`moocp_<Version>_amd64.deb`): `sudo apt install ./moocp_<Version>_amd64.deb`. Das installiert **systemweit** nach `/opt/moocp` und braucht Administratorrechte; eine Installation nur für Ihren Benutzer geht damit nicht, dafür sind der Installer und das AppImage da. Entfernen mit `sudo apt remove moocp`; Ihre Einstellungen und gespeicherten Anmeldedaten bleiben im Benutzerordner (`~/.config/moocp`, das Passwort im Schlüsselbund), weil apt keine Benutzerordner anfasst. Löschen Sie sie bei Bedarf von Hand.
+
+### Installation auf dem Mac
+
+Für den Mac gibt es unter „Releases" dieses Repositorys ein Disk-Image, `moocp_<Version>_macos.dmg`, für Macs mit Apple Silicon und mit Intel ab macOS 12. Wer es öffnet, sieht moocp und den Ordner „Programme" mit einem Pfeil dazwischen: moocp auf „Programme" ziehen, danach das Disk-Image im Finder auswerfen. Eine neue Version wird genauso installiert und ersetzt die alte; Einstellungen und gespeicherte Anmeldedaten bleiben. Ist die tägliche Suche an, sagt die App Bescheid, wenn es eine neue Version gibt, zeigt die Neuerungen und öffnet mit „Update herunterladen“ das Disk-Image im Browser (siehe [Updates](#updates)).
+
+moocp ist für den Mac nicht signiert und nicht von Apple beglaubigt. Beim ersten Start hält macOS die App deshalb an, und Sie geben sie einmal frei; danach startet sie wie jede andere App. Für die Freigabe braucht es die Touch ID oder das Passwort eines Administrators. Auf einem Mac, den die Schule verwaltet und auf dem Sie kein Administrator sind, erledigt das die IT.
+
+1. **moocp aus „Programme" starten.** macOS meldet „„moocp" nicht geöffnet". Klicken Sie auf **Fertig**, nicht auf „In den Papierkorb legen".
+2. **Systemeinstellungen › Datenschutz & Sicherheit** öffnen (Apfelmenü › Systemeinstellungen) und ganz nach unten scrollen. Unter „Sicherheit" steht „„moocp" wurde blockiert, um deinen Mac zu schützen." – dort auf **Dennoch öffnen**.
+3. macOS fragt noch einmal: „„moocp" öffnen?" – **Dennoch öffnen**.
+4. Mit **Touch ID** oder **Passwort verwenden …** und dem Passwort eines Administrators bestätigen.
+
+<details>
+<summary><b>Die vier Schritte mit Bildern</b></summary>
+
+| 1. Fertig | 2. Dennoch öffnen in den Systemeinstellungen |
+|---|---|
+| <img src="docs/bilder/mac/1-nicht-geoeffnet.png" width="300" alt="Dialog „moocp“ nicht geöffnet mit den Knöpfen In den Papierkorb legen und Fertig"> | <img src="docs/bilder/mac/2-datenschutz-und-sicherheit.png" width="420" alt="Systemeinstellungen, Datenschutz und Sicherheit: „moocp“ wurde blockiert, daneben der Knopf Dennoch öffnen"> |
+| **3. Noch einmal Dennoch öffnen** | **4. Als Administrator bestätigen** |
+| <img src="docs/bilder/mac/3-dennoch-oeffnen.png" width="300" alt="Dialog „moocp“ öffnen? mit den Knöpfen In den Papierkorb legen, Dennoch öffnen und Fertig"> | <img src="docs/bilder/mac/4-administrator.png" width="300" alt="Dialog Datenschutz und Sicherheit: Admin-Touch ID verwenden oder Passwort eingeben"> |
+
+</details>
+
+Danach geht es weiter wie unter Windows mit dem Einrichten der KI-Werkzeuge und der Anmeldung (Schritte 2 und 3 unter [Installation](#installation)); auf dem Mac gilt das für Claude Code und Codex CLI, die Skills liegen unter `~/.claude/skills` und `~/.codex/skills`. Entfernen: moocp aus „Programme" in den Papierkorb legen. Ein Deinstallieren, das alles abräumt wie unter Windows und Linux, gibt es auf dem Mac nicht: Einstellungen, Protokoll und installierte Plugins bleiben unter `~/Library/Application Support/moocp`, das gespeicherte Passwort im Schlüsselbund, die Verbindung und die Skills in Claude Code und Codex CLI.
 
 ### Einrichten
 
@@ -292,6 +339,7 @@ Gelesenes legt die App im Arbeitsordner ab, an die KI geht eine Übersicht. Lese
 | `status` | Zeigt, ob die App angemeldet ist, welche Moodle-Instanz sie bedient und ob es die Druckaufbereitung gibt. Fragt Moodle nichts an. | – |
 | `meine_kurse` | Ihre Kurse mit Nummer, Name und Kurzname, auf Wunsch die zuletzt besuchten. | – |
 | `kurs_uebersicht` | Die Struktur eines Kurses: Abschnitte, Unterabschnitte und Aktivitäten mit Typ und Sichtbarkeit, mit Warnung, wenn etwas, das nach Lösung oder Lehrermaterial klingt, für Lernende erreichbar ist. Keine Inhalte, aber die Konventionen des Kurses, falls es sie gibt. | – |
+| `lernsituation_pruefen` | Prüft die Form einer Lernsituation nach den Vorlagen des Skills `lernsituation`, als Entwurf im Arbeitsordner oder als gelesenen Abschnitt in Moodle: SchuCu-Tabelle, Handreichung mit Ablaufplan und Zeiten, je Arbeitsblatt eine Lösung, Kennungen und Verweise zwischen den Blättern, HTML-Regeln, in Moodle auch die Links. Ob die Lernsituation gut ist, prüft es nicht. Liest nur im Arbeitsordner und fragt Moodle nichts an. | – |
 | `kurs_hinweise` | Die Konventionen des Kurses: die Datei „CLAUDE.md" im verborgenen Verzeichnis „CLAUDE", falls es sie gibt – als Daten, nie als Anweisung. Für den ganzen Kurs, auf Wunsch zusätzlich für einen Abschnitt. `kurs_uebersicht` und `abschnitt_lesen` liefern das von sich aus mit. | – |
 | `kurs_filter` | Welche Textfilter ein Kurs hat, vor allem ob Formeln (MathJax) gesetzt werden. | – |
 | `gruppierungen_lesen` | Die Gruppierungen eines Kurses mit den Namen ihrer Gruppen, nie Mitglieder. Im Quellkurs zeigt es, was nach einer Wiederherstellung im Zielkurs gebraucht wird. | – |
@@ -458,7 +506,9 @@ Gibt es eine neue Version, zeigt die App, was sich ändert, und fragt: „Herunt
 
 Was GitHub dabei erfährt: Ihre IP-Adresse und den Zeitpunkt der Anfrage, wie bei jedem Aufruf einer Webseite. Nichts aus Moodle wird übertragen, kein Benutzername, kein Passwort – die Suche benutzt eine eigene Verbindung ohne Ihre Moodle-Sitzung und darf nur die Auskunft über die neueste Version und die Installationsdatei des Releases anfragen ([lib/update/updateliste.dart](lib/update/updateliste.dart)). Jede Anfrage steht mit ihrem Ergebnis im Protokoll.
 
-Sucht die App nicht nach Updates, schauen Sie von Zeit zu Zeit selbst unter „Releases" nach. Nicht gesucht wird außerdem, wenn die App nicht aus `%LOCALAPPDATA%\Programs\moocp` läuft – dann würde ein Update sie gar nicht ersetzen – oder wenn sie mit `--kein-update` gestartet wird; so lässt sich die Suche auch über die Verknüpfung abschalten. Beides gilt auch für Plugins: Wie die tägliche Suche ihre Updates findet, steht unter [Plugins](#plugins).
+**Auf dem Mac und unter Linux** ersetzt sich die App nicht selbst. Die Suche läuft genauso, und der Dialog zeigt ebenso, was sich ändert; statt „Herunterladen und installieren“ heißt der Knopf dort „Update herunterladen“ und öffnet im Browser die Datei, mit der Sie installiert haben: das Disk-Image auf dem Mac, unter Linux den Installer, das AppImage oder das Debian-Paket. Die App selbst lädt dabei nichts. Beenden Sie moocp und spielen Sie die Datei ein wie bei der Installation; Einstellungen und gespeicherte Anmeldedaten bleiben. Gesucht wird dort nur, wenn die App installiert läuft: auf dem Mac aus „Programme“, unter Linux aus dem Ordner des Installers, aus `/opt/moocp` oder als AppImage. Hängt an einem Release keine Datei für Ihr System, meldet die App es nicht.
+
+Sucht die App nicht nach Updates, schauen Sie von Zeit zu Zeit selbst unter „Releases" nach. Nicht gesucht wird außerdem, unter Windows, wenn die App nicht aus `%LOCALAPPDATA%\Programs\moocp` läuft – dann würde ein Update sie gar nicht ersetzen – oder wenn sie mit `--kein-update` gestartet wird; so lässt sich die Suche auch über die Verknüpfung abschalten. Beides gilt auch für Plugins: Wie die tägliche Suche ihre Updates findet, steht unter [Plugins](#plugins).
 
 ### Plugins
 
@@ -498,7 +548,7 @@ Fragt moocp beim Start, ob es ein „Entwicklungs-Plugin anhängen“ soll, ist 
 
 ### Deinstallieren
 
-In den Windows-Einstellungen unter „Apps", „Installierte Apps", bei moocp „Deinstallieren". Das entfernt alles, was die App auf den Rechner gebracht hat: die App selbst, Einstellungen mit Zugangsschlüssel, Protokoll, gespeicherte Anmeldedaten, installierte Plugins, den Arbeitsordner, den Ordner für Downloads der Plugins und in Claude Code, Codex CLI und LM Studio die Verbindung „moodle" und die Skills der App und der Plugins. Läuft die App noch, bittet die Deinstallation, sie zu schließen; LM Studio darf dabei offen bleiben, ebenso bei einem Update. Lässt sich etwas nicht entfernen, etwa weil Claude Code nicht gefunden wird, sagt sie, was von Hand zu tun ist.
+Auf dem Mac und unter Linux steht es unter [Installation auf dem Mac](#installation-auf-dem-mac) und [Installation unter Linux](#installation-unter-linux). Unter Windows: in den Windows-Einstellungen unter „Apps", „Installierte Apps", bei moocp „Deinstallieren". Das entfernt alles, was die App auf den Rechner gebracht hat: die App selbst, Einstellungen mit Zugangsschlüssel, Protokoll, gespeicherte Anmeldedaten, installierte Plugins, den Arbeitsordner, den Ordner für Downloads der Plugins und in Claude Code, Codex CLI und LM Studio die Verbindung „moodle" und die Skills der App und der Plugins. Läuft die App noch, bittet die Deinstallation, sie zu schließen; LM Studio darf dabei offen bleiben, ebenso bei einem Update. Lässt sich etwas nicht entfernen, etwa weil Claude Code nicht gefunden wird, sagt sie, was von Hand zu tun ist.
 
 ---
 
@@ -586,8 +636,8 @@ skills/  (Wissen: Didaktik, Regeln,        moocp (Flutter, Windows)
 | `lib/protokoll.dart`, `lib/log.dart` | Protokoll, Logging ohne Inhalte |
 | `test/` | Prüfungen ohne Moodle: Positiv- und Sperrliste, Formulare, Auswertung, Kurs, Fragen, Tests, Zeilenenden; in `test/daten/fragen/` die gemessenen Beispielfragen je Fragetyp |
 | `tool/` | `neustart.sh` (prüfen, bauen, neu starten), `mcp_aufruf.sh` (ein Werkzeug der laufenden App aufrufen), Auswertung und Einstellungen an einem gelesenen Ordner ausprobieren, Entwicklerversion mit Hot Reload, die Bilder dieser README erzeugen, die Update-Abfrage gegen das echte GitHub prüfen (`update_probe.dart`) |
-| `skills/` | die Skills, ihre Gleichanteile, Bau- und Prüfskripte |
-| `installer/`, `create_installer.bat` | der Installer (NSIS) und das Skript, das ihn baut |
+| `skills/` | die Skills, ihre Gleichanteile, Bau- und Prüfskripte für die Skills |
+| `installer/`, `create_installer.bat` | der Installer (NSIS) und das Skript, das ihn baut; unter `installer/macos/` Fenster und Hintergrund des Disk-Images für den Mac (`tool/mac_dmg.sh`) |
 | `docs/bilder/`, `docs/icon/` | Bilder dieser README; das Symbol der App als SVG |
 | `CHANGELOG.md` | was sich je Version geändert hat |
 
@@ -636,9 +686,9 @@ Schalter von `moocp.exe`; die Auskünfte schreiben nach stdout, und weil `moocp.
 | `--werkzeugliste` | gibt als eine Zeile JSON aus, was der MCP-Server des Standardprofils auf `initialize` und `tools/list` antwortet, und endet; daraus antwortet die Brücke. Die Werkzeuge der Plugins stehen darin aus dem, was die App von ihnen gemerkt hat (siehe „Werkzeuge eines Plugins“); ein Plugin wird dafür nicht gestartet |
 | `--claude-entfernen` | entfernt die Einrichtung in allen KI-Werkzeugen und endet; ruft die Deinstallation auf (der Name stammt aus der Zeit, als es nur Claude Code gab, und bleibt, damit auch ältere Deinstallationen wirken) |
 
-### Auf dem Mac bauen (nur Entwicklerversion)
+### Auf dem Mac bauen
 
-Voraussetzung: Flutter und Xcode (aus dem App Store, einmal gestartet). Eine Veröffentlichung für den Mac gibt es nicht; die App läuft aus dem Entwicklungsbau.
+Voraussetzung: Flutter und Xcode (aus dem App Store, einmal gestartet).
 
 ```sh
 flutter analyze
@@ -646,7 +696,7 @@ flutter test
 flutter run -d macos
 ```
 
-**Ohne KI-Chat starten:** `moocp-starten.command` im Hauptordner des Projekts doppelt anklicken (beim ersten Mal im Finder Rechtsklick > Öffnen) oder im Terminal `bash moocp-starten.command` aufrufen. Das Skript baut die App, wenn es noch keinen Bau gibt oder der Quelltext neuer ist, und startet sie; sonst startet es sofort den vorhandenen Bau. Läuft die App schon, holt es sie nur nach vorn. Ein Entwicklerbau mit Testbetrieb (Teil 4, Bildschirmfotos) gilt ihm als veraltet und wird neu, ohne Testbetrieb, gebaut.
+**Ohne KI-Chat starten:** `moocp-starten.command` im Hauptordner des Projekts doppelt anklicken (kam das Projekt als ZIP aus dem Browser, hält macOS das Skript beim ersten Mal an wie die App, siehe [Installation auf dem Mac](#installation-auf-dem-mac)) oder im Terminal `bash moocp-starten.command` aufrufen. Das Skript baut die App, wenn es noch keinen Bau gibt oder der Quelltext neuer ist, und startet sie; sonst startet es sofort den vorhandenen Bau. Läuft die App schon, holt es sie nur nach vorn. Ein Entwicklerbau mit Testbetrieb (Teil 4, Bildschirmfotos) gilt ihm als veraltet und wird neu, ohne Testbetrieb, gebaut.
 
 Die Einstellungen liegen unter `~/Library/Application Support/moocp`, dort auch der Socket für die Einzelstart-Sperre (`moocp.sock`). Die Zugangsdaten stehen im Schlüsselbund des Benutzers, im alten Schlüsselbund statt der Datenschutz-Schlüsselbundgruppe, weil ein Entwicklerbau ohne Team-ID dort nicht schreiben darf.
 
@@ -655,6 +705,14 @@ Das KI-Werkzeug LM Studio mit Bionic wird auf dem Mac nicht angeboten: Seine Br�
 Bildschirmfotos suchen auf dem Mac Microsoft Edge, Google Chrome und Chromium in `/Applications` und `~/Applications`. Eine Richtlinie, die die Fernsteuerung abschaltet (`RemoteDebuggingAllowed`), liest die App aus den verwalteten Einstellungen; fehlt sie, ist die Fernsteuerung erlaubt. Beendet werden nur Browserprozesse mit dem eigenen Profil. Ob das auf dem Mac so läuft, ist ungemessen (siehe [Issue #9](https://github.com/topse/moocp/issues/9)). Findet die App keinen Browser, meldet das Werkzeug ihn, statt ihn zu raten.
 
 Die Skripte `tool/neustart.sh`, `tool/mcp_aufruf.sh` und `tool/mac_bau.sh` / `tool/mac_start.sh` erkennen den Mac über `uname`.
+
+**Disk-Image für ein Release:**
+
+```sh
+bash tool/mac_dmg.sh
+```
+
+Das baut die App ohne Debugmodus und ohne Testbetrieb (`tool/mac_bau.sh release`), bricht ab, wenn sie nicht zugleich für Apple Silicon und Intel gebaut ist, und packt sie in `installer/moocp_<Version>_macos.dmg` (Version ohne Buildnummer). Gepackt wird mit [dmgbuild](https://github.com/dmgbuild/dmgbuild): Beim ersten Lauf legt das Skript unter `build/tools` eine Python-Umgebung an und lädt dmgbuild mit seinen Paketen in festen Versionen, geprüft gegen die Prüfsummen im Skript; es reicht das Python 3, das mit Xcode kommt. Fenster, Symbole und Hintergrund der DMG stehen in `installer/macos/` (`dmg_einstellungen.py`, `hintergrund.svg` mit den PNGs daraus). `bash tool/mac_dmg_test.sh` prüft das Skript ohne Mac. Das Symbol der App kommt aus `docs/icon/icon_macos.svg` (siehe `pubspec.yaml`, `flutter_launcher_icons`).
 
 ### Unter Linux bauen
 
@@ -678,7 +736,7 @@ Claude Code und Codex CLI findet die App im `PATH` sowie unter `/usr/local/bin`,
 
 Bildschirmfotos suchen Chromium, Google Chrome und Microsoft Edge im `PATH` und in `/opt/google/chrome` und `/opt/microsoft/msedge`. Ein Chromium aus Snap oder Flatpak läuft in einer Sandbox, die das Profil der App nicht lesen darf; dafür ein Paket der Distribution oder von Google nehmen. Eine Richtlinie, die die Fernsteuerung abschaltet (`RemoteDebuggingAllowed`), liest die App aus den JSON-Dateien unter `/etc/opt/chrome/policies/managed`, `/etc/chromium/policies/managed` und `/etc/opt/edge/policies/managed`; fehlt sie, ist die Fernsteuerung erlaubt. Beendet werden nur Browserprozesse mit dem eigenen Profil. Gebraucht wird kein Fenster, aber ein Browser, der ohne Anzeige startet.
 
-Die Zwischenablage bekommt bei der Übergabe an die Lehrkraft nur den Text, nicht HTML. Eine Selbstaktualisierung gibt es nicht; eine neue Version kommt von Hand.
+Die Zwischenablage bekommt bei der Übergabe an die Lehrkraft nur den Text, nicht HTML. Eine Selbstaktualisierung gibt es nicht; die Update-Suche sagt nur Bescheid und öffnet das Paket im Browser (`updatePaket` in `lib/update/update.dart`).
 
 Die Skripte `tool/neustart.sh`, `tool/mcp_aufruf.sh` und `tool/linux_bau.sh` / `tool/linux_start.sh` erkennen Linux über `uname`.
 
@@ -700,7 +758,7 @@ Das baut die Skills, prüft (`flutter analyze`, `flutter test`), baut die App un
 
 ### Lizenzen der Abhängigkeiten
 
-Die App steht unter der AGPLv3 oder später. Neue Pakete kommen nur hinzu, wenn ihre Lizenz damit verträglich ist, und das gilt auch für jede indirekte Abhängigkeit in `pubspec.lock`: freizügige Lizenzen wie MIT, BSD und Apache 2.0 sind es, GPLv3, LGPLv3 und AGPLv3 ebenfalls, Lizenzen nur für die GPLv2 („GPLv2 only“) nicht. Das Beispiel-Plugin (`example/example-plugin/`) steht unter MIT, damit eigene Plugins daraus unter jeder Lizenz entstehen können; seine Pakete brauchen deshalb eine freizügige Lizenz. Die Lizenzhinweise aller Pakete sammelt Flutter beim Bauen selbst ein; die App zeigt sie unter ⓘ.
+Die App steht unter der AGPLv3 oder später. Neue Pakete kommen nur hinzu, wenn ihre Lizenz damit verträglich ist, und das gilt auch für jede indirekte Abhängigkeit in `pubspec.lock`: freizügige Lizenzen wie MIT, BSD und Apache 2.0 sind es, GPLv3, LGPLv3 und AGPLv3 ebenfalls, Lizenzen nur für die GPLv2 („GPLv2 only“) nicht. Das Beispiel-Plugin (`example/example-plugin/`) steht unter MIT, damit eigene Plugins daraus unter jeder Lizenz entstehen können; seine Pakete brauchen deshalb eine freizügige Lizenz. Die Lizenzhinweise aller Pakete sammelt Flutter beim Bauen selbst ein; die App zeigt sie unter ⓘ. Werkzeuge, die nur beim Bauen laufen und nicht in die App gelangen, stehen im Skript, das sie lädt, mit Version und Prüfsumme: appimagetool (MIT) in `tool/linux_appimage.sh`, dmgbuild (BSD) mit ds_store und mac_alias (MIT) in `tool/mac_dmg.sh`.
 
 Die Bilder dieser README entstehen aus den echten Fenstern mit erfundenen
 Daten:
@@ -739,7 +797,7 @@ flutter test tool/bilder_test.dart --update-goldens
 | `skills/gemeinsam/` | Gleichanteile: Abschnitte, die in mehreren Skills gleich stehen (Plan, Lücken, Datenschutzbefund, erfundene Namen, Urheberrecht, HTML-Regeln, Hausstil für Zeichnungen, Anregungen zum Einsatz der Aktivitäten …) |
 | `skills/build.py` | setzt die Gleichanteile ein, schnürt die Pakete einer Version nach `skills/dist/`, prüft sie aus dem fertigen Paket |
 | `skills/dist/` | die fertigen Pakete (`*.skill`), Bauergebnis und nicht versioniert; die App bringt sie als Assets mit und installiert sie nach Rückfrage (`lib/einrichtung.dart`) |
-| `skills/pruefung/` | Prüfskripte: Umlaute statt Ersatzschreibweisen, das Prüfskript der Lernsituationen |
+| `skills/pruefung/` | Prüfskript: Umlaute statt Ersatzschreibweisen |
 | `skills/umlaute.py` | stellt Ersatzschreibweisen auf Umlaute um |
 
 Ein Gleichanteil wird nur in `skills/gemeinsam/` bearbeitet; zwischen den
@@ -751,7 +809,6 @@ nächsten Bau verloren. Welcher Skill welche Anteile trägt, steht in
 ```powershell
 python skills\build.py
 python skills\pruefung\pruefe-umlaute.py
-python skills\pruefung\pruefe-lernsituation-skript.py
 ```
 
 Auf den eigenen Rechner kommen die Skills über die App: `tool/neustart.sh`
@@ -1019,7 +1076,7 @@ git tag v0.10.1
 git push origin v0.10.1
 ```
 
-Danach wird auf GitHub aus diesem Tag ein Release erzeugt, mit dem Windows-Installer und den drei Linux-Paketen (`moocp_setup_0.10.1.run`, `moocp_0.10.1-x86_64.AppImage`, `moocp_0.10.1_amd64.deb`, siehe „Unter Linux bauen") als Dateien und dem Abschnitt der Version aus `CHANGELOG.md` als Text. Tag und Datei müssen dem Schema folgen, sonst findet die Update-Prüfung der App die Version nicht: Tag `v0.10.1`, Datei `moocp_setup_0.10.1.exe`, kein Entwurf und keine Vorabversion.
+Danach wird auf GitHub aus diesem Tag ein Release erzeugt, mit dem Windows-Installer, den drei Linux-Paketen (`moocp_setup_0.10.1.run`, `moocp_0.10.1-x86_64.AppImage`, `moocp_0.10.1_amd64.deb`, siehe „Unter Linux bauen") und dem Disk-Image für den Mac (`moocp_0.10.1_macos.dmg`, siehe „Auf dem Mac bauen") als Dateien und dem Abschnitt der Version aus `CHANGELOG.md` als Text. Tag und Datei müssen dem Schema folgen, sonst findet die Update-Prüfung der App die Version nicht: Tag `v0.10.1`, Datei `moocp_setup_0.10.1.exe`, kein Entwurf und keine Vorabversion.
 
 ### Mitwirken
 

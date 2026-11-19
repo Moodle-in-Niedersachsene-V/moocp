@@ -669,10 +669,11 @@ class McpDienst implements AufrufKontext {
       parameter: {'cmid': _cmid},
       pflicht: ['cmid'],
       nurLesen: true,
-      ausfuehren: (a) async => (await formularLesen(
+      ausfuehrenMitAbbruch: (a, abbruch) async => (await formularLesen(
         moodle,
         Formularziel.aktivitaet(_zahl(a, 'cmid')),
         ao,
+        abbruch: abbruch,
       )).zusammenfassung(),
     );
 

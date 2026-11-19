@@ -56,7 +56,7 @@ class _Moodle extends MoodleZugang {
   }
 
   @override
-  Future<Antwort> lesen(String pfadMitQuery) async => Antwort(
+  Future<Antwort> lesen(String pfadMitQuery, {Future<void>? abbruch}) async => Antwort(
       200,
       Uri.parse('http://127.0.0.1/'),
       Uint8List.fromList(utf8.encode('M.cfg = {"courseId":1,"contextid":"55"};')),

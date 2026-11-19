@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Hintergrund des Fensters der DMG (tool/mac_dmg.sh, installer/macos/dmg_einstellungen.py).
-     Größe = Fenster (window_rect), die Symbole liegen bei x 140 und 420, y 150.
+     Größe = Fenster (window_rect), die Symbole liegen bei x 140 und 420, y 170.
      Die PNGs daneben entstehen aus dieser Datei:
        cairosvg hintergrund.svg -o hintergrund.png
        cairosvg -s 2 hintergrund.svg -o hintergrund@2x.png -->
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="360" viewBox="0 0 560 360">
-  <rect width="560" height="360" fill="#f2f2f5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="440" viewBox="0 0 560 440">
+  <rect width="560" height="440" fill="#f2f2f5"/>
   <g fill="none" stroke="#8e8e93" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M232 150 H322"/>
-    <path d="M304 128 L330 150 L304 172"/>
+    <path d="M232 170 H322"/>
+    <path d="M304 148 L330 170 L304 192"/>
   </g>
-  <text x="280" y="300" text-anchor="middle" fill="#3c3c43"
+  <text x="280" y="370" text-anchor="middle" fill="#3c3c43"
         font-family="Helvetica Neue, Helvetica, Liberation Sans, Arial, sans-serif" font-size="16">Zum Installieren moocp auf „Programme“ ziehen</text>
 </svg>

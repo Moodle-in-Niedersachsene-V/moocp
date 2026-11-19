@@ -142,14 +142,20 @@ String _code(String t) => [
       for (final m in _ereignisWert.allMatches(t)) m.group(1) ?? m.group(2) ?? m.group(3)!,
     ].join('\n');
 
-/// Was in einem Element nicht geht, je als Satz -- geprüft ohne den Kopf der
-/// App. Leer: in Ordnung.
-List<String> elementFehler(String text) {
+/// Ein Befund an einem Element: entweder eine fremde [adresse] (der Satz
+/// dazu hängt vom Aufrufer ab, weil er die Adresse anders kürzt) oder der
+/// fertige [satz].
+typedef ElementBefund = ({String? adresse, String satz});
+
+/// Die Regeln für ein Element in fester Reihenfolge, geprüft ohne den Kopf
+/// der App. Die einzige Quelle: [elementFehler] (Schreiben) und die Prüfung
+/// von Entwürfen (`lernsituation_pruefen`) bilden daraus je ihren Wortlaut.
+List<ElementBefund> elementBefunde(String text) {
   final t = ohneKopf(text);
   final code = _code(t);
-  final aus = <String>[];
+  final aus = <ElementBefund>[];
   void wenn(String muster, String satz, {bool gross = false, bool nurCode = false}) {
-    if (RegExp(muster, caseSensitive: gross).hasMatch(nurCode ? code : t)) aus.add(satz);
+    if (RegExp(muster, caseSensitive: gross).hasMatch(nurCode ? code : t)) aus.add((adresse: null, satz: satz));
   }
 
   // Adressen in Attributen, CSS und Zeichenketten. Namensräume des W3C
@@ -158,12 +164,13 @@ List<String> elementFehler(String text) {
       .allMatches(t)) {
     final adresse = m.group(1)!;
     if (RegExp(r'^(?:https?:)?//www\.w3\.org/', caseSensitive: false).hasMatch(adresse)) continue;
-    aus.add('Adresse „${kurz(adresse, 60)}": Ein Element lädt nichts und verweist nirgendwohin -- Bilder als SVG '
-        'im Element, Verweise in den Text der Seite.');
+    aus.add((adresse: adresse, satz: ''));
     break;
   }
   for (final (muster, was) in netzSchnittstellen) {
-    if (muster.hasMatch(code)) aus.add('Im Code steht $was: Ein Element lädt und sendet nichts.');
+    if (muster.hasMatch(code)) {
+      aus.add((adresse: null, satz: 'Im Code steht $was: Ein Element lädt und sendet nichts.'));
+    }
   }
   wenn(r'\b(?:localStorage|sessionStorage|indexedDB)\b|document\s*\.\s*cookie',
       'Speichern im Browser: Ein Element merkt sich nichts, und der Rahmen sperrt es.', gross: true, nurCode: true);
@@ -176,35 +183,76 @@ List<String> elementFehler(String text) {
   return aus;
 }
 
-/// Stellen im Text eines Editorfelds, an denen Code läuft: `<script>`,
-/// Ereignis-Attribute (onclick …), `javascript:`-Adressen und `srcdoc`. Jede
-/// Stelle als voller Text, damit [skripteImTextPruefen] alte von neuen
-/// unterscheiden kann.
-List<String> skriptstellen(String html) {
+/// Was in einem Element nicht geht, je als Satz -- geprüft ohne den Kopf der
+/// App. Leer: in Ordnung.
+List<String> elementFehler(String text) => [
+      for (final b in elementBefunde(text))
+        b.adresse == null
+            ? b.satz
+            : 'Adresse „${kurz(b.adresse!, 60)}": Ein Element lädt nichts und verweist nirgendwohin -- Bilder als SVG '
+                'im Element, Verweise in den Text der Seite.',
+    ];
+
+/// Wie Code an einer Stelle läuft.
+enum SkriptArt { skript, ereignis, srcdoc, javascriptAdresse, komprimiert }
+
+/// Eine Stelle, an der Code läuft: Tag, Attribut und Wert (bei `skript` der
+/// Inhalt, ohne Attribut).
+typedef Skriptstelle = ({SkriptArt art, String tag, String attribut, String wert});
+
+/// Ob das Attribut [k] (klein geschrieben) mit dem Wert [w] Code auslöst:
+/// Ereignis-Attribut (auch per SVG-Animation gesetzt: attributeName="on…"),
+/// `srcdoc` oder eine `javascript:`-Adresse. Die einzige Regel dafür, für
+/// Felder ([skriptstellen]) wie für Entwürfe (`lernsituation_pruefen`).
+SkriptArt? skriptArtVonAttribut(String k, String w) {
+  if (k.startsWith('on') || (k == 'attributename' && w.trim().toLowerCase().startsWith('on'))) {
+    return SkriptArt.ereignis;
+  }
+  if (k == 'srcdoc') return SkriptArt.srcdoc;
+  if (w.replaceAll(RegExp(r'[\s\x00-\x1f]'), '').toLowerCase().startsWith('javascript:')) {
+    return SkriptArt.javascriptAdresse;
+  }
+  return null;
+}
+
+/// Der Name des Ereignisses, das ein Attribut auslöst: das Attribut selbst,
+/// bei attributeName="on…" der Wert.
+String ereignisName(String k, String w) => k.startsWith('on') ? k : w.trim();
+
+/// Die Stellen, an denen in [html] Code läuft: `<script>`, Ereignis-Attribute,
+/// `javascript:`-Adressen und `srcdoc`.
+List<Skriptstelle> skriptstellenGenau(String html) {
   if (!RegExp(r'''script|\bon[a-z]+\s*=|srcdoc|attributename\s*=\s*["']?\s*on''', caseSensitive: false)
       .hasMatch(html)) {
     return const [];
   }
-  final aus = <String>[];
+  final aus = <Skriptstelle>[];
   // Der Code einer STACK-Zeichnung ist kein HTML; ein „a<b" darin hielte der
   // Parser für einen Tag (stack_skripte.dart prüft ihn eigens).
   for (final e in html_parser.parseFragment(ohneJsxgraphCode(html)).querySelectorAll('*')) {
     final tag = e.localName ?? '';
-    if (tag == 'script') aus.add('<script>${e.text}</script>');
+    if (tag == 'script') aus.add((art: SkriptArt.skript, tag: tag, attribut: '', wert: e.text));
     for (final a in e.attributes.entries) {
       final k = '${a.key}'.toLowerCase(), w = a.value;
-      // attributeName="on…": eine SVG-Animation, die ein Ereignis-Attribut setzt.
-      if (k.startsWith('on') || (k == 'attributename' && w.trim().toLowerCase().startsWith('on'))) {
-        aus.add('<$tag $k="$w">');
-      } else if (k == 'srcdoc') {
-        aus.add('<$tag srcdoc="$w">');
-      } else if (w.replaceAll(RegExp(r'[\s\x00-\x1f]'), '').toLowerCase().startsWith('javascript:')) {
-        aus.add('<$tag $k="$w">');
-      }
+      final art = skriptArtVonAttribut(k, w);
+      if (art != null) aus.add((art: art, tag: tag, attribut: k, wert: w));
     }
   }
   return aus;
 }
+
+/// Eine Stelle als voller Text, damit [skripteImTextPruefen] alte von neuen
+/// unterscheiden kann.
+String skriptstelleText(Skriptstelle s) => switch (s.art) {
+      SkriptArt.skript => '<script>${s.wert}</script>',
+      SkriptArt.srcdoc => '<${s.tag} srcdoc="${s.wert}">',
+      SkriptArt.komprimiert => 'komprimierte SVG, die sich nicht entpacken lässt',
+      SkriptArt.ereignis || SkriptArt.javascriptAdresse => '<${s.tag} ${s.attribut}="${s.wert}">',
+    };
+
+/// Stellen im Text eines Editorfelds, an denen Code läuft ([skriptstellenGenau]),
+/// je als voller Text.
+List<String> skriptstellen(String html) => [for (final s in skriptstellenGenau(html)) skriptstelleText(s)];
 
 /// Ein Rahmen, der eine HTML-Datei des Felds einbindet.
 typedef ElementRahmen = ({String datei, bool abgeschottet, String markup});
@@ -360,20 +408,25 @@ void elementeVorbereiten(String quelle, Map<String, String> felder, String kopf,
 /// Herkunft von Moodle liefe.
 final RegExp _dokument = RegExp(r'\.(?:x?html?|xht|shtml|svgz?|xml|xslt?)$', caseSensitive: false);
 
-/// Die Stellen mit Code ([skriptstellen]) in einer Datei, die der Browser als
-/// Dokument öffnet; bei anderen Dateien leer.
-List<String> codeInDatei(String name, List<int> bytes) {
+/// Die Stellen mit Code ([skriptstellenGenau]) in einer Datei, die der
+/// Browser als Dokument öffnet; bei anderen Dateien leer.
+List<Skriptstelle> stellenInDatei(String name, List<int> bytes) {
   if (!_dokument.hasMatch(name)) return const [];
   var b = bytes;
   if (name.toLowerCase().endsWith('.svgz')) {
     try {
       b = gzip.decode(bytes);
     } on FormatException {
-      return const ['komprimierte SVG, die sich nicht entpacken lässt'];
+      return const [(art: SkriptArt.komprimiert, tag: '', attribut: '', wert: '')];
     }
   }
-  return skriptstellen(utf8.decode(b, allowMalformed: true));
+  return skriptstellenGenau(utf8.decode(b, allowMalformed: true));
 }
+
+/// [stellenInDatei], je als voller Text.
+List<String> codeInDatei(String name, List<int> bytes) => [
+      for (final s in stellenInDatei(name, bytes)) skriptstelleText(s),
+    ];
 
 /// Bricht ab, wenn eine Datei, die hochgeladen werden soll, Code enthält --
 /// bevor etwas an Moodle geht. [dateien]: Pfad für die Meldung (dateien/…,

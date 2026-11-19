@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Sammelspeichern: Wurde ein Ordner während der Freigabe neu gelesen, wird keine Seite des Stapels geschrieben.
 - Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
 - Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.
 - Fragen: Fragen lassen sich in eine andere Kategorie des Kurses verschieben.

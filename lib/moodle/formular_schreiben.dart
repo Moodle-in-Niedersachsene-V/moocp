@@ -1679,15 +1679,7 @@ Future<(String, bool)> aenderungSchreiben(
 /// Schreibt eine freigegebene Änderung -- mit frischem Formular, denn die
 /// Freigabe kann gedauert haben; der Stand wird dabei noch einmal geprüft --
 /// und liest zurück. Gibt den Bericht und das Ergebnis der Rückleseprobe.
-Future<(String, bool)> _schreiben(
-  MoodleZugang moodle,
-  Aenderung a,
-  String arbeitsordner,
-) => ordnerSperre(
-  ordnerSchluessel(a.ziel, arbeitsordner),
-  () => _schreibenOhneSperre(moodle, a, arbeitsordner),
-);
-
+/// Innerhalb der [ordnerSperre] des Ordners aufrufen.
 Future<(String, bool)> _schreibenOhneSperre(
   MoodleZugang moodle,
   Aenderung a,
@@ -2280,7 +2272,10 @@ Future<String> _ordnerAbdruck(String ordner) async {
 /// Änderung eine neue Version ist.
 ///
 /// Jeder Stand wird vor der Freigabe gegen Moodle geprüft; stimmt einer
-/// nicht, wird nichts gespeichert. Danach wird der Reihe nach geschrieben und
+/// nicht, wird nichts gespeichert. Wie bei [aendern] liegt die Sperre jedes
+/// Ordners nur um sein Vorbereiten samt Abdruck und um sein Schreiben, nicht
+/// um die Freigabe; wurde ein Ordner währenddessen neu gelesen, wird nichts
+/// des Stapels geschrieben (alle Abdrücke vor dem ersten Schreiben). Danach wird der Reihe nach geschrieben und
 /// zurückgelesen. Beim ersten Fehler oder verified: false hört es auf, und
 /// die Antwort sagt genau, was gespeichert ist und was nicht -- ein halb
 /// gespeicherter Stapel, den niemand bemerkt, wäre schlimmer als ein Abbruch.
@@ -2303,6 +2298,7 @@ Future<String> aendernMehrere(
   if (ordner.isEmpty) throw MoodleFehler('Keine Ordner angegeben.');
   const nichts = 'Nichts gespeichert.';
   final alle = <Aenderung>[];
+  final abdruecke = <String>[];
   final unveraendert = <String>[];
   final ziele = <String>{};
   for (final o in ordner) {
@@ -2317,8 +2313,21 @@ Future<String> aendernMehrere(
       throw MoodleFehler('$o steht doppelt in der Liste. $nichts');
     }
     final Aenderung? a;
+    final String abdruck;
     try {
-      a = await _vorbereiten(moodle, ordner: o, arbeitsordner: arbeitsordner);
+      // Wie bei aendern: Vorbereiten und Abdruck unter der Sperre des
+      // Ordners, die Freigabe danach ohne sie.
+      (a, abdruck) = await ordnerSperre(
+        ordnerSchluessel(ziel, arbeitsordner),
+        () async {
+          final a = await _vorbereiten(
+            moodle,
+            ordner: o,
+            arbeitsordner: arbeitsordner,
+          );
+          return (a, a == null ? '' : await _ordnerAbdruck(a.quelle));
+        },
+      );
     } on MoodleFehler catch (x) {
       throw MoodleFehler('$o: ${x.meldung} $nichts');
     }
@@ -2326,6 +2335,7 @@ Future<String> aendernMehrere(
       unveraendert.add(o);
     } else {
       alle.add(a);
+      abdruecke.add(abdruck);
     }
   }
   if (alle.isEmpty) {
@@ -2393,35 +2403,66 @@ Future<String> aendernMehrere(
         '${freigaben.frist.inMinutes} Minuten freigegeben. Die Ordner sind unverändert.';
   }
 
+  // Vor dem ersten Schreiben alle Ordner prüfen: Wurde einer während der
+  // Freigabe neu gelesen, gibt es seine freigegebene Änderung nicht mehr, und
+  // der Stapel schreibt gar nichts, statt auf halbem Weg zu halten.
+  final neuGelesen = <String>[];
+  for (var i = 0; i < alle.length; i++) {
+    final a = alle[i];
+    final gleich = await ordnerSperre(
+      ordnerSchluessel(a.ziel, arbeitsordner),
+      () async => await _ordnerAbdruck(a.quelle) == abdruecke[i],
+    );
+    if (!gleich) neuGelesen.add(a.ordner);
+  }
+  if (neuGelesen.isNotEmpty) {
+    return 'Nicht gespeichert: ${neuGelesen.length == 1 ? "Der Ordner ${neuGelesen.single} wurde" : "Die Ordner ${neuGelesen.join(", ")} wurden"} '
+        'während der Freigabe neu gelesen oder verändert; die freigegebene Änderung gibt es dort nicht '
+        'mehr. Die Ordner und Moodle sind unverändert. Neu lesen und die Änderung noch einmal machen.';
+  }
+
   final berichte = <String>[];
   for (var i = 0; i < alle.length; i++) {
     final a = alle[i];
     String? abbruch;
     try {
-      (String, bool) ergebnis;
       var uebergeben = false;
-      try {
-        ergebnis = await _schreiben(moodle, a, arbeitsordner);
-      } on SchutzPruefung catch (e) {
-        // Der Schutzdienst prüft jede Anfrage für sich: Die übrigen Seiten
-        // gehen meist durch, nur diese braucht die Lehrkraft. Zeigt Moodle
-        // danach ihren Stand, geht es weiter, sonst Abbruch.
-        ergebnis = await ordnerSperre(
-          ordnerSchluessel(a.ziel, arbeitsordner),
-          () => _uebergeben(
-            moodle,
-            freigaben,
-            a,
-            arbeitsordner,
-            e,
-            stelle: 'Seite ${i + 1} von ${alle.length}',
-          ),
-        );
-        uebergeben = true;
+      var geaendert = false;
+      // Die Sperre des Ordners hält Vergleich, Schreiben und eine Übergabe an
+      // die Lehrkraft; der Abdruck gilt für diese Seite noch einmal unter ihr.
+      final (text, ok) = await ordnerSperre(
+        ordnerSchluessel(a.ziel, arbeitsordner),
+        () async {
+          if (await _ordnerAbdruck(a.quelle) != abdruecke[i]) {
+            geaendert = true;
+            return ('', false);
+          }
+          try {
+            return await _schreibenOhneSperre(moodle, a, arbeitsordner);
+          } on SchutzPruefung catch (e) {
+            // Der Schutzdienst prüft jede Anfrage für sich: Die übrigen Seiten
+            // gehen meist durch, nur diese braucht die Lehrkraft. Zeigt Moodle
+            // danach ihren Stand, geht es weiter, sonst Abbruch.
+            uebergeben = true;
+            return _uebergeben(
+              moodle,
+              freigaben,
+              a,
+              arbeitsordner,
+              e,
+              stelle: 'Seite ${i + 1} von ${alle.length}',
+            );
+          }
+        },
+      );
+      if (geaendert) {
+        abbruch =
+            '${a.kopf(mitKurs: false)}: Der Ordner wurde während des Schreibens neu gelesen oder '
+            'verändert, nicht geschrieben.';
+      } else {
+        berichte.add(text);
       }
-      final (text, ok) = ergebnis;
-      berichte.add(text);
-      if (!ok) {
+      if (!ok && !geaendert) {
         abbruch = uebergeben
             ? '${a.kopf(mitKurs: false)}: nicht im Browser gespeichert (oben).'
             : '${a.kopf(mitKurs: false)}: nicht verifiziert; siehe Befund oben.';

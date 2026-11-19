@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
 - Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
 - Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.
 - Fragen: Jeder Fragetyp, den Ihr Moodle kennt, lässt sich anlegen, wenn er die Prüfung besteht; die KI liest und schreibt dazu Fragetyp-Notizen.

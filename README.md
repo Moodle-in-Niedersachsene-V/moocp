@@ -748,6 +748,29 @@ Die Zwischenablage bekommt bei der Übergabe an die Lehrkraft nur den Text, nich
 
 Die Skripte `tool/neustart.sh`, `tool/mcp_aufruf.sh` und `tool/linux_bau.sh` / `tool/linux_start.sh` erkennen Linux über `uname`.
 
+### Bauen mit GitHub Actions
+
+`Desktop builds` baut den gepushten Stand eines Zweigs auf GitHub. Die Zielsysteme werden ausdrücklich gewählt: `linux`, `windows`, `macos`, eine kommagetrennte Auswahl oder `all`. Linux und Windows sind x64, macOS ist arm64. Dafür reichen auf dem anfordernden Rechner Git, Python ab 3.12 und angemeldetes GitHub CLI (`gh`); Flutter und die Zielplattform müssen dort nicht installiert sein.
+
+Aus einem sauberen eigenen Zweig:
+
+```bash
+python3 tool/ci_bau.py linux
+python3 tool/ci_bau.py linux,windows
+python3 tool/ci_bau.py all
+```
+
+Der Client erzeugt einen leeren Auslöse-Commit und pusht nur den aktuellen Zweig nach `origin`. Auf `main`, `master` oder ohne ausgecheckten Zweig bricht er ab. Die Commit-Marker `[ci:linux]`, `[ci:windows]` und `[ci:macos]` wählen dieselben Ziele auch bei einem normalen Push; ohne CI-Marker startet kein Bau. `--task tests` fordert nur Analyse und vollständige Tests an, `--task builds` nur Release-Bundles. Die Vorgabe `all` prüft und baut. Im Actions-Dialog lässt sich die Auswahl ebenfalls anfordern, sobald der Workflow im Hauptzweig verfügbar ist. Jeder Auftrag läuft unabhängig; ein weiterer Bau bricht ihn nicht ab.
+
+Der Client gibt den Commit und den Befehl zum Finden des Laufs aus. Nach erfolgreichem Abschluss lädt er nur Artefakte genau dieses Commits und Workflows herunter; fehlgeschlagene, abgebrochene oder noch laufende Aufträge werden abgewiesen:
+
+```bash
+python3 tool/ci_bau.py linux --download RUN_ID --commit COMMIT_SHA
+python3 tool/ci_bau.py linux --download RUN_ID --commit COMMIT_SHA --install-linux
+```
+
+Die Archive liegen unter `build/ci-downloads/<Commit>/<Plattform>/` (`--output` wählt einen anderen Ordner) und bleiben sieben Tage auf GitHub verfügbar. `--install-linux` entpackt das Linux-Archiv und verwendet den normalen App-Installer für `~/.local/opt/moocp`, einschließlich Menüeintrag. Dazu braucht es eine grafische Sitzung. Er beendet keine laufende App: Läuft sie aus dem Installationsziel, muss sie zuvor geschlossen werden; eine App aus einem anderen Ordner kann weiterlaufen. Einstellungen und Anmeldedaten bleiben erhalten. `build-commit.txt` im Installationsordner nennt den installierten Commit. Erst der nächste Start vom Menü verwendet die neue Installation. Builds erzeugen keine Tags oder Releases und enthalten weder Testzugänge noch Profile; Live-Tests gegen Moodle bleiben gesondert erforderlich.
+
 ### Bildschirmfotos
 
 `bildschirmfoto` rendert mit Microsoft Edge, sonst Google Chrome, ohne Fenster und steuert ihn über das DevTools-Protokoll; ein Paket braucht es dafür nicht. Jede Anfrage des Browsers hält die App an, und zwar auf der Ebene des Browsers, nicht der Seite: Abgeschottete Rahmen wie die Zeichnungen in STACK-Fragen laufen als eigene Ziele, deren Anfragen sonst direkt ins Netz gingen. Sie stellt sie selbst – geprüft gegen Sperrliste und eine eigene, enge Liste (`lib/moodle/browserliste.dart`) und mit Eintrag im Protokoll; der Browser bekommt das Sitzungscookie nie und lädt als Seite nur die eine, die aufgenommen wird, auch nicht in einem eingebetteten Rahmen. Nur MathJax lädt er selbst, von der Adresse, die die Seite dafür einstellt. Interaktive Elemente lädt er als Rahmen, ebenfalls über die App; Fehler in ihrem Skript meldet ihr Kopf per `postMessage` an die Seite, wo die App sie einsammelt und in der Antwort nennt. Aufgenommen wird nur der Inhalt selbst, also was auch die Textwerkzeuge liefern; ein Wiki nur, wenn es gemeinsam ist und nicht im Gruppenmodus steht. Mit `druck: true` wird jede Seite der Druckaufbereitung ein Bild, ohne sie der Inhalt mit den Druck-Stylesheets. Jeder Aufruf braucht einen Grund (`grund`), der im Freigabedialog über dem Bild steht. Das Ansehen hat dieselben Nebenwirkungen wie im Browser: Moodle protokolliert den Aufruf unter dem eigenen Konto, und die Fragenvorschau legt einen Vorschauversuch an. Freigegebene Bilder legt die App als PNG in den Arbeitsordner; die Antwort nennt die Pfade. Beim Entwickeln ersetzt das Werkzeug Bildschirmfotos von Hand: Claude sieht sich Messungen im Testkurs selbst an.

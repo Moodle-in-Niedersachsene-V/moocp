@@ -1335,6 +1335,7 @@ String _was(Formularziel z, Formular f) => switch (z.art) {
   Zielart.abschnitt => 'Abschnitt',
   Zielart.buchkapitel => 'Buchkapitel',
   Zielart.frage => 'Frage (${f.modul ?? "?"})',
+  Zielart.kategorie => 'Kategorie',
 };
 
 /// Eine vorbereitete Änderung an einem gelesenen Ordner: gegen den Stand in
@@ -1399,7 +1400,7 @@ class Aenderung {
   int? get cmid => switch (ziel.art) {
     Zielart.aktivitaet => ziel.id,
     Zielart.buchkapitel => ziel.cmid,
-    Zielart.abschnitt || Zielart.frage => null,
+    Zielart.abschnitt || Zielart.frage || Zielart.kategorie => null,
   };
 
   String kopf({bool mitKurs = true}) =>
@@ -2349,7 +2350,7 @@ Future<String> aendernMehrere(
     Zielart.aktivitaet => oben(k.nachCmid[a.ziel.id]?.abschnittId),
     Zielart.abschnitt => oben(a.ziel.id),
     Zielart.buchkapitel => oben(k.nachCmid[a.ziel.cmid]?.abschnittId),
-    Zielart.frage => null,
+    Zielart.frage || Zielart.kategorie => null,
   };
   final abschnitte = {for (final a in alle) abschnittVon(a)};
   if (abschnitte.length != 1 || abschnitte.single == null) {

@@ -21,7 +21,7 @@ diesen.
 | Wofür | Werkzeuge |
 |---|---|
 | Sammlungen | `fragensammlungen`, `fragetypen`; anlegen über `aktivitaet_anlegen` (Typ `qbank`) |
-| Kategorien | `kategorie_anlegen` — die Gliederung *innerhalb* einer Sammlung |
+| Kategorien | `kategorie_anlegen` — die Gliederung *innerhalb* einer Sammlung; `kategorie_aendern` benennt um und verschiebt (auch mit Unterkategorien in eine andere Sammlung) |
 | Fragen lesen | `fragen_lesen`, `frage_lesen` |
 | Fragen anlegen | `fragetyp_notiz_lesen`, dann `fragen_importieren`, dazu die Bauhilfen `stack_xml`, `coderunner_xml` |
 | Fragen ändern | `fragen_lesen`, XML bearbeiten, `fragen_version_importieren` (neue Version, Verlauf bleibt); kleine Änderungen auch `frage_lesen`, dann `aendern`; Typwechsel und Instanzen ohne das Plugin: `frage_ersetzen` |
@@ -543,7 +543,7 @@ Unterscheidung ist folgenreich:
 
 Frag im Zweifel, wohin eine neue Frage soll, oder leg sie in die geteilte
 Sammlung und sag es dazu. Leg sie gleich in die richtige Kategorie: Zwischen
-Kategorien verschieben kann die App nicht; Fragen zwischen Kategorien schon (`fragen_verschieben`, `references/sammlungen.md`).
+Kategorien benennt `kategorie_aendern` um und verschiebt sie mit allem darin; Fragen zwischen Kategorien verschiebt `fragen_verschieben` (beide: `references/sammlungen.md`).
 
 ## Fragen lesen
 

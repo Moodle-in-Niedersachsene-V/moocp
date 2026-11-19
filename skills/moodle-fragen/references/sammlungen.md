@@ -65,6 +65,16 @@ kategorie_anlegen(sammlung, name: "Lernfeld 3 – Schutzmaßnahmen",
 Ohne `eltern` kommt sie auf die oberste Ebene der Sammlung. Die Antwort nennt
 die neue id — die brauchst du für den Import und für Zufallsfragen.
 
+**Umbenennen und verschieben** (`kategorie_aendern`): Erst der Plan im Chat — welche Kategorie (`fragen_lesen`: id und Name), neuer Name, neuer Elternteil und, bei einem Wechsel der Sammlung, welche; die Lehrkraft sagt Ja. Nichts wird gelöscht, Unterkategorien und Fragen ziehen mit.
+
+```
+kategorie_aendern(kurs, sammlung, kategorie: <id>, name: "<jetziger Name>",
+                  neuer_name: "…" (optional),
+                  ziel_sammlung: <cmid> (optional), ziel_eltern: <id oder Name> (optional))
+```
+
+Mit `ziel_sammlung` ohne `ziel_eltern` kommt die Kategorie auf die oberste Ebene dieser Sammlung. Das Werkzeug bricht ab, bevor etwas geschieht, bei der obersten Kategorie, einem Ziel in der eigenen Teilstruktur, dem einzigen Kind der obersten Ebene (das geht nur umzubenennen), einem gleichen Namen unter dem Ziel und einer Sachnummer, die im Ziel schon vergeben ist; sag der Lehrkraft den Grund und schlag eine Lösung vor. Hängt ein Test mit Zufallsfragen an einer der Kategorien, sieh vorher mit `test_lesen` nach und sag es: Ob der Zufallsplatz beim Verschieben mitzieht, prüft die App nicht (die Antwort sagt „nicht geprüft“). `verified: true` genügt; lies nicht selbst nach.
+
 **Wann eine Kategorie etwas trägt:** wenn Zufallsfragen aus ihr ziehen sollen — dann je Teilthema eine, damit ein Test „zwei Fragen zu Tagging, zwei zu Trunks" ziehen kann —, und wenn Übungsfragen und Fragen zur Leistungsfeststellung getrennt bleiben sollen, damit niemand die Klassenarbeit aus der Übung kennt. Für eine Handvoll Fragen ohne Zufall braucht es keine; eine Kategorie je Frage oder je Fragetyp gliedert nichts.
 
 ## Fragen thematisch sortieren

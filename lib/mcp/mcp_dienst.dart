@@ -34,6 +34,7 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_kategorie.dart';
 import '../moodle/fragen_verschieben.dart';
 import '../moodle/fragen_version.dart';
 import '../moodle/fragetyp_notizen.dart';
@@ -2104,6 +2105,48 @@ class McpDienst implements AufrufKontext {
         name: _text(a, 'name'),
         eltern: a['eltern']?.toString(),
         beschreibung: a['beschreibung'] as String?,
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'kategorie_aendern',
+      titel: 'Kategorie umbenennen oder verschieben',
+      beschreibung:
+          'Benennt eine Fragenkategorie um und/oder verschiebt sie mit ihren Unterkategorien und Fragen unter eine '
+          'andere Kategorie desselben Kurses, auch in eine andere Fragensammlung. Nichts wird gelöscht. '
+          'Die Kategorie wird mit Sammlung, id und ihrem jetzigen Namen genannt (fragen_lesen); passt der Name nicht, '
+          'ist es die oberste Kategorie, soll sie unter sich selbst oder eine ihrer Unterkategorien, gibt es unter dem Ziel '
+          'schon eine gleich benannte Kategorie, ist sie das einzige Kind der obersten Ebene (verschieben geht dann nicht) '
+          'oder ist eine Sachnummer im Ziel vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Ohne ziel_eltern '
+          'kommt die Kategorie auf die oberste Ebene der Zielsammlung. Die App fragt in einem Dialog (Stufe „mittel“ und '
+          '„alle“). verified nur, wenn Name, Elternteil und Unterkategorien nach dem Zurücklesen stimmen; Zufallsplätze '
+          'und feste Fragen in Tests, Dateien der Fragen und die Reihenfolge sind „nicht geprüft“.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.integer(description: 'id der Kategorie (aus fragen_lesen)'),
+        'name': JsonSchema.string(description: 'Der jetzige Name der Kategorie, wie er in Moodle steht'),
+        'neuer_name': JsonSchema.string(description: 'Optional: neuer Name'),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'Optional: cmid der Sammlung, in die verschoben wird (gleicher Kurs; ohne Angabe die eigene)',
+        ),
+        'ziel_eltern': JsonSchema.string(
+          description: 'Optional: Kategorie-id oder Name in der Zielsammlung, unter die sie kommt; mit ziel_sammlung '
+              'ohne ziel_eltern kommt sie auf die oberste Ebene',
+        ),
+      },
+      pflicht: ['kurs', 'sammlung', 'kategorie', 'name'],
+      ausfuehren: (a) => kategorieAendern(
+        moodle,
+        freigaben,
+        kurs: _zahl(a, 'kurs'),
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: _zahl(a, 'kategorie'),
+        name: _text(a, 'name'),
+        neuerName: a['neuer_name'] as String?,
+        zielSammlung: a['ziel_sammlung'] == null ? null : _zahl(a, 'ziel_sammlung'),
+        zielEltern: a['ziel_eltern']?.toString(),
       ),
     );
 

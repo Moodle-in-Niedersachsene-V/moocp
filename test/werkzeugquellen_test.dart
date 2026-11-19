@@ -60,6 +60,7 @@ const _eingebaut = [
   'fragetyp_notiz_lesen',
   'fragetyp_notiz_schreiben',
   'kategorie_anlegen',
+  'kategorie_aendern',
   'fragen_loeschen',
   'fragen_verschieben',
   'frage_ersetzen',

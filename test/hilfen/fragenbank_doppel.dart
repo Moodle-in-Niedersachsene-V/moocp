@@ -54,11 +54,54 @@ class FragenbankDoppel {
   /// Die Sammlungen, die die Übersicht des Kurses (`banks.php`) nennt: cmid -> Name.
   final Map<int, String> kursBanken = {12: 'ZZ Bank'};
 
-  /// Legt eine Kategorie in einer anderen Sammlung an (Kontext-id 60 + cmid).
-  void legeKategorieAn(int id, String name, {int bank = sammlung}) {
+  /// Legt eine Kategorie an (Kontext-id 60 + cmid, die erste Sammlung hat 55);
+  /// ohne [eltern] liegt sie unter der Top-Kategorie ihrer Sammlung.
+  void legeKategorieAn(int id, String name, {int bank = sammlung, int? eltern}) {
     kategorien[id] = name;
-    bankVon[id] = bank;
+    bankVon[id] = eltern == null ? bank : _bank(eltern);
+    if (eltern != null) this.eltern[id] = eltern;
   }
+
+  /// Elternkategorie je Kategorie; ohne Eintrag liegt sie unter der Top-Kategorie.
+  final Map<int, int> eltern = {};
+
+  /// Beschreibung und Sachnummer je Kategorie (roh, wie das Formular sie lädt).
+  final Map<int, String> kategorieInfo = {};
+  final Map<int, String> kategorieIdnummer = {};
+
+  /// Die Top-Kategorie einer Sammlung (steht nicht in `kategorien`).
+  static int topId(int bank) => 900 + bank;
+  static bool istTop(int id) => id >= 900 && id < 1000;
+
+  /// Das Formular „rendert" die Beschreibung beim Speichern (format_text) und hängt `<p>` an.
+  bool infoRendert = false;
+
+  /// Der Export zeigt keine Top-Kategorie (dann ist sie nicht zu ermitteln).
+  bool exportOhneTop = false;
+
+  /// Der Dienst zum Verschieben von Kategorien antwortet mit einem Fehler / meldet Erfolg und ändert nichts.
+  bool kategorieVerschiebenAbgelehnt = false;
+  bool kategorieVerschiebenWirktNicht = false;
+
+  /// Das Formular nimmt einen neuen Namen nicht an (meldet aber Erfolg).
+  bool kategorieUmbenennenWirktNicht = false;
+
+  /// Wird aufgerufen, kurz bevor ein Dienst eine Kategorie ändert.
+  void Function()? beiKategorieAenderung;
+
+  /// Die Argumente jedes Aufrufs von qbank_managecategories_move_category und
+  /// die abgesendeten Felder jedes Speicherns des Kategorieformulars.
+  final List<Map<String, dynamic>> kategorieVerschiebeAufrufe = [];
+  final List<Map<String, String>> kategorieFormulare = [];
+
+  bool _unter(int kat, int vorfahr) {
+    for (int? k = kat; k != null; k = eltern[k]) {
+      if (k == vorfahr) return true;
+    }
+    return false;
+  }
+
+  int _eintraegeIn(int kat) => eintraege.where((e) => e.kategorie == kat && e.versionen.isNotEmpty).length;
 
   int _bank(int kategorie) => bankVon[kategorie] ?? sammlung;
   static int _kontext(int bank) => bank == sammlung ? 55 : 60 + bank;
@@ -245,7 +288,7 @@ class FragenbankDoppel {
       if (r.method == 'GET') {
         return _text(r, _seite('''<form class="mform" method="post" action="/question/bank/exportquestions/export.php?cmid=$cmid">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="_qf__qbank_exportquestions_export_form" value="1">
-<select name="category">${_optionen(cmid)}</select><select name="format"><option value="xml" selected>xml</option></select>
+<select name="category">${_optionen(cmid, top: !exportOhneTop)}</select><select name="format"><option value="xml" selected>xml</option></select>
 <input type="hidden" name="cattofile" value="1"><input type="hidden" name="contexttofile" value="1"></form>'''));
       }
       final f = Uri.splitQueryString(koerper);
@@ -275,6 +318,14 @@ class FragenbankDoppel {
         'error': true,
         'exception': {'errorcode': 'cannotfindcate', 'message': 'Abgelehnt'}
       };
+      if (aufruf['methodname'] == 'core_form_dynamic_form') {
+        r.response.write(jsonEncode([_kategorieFormular((aufruf['args'] as Map).cast<String, dynamic>(), fehler)]));
+        return r.response.close();
+      }
+      if (aufruf['methodname'] == 'qbank_managecategories_move_category') {
+        r.response.write(jsonEncode([_kategorieVerschieben((aufruf['args'] as Map).cast<String, dynamic>(), fehler)]));
+        return r.response.close();
+      }
       if (aufruf['methodname'] != 'core_question_move_questions') {
         r.response.write(jsonEncode([fehler]));
         return r.response.close();
@@ -406,12 +457,78 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
     return _text(r, 'nicht gefunden', status: 404);
   }
 
+  Map<String, dynamic> _kategorieFormular(Map<String, dynamic> a, Map<String, dynamic> fehler) {
+    final daten = Uri.splitQueryString('${a['formdata']}');
+    final id = int.tryParse(daten['categoryid'] ?? daten['id'] ?? '');
+    if (id == null || !kategorien.containsKey(id)) return fehler;
+    final bank = _bank(id);
+    if (daten.containsKey('name') && daten.containsKey('_qf__qbank_managecategories_form_question_category_edit_form')) {
+      beiKategorieAenderung?.call();
+      kategorieFormulare.add(daten);
+      if (!kategorieUmbenennenWirktNicht) kategorien[id] = daten['name']!;
+      final info = daten['info[text]'] ?? '';
+      kategorieInfo[id] = infoRendert && info.isNotEmpty && !info.startsWith('<p>') ? '<p>$info</p>' : info;
+      kategorieIdnummer[id] = daten['idnumber'] ?? '';
+      final parent = daten['parent'];
+      if (parent != null) {
+        final neu = int.parse(parent.split(',').first);
+        final alt = eltern[id] ?? topId(bank);
+        if (neu != alt && !istTop(neu) && !_unter(neu, id) && _bank(neu) == bank) eltern[id] = neu;
+        if (neu != alt && istTop(neu) && neu == topId(bank)) eltern.remove(id);
+      }
+      return {'error': false, 'data': {'submitted': true}};
+    }
+    final nurKind = eltern[id] == null && kategorien.keys.where((k) => eltern[k] == null && _bank(k) == bank).length == 1;
+    final optionen = StringBuffer('<option value="${topId(bank)},${_kontext(bank)}"${eltern[id] == null ? ' selected' : ''}>Top</option>');
+    for (final k in kategorien.keys.where((k) => _bank(k) == bank && !_unter(k, id))) {
+      optionen.write('<option value="$k,${_kontext(bank)}"${eltern[id] == k ? ' selected' : ''}>${kategorien[k]}</option>');
+    }
+    final html = '''<form class="mform" autocomplete="off"><input type="hidden" name="contextid" value="${_kontext(bank)}">
+<input type="hidden" name="cmid" value="$bank"><input type="hidden" name="courseid" value="0"><input type="hidden" name="id" value="$id">
+<input type="hidden" name="questioncount" value="${_eintraegeIn(id)}"><input type="hidden" name="sortorder" value="1">
+<input type="hidden" name="_qf__qbank_managecategories_form_question_category_edit_form" value="1">
+${nurKind ? '' : '<select name="parent">$optionen</select>'}
+<input type="text" name="name" value="${kategorien[id]}"><textarea name="info[text]">${kategorieInfo[id] ?? ''}</textarea>
+<input type="hidden" name="info[format]" value="1"><input type="text" name="idnumber" value="${kategorieIdnummer[id] ?? ''}"></form>''';
+    return {'error': false, 'data': {'html': html}};
+  }
+
+  Map<String, dynamic> _kategorieVerschieben(Map<String, dynamic> a, Map<String, dynamic> fehler) {
+    kategorieVerschiebeAufrufe.add(a);
+    final id = a['categoryid'] as int, ziel = a['targetparentid'] as int;
+    final zielBank = istTop(ziel) ? ziel - 900 : (kategorien.containsKey(ziel) ? _bank(ziel) : null);
+    if (kategorieVerschiebenAbgelehnt || !kategorien.containsKey(id) || zielBank == null) return fehler;
+    beiKategorieAenderung?.call();
+    if (!kategorieVerschiebenWirktNicht) {
+      for (final k in kategorien.keys.where((k) => _unter(k, id))) {
+        bankVon[k] = zielBank;
+      }
+      if (istTop(ziel)) {
+        eltern.remove(id);
+      } else {
+        eltern[id] = ziel;
+      }
+    }
+    return {'error': false, 'data': <Object?>[]};
+  }
+
   String _ausgeliefert(DoppelVersion v) => beimExport?.call(v.xml) ?? v.xml;
 
-  String _optionen(int cmid) => [
-        for (final k in kategorien.entries.where((k) => _bank(k.key) == cmid))
-          '<option value="${k.key},${_kontext(cmid)}">${k.value} (${eintraege.where((e) => e.kategorie == k.key && e.versionen.isNotEmpty).length})</option>'
-      ].join();
+  String _optionen(int cmid, {bool top = false}) {
+    final b = StringBuffer();
+    if (top) b.write('<option value="${topId(cmid)},${_kontext(cmid)}">Top für ZZ</option>');
+    void ast(int k, int tiefe) {
+      b.write('<option value="$k,${_kontext(cmid)}">${'\u00a0' * 3 * tiefe}${kategorien[k]} (${_eintraegeIn(k)})</option>');
+      for (final kind in kategorien.keys.where((x) => eltern[x] == k && _bank(x) == cmid)) {
+        ast(kind, tiefe + 1);
+      }
+    }
+
+    for (final k in kategorien.keys.where((k) => eltern[k] == null && _bank(k) == cmid)) {
+      ast(k, 0);
+    }
+    return b.toString();
+  }
 
   Future<void> _um(HttpRequest r, String ziel) async {
     r.response.redirect(Uri.parse(ziel), status: HttpStatus.seeOther);

@@ -1439,11 +1439,12 @@ Future<_Aenderung?> _vorbereiten(
   }
 
   if (MoodleZugang.optionsModule.containsKey(gespeicherteArt)) {
-    final bildTags = RegExp(r'<(?:img|iframe|video|audio|source)\b[^>]*>', caseSensitive: false);
+    String medien(String text) => html_parser.parseFragment(text)
+        .querySelectorAll('img, iframe, video, audio, source, picture, object, embed, svg')
+        .map((e) => e.outerHtml).join('\u0000');
     if (lokal.entries.any((e) =>
         (e.key != 'introeditor' && e.value != alt[e.key]) ||
-        bildTags.allMatches(e.value).map((m) => m[0]).join() !=
-          bildTags.allMatches(alt[e.key] ?? '').map((m) => m[0]).join())) {
+        medien(e.value) != medien(alt[e.key] ?? ''))) {
       throw MoodleFehler('${typName(gespeicherteArt)}: Nur Beschreibungstext und normale Optionen; Bilder und Dateien ändern wird nicht unterstützt. Nichts gespeichert.');
     }
   }

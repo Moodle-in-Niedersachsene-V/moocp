@@ -9,7 +9,7 @@ class McpTestClient {
   final http = HttpClient();
   int id = 0;
   String? session;
-  Future<Map> call(String method, [Map<String, Object?>? params]) async {
+  Future<Map> call(String method, [Map<String, Object?>? params, int? fehlercode]) async {
     final r = await http.postUrl(Uri.parse('http://127.0.0.1:$port/mcp'));
     r.headers
       ..set('Authorization', 'Bearer test')
@@ -29,6 +29,11 @@ class McpTestClient {
     final body = await utf8.decoder.bind(response).join();
     expect(response.statusCode, 200, reason: body);
     final decoded = jsonDecode(body) as Map;
+    if (fehlercode != null) {
+      final fehler = decoded['error'] as Map;
+      expect(fehler['code'], fehlercode, reason: body);
+      return fehler;
+    }
     expect(decoded['error'], isNull, reason: body);
     return decoded['result'] as Map;
   }

@@ -804,6 +804,8 @@ void main() {
     });
     expect(ergebnis, contains('bestätigt'));
     expect(ergebnis, contains('verified: true'));
+    expect(ergebnis, contains('Verknüpfungen der Karte ok'));
+    expect(ergebnis, isNot(contains('abweichend')));
     expect(links(moodle.karte)['p1'], moodle.seiteB.cmid);
     expect(kartenDialoge, 1);
     expect(moodle.restoreStarts, 0);
@@ -1708,6 +1710,9 @@ void main() {
       contains('verified: false'),
       reason: 'Nach dem Entkoppeln gibt es keinen belegten Zielnamen.',
     );
+    expect(kopieLink, contains('Rückleseprüfung:'));
+    expect(kopieLink, contains('Kartenzeichnung (SVG) abweichend'));
+    expect(kopieLink, contains('Formularfelder ok'));
     final kopierterStore =
         jsonDecode(kartenKopie.placestore!) as Map<String, dynamic>;
     expect(

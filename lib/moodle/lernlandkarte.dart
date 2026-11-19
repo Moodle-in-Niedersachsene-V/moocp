@@ -168,13 +168,16 @@ String? lernlandkarteRolle(Map karte, String id) {
   return null;
 }
 
-/// Bestehende Aufrufer und Tests: entfernt Ortsbeschriftungen für eine reine
-/// Darstellung. Die Schreibprüfung verwendet stattdessen den engeren Vergleich
+/// Entfernt Ortsbeschriftungen für eine reine Darstellung. Ohne [nurOrte]
+/// gehen alle weg; mit [nurOrte] nur die der genannten Orte (Kennungen wie in
+/// `placestore`), alle anderen Beschriftungen bleiben Teil des Vergleichs. Die
+/// Schreibprüfung verwendet stattdessen den engeren Vergleich
 /// [_gleicheSvgMitNeubeschriftungen].
-String? ohneOrtsbeschriftung(Object? svg) => svg is String
+String? ohneOrtsbeschriftung(Object? svg, {Set<String>? nurOrte}) =>
+    svg is String
     ? svg.replaceAllMapped(
-        RegExp(r'(<(?:title|text) id="(?:title|text)[^"]*"[^>]*>)[^<]*'),
-        (m) => m[1]!,
+        RegExp(r'(<(?:title|text) id="(title|text)([^"]*)"[^>]*>)[^<]*'),
+        (m) => nurOrte == null || nurOrte.contains(m[3]) ? m[1]! : m[0]!,
       )
     : null;
 

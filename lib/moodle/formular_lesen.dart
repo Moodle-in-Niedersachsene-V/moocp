@@ -204,6 +204,7 @@ class FormularGelesen {
     this.lernlandkarteTitel = const {},
     this.lernlandkarteZielstatus = const {},
     this.editorFormate = const {},
+    this.mehrdeutigeAuswahl = const [],
   });
   final Formularziel ziel;
   final List<Einstellung> einstellungen;
@@ -228,6 +229,9 @@ class FormularGelesen {
   final Map<int, OrtVerknuepfung> lernlandkarteZielstatus;
   final Map<String, String> editorFormate;
 
+  /// Auswahlfelder, deren Anzeigetext auf mehrere Optionen passt (Befund).
+  final List<String> mehrdeutigeAuswahl;
+
   String zusammenfassung() {
     final b = StringBuffer()
       ..writeln(
@@ -251,6 +255,13 @@ class FormularGelesen {
                   'Die Verweisprüfung erfasst nur Textfelder; Auswahlfelder werden nicht geprüft.'
             : 'Prüflücke: Typ „$modul" ist nicht schreibbar -- gelesen, nicht geändert (aendern lehnt ab). '
                   'Die Verweisprüfung erfasst nur Textfelder; Auswahlfelder werden nicht geprüft.',
+      );
+    }
+    if (mehrdeutigeAuswahl.isNotEmpty) {
+      b.writeln(
+        'Befund: Auswahlfeld mit mehrdeutigem Anzeigetext (mehrere Optionen mit '
+        'gleichem Namen, einstellungen.json zeigt nur den Text; aendern bricht ab): '
+        '${mehrdeutigeAuswahl.join(", ")}',
       );
     }
     if (fehlend.isNotEmpty) {
@@ -805,6 +816,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
     lernlandkarteTitel: titel,
     lernlandkarteZielstatus: lernlandkarteZielstatus,
     editorFormate: editorFormate,
+    mehrdeutigeAuswahl: mehrdeutigeAuswahlfelder(form),
   );
   await File(p.join(ziel0.path, 'uebersicht.json')).writeAsString(
     const JsonEncoder.withIndent('  ').convert({

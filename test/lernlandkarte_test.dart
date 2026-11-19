@@ -17,6 +17,7 @@ import 'package:moocp/moodle/formular_lesen.dart';
 import 'package:moocp/moodle/formular_schreiben.dart';
 import 'package:moocp/moodle/lernlandkarte.dart';
 import 'package:moocp/moodle/lernlandkarte_entwurf.dart';
+import 'package:moocp/moodle/lernlandkarte_verteilen.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -433,6 +434,62 @@ void main() {
     expect(ohneOrtsbeschriftung(nachher), ohneOrtsbeschriftung(vorher));
     expect(ohneOrtsbeschriftung(verschoben), isNot(ohneOrtsbeschriftung(vorher)));
     expect(ohneOrtsbeschriftung(null), isNull);
+  });
+
+  group('Kartenkopie: nur Neubeschriftung verknüpfter Orte wird toleriert', () {
+    Map<String, Object?> karte(
+      String svg, {
+      Object? ziel1 = 5,
+      Object? ziel2,
+    }) => {
+      'svgcode': svg,
+      'placestore': {
+        'places': [
+          {'id': 'p1', 'linkedActivity': ziel1},
+          {'id': 'p2', 'linkedActivity': ziel2},
+        ],
+      },
+    };
+    String svg({
+      String name1 = 'Quelle',
+      String name2 = 'Unverknüpft',
+      String cx = '200',
+      String form = 'circle',
+    }) =>
+        '<svg><$form id="p1" cx="$cx"/>'
+        '<title id="titlep1">$name1</title>'
+        '<text id="textp1">$name1</text>'
+        '<circle id="p2"/>'
+        '<title id="titlep2">$name2</title>'
+        '<text id="textp2">$name2</text></svg>';
+
+    test('Neubeschriftung eines verknüpften Orts ändert nichts', () {
+      expect(
+        gleicherKartenInhaltFuerTest(
+          karte(svg()),
+          karte(svg(name1: 'Ziel in anderem Kurs')),
+        ),
+        isTrue,
+      );
+    });
+
+    test('Beschriftung eines unverknüpften Orts zählt mit', () {
+      expect(
+        gleicherKartenInhaltFuerTest(karte(svg()), karte(svg(name2: 'Anders'))),
+        isFalse,
+      );
+    });
+
+    test('verschobener Ort oder geänderte Form werden erkannt', () {
+      expect(
+        gleicherKartenInhaltFuerTest(karte(svg()), karte(svg(cx: '300'))),
+        isFalse,
+      );
+      expect(
+        gleicherKartenInhaltFuerTest(karte(svg()), karte(svg(form: 'rect'))),
+        isFalse,
+      );
+    });
   });
 
   test('ungültiges placestore meldet nur Parserposition und Zeichensignatur', () {

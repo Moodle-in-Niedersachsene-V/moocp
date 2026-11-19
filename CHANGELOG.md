@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- KI-Werkzeuge einrichten: Der Dialog sagt bei jedem Werkzeug, wo die Verbindung wirkt, etwa in Claude Desktop nur im Reiter „Code".
 - Lesen: Ein abgebrochenes oder fehlgeschlagenes Lesen lässt den zuletzt gelesenen Stand im Arbeitsordner unverändert, statt einen halben zu hinterlassen.
 - Sammelspeichern: Wurde ein Ordner während der Freigabe neu gelesen, wird keine Seite des Stapels geschrieben.
 - Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.

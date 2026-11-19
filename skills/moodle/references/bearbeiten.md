@@ -102,13 +102,19 @@ Datum nach der Frist.
 Fristen an bestehenden Aufgaben zu ändern trifft Lernende unmittelbar; die
 Freigabe zeigt es, sag es trotzdem vorher im Chat.
 
-### Collabora (`collabora`) und Gruppenwahl (`choicegroup`)
+### Collabora (`collabora`)
 
-Bei bestehenden Collabora-Aktivitäten und Gruppenwahlen ändert `aendern` ausschließlich Gruppenmodus
+Bei bestehenden Collabora-Aktivitäten ändert `aendern` ausschließlich Gruppenmodus
 und Gruppierung. Lies die Aktivität frisch und verwende die angebotenen Optionen
 aus dem Formular; eine Gruppierungsnummer aus einem anderen Kurs ist kein Beleg.
 Texte, Dateien, Name, andere Einstellungen und unverändertes Neuspeichern bleiben
 gesperrt. Dokumentinhalte werden damit nicht bearbeitet. Meldet das Zurücklesen `verified: false` mit „übrige Felder unverändert“, hat Moodle beim Speichern noch etwas anderes verändert: Sag es der Lehrkraft und lies die Aktivität neu, statt es zu überspielen.
+
+### Gruppenwahl und Bildergalerie
+
+Bei bestehenden Gruppenwahlen (`choicegroup`) und Bildergalerien (`lightboxgallery`) kannst du Beschreibungstext und gemessene normale Optionen mit `aendern` bearbeiten. Lies zuerst frisch und nutze die angebotenen Optionen; die App prüft den Stand und liest jede Änderung zurück. Gruppenauswahl und individuelle Gruppenlimits bleiben unverändert. Ihre Änderung und das Anlegen beider Arten werden nicht unterstützt.
+
+Galeriebilder gehören nicht zum Beschreibungseditor. Ihr eigener Verwaltungsweg ist nicht unterstützt; versuche weder einen Upload als Beschreibung noch Dateiänderungen im gelesenen Ordner. Die App lehnt Bild- und Dateiänderungen vor dem Schreiben ab. Benenne diese Grenze der Lehrkraft nach A6, statt volle Galerieunterstützung zu behaupten.
 
 ### Gruppierungen nach der Wiederherstellung
 

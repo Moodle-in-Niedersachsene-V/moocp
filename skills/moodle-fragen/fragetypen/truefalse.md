@@ -6,7 +6,7 @@ Beweis: Import, Export und Vergleich sowie Vorschau auf der Testinstanz (Messung
 ```xml
 <question type="truefalse">
   <name><text>ZZTEST truefalse</text></name>
-  <questiontext format="html"><text><![CDATA[<p>Ein Fehlerstromschutzschalter schuetzt auch vor Kurzschluss.</p>]]></text></questiontext>
+  <questiontext format="html"><text><![CDATA[<p>Ein Fehlerstromschutzschalter schützt auch vor Kurzschluss.</p>]]></text></questiontext>
   <generalfeedback format="html"><text></text></generalfeedback>
   <defaultgrade>1.0000000</defaultgrade>
   <penalty>1.0000000</penalty>

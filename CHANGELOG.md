@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.13.0
+- Fragen: Jede neu angelegte Frage und jede eingespielte Version wird nach dem Speichern aus Moodle zurückgelesen und geprüft (Export, Bearbeitungsformular, Vorschau, einmal unverändert als Entwurf speichern); eine Frage, die durchfällt, bleibt nicht stehen.
+- Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.
+- Fragen: Jeder Fragetyp, den Ihr Moodle kennt, lässt sich anlegen, wenn er die Prüfung besteht; die KI liest und schreibt dazu Fragetyp-Notizen.
+- Speichern: Eine Sperre nach unklarem Ausgang heben Sie jetzt selbst in den Einstellungen auf.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
 - Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind.

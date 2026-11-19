@@ -6,7 +6,7 @@ Beweis: Import, Export und Vergleich sowie Vorschau auf der Testinstanz (Messung
 ```xml
 <question type="gapselect">
   <name><text>ZZTEST gapselect</text></name>
-  <questiontext format="html"><text><![CDATA[<p>Der [[1]] begrenzt den Strom, der [[2]] schuetzt vor Fehlerstroemen.</p>]]></text></questiontext>
+  <questiontext format="html"><text><![CDATA[<p>Der [[1]] begrenzt den Strom, der [[2]] schützt vor Fehlerstroemen.</p>]]></text></questiontext>
   <generalfeedback format="html"><text></text></generalfeedback>
   <defaultgrade>2.0000000</defaultgrade>
   <penalty>0.3333333</penalty>

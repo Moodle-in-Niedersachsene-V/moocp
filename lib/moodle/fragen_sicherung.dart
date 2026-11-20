@@ -88,7 +88,7 @@ Future<String> fragenSichern(String ordner, int sammlung, List<({int id, String 
 /// Die Sicherung einer ganzen Fragensammlung vor ihrem Löschen: eine Datei
 /// `sammlung-<cmid>-geloescht-<Zeitstempel>.xml` mit jeder Kategorie als
 /// `<question type="category">` und den Fragen darunter (aktuelle Version jeder
-/// Frage), damit sie mit fragen_importieren im Ganzen wieder einzuspielen ist.
+/// Frage). Die Fragen lassen sich mit fragen_importieren wieder einspielen.
 /// Verborgene Fragen liefert Moodles Export nicht, sie fehlen also.
 ///
 /// UNGEMESSEN: der Kategoriename im Format `$module$/top/<Pfad>` (so schreibt

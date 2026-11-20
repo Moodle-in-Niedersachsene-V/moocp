@@ -100,10 +100,12 @@ Future<String> exportieren(MoodleZugang moodle, int sammlung, Kategorie k) async
 typedef SammlungsKategorie = ({Kategorie kat, List<String> pfad, String? xml, int exportiert});
 
 /// Liest alle Kategorien einer Sammlung samt Export, für die Sicherung vor dem Löschen der ganzen
-/// Sammlung. Der Export liefert keine verborgenen Fragen (gemessen, siehe [exportieren]); die Zahl
-/// in [Kategorie.anzahl] zeigt, ob mehr in der Kategorie stehen. UNGEMESSEN: ob diese Zahl
-/// verborgene Fragen mitzählt; ein Unterschied wird deshalb nur als Hinweis gemeldet, nie als Beleg.
-/// Scheitert der Export einer nicht leeren Kategorie, bricht das Lesen ab.
+/// Sammlung. Eine Frage, die in einem Test benutzt und „gelöscht" wurde, ist in Moodle nur verborgen
+/// (auf Moodle 5.1 gemessen): Moodles Kategorieliste zählt sie nicht mit, und der Export der Kategorie
+/// liefert sie nicht. Eine Kategorie mit Zahl 0 wird deshalb nicht angefragt und gilt als leer; verborgene
+/// Fragen sind nie in der Sicherung. Nicht gemessen: was Moodle beim Löschen der Sammlung mit verborgenen
+/// Fragen und den Plätzen in Tests macht. Scheitert der Export einer Kategorie mit Zahl über 0 (etwa weil
+/// Moodle keinen Download nennt), bricht das Lesen ab; sie gilt nie stillschweigend als leer.
 Future<List<SammlungsKategorie>> sammlungExportieren(MoodleZugang moodle, int sammlung) async {
   final kats = await kategorienLesen(moodle, sammlung);
   final namen = <String>[];

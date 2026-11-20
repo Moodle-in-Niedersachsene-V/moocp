@@ -31,6 +31,11 @@ class DoppelPlatz {
   int frage;
   int seite;
   double punkte;
+
+  /// Fragensammlung (cmid), aus der der Platz kommt: bei einem festen Platz das Abzeichen der
+  /// geteilten Bank, bei einem Zufallsplatz der Link zur Bank; null: Bank des Tests selbst.
+  int? bank;
+  bool zufall = false;
 }
 
 class DoppelEintrag {
@@ -72,6 +77,10 @@ class FragenbankDoppel {
 
   /// Abschnitte der Kursstruktur: id -> Titel.
   final Map<int, String> kursAbschnitte = {4: 'Allgemein', 5: 'Thema 1'};
+
+  /// Unterabschnitte (mod_subsection): cmid der Aktivität -> id ihres delegierten Abschnitts, der in
+  /// [kursAbschnitte] stehen muss; die Aktivität steht in `kursAktivitaeten` mit Modul `subsection`.
+  final Map<int, int> unterabschnitte = {};
 
   /// Jeder Aufruf von core_courseformat_update_course: Aktion und ids.
   final List<({String aktion, List<int> ids})> kursAktionen = [];
@@ -145,7 +154,10 @@ class FragenbankDoppel {
     return false;
   }
 
-  int _eintraegeIn(int kat) => eintraege.where((e) => e.kategorie == kat && e.versionen.isNotEmpty).length;
+  /// Wie Moodles Kategorieliste: verborgene (in einem Test benutzte, „gelöschte") Fragen zählen nicht
+  /// (auf Moodle 5.1 gemessen).
+  int _eintraegeIn(int kat) =>
+      eintraege.where((e) => e.kategorie == kat && e.versionen.isNotEmpty && !versteckt.contains(e.neueste.id)).length;
 
   int _bank(int kategorie) => bankVon[kategorie] ?? sammlung;
   static int _kontext(int bank) => bank == sammlung ? 55 : 60 + bank;
@@ -174,6 +186,12 @@ class FragenbankDoppel {
 
   /// Löscht „alle Versionen", auch wenn nur eine gewählt war (Moodle ohne die erwartete Wirkung).
   bool loeschtAlles = false;
+
+  /// Kategorien, deren Export Moodle ohne Download beantwortet (Formular ohne Umleitung).
+  final Set<int> exportAbgelehnt = {};
+
+  /// Die Kategorien, die als Export angefordert wurden.
+  final List<int> exportAufrufe = [];
 
   /// Das Löschen wirkt nicht.
   bool loeschenWirktNicht = false;
@@ -351,6 +369,8 @@ class FragenbankDoppel {
       }
       final f = Uri.splitQueryString(koerper);
       final kat = f['category']!.split(',').first;
+      exportAufrufe.add(int.parse(kat));
+      if (exportAbgelehnt.contains(int.parse(kat))) return _text(r, _seite('<p>Export nicht möglich</p>'));
       return _um(r, '/pluginfile.php/${_kontext(_bank(int.parse(kat)))}/question/export/$kat/export.xml');
     }
     if (RegExp(r'^/pluginfile\.php/\d+/question/export/').hasMatch(pfad)) {
@@ -684,6 +704,10 @@ ${nurKind ? '' : '<select name="parent">$optionen</select>'}
               'number': kursAbschnitte.keys.toList().indexOf(a.key),
               'title': a.value,
               'visible': true,
+              if (unterabschnitte.containsValue(a.key)) ...{
+                'component': 'mod_subsection',
+                'parentsectionid': '${kursAktivitaeten[unterabschnitte.entries.firstWhere((e) => e.value == a.key).key]?.abschnitt ?? 0}',
+              },
               'cmlist': [for (final c in kursAktivitaeten.entries) if (c.value.abschnitt == a.key) '${c.key}'],
             }
         ],
@@ -695,6 +719,7 @@ ${nurKind ? '' : '<select name="parent">$optionen</select>'}
               'module': c.value.modul,
               'visible': true,
               'sectionid': '${c.value.abschnitt}',
+              if (unterabschnitte.containsKey(c.key)) 'delegatesectionid': '${unterabschnitte[c.key]}',
             }
         ],
       };
@@ -710,9 +735,14 @@ ${nurKind ? '' : '<select name="parent">$optionen</select>'}
       }
       final v = version(x.frage);
       summe += x.punkte;
-      b.write('<li class="slot qtype_shortanswer" id="slot-${x.slotid}">'
-          '<a href="/question/bank/editquestion/question.php?cmid=$sammlung&id=${x.frage}">Bearbeiten</a>'
-          '<span class="questionname">${v?.name ?? 'unbekannt'}</span>'
+      final herkunft = x.bank == null
+          ? ''
+          : x.zufall
+              ? '<a class="mod_quiz_random_qbank_link" href="/question/edit.php?cmid=${x.bank}">Bank</a>'
+              : '<div class="sharedbank"><a href="/question/edit.php?cmid=${x.bank}">Bank</a></div>';
+      b.write('<li class="slot ${x.zufall ? 'qtype_random' : 'qtype_shortanswer'}" id="slot-${x.slotid}">'
+          '${x.zufall ? '' : '<a href="/question/bank/editquestion/question.php?cmid=$sammlung&id=${x.frage}">Bearbeiten</a>'}'
+          '$herkunft<span class="questionname">${v?.name ?? 'unbekannt'}</span>'
           '<span class="instancemaxmark">${x.punkte.toStringAsFixed(2).replaceAll('.', ',')}</span></li>');
     }
     return _seite('<script>var q = {"quizid":"7"};</script><ul>$b</ul>'

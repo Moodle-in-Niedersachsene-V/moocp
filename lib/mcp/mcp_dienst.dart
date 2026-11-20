@@ -1192,7 +1192,7 @@ class McpDienst implements AufrufKontext {
           'eine Fragensammlung samt Kategorien und Fragen) oder einen Abschnitt samt Inhalt -- nur nach '
           'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Eine Fragensammlung '
           '(auch in einem gelöschten Abschnitt) fragt auf jeder Stufe, jede Kategorie einzeln abgehakt, '
-          'und wird vorher als XML gesichert (ohne verborgene Fragen; die Antwort nennt den Pfad). Nummer und Name müssen '
+          'und wird vorher als XML gesichert (verborgene Fragen sind nie darin; Tests, die Fragen aus der Sammlung benutzen, nennt die Freigabe; die Antwort nennt den Pfad). Nummer und Name müssen '
           'zusammenpassen, vor der Freigabe und noch einmal danach. Prüft danach die Kursstruktur.',
       parameter: {
         'kurs': _kurs,

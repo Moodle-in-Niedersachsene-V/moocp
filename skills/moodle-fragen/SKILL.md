@@ -107,9 +107,11 @@ App das bewusst nicht kann.
   Fragen stecken, und ruf das Werkzeug erst nach einem ausdrücklichen Ja auf.
   Die App sichert vorher alle Fragen als XML (die Antwort nennt den Pfad) und
   fragt auf jeder Stufe; die Lehrkraft hakt jede Kategorie einzeln ab.
-  **Verborgene Fragen liefert Moodles Export nicht aus, sie sind nicht in der
-  Sicherung** — sag das im Plan. Zurück kommt die Sicherung über
-  `fragen_importieren`.
+  **Verborgene Fragen (in einem Test benutzt und „gelöscht“) liefert Moodles
+  Export nicht aus, sie sind nicht in der Sicherung** — sag das im Plan. Die
+  Freigabe nennt die Tests, die Plätze aus der Sammlung haben; was Moodle beim
+  Löschen mit den Fragen darin macht, ist nicht geprüft. Die gesicherten Fragen
+  lassen sich über `fragen_importieren` wieder einspielen.
 - **Wenn es bereits Versuche gibt** (`test_lesen` meldet das): anhalten und
   nachfragen. Punkte- oder Fragenänderungen verschieben dann rückwirkend
   Bewertungen.
@@ -171,7 +173,7 @@ ein Ja im Chat ersetzt sie nicht.
 
 Was du gerade selbst verborgen angelegt hast, ist dabei noch nichts Bestehendes: Es zu füllen oder zu ändern, solange es verborgen ist — die Spalten eines neuen Boards, die Fragen eines neuen Tests, die Links zwischen den Blättern einer neuen Lernsituation —, gehört zum Anlegen und fragt wie dieses erst bei „alle". Kopien zählen nicht dazu; bei ihnen zeigt die Freigabe, was sich gegenüber dem Original ändert.
 
-**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
+**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
 <!-- >>> gemeinsam/plan.md -->
 
 <!-- <<< gemeinsam/ueberarbeiten.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -533,7 +535,7 @@ Zwei verschiedene Dinge — und das kleinere ist nie der Ersatz für das größe
 
 Weil eine Sammlung eine Aktivität ist, gehört ihr **Name** in den Plan — den Abschnitt wählst du nicht: Moodle legt jede Sammlung im allgemeinen Abschnitt ab, einerlei welche `abschnitt_id` du mitgibst (verlangt wird sie trotzdem, weil jede andere Aktivität sie braucht). **Als Gliederung schlägst du eine eigene Sammlung je Lernsituation oder Thema vor**, mit Kategorien darin, wo sie etwas tragen — je Teilthema, damit Zufallsfragen gezielt ziehen, und Übungsfragen getrennt von denen für die Leistungsfeststellung, damit die Klassenarbeit nicht aus der Übung bekannt ist. Die Sammlung, die Moodle für den ganzen Kurs angelegt hat, bleibt unberührt, solange die Lehrkraft nichts anderes sagt. Sieh vorher mit `fragensammlungen(kurs)` nach: Gibt es schon eine Sammlung für das Thema, kommen die Fragen dorthin. Begründung und Einzelheiten: `references/sammlungen.md`.
 
-Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe auf jeder Stufe und mit allem, was darin liegt (Fragen vorher als XML gesichert, ohne verborgene Fragen; Einzelheiten im Abschnitt „Fragen löschen“ oben).
+Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe auf jeder Stufe und mit allem, was darin liegt (Fragen vorher als XML gesichert, verborgene Fragen nie darin; Einzelheiten im Abschnitt „Fragen löschen“ oben).
 
 ## Ab Moodle 5: Fragensammlungen sind Aktivitäten
 

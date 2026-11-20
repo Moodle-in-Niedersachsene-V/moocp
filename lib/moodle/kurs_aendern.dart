@@ -875,10 +875,12 @@ class _Sicherungen {
 
   bool get leer => _sammlungen.isEmpty;
 
-  /// Liest und sichert jede Sammlung; scheitert eine, bleiben die Dateien der anderen nicht liegen.
-  static Future<_Sicherungen> anlegen(MoodleZugang moodle, String ordner, List<(int, String)> sammlungen) async {
+  /// Liest die Tests des Kurses und sichert jede Sammlung; scheitert etwas, bleiben die Dateien nicht liegen.
+  static Future<_Sicherungen> anlegen(
+      MoodleZugang moodle, String ordner, KursStruktur kurs, List<(int, String)> sammlungen) async {
     final s = _Sicherungen._([]);
     try {
+      final tests = sammlungen.isEmpty ? const <int, List<_TestNutzung>>{} : await _testsLesen(moodle, kurs, {for (final (c, _) in sammlungen) c});
       for (final (cmid, name) in sammlungen) {
         late final List<SammlungsKategorie> stand;
         try {
@@ -888,7 +890,7 @@ class _Sicherungen {
               'nicht sichern (${e.meldung}). Ohne Sicherung löscht die App nicht.');
         }
         final datei = await sammlungSichern(ordner, cmid, [for (final k in stand) (pfad: k.pfad, xml: k.xml)]);
-        s._sammlungen.add(_GesicherteSammlung(cmid, name, stand, datei));
+        s._sammlungen.add(_GesicherteSammlung(cmid, name, stand, datei, tests[cmid] ?? const []));
       }
     } catch (_) {
       s.verwerfen();
@@ -904,20 +906,35 @@ class _Sicherungen {
     }
   }
 
+  bool get _testsBetroffen => _sammlungen.any((x) => x.tests.isNotEmpty);
+
+  /// Die Tests, die Plätze aus einer der Sammlungen haben, für Freigabe und Antwort.
+  List<String> get _testZeilen => [
+        for (final x in _sammlungen)
+          for (final t in x.tests)
+            'Test „${t.name}" (cmid ${t.cmid}): ${t.plaetze} ${t.plaetze == 1 ? 'Platz' : 'Plätze'} aus der Sammlung '
+                '„${x.name}"${t.unbekannt == 0 ? '' : ' und ${t.unbekannt} mit nicht lesbarer Herkunft'}',
+      ];
+
+  static const _verborgenHinweis =
+      'Fragen, die in diesen Tests benutzt werden, können verborgen sein: Sie sind in den Zahlen oben nicht '
+      'mitgezählt und nicht in der Sicherung. Was Moodle beim Löschen der Sammlung mit ihnen und mit den Plätzen '
+      'in den Tests macht, ist nicht geprüft. Tests in anderen Kursen sieht moocp nicht.';
+
   /// Die Zeilen der Freigabe zu den Sicherungen.
   List<String> get punkte => [
         for (final x in _sammlungen) ...[
           'Fragensammlung „${x.name}" (cmid ${x.cmid}) mit ${x.stand.length} Kategorie(n) und '
               '${x.stand.fold<int>(0, (a, k) => a + k.kat.anzahl)} Frage(n); vorher gesichert als XML: ${x.datei} -- '
-              'gesichert ist die aktuelle Version jeder Frage, nicht ihr Verlauf. Zurück kommt sie mit fragen_importieren.',
+              'gesichert ist die aktuelle Version jeder Frage, nicht ihr Verlauf. Die gesicherten Fragen lassen sich '
+              'mit fragen_importieren wieder einspielen.',
           if (x.stand.any((k) => k.exportiert < k.kat.anzahl))
             'Die Kategorieliste nennt mehr Fragen, als die Sicherung enthält: ${[
               for (final k in x.stand)
                 if (k.exportiert < k.kat.anzahl) '„${k.pfad.join(' / ')}" (${k.exportiert} von ${k.kat.anzahl})'
             ].join(', ')}.',
         ],
-        'Verborgene Fragen (etwa solche, die in einem Test stecken) liefert Moodles Export nicht aus: Sie sind '
-            'NICHT in der Sicherung und gehen mit der Sammlung verloren.',
+        if (_testsBetroffen) ...[..._testZeilen, _verborgenHinweis] else 'Verborgene Fragen stehen in keiner Sicherung.',
       ];
 
   /// Ein Haken je Kategorie; eine Sammlung ohne Kategorie hakt die Sammlung selbst ab.
@@ -950,35 +967,59 @@ class _Sicherungen {
 
   static String _stand(List<SammlungsKategorie> s) => [for (final k in s) '${k.kat.wert}|${k.pfad.join('/')}|${k.kat.anzahl}|${k.xml}'].join('\n');
 
-  /// Der Satz für die Antwort, der die Sicherung nennt.
+  /// Der Satz für die Antwort, der die Sicherung und die betroffenen Tests nennt.
   String get antwort => [
         for (final x in _sammlungen) 'Sicherung der Fragen von „${x.name}" (cmid ${x.cmid}), vor dem Löschen angelegt: ${x.datei}',
-        'Verborgene Fragen sind nicht darin.',
+        if (_testsBetroffen) ...[..._testZeilen, _verborgenHinweis] else 'Verborgene Fragen stehen in keiner Sicherung.',
       ].join('\n');
 }
 
+/// Ein Test des Kurses mit Plätzen aus einer Sammlung: [plaetze] mit dieser Sammlung als Herkunft (feste und
+/// Zufallsplätze), [unbekannt] Plätze, deren Herkunft Moodle ohne Link nennt (dann nicht lesbar).
+typedef _TestNutzung = ({int cmid, String name, int plaetze, int unbekannt});
+
+/// Liest jeden Test des Kurses (die Zusammenstellungsseite, wie test_lesen) und sammelt je Sammlung die Tests, die
+/// Plätze aus ihr haben. Verborgene Fragen zählt Moodles Kategorieliste nicht (auf Moodle 5.1 gemessen), und der
+/// Export liefert sie nicht: Die Plätze sind der einzige Hinweis, dass eine Sammlung solche Fragen haben kann.
+/// Tests anderer Kurse sind für moocp nicht sichtbar. Lässt sich ein Test nicht lesen, bricht das Löschen ab.
+Future<Map<int, List<_TestNutzung>>> _testsLesen(MoodleZugang moodle, KursStruktur kurs, Set<int> sammlungen) async {
+  final aus = <int, List<_TestNutzung>>{};
+  for (final c in kurs.nachCmid.values.where((c) => c.modul == 'quiz')) {
+    final TestAufbau t;
+    try {
+      t = await testLesen(moodle, c.cmid);
+    } on SchutzPruefung {
+      rethrow;
+    } on SitzungAbgelaufen {
+      rethrow;
+    } on MoodleFehler catch (e) {
+      throw MoodleFehler('Abgebrochen, nichts gelöscht: Der Test „${c.name}" (cmid ${c.cmid}) lässt sich nicht lesen '
+          '(${e.meldung}). Ohne zu wissen, welche Tests Fragen aus der Sammlung benutzen, löscht die App nicht.');
+    }
+    final unbekannt = t.plaetze.where((p) => p.bankOhneLink).length;
+    for (final bank in sammlungen) {
+      final n = t.plaetze.where((p) => (p.zufall ? p.zufallBankCmid : p.bankCmid) == bank).length;
+      if (n > 0 || unbekannt > 0) aus.putIfAbsent(bank, () => []).add((cmid: c.cmid, name: c.name, plaetze: n, unbekannt: unbekannt));
+    }
+  }
+  return aus;
+}
+
 class _GesicherteSammlung {
-  _GesicherteSammlung(this.cmid, this.name, this.stand, this.datei);
+  _GesicherteSammlung(this.cmid, this.name, this.stand, this.datei, this.tests);
   final int cmid;
   final String name;
   final List<SammlungsKategorie> stand;
   final String datei;
+  final List<_TestNutzung> tests;
 }
 
 /// Die Fragensammlungen, die im Abschnitt [a] stehen, auch in seinen Unterabschnitten. UNGEMESSEN: ob die
 /// Kursstruktur eine Fragensammlung je in einem Abschnitt zeigt (Moodle 5 führt sie auf einer eigenen Seite);
 /// der Weg gilt vorsorglich.
-List<(int, String)> _sammlungenIn(KursStruktur k, KursAbschnitt a, [Set<int>? besucht]) {
-  final gesehen = besucht ?? <int>{};
-  if (!gesehen.add(a.id)) return const [];
-  return [
-    for (final c in k.inhalt(a)) ...[
-      if (c.modul == 'qbank') (c.cmid, c.name),
-      if (c.unterabschnittId != null && k.nachId[c.unterabschnittId] != null)
-        ..._sammlungenIn(k, k.nachId[c.unterabschnittId]!, gesehen),
-    ]
-  ];
-}
+List<(int, String)> _sammlungenIn(KursStruktur k, KursAbschnitt a) =>
+    // `inhalt` geht schon durch die Unterabschnitte; jede Sammlung nur einmal.
+    {for (final c in k.inhalt(a)) if (c.modul == 'qbank') c.cmid: c.name}.entries.map((e) => (e.key, e.value)).toList();
 
 /// Eine Fragensammlung löschen. Eigener Weg, weil sie nicht in der
 /// Kursstruktur steht (kurs.dart): Ohne ihn liefe jedes Aufräumen in „cmid …
@@ -986,7 +1027,7 @@ List<(int, String)> _sammlungenIn(KursStruktur k, KursAbschnitt a, [Set<int>? be
 Future<String> _fragensammlungLoeschen(
     MoodleZugang moodle, Freigaben freigaben, int kurs, Fragensammlung s, String name, String sicherungsOrdner) async {
   nameBestaetigen(name, s.name, 'cmid ${s.cmid}');
-  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, [(s.cmid, s.name)]);
+  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, await kursLesen(moodle, kurs), [(s.cmid, s.name)]);
   final bool ja;
   try {
     ja = await freigaben.anfragen(FreigabeAnfrage(
@@ -1047,7 +1088,7 @@ Future<String> loeschen(MoodleZugang moodle, Freigaben freigaben,
     final c = z.cm!;
     final unter = c.unterabschnittId == null ? null : k.nachId[c.unterabschnittId];
     // Eine Fragensammlung (auch im Unterabschnitt) nimmt ihre Fragen mit: Sicherung und Haken je Kategorie.
-    final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, [
+    final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, k, [
       if (c.modul == 'qbank') (c.cmid, c.name),
       if (unter != null) ..._sammlungenIn(k, unter),
     ]);
@@ -1100,7 +1141,7 @@ Future<String> loeschen(MoodleZugang moodle, Freigaben freigaben,
   if (a.nummer == 0 && !a.istUnterabschnitt) {
     throw MoodleFehler('Den allgemeinen Abschnitt (Nummer 0) löscht Moodle nicht.');
   }
-  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, _sammlungenIn(k, a));
+  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, k, _sammlungenIn(k, a));
   final bool ja;
   try {
     ja = await freigaben.anfragen(FreigabeAnfrage(

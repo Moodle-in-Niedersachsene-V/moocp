@@ -146,15 +146,82 @@ void main() {
     expect(dateien(), hasLength(1));
   });
 
-  test('Eine nicht exportierbare (verborgene) Frage steht nicht in der Sicherung, und der Dialog sagt es', () async {
-    final verborgen = moodle.eintraege.firstWhere((e) => e.neueste.name == 'ZZ Zwei');
-    moodle.versteckt.add(verborgen.neueste.id);
+  test('Ohne Test, der die Sammlung benutzt: kein Hinweis auf Tests, nur der kurze Satz zu verborgenen Fragen', () async {
+    moodle.legeTestAn(40, 'ZZ Anderer Test', [(moodle.eintraege.first, 1, 1.0)]); // Bank des Tests selbst, keine Herkunft
     final f = los();
     final anfrage = await aufFreigabe();
-    expect(anfrage.punkte.join('\n'), contains('Verborgene Fragen'));
+    final text = anfrage.punkte.join('\n');
+    expect(text, contains('Verborgene Fragen stehen in keiner Sicherung.'));
+    expect(text, isNot(contains('Test „')));
+    expect(text, isNot(contains('anderen Kursen')));
     freigaben.entscheiden(true);
-    expect(await f, contains('verified: true'));
+    final bericht = await f;
+    expect(bericht, isNot(contains('Test „')));
+  });
+
+  test('Benutzt ein Test Fragen der Sammlung (fest oder zufällig), nennt der Dialog ihn mit der Zahl der Plätze', () async {
+    // Die Frage „ZZ Zwei" steckt in einem Test und ist durch ein Löschen verborgen: Moodle zählt sie nicht
+    // mehr mit, und der Export liefert sie nicht.
+    final zwei = moodle.eintraege.firstWhere((e) => e.neueste.name == 'ZZ Zwei');
+    moodle.legeTestAn(40, 'ZZ Test', [(zwei, 1, 1.0), (zwei, 1, 1.0), (moodle.eintraege.first, 1, 1.0)]);
+    moodle.testPlaetze[40]![0].bank = FragenbankDoppel.sammlung;
+    moodle.testPlaetze[40]![1]
+      ..bank = FragenbankDoppel.sammlung
+      ..zufall = true;
+    moodle.testPlaetze[40]![2].bank = 99; // eine andere Sammlung
+    moodle.legeTestAn(41, 'ZZ Anderer Test', [(zwei, 1, 1.0)]); // ohne Herkunft
+    moodle.versteckt.add(zwei.neueste.id);
+
+    final f = los();
+    final anfrage = await aufFreigabe();
+    final text = anfrage.punkte.join('\n');
+    expect(text, contains('Test „ZZ Test" (cmid 40): 2 Plätze aus der Sammlung „ZZ Bank"'));
+    expect(text, isNot(contains('ZZ Anderer Test')));
+    expect(text, allOf(contains('können verborgen sein'), contains('nicht geprüft'), contains('anderen Kursen')));
+    // Die verborgene Frage ist in Moodles Zahl nicht enthalten: „ZZ Probe" zählt nur „ZZ Eins".
+    expect(anfrage.abhaken[0], allOf(contains('ZZ Probe'), contains('1 Frage')));
+    expect(kursAktion('cm_delete'), isFalse);
+    freigaben.entscheiden(true);
+    final bericht = await f;
+    expect(bericht, allOf(contains('verified: true'), contains('Test „ZZ Test" (cmid 40): 2 Plätze'), contains('können verborgen sein')));
     expect([for (final q in fragenAusXml(dateien().single.readAsStringSync())) q.name], isNot(contains('ZZ Zwei')));
+  });
+
+  test('Ein Test, der sich nicht lesen lässt, bricht ab, bevor gesichert oder gefragt wird', () async {
+    moodle.kursAktivitaeten[40] = (name: 'ZZ Kaputt', modul: 'quiz', abschnitt: 5); // Zusammenstellung: 404
+    await expectLater(
+      los(),
+      throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung',
+          allOf(contains('nichts gelöscht'), contains('ZZ Kaputt'), contains('lässt sich nicht lesen')))),
+    );
+    expect(freigaben.aktuell, isNull);
+    expect(dateien(), isEmpty);
+    expect(kursAktion('cm_delete'), isFalse);
+  });
+
+  test('Eine Kategorie mit nur verborgenen Fragen zählt 0, wird nicht exportiert und gilt als leer', () async {
+    moodle.legeKategorieAn(4, 'ZZ Nur Verborgen');
+    final h = moodle.legeAn('shortanswer', 'ZZ Weg', 'zz-weg', kategorie: 4);
+    moodle.versteckt.add(h.neueste.id);
+    final f = los();
+    final anfrage = await aufFreigabe();
+    expect(anfrage.abhaken.where((t) => t.contains('ZZ Nur Verborgen')).single, contains('0 Fragen'));
+    expect(moodle.exportAufrufe, isNot(contains(4)));
+    expect(moodle.exportAufrufe, containsAll([1, 2]));
+    freigaben.entscheiden(false);
+    await f;
+  });
+
+  test('Scheitert der Export einer Kategorie mit Fragen, bricht es vor der Freigabe ab; nichts bleibt liegen', () async {
+    moodle.exportAbgelehnt.add(2);
+    await expectLater(
+      los(),
+      throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung',
+          allOf(contains('nichts gelöscht'), contains('lassen sich nicht sichern')))),
+    );
+    expect(freigaben.aktuell, isNull);
+    expect(dateien(), isEmpty);
+    expect(kursAktion('cm_delete'), isFalse);
   });
 
   test('Andere Aktivitäten fragen weiter erst ab „mittel", ohne Haken und ohne Sicherung', () async {
@@ -198,6 +265,50 @@ void main() {
     expect(dateien(), hasLength(1));
     freigaben.entscheiden(false);
     expect(await f, contains('Nicht gelöscht'));
+    expect(dateien(), isEmpty);
+  });
+
+  void unterabschnittAnlegen() {
+    moodle.kursAbschnitte[7] = 'ZZ Unterabschnitt';
+    moodle.kursAktivitaeten[60] = (name: 'ZZ Unterabschnitt', modul: 'subsection', abschnitt: 5);
+    moodle.unterabschnitte[60] = 7;
+    moodle.kursAktivitaeten[12] = (name: 'ZZ Bank', modul: 'qbank', abschnitt: 7);
+  }
+
+  test('Steht die Sammlung in einem Unterabschnitt des gelöschten Abschnitts, gilt dasselbe für sie', () async {
+    unterabschnittAnlegen();
+    final f = loeschen(zugang, freigaben, kurs: 12, abschnittId: 5, name: 'Thema 1', sicherungsOrdner: sicherungen.path);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.ab, Bestaetigungen.keine);
+    expect(anfrage.abhaken, hasLength(3));
+    expect(dateien(), hasLength(1));
+    freigaben.entscheiden(true);
+    expect(await f, contains('verified: true'));
+    expect(kursAktion('section_delete'), isTrue);
+  });
+
+  test('Wer den Unterabschnitt löscht, in dem die Sammlung steht, bekommt Haken und Sicherung', () async {
+    unterabschnittAnlegen();
+    final f = loeschen(zugang, freigaben, kurs: 12, cmid: 60, name: 'ZZ Unterabschnitt', sicherungsOrdner: sicherungen.path);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.ab, Bestaetigungen.keine);
+    expect(anfrage.abhaken, hasLength(3));
+    expect(dateien(), hasLength(1));
+    freigaben.entscheiden(false);
+    expect(await f, contains('Nicht gelöscht'));
+    expect(dateien(), isEmpty);
+  });
+
+  test('Ändert sich die Sammlung im gelöschten Abschnitt, während die Freigabe offen ist, wird nichts gelöscht', () async {
+    moodle.kursAktivitaeten[12] = (name: 'ZZ Bank', modul: 'qbank', abschnitt: 5);
+    final f = loeschen(zugang, freigaben, kurs: 12, abschnittId: 5, name: 'Thema 1', sicherungsOrdner: sicherungen.path);
+    final erwartet =
+        expectLater(f, throwsA(isA<MoodleFehler>().having((x) => x.meldung, 'meldung', contains('nichts gelöscht'))));
+    await aufFreigabe();
+    moodle.legeAn('shortanswer', 'ZZ Neu dazu', 'zz-9');
+    freigaben.entscheiden(true);
+    await erwartet;
+    expect(kursAktion('section_delete'), isFalse);
     expect(dateien(), isEmpty);
   });
 }

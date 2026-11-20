@@ -145,4 +145,15 @@ void main() {
     expect(alt.versionen, isNotEmpty);
     expect(moodle.testPlaetze[40]!.first.frage, neueId());
   });
+
+  test('Ohne Löschen kommt auf „mittel" eine Freigabe ohne Haken, nie eine, die auf jeder Stufe fragt', () async {
+    freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.mittel);
+    final f = los(loeschen: false);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.ab, Bestaetigungen.mittel);
+    expect(anfrage.abhaken, isEmpty);
+    freigaben.entscheiden(true);
+    expect(await f, contains('verified: true'));
+    expect(dateien(), isEmpty);
+  });
 }

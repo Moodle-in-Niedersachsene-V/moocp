@@ -268,3 +268,29 @@ _Nicht zu verwechseln mit_: Moodle-Sitzung.
 Die Anmeldung bei Moodle, die die App über ein Sitzungscookie hält. Läuft sie ab, meldet sich die App neu an.
 _Englisch_: Moodle session
 _Nicht zu verwechseln mit_: KI-Sitzung.
+
+## Versionen und Updates
+
+**Kanal**:
+Die Reihe von Versionen, aus der eine installierte App ihre Updates bekommt: „Stabil“ oder „Nightly“. Die Lehrkraft wählt ihn; er gilt für die App, nicht je Instanzprofil.
+_Englisch_: update channel
+_Vermeiden_: Zweig (für den Kanal), Ring
+
+**Stabile Version**:
+Eine Version, die vorher als Nightly bei Testern lief und danach als stabil veröffentlicht wurde. Nur sie bekommt, wer den Kanal „Stabil“ gewählt hat.
+_Englisch_: stable release
+_Vermeiden_: Release (allein, für die stabile Version)
+
+**Nightly**:
+Eine Version aus dem aktuellen Stand von `main`, zum Testen, gebaut einmal täglich, wenn sich etwas geändert hat, oder sofort auf Anstoß eines Maintainers. Ihre Änderungen sind vor der Veröffentlichung nicht unbedingt vom zweiten Maintainer gesehen. In der App heißt sie „Testversion (Nightly)“.
+_Englisch_: nightly
+_Vermeiden_: Lightning, Beta, Vorabversion (das ist nur das Feld bei GitHub)
+
+**Hotfix**:
+Eine Fehlerbehebung für die zuletzt veröffentlichte stabile Version, die ohne die neuen Funktionen aus `main` als eigene Fehlerversion erscheint.
+_Englisch_: hotfix
+
+**Rückkehr zur stabilen Version**:
+Der Wechsel einer App von einer Nightly auf die letzte stabile Version, auch wenn diese eine kleinere Versionsnummer hat.
+_Englisch_: return to stable
+_Vermeiden_: Downgrade (im Text für Lehrkräfte)

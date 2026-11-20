@@ -202,7 +202,6 @@ void main() {
       extern.basis,
       benutzer: 'e.mustermann',
       passwort: 'erfunden',
-      schreibvorgaengeOrdner: vorgaenge.path,
       antwortfrist: antwortfrist,
       langsamAb: langsamAb,
     );
@@ -292,20 +291,32 @@ void main() {
       expect(antwort, contains('Keine Antwort innerhalb der Zeitgrenze'));
       expect(antwort, contains('Moodle nicht erreichbar'));
       expect(antwort, isNot(contains('NICHT gelesen')));
-      // Bild 0 antwortet, Bild 1 hängt; danach wird kein weiteres Bild versucht.
-      expect(extern.bildanfragen, hasLength(2));
+      // Bild 0 antwortet, Bild 1 und 2 hängen: Die zweite Datei in Folge ohne
+      // Antwort beendet das Lesen; danach wird kein weiteres Bild versucht.
+      expect(extern.bildanfragen, hasLength(3));
       expect(bildOrdnerVorhanden(), isFalse, reason: 'kein halb gelesener Ordner');
     });
 
-    test('eine mitten in der Antwort abgebrochene Verbindung beendet das Lesen mit der Phase im Fehler', () async {
+    test('zwei mitten in der Antwort abgebrochene Verbindungen in Folge beenden das Lesen mit der Phase im Fehler', () async {
       await starten();
       extern.verhalten[2] = _Bild.bricht;
+      extern.verhalten[3] = _Bild.bricht;
       extern.anfragen.clear();
       final antwort = await lesen();
       expect(antwort, contains('Verbindung abgebrochen'));
       expect(antwort, contains('Phase Antwortinhalt'));
-      expect(extern.bildanfragen, hasLength(3));
+      expect(extern.bildanfragen, hasLength(4));
       expect(bildOrdnerVorhanden(), isFalse);
+    });
+
+    test('ein einzelnes Bild ohne Antwort ist ein Befund an diesem Bild; die Aktivität bleibt lesbar und änderbar', () async {
+      await starten();
+      extern.verhalten[2] = _Bild.bricht;
+      extern.anfragen.clear();
+      final antwort = await lesen();
+      expect(antwort, contains('NICHT gelesen (1): bild2.png'));
+      expect(extern.bildanfragen, hasLength(6));
+      expect(File(p.join(ordner.path, 'cm-101', 'dateien', 'bild5.png')).existsSync(), isTrue);
     });
 
     test('ein unbekanntes Bild (404) bleibt ein Befund, die übrigen Bilder werden gelesen', () async {

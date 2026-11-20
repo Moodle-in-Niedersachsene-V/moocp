@@ -965,6 +965,7 @@ Future<String> aktivitaetAnlegen(
           if (e.value.trim().isNotEmpty) '${e.key}: ${e.value.length} Zeichen',
         for (final e in einstellungen.entries)
           'Einstellung ${e.key}: ${e.value}',
+        if (einrueckung != null) 'Einrückung: Stufe $einrueckung (gehört zum Anlegen)',
         if (kartenVorlage != null)
           'Kartenvorlage: ${(kartenVorlage['orte'] as List).length} Orte, '
               '${(kartenVorlage['wege'] as List).length} Wege; Ziele bleiben zunächst leer.',
@@ -1074,16 +1075,31 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
-  // Einrücken folgt direkt auf das Anlegen und braucht keine eigene Freigabe.
+  // Einrücken gehört zum Anlegen: Die Freigabe zum Anlegen nennt es, eine eigene
+  // gibt es nicht (E20). Ein Fehler dabei kommt als Ergebnis, nicht als Ausnahme:
+  // Die Aktivität steht schon, und ihre cmid muss in der Antwort bleiben.
   final einr = einrueckung == null
       ? null
       : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 
-  final g = await formularLesen(
-    moodle,
-    Formularziel.aktivitaet(cmid),
-    arbeitsordner,
-  );
+  final FormularGelesen g;
+  try {
+    g = await formularLesen(
+      moodle,
+      Formularziel.aktivitaet(cmid),
+      arbeitsordner,
+    );
+  } on MoodleAbgebrochen {
+    rethrow;
+  } on MoodleFehler catch (x) {
+    // Nach dem Anlegen darf ein Lesefehler die cmid nicht verschweigen: Die KI
+    // legte die Aktivität sonst ein zweites Mal an.
+    throw MoodleFehler(
+      '${x.meldung}\nDie Aktivität ist bereits angelegt (${typName(typ)}, cmid $cmid, '
+      '${sichtbar ? 'SICHTBAR' : 'verborgen'}). Nicht erneut anlegen; mit aktivitaet_lesen nachsehen.'
+      '${einr == null ? '' : '\n${einr.text}'}',
+    );
+  }
   final probe = await zuruecklesen(
     g,
     felder: geschrieben,
@@ -1095,6 +1111,8 @@ Future<String> aktivitaetAnlegen(
     // hat keinen eigenen Namen; Moodle bildet ihn aus dem Text.
     name: typ == 'label' ? null : name,
   );
+  // Ein Urteil: Scheitert die Einrückung, ist auch die Rückleseprobe nicht bestanden.
+  if (einr != null) probe.pruefe(einr.ok, 'Einrückung');
   if (typ == 'learningmap') {
     probe.pruefe(g.modul == typ, 'Modultyp (gelesen ${g.modul})');
     probe.pruefe(g.kurs == kurs, 'Kurs (gelesen ${g.kurs})');
@@ -1129,7 +1147,7 @@ Future<String> aktivitaetAnlegen(
       fehler: angehalten,
       angelegt:
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
-          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}'}',
+          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}.'}',
     );
   }
   return [
@@ -1145,7 +1163,7 @@ Future<String> aktivitaetAnlegen(
     if (gesetzt.isNotEmpty)
       'Einstellungen: ${gesetzt.map((s) => '${s.label}: ${s.nachher}').join("; ")}.',
     probe.text,
-    if (einr != null) einr.text,
+    if (einr != null) '${einr.text}.',
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',

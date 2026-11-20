@@ -68,8 +68,9 @@ part 'lernlandkarten.dart';
 /// Was die eingestellte Stufe für die Werkzeuge bedeutet, für `status`.
 const _stufenText = {
   Bestaetigungen.keine:
-      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen und das Ersetzen eines Kurses durch eine '
-      'Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche Entscheidung in der App. '
+      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen, das Löschen von Fragen und das Ersetzen eines '
+      'Kurses durch eine Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche '
+      'Entscheidung in der App. '
       'Die Freigabe je Bildschirmfoto bleibt davon unberührt.',
   Bestaetigungen.mittel:
       'Freigabe vor Ändern, Verschieben, Sichtbarkeit, Löschen und sichtbarem '

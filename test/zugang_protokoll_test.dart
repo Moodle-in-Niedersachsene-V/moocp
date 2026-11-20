@@ -24,6 +24,7 @@ class _Moodle {
   /// Jede Anfrage, die den Server erreicht hat: `GET /pfad?query`.
   final angefragt = <String>[];
   var eingeloggt = false;
+  var abbrechen = false;
 
   // Die Antwort auf den Download.
   var downloadStatus = 200;
@@ -70,6 +71,11 @@ class _Moodle {
               : '<html><input name="logintoken" value="t"></html>',
         );
       case '/course/modedit.php':
+        if (abbrechen) {
+          final socket = await r.detachSocket(writeHeaders: false);
+          socket.destroy();
+          return;
+        }
         if (q['update'] == '35') {
           // Ein Schutzdienst verlangt seine Prüfung.
           r.headers
@@ -127,6 +133,16 @@ void main() {
   tearDown(() async {
     await moodle.server.close(force: true);
     await ordner.delete(recursive: true);
+  });
+
+  test('Transportabbruch nach POST empfiehlt keine blinde Wiederholung', () async {
+    moodle.abbrechen = true;
+    await expectLater(zugang.senden('/course/modedit.php', const [
+      MapEntry('course', '12'), MapEntry('modulename', 'page'),
+      MapEntry('_qf__mod_page_mod_form', '1'), MapEntry('sesskey', 'abc123'),
+    ]), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Ausgang', contains('Ausgang unklar'))));
+    expect(zeilen().join(), contains('Phase'));
+    expect(zeilen().join(), isNot(contains('abc123')));
   });
 
   test('Anmeldung: Methode, Pfad und Status; Art schreiben für das Formular, die Query der Anmeldeseite bleibt unlesbar', () async {

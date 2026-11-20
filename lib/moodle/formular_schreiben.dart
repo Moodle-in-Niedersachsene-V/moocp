@@ -50,6 +50,8 @@ import 'kurs_aendern.dart' show einrueckungPruefen, einrueckungSetzen;
 import 'lernlandkarte_entwurf.dart';
 import 'moodle_zugang.dart';
 import 'stack_skripte.dart';
+import 'schreibvorgang.dart';
+export 'schreibvorgang.dart' show normalisiert;
 import 'zeilenvergleich.dart';
 
 /// Das Editorfeld, das eine neue Aktivität mindestens braucht. Fehlt ein Typ
@@ -145,11 +147,6 @@ String wieImEditor(String html) {
   }
   return b.toString();
 }
-
-String normalisiert(String html) => html.replaceAll(
-  RegExp(r'/draftfile\.php/\d+/user/draft/\d+/'),
-  '/draftfile.php/U/user/draft/X/',
-);
 
 /// Entwurfs-IDs (`<feld>[itemid]` und der verborgene Wert des Hintergrunds)
 /// vergibt Moodle bei jedem Laden neu; sie gehören nicht zum Stand. Gemessen
@@ -571,6 +568,14 @@ void nameSetzen(dom.Element form, Felder f, String name) {
   f.removeWhere((e) => e.key == 'usedefaultname' && e.value != '0');
 }
 
+/// Moodle hat das Formular beantwortet und nicht angenommen (Prüffehler im
+/// Formular, 403 von Moodle oder einem Filter davor): Es wurde nichts
+/// gespeichert. Anders als ein Abbruch ohne Antwort ist der Ausgang bekannt,
+/// darum sperrt er das Objekt nicht (E37).
+class FormularAbgelehnt extends MoodleFehler {
+  FormularAbgelehnt(super.meldung);
+}
+
 /// Sendet das Formular mit „Speichern" (bei Aktivitäten „Speichern und zum
 /// Kurs", das es bei jedem Typ gibt). Erfolg ist eine Umleitung; sonst
 /// sammelt die Meldung Moodles Hinweise aus dem Formular.
@@ -621,7 +626,11 @@ Future<Antwort> absenden(
       feld.isEmpty ? text : '„$feld"${name == null ? '' : ' ($name)'}: $text',
     );
   }
-  throw MoodleFehler(formularAbgelehnt(antwort.status, meldungen));
+  final meldung = formularAbgelehnt(antwort.status, meldungen);
+  // Ab 500 weiß niemand, ob der Server vorher gespeichert hat.
+  throw antwort.status >= 500
+      ? MoodleFehler(meldung)
+      : FormularAbgelehnt(meldung);
 }
 
 /// Die Meldung, wenn Moodle ein Formular nicht annimmt. Bei HTTP 403 ohne
@@ -1438,6 +1447,8 @@ Future<_Aenderung?> _vorbereiten(
 }) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
   final ziel = Formularziel.ausOrdner(quelle);
+  final vorgang = Schreibvorgang(moodle, ziel);
+  if (vorgang.offen) throw MoodleFehler(vorgang.hinweis);
   final stand = p.join(quelle, '.stand');
   final gespeichertesFormular = _gespeichertesFormular(stand);
   final gespeicherteArt = gespeichertesFormular == null ? null :
@@ -1692,6 +1703,50 @@ Future<(String, bool)> _schreibenOhneSperre(
   _Aenderung a,
   String arbeitsordner,
 ) async {
+  final vorgang = Schreibvorgang(moodle, a.ziel);
+  return ordnerSperre(vorgang.sperrpfad, () async {
+    if (vorgang.offen) return (vorgang.hinweis, false);
+    try {
+      final ergebnis = await _schreibenMitProbe(
+        moodle,
+        a,
+        arbeitsordner,
+        vorgang,
+      );
+      if (ergebnis.$2) {
+        vorgang.abschliessen();
+        return ergebnis;
+      }
+      // Die Rückleseprobe hat gelesen und Abweichungen gefunden: Der Stand
+      // in Moodle ist bekannt, der Ausgang nicht unklar. Der Vorgang bleibt
+      // dokumentiert, sperrt aber nicht; vor jeder weiteren Änderung wird
+      // frisch gelesen (E17).
+      vorgang.rueckgelesen();
+      return (
+        '${ergebnis.$1}\nMoodle zeigt einen abweichenden Stand (verified: false). '
+            'Frisch lesen und neu planen; der Ordner zeigt den gelesenen Stand.',
+        false,
+      );
+    } catch (e) {
+      // Vor dem letzten POST gibt es noch keinen Vorgang. Nach seinem Beginn
+      // ist auch ein Fehler beim Rücklesen kein Nachweis eines Misserfolgs.
+      if (vorgang.offen) {
+        return (
+          '${vorgang.hinweis}\nUrsache: ${e is MoodleFehler ? e.meldung : e.runtimeType}',
+          false,
+        );
+      }
+      rethrow;
+    }
+  });
+}
+
+Future<(String, bool)> _schreibenMitProbe(
+  MoodleZugang moodle,
+  _Aenderung a,
+  String arbeitsordner,
+  Schreibvorgang vorgang,
+) async {
   final alt = felderIn(a.stand);
   Future<(Map<String, String>, List<Gesetzt>, Antwort)> schreiben() async {
     final f = await formularHolen(moodle, a.ziel.adresse);
@@ -1728,7 +1783,46 @@ Future<(String, bool)> _schreibenOhneSperre(
     for (final b in a.bereiche) {
       await bereichSetzen(moodle, f, b);
     }
-    final antwort = await absenden(moodle, f);
+    final vorher = schreibStand(a.stand);
+    final nachher = {...vorher};
+    for (final e in geschrieben.entries) {
+      nachher['text:${e.key}.html'] = schreibPruefsumme(normalisiert(e.value));
+    }
+    nachher.removeWhere((k, _) => k.startsWith('datei:dateien/'));
+    for (final e in a.dateien.entries) {
+      nachher['datei:dateien/${e.key}'] = sha256.convert(e.value).toString();
+    }
+    for (final b in a.bereiche) {
+      nachher.removeWhere((k, _) => k.startsWith('datei:bereiche/${b.feld}/'));
+      for (final e in b.lokal.entries) {
+        final pfad = e.key.split('/').where((s) => s.isNotEmpty).join('/');
+        nachher['datei:bereiche/${b.feld}/$pfad'] = sha256.convert(e.value).toString();
+      }
+    }
+    for (final e in gesetzt) {
+      nachher['einstellung:${e.schluessel}'] = schreibPruefsumme(e.auswahlwert ?? e.nachher);
+    }
+    vorgang.beginnen(vorher, nachher);
+    final Antwort antwort;
+    try {
+      antwort = await absenden(moodle, f);
+    } on SitzungAbgelaufen {
+      vorgang.verwerfen();
+      rethrow;
+    } on SchutzPruefung {
+      vorgang.verwerfen();
+      rethrow;
+    } on FormularAbgelehnt {
+      vorgang.verwerfen();
+      rethrow;
+    } on AnfrageGesperrt {
+      // Moodle hat die Anfrage nie gesehen.
+      vorgang.verwerfen();
+      rethrow;
+    } on NichtAngemeldet {
+      vorgang.verwerfen();
+      rethrow;
+    }
     return (geschrieben, gesetzt, antwort);
   }
 
@@ -2065,6 +2159,94 @@ Future<(String, bool)> _uebergeben(
   }
 }
 
+/// Klärt einen offenen Vorgang lesend. Ein unveränderter Stand beweist nicht,
+/// dass Moodle einen noch laufenden POST später nicht ausführt; er hebt die
+/// Sperre darum nicht von selbst auf. Mit [aufheben] fragt die App die
+/// Lehrkraft (auf jeder Stufe, E20): Sie entscheidet, ob sie in Moodle
+/// nachgesehen hat und die Sperre fällt -- der Ausweg, wenn die Anfrage nie
+/// ankam, die Lehrkraft das Objekt von Hand in Ordnung gebracht hat oder der
+/// Stand nicht prüfbar ist (Fragen).
+Future<String> aendernStatus(
+  MoodleZugang moodle, {
+  required String vorgang,
+  required String arbeitsordner,
+  Freigaben? freigaben,
+  bool aufheben = false,
+}) async {
+  final v = Schreibvorgang.laden(moodle, vorgang);
+  final ziel = v.ziel;
+  return ordnerSperre(
+    ordnerSchluessel(ziel, arbeitsordner),
+    () => ordnerSperre(v.sperrpfad, () async {
+      final j = v.lesen()!;
+      if (j.status == Schreibstatus.bestaetigt) {
+        return 'Vorgang $vorgang abgeschlossen (verified: true).';
+      }
+      if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      if (j.status == Schreibstatus.rueckgelesen) {
+        return 'Vorgang $vorgang: Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab (verified: false). '
+            'Keine Sperre; frisch lesen und neu planen.';
+      }
+
+      Future<String> ungeklaert(String befund) async {
+        if (!aufheben) {
+          return '${v.hinweis}\n$befund'
+              '${freigaben == null ? '' : '\nHat die Lehrkraft in Moodle nachgesehen und ist die Sperre nicht mehr nötig, '
+                  'aendern_status mit sperre_aufheben aufrufen: Die Lehrkraft entscheidet dann in der App.'}';
+        }
+        if (freigaben == null) return '${v.hinweis}\n$befund\nDie Sperre lässt sich hier nicht aufheben.';
+        final frei = await freigaben.anfragen(FreigabeAnfrage(
+          titel: 'Sperre nach unklarem Speichern aufheben',
+          punkte: [
+            ziel.bezeichnung,
+            befund,
+            'Beim Speichern ist der Ausgang unklar geblieben. Hebt die Sperre auf, wer in Moodle nachgesehen hat '
+                'und weiß, dass die Änderung nicht (mehr) kommt oder nicht mehr gilt.',
+            'Wurde die Anfrage doch noch verarbeitet, kann die Änderung später oder doppelt erscheinen.',
+          ],
+          vergleich: const [],
+          abhaken: const ['Ich habe in Moodle nachgesehen und will dieses Objekt wieder ändern lassen.'],
+          knopf: 'Sperre aufheben',
+          ablehnen: 'Gesperrt lassen',
+          ohneEntscheidung: 'bleibt das Objekt gesperrt',
+          // Eine Entscheidung der Lehrkraft, keine Freigabe zum Schreiben.
+          ab: Bestaetigungen.keine,
+        ));
+        if (!frei) return '${v.hinweis}\n$befund\nDie Lehrkraft hat die Sperre bestehen lassen.';
+        v.verwerfen();
+        return 'Vorgang $vorgang: Sperre auf Entscheidung der Lehrkraft aufgehoben (verified: false, nichts als gespeichert belegt). '
+            'Vor einer weiteren Änderung frisch lesen und planen.';
+      }
+
+      // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
+      // Frage zurückzulesen wäre ein falscher Nachweis.
+      if (ziel.art == Zielart.frage) {
+        return ungeklaert('Neue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.');
+      }
+      final temp = await Directory(arbeitsordner)
+          .createTemp('.aendern-status-');
+      try {
+        final g = await formularLesen(moodle, ziel, temp.path);
+        final aktuell = schreibStand(p.join(g.ordner, '.stand'));
+        final vorher = j.vorher;
+        final nachher = j.nachher;
+        final gleichVorher = schreibStandGleich(aktuell, vorher);
+        if (!gleichVorher && schreibStandGleich(aktuell, nachher)) {
+          v.abschliessen();
+          return 'Vorgang $vorgang: Zielstand bestätigt (verified: true). '
+              'Vor einer weiteren Änderung frisch lesen und planen. Kein POST wiederholt.';
+        }
+        return await ungeklaert('${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
+            'Prozessende nicht belegt.');
+      } on MoodleFehler catch (e) {
+        return ungeklaert('Status nicht lesbar: ${e.meldung}');
+      } finally {
+        await temp.delete(recursive: true);
+      }
+    }),
+  );
+}
+
 /// Schreibt einen gelesenen und bearbeiteten Ordner zurück. [neuSpeichern]:
 /// auch ohne Änderung einmal über das Formular speichern (CodeRunner prüft
 /// seine Musterlösung nur dort).
@@ -2087,6 +2269,8 @@ Future<String> aendern(
   bool neuSpeichern = false,
 }) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
+  final vorgang = Schreibvorgang(moodle, Formularziel.ausOrdner(quelle));
+  if (vorgang.offen) return vorgang.hinweis;
   final schluessel = ordnerSchluessel(
     Formularziel.ausOrdner(quelle),
     arbeitsordner,
@@ -2307,7 +2491,7 @@ Future<String> aendernMehrere(
       if (!ok) {
         abbruch = uebergeben
             ? '${a.kopf(mitKurs: false)}: nicht im Browser gespeichert (oben).'
-            : '${a.kopf(mitKurs: false)} ist gespeichert, aber die Rückleseprobe weicht ab (oben).';
+            : '${a.kopf(mitKurs: false)}: nicht verifiziert; siehe Befund oben.';
       }
     } on MoodleFehler catch (x) {
       abbruch = '${a.kopf(mitKurs: false)}: ${x.meldung}';

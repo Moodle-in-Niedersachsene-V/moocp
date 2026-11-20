@@ -723,7 +723,8 @@ class McpDienst implements AufrufKontext {
           'bereiche/<feld>/ (hinzufügen, ersetzen, entfernen) und Einstellungen als Parameter. '
           'Prüft zuerst, dass Moodle noch den Stand vom Lesen zeigt, zeigt der Lehrkraft in der '
           'App eine Änderungsübersicht mit Zeilenvergleich und schreibt nur nach ihrer Freigabe. '
-          'Danach Rückleseprobe (verified). Sichtbarkeit: sichtbarkeit_setzen. '
+          'Danach Rückleseprobe (verified). Bei Ausgang unklar nicht wiederholen, sondern aendern_status '
+          'mit der Vorgangsnummer aufrufen. Sichtbarkeit: sichtbarkeit_setzen. '
           'Gruppenwahl und Bildergalerie: nur Beschreibungstext und gemessene normale Optionen bestehender Aktivitäten; '
           'keine Gruppenauswahl, individuellen Gruppenlimits, Bilder oder Dateien ändern, kein Anlegen. '
           '${MoodleZugang.nurGruppenModule.map(typName).join(", ")}: nur groupmode und groupingid '
@@ -750,6 +751,32 @@ class McpDienst implements AufrufKontext {
         arbeitsordner: ao,
         einstellungen: _einstellungen(a),
         neuSpeichern: a['neu_speichern'] == true,
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'aendern_status',
+      titel: 'Schreibausgang prüfen',
+      beschreibung: 'Prüft einen unklaren aendern-Vorgang lesend gegen Ausgangs- und Zielstand. '
+          'Wiederholt keinen POST. Ein unveränderter Ausgangsstand erlaubt keine Wiederholung. '
+          'Nur ein eindeutig bestätigter Zielstand schließt den Vorgang ab; danach frisch lesen und planen. '
+          'Mit sperre_aufheben fragt die App die Lehrkraft, ob die Sperre fällt (sie sieht in Moodle nach); '
+          'nur aufrufen, wenn die Lehrkraft es will.',
+      parameter: {
+        'vorgang': JsonSchema.string(description: 'Vorgangsnummer aus der Meldung Ausgang unklar'),
+        'sperre_aufheben': JsonSchema.boolean(
+          description: 'true = die Lehrkraft in der App fragen, ob die Sperre aufgehoben wird; auf jeder Stufe, '
+              'keine Freigabe zum Schreiben. Schreibt nichts nach Moodle.',
+        ),
+      },
+      pflicht: ['vorgang'],
+      ausfuehren: (a) => aendernStatus(
+        moodle,
+        vorgang: _text(a, 'vorgang'),
+        arbeitsordner: ao,
+        freigaben: freigaben,
+        aufheben: a['sperre_aufheben'] == true,
       ),
     );
 

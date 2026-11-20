@@ -36,6 +36,8 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
 import '../protokoll.dart';
+import '../einstellungen_ort.dart';
+import 'package:path/path.dart' as p;
 import '../testschalter.dart';
 import 'browserliste.dart';
 import 'sicherung_regeln.dart';
@@ -434,7 +436,11 @@ class _Namenssperre extends Aufrufer {
 }
 
 class MoodleZugang {
-  MoodleZugang(this.protokoll);
+  MoodleZugang(this.protokoll, {String? schreibvorgaengeOrdner})
+      : schreibvorgaengeOrdner = schreibvorgaengeOrdner ?? p.join(einstellungenOrdner, 'schreibvorgaenge');
+
+  /// Dauerhafte Prüfsummen offener Schreibvorgänge, außerhalb des Arbeitsordners.
+  final String schreibvorgaengeOrdner;
 
   /// Zeitgrenzen: Aufbau der Verbindung, und bis die Antwort vollständig da
   /// ist. Ohne sie kann eine hängende Anfrage ein Werkzeug beliebig lange
@@ -1790,6 +1796,7 @@ class MoodleZugang {
     Uri basis, {
     required String benutzer,
     required String passwort,
+    String? schreibvorgaengeOrdner,
     Duration? antwortfrist,
     Duration? langsamAb,
   }) async {
@@ -1797,7 +1804,8 @@ class MoodleZugang {
     if (basis.scheme != 'http' || basis.host != '127.0.0.1') {
       throw ArgumentError('Testzugang nur über http://127.0.0.1.');
     }
-    final z = MoodleZugang(protokoll);
+    final z = MoodleZugang(protokoll, schreibvorgaengeOrdner: schreibvorgaengeOrdner ??
+        p.join(Directory.systemTemp.path, 'moocp-test-schreibvorgaenge', '${basis.port}-${Random.secure().nextInt(1 << 32)}'));
     z._testInstanz = true;
     if (antwortfrist != null) z._antwortgrenze = antwortfrist;
     if (langsamAb != null) z._langsamAb = langsamAb;
@@ -2587,7 +2595,7 @@ class MoodleZugang {
       final diagnose = '$grund (Phase $phase, ${dauer.elapsedMilliseconds} ms, $empfangen Bytes)';
       protokoll.eintrag(Art.fehler, '$methode ${aufrufer!.pfadImProtokoll(uri)}: $diagnose');
       return MoodleNichtErreichbar('$diagnose. ${schreibt
-          ? 'Ausgang unklar (verified: false): Moodle kann bereits gespeichert haben. Nicht blind wiederholen; den Stand frisch lesen und prüfen.'
+          ? 'Ausgang unklar: Moodle kann bereits gespeichert haben. Nicht blind wiederholen; den Vorgang beziehungsweise Speicherstand lesend prüfen.'
           : 'Moodle nicht erreichbar. Später erneut lesen.'}');
     }
     try {

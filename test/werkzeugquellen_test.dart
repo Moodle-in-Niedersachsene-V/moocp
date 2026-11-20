@@ -29,6 +29,7 @@ const _eingebaut = [
   'lernlandkarte_verknuepfungen_setzen',
   'abschnitt_lesen',
   'aendern',
+  'aendern_status',
   'aendern_mehrere',
   'links_setzen',
   'lernsituation_pruefen',

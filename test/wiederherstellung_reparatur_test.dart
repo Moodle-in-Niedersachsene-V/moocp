@@ -41,6 +41,9 @@ Uint8List _mbz(Map<String, List<int>> dateien) {
 
 /// Eine Sicherung: Seite „Infoblatt" mit zwei Bildern, Datei „Handout" mit zwei Dateien
 /// im Dateimanager (eine in einem Unterordner).
+/// Ob die Sicherung die Dateien selbst enthält (`files/<ab>/<sha1>`, wie ein echtes .mbz).
+var _mitDateien = false;
+
 Uint8List _archiv() {
   const backup = '<moodle_backup><activities>'
       '<activity><modulename>page</modulename><title>Infoblatt</title><directory>activities/page_7</directory></activity>'
@@ -66,6 +69,8 @@ Uint8List _archiv() {
     'activities/resource_8/inforef.xml': utf8.encode(
         '<inforef><fileref><file><id>3</id></file><file><id>4</id></file><file><id>5</id></file></fileref></inforef>'),
     'files.xml': utf8.encode(files),
+    if (_mitDateien)
+      for (final d in [_bild, _zwei, _pdf, _txt]) 'files/${_sha(d).substring(0, 2)}/${_sha(d)}': d,
   });
 }
 
@@ -565,6 +570,17 @@ void main() {
       expect(moodle.schreiben, isEmpty);
     });
 
+    test('wiederholte Reparatur derselben Aktivität lässt den Status nicht wachsen', () async {
+      final ordner = await lesen(2);
+      await reparieren(ordner);
+      final nach1 = await client.tool('wiederherstellung_status', {'id': vorgang.id});
+      await reparieren(ordner);
+      await reparieren(ordner);
+      final nach3 = await client.tool('wiederherstellung_status', {'id': vorgang.id});
+      expect('Anhangsreparatur: „Infoblatt"'.allMatches(nach3).length, 'Anhangsreparatur: „Infoblatt"'.allMatches(nach1).length);
+      expect(nach3.length, lessThanOrEqualTo(nach1.length + 5));
+    });
+
     test('fehlendes Bild (verwaiste Entwurfsadresse): hinzufügen, verified, Status-Hinweis', () async {
       moodle.akt[2]!.eingebettet.remove('bild.png');
       final ordner = await lesen(2);
@@ -697,6 +713,36 @@ void main() {
       expect(text, contains('verified: true'));
     });
 
+    test('Stufe „keine": Ersetzen einer abweichenden Datei fragt trotzdem, einzeln zum Abhaken', () async {
+      moodle.akt[2]!.eingebettet['zwei.png'] = utf8.encode('anderes Bild');
+      freigaben.stufe = Bestaetigungen.keine;
+      List<String>? abhaken;
+      beiFreigabe = () => abhaken = freigaben.aktuell!.abhaken;
+      final ordner = await lesen(2);
+      ablegen(ordner, 'dateien/zwei.png', _zwei);
+
+      final text = await reparieren(ordner);
+
+      expect(titel, ['Anhänge reparieren?']);
+      expect(abhaken, hasLength(1));
+      expect(abhaken!.single, contains('zwei.png'));
+      expect(freigaben.ausgelassen, 0);
+      expect(text, contains('verified: true'));
+    });
+
+    test('Stufe „keine": Ersetzen abgelehnt, nichts überschrieben', () async {
+      moodle.akt[2]!.eingebettet['zwei.png'] = utf8.encode('anderes Bild');
+      freigaben.stufe = Bestaetigungen.keine;
+      antwort = false;
+      final ordner = await lesen(2);
+      ablegen(ordner, 'dateien/zwei.png', _zwei);
+
+      final text = await reparieren(ordner);
+
+      expect(text, contains('Nichts geschrieben'));
+      expect(moodle.akt[2]!.eingebettet['zwei.png'], utf8.encode('anderes Bild'));
+    });
+
     test('Ablehnung: nichts geschrieben', () async {
       moodle.akt[2]!.eingebettet.remove('bild.png');
       antwort = false;
@@ -815,6 +861,34 @@ void main() {
       await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('Anderer Inhalt'))));
       expect(titel, isEmpty);
       expect(moodle.schreiben, isEmpty);
+    });
+
+    group('Sicherung enthält die Dateien', () {
+      setUpAll(() => _mitDateien = true);
+      tearDownAll(() => _mitDateien = false);
+
+      test('die App legt fehlende Reparaturdateien selbst in den Ordner, auch im Dateimanager', () async {
+        moodle.akt[2]!.eingebettet.remove('bild.png');
+        moodle.akt[3]!.manager.remove('/Ordner/b.txt');
+        final ordner2 = await lesen(2);
+        final ordner3 = await lesen(3);
+
+        final text2 = await reparieren(ordner2);
+        final text3 = await reparieren(ordner3, cmid: 3, name: 'Handout');
+
+        expect(text2, contains('verified: true'));
+        expect(text3, contains('verified: true'));
+        expect(moodle.akt[2]!.eingebettet['bild.png'], _bild);
+        expect(moodle.akt[3]!.manager['/Ordner/b.txt'], _txt);
+      });
+
+      test('eine falsche Datei im Ordner wird nicht überschrieben, sondern genannt', () async {
+        moodle.akt[2]!.eingebettet.remove('bild.png');
+        final ordner = await lesen(2);
+        ablegen(ordner, 'dateien/bild.png', utf8.encode('falscher Inhalt'));
+        await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('Anderer Inhalt'))));
+        expect(moodle.schreiben, isEmpty);
+      });
     });
 
     test('Ordner mit zusätzlicher Textänderung: Abbruch, die Reparatur ändert keinen Text', () async {

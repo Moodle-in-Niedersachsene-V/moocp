@@ -55,6 +55,7 @@ class FragenbankDoppel {
   bool formularFehler = false;
   bool vorschauFehler = false;
   bool entwurfAbgelehnt = false;
+  int entwurfAblehnungStatus = 200;
   bool entwurfOhneNummer = false;
   String? stackTestHtml;
 
@@ -241,7 +242,7 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
 <input type="submit" name="submitbutton" value="Änderungen speichern"></form>'''));
       }
       if (entwurfAbgelehnt) {
-        return _text(r, _seite('<form class="mform" method="post"><div class="fitem"><div class="col-form-label">Status</div><div class="alert-danger">Nicht speicherbar</div></div></form>'));
+        return _text(r, _seite('<form class="mform" method="post"><div class="fitem"><div class="col-form-label">Status</div><div class="alert-danger">Nicht speicherbar</div></div></form>'), status: entwurfAblehnungStatus);
       }
       final f = Uri.splitQueryString(koerper);
       final e = eintragVon(v.id)!;

@@ -255,6 +255,10 @@ Future<({bool ok, bool verified, String text})> _eine(MoodleZugang moodle, Strin
     vorgang.verwerfen();
     rethrow;
   } on MoodleFehler catch (x) {
+    if (x is FormularAbgelehnt || x is AnfrageGesperrt || x is NichtAngemeldet) {
+      vorgang.verwerfen();
+      return (ok: false, verified: false, text: '$kopf: Import abgelehnt, nichts gespeichert: ${x.meldung}');
+    }
     // Nach dem Beginn ist auch eine Ablehnung ohne Beleg kein Nachweis, dass
     // nichts geschrieben wurde (E37).
     return (ok: false, verified: false, text: '$kopf: ${vorgang.hinweis}\nUrsache: ${x.meldung}');
@@ -276,10 +280,12 @@ Future<({bool ok, bool verified, String text})> _eine(MoodleZugang moodle, Strin
   final abweichungen = export.xml == null ? ['Die zurückgelesene Version lässt sich nicht exportieren.']
       : fragenVergleichen(eingabe, export.xml!);
   if (abweichungen.isNotEmpty) {
+    if (export.xml != null) vorgang.rueckgelesen();
     return (ok: false, verified: false, text: '$kopf: Rundlaufprobe NICHT bestanden. '
         'Zurückgelesene Version ${neu.id}: ${abweichungen.join(' ')} '
         'Ihre Herkunft ist nicht direkt bestätigt; sie wurde weder gelöscht noch auf Entwurf gesetzt '
-        'und kann in Tests aktiv sein. Die Lehrkraft prüft sie in der Fragenbank. ${vorgang.hinweis}');
+        'und kann in Tests aktiv sein. Die Lehrkraft prüft sie in der Fragenbank. '
+        '${export.xml == null ? vorgang.hinweis : 'Frisch lesen und neu planen.'}');
   }
   // Bestätigt den beobachteten Zielinhalt, nicht die Herkunft der Version.
   vorgang.abschliessen();

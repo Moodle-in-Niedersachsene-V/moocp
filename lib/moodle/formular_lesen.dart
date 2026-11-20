@@ -351,6 +351,29 @@ class FormularGelesen {
   }
 }
 
+/// Wie viele Dateien nacheinander ohne Antwort das Lesen verträgt. Eine einzelne
+/// Datei, die zu langsam kommt oder hinter einer Prüfung des Schutzdienstes liegt,
+/// ist ein Befund an dieser Datei: Sonst ließe sich eine Aktivität mit einem solchen
+/// Bild nie mehr ändern, denn Ändern beginnt mit frischem Lesen (E17). Die zweite
+/// Datei in Folge zeigt, dass Moodle selbst nicht antwortet; dann hört das Lesen auf,
+/// statt jede weitere bis zur Zeitgrenze zu versuchen. Ein Abbruch des Clients
+/// beendet es sofort.
+class _Wartegrenze {
+  int _folge = 0;
+
+  void gelesen() => _folge = 0;
+
+  /// Ob nach [x] die nächste Datei versucht wird.
+  bool weiter(MoodleFehler x) {
+    if (x is MoodleAbgebrochen) return false;
+    if (!moodleAntwortetNicht(x)) {
+      _folge = 0;
+      return true;
+    }
+    return ++_folge < 2;
+  }
+}
+
 /// Größere Dateien eines Dateibereichs werden nicht geladen, nur genannt.
 const int bereichGrenze = 25 * 1024 * 1024;
 
@@ -364,6 +387,7 @@ Future<List<Dateibereich>> _bereicheLesen(
   String ziel,
   String? sesskey,
   Future<void>? abbruch,
+  _Wartegrenze wartegrenze,
 ) async {
   final aus = <Dateibereich>[];
   for (final b in roh) {
@@ -437,10 +461,11 @@ Future<List<Dateibereich>> _bereicheLesen(
             await f.writeAsBytes(d.bytes);
           }
           bereich.dateien['$pfad$name'] = dateiAuswerten(name, d.bytes);
+          wartegrenze.gelesen();
         } on MoodleFehler catch (x) {
           // Nur diese Datei fehlt -- nicht: Moodle antwortet nicht (dann
           // wartete jede weitere Datei wieder bis zur Zeitgrenze).
-          if (moodleAntwortetNicht(x)) rethrow;
+          if (!wartegrenze.weiter(x)) rethrow;
           bereich.nichtGelesen.add('$pfad$name (${x.meldung})');
         }
       }
@@ -474,7 +499,7 @@ Future<Map<int, (String, String)>> _zielTitel(
 
   if (kurs != null) {
     try {
-      final k = await kursLesen(moodle, kurs);
+      final k = await kursLesen(moodle, kurs, abbruch: abbruch);
       for (final c in k.nachCmid.values) {
         if (cmids.contains(c.cmid)) titel[c.cmid] = (c.name, c.modul);
       }
@@ -711,23 +736,26 @@ Future<FormularGelesen> formularLesenOhneSperre(
   final sesskey = wert('sesskey');
   // Antwortet Moodle nicht mehr, bleibt kein halb gelesener Ordner zurück:
   // Er sähe wie ein Stand aus, hat aber nicht einmal den Quelltext.
+  Future<void> halbGelesenVerwerfen() async {
+    try {
+      await ziel0.delete(recursive: true);
+    } on FileSystemException {
+      // Der Fehler von Moodle ist die Meldung; ein Rest bleibt dann liegen.
+    }
+  }
+
   Future<T> ganzOderGarNicht<T>(Future<T> Function() lesen) async {
     try {
       return await lesen();
     } on MoodleFehler catch (x) {
-      if (moodleAntwortetNicht(x)) {
-        try {
-          await ziel0.delete(recursive: true);
-        } on FileSystemException {
-          // Der Fehler von Moodle ist die Meldung; ein Rest bleibt dann liegen.
-        }
-      }
+      if (moodleAntwortetNicht(x)) await halbGelesenVerwerfen();
       rethrow;
     }
   }
 
+  final wartegrenze = _Wartegrenze();
   final bereiche = await ganzOderGarNicht(
-    () => _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch),
+    () => _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch, wartegrenze),
   );
 
   // Referenzierte Dateien einsammeln: src und href, die auf Datei-Adressen
@@ -764,7 +792,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
       name = '${p.basenameWithoutExtension(name)}-$i$ext';
     }
     try {
-      final d = await ganzOderGarNicht(() => moodle.lesen(e.key, abbruch: abbruch));
+      final d = await moodle.lesen(e.key, abbruch: abbruch);
       if (d.status != 200) {
         fehlend.add('$name (HTTP ${d.status})');
         continue;
@@ -776,10 +804,15 @@ Future<FormularGelesen> formularLesenOhneSperre(
       namenFuer[e.key] = name;
       dateien.add(GeleseneDatei(name, d.bytes.length, d.inhaltstyp, e.value));
       dateiinfo[name] = dateiAuswerten(name, d.bytes);
+      wartegrenze.gelesen();
     } on MoodleFehler catch (x) {
-      // Nur dieses Bild fehlt (HTTP-Status, gesperrt, zu groß) -- nicht:
-      // Moodle antwortet nicht. Dann nicht jedes weitere Bild versuchen.
-      if (moodleAntwortetNicht(x)) rethrow;
+      // Nur dieses Bild fehlt (HTTP-Status, gesperrt, zu groß, einmal keine
+      // Antwort) -- nicht: Moodle antwortet nicht. Dann nicht jedes weitere
+      // Bild versuchen, und kein halb gelesener Ordner bleibt zurück.
+      if (!wartegrenze.weiter(x)) {
+        await halbGelesenVerwerfen();
+        rethrow;
+      }
       fehlend.add('$name (${x.meldung})');
     }
   }
@@ -819,7 +852,9 @@ Future<FormularGelesen> formularLesenOhneSperre(
   Set<int>? lokaleCmids;
   if (karte != null && kurs != null) {
     try {
-      lokaleCmids = (await kursLesen(moodle, kurs)).nachCmid.keys.toSet();
+      lokaleCmids = (await kursLesen(moodle, kurs, abbruch: abbruch)).nachCmid.keys.toSet();
+    } on MoodleAbgebrochen {
+      rethrow;
     } on MoodleFehler {
       lokaleCmids = null;
     }

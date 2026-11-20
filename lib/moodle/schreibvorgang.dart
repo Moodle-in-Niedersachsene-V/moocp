@@ -15,7 +15,7 @@ import 'moodle_zugang.dart';
 /// [aufgehoben]: Die Lehrkraft hat die Sperre nach einem unklaren Ausgang in der
 /// App selbst gelöst ([sperreAufheben]). Das heißt nicht „gespeichert" oder
 /// „nicht gespeichert", sondern: Der nächste Vorgang beginnt mit frischem Lesen.
-enum Schreibstatus { offen, bestaetigt, nichtGespeichert, aufgehoben }
+enum Schreibstatus { offen, bestaetigt, nichtGespeichert, rueckgelesen, aufgehoben }
 
 class Schreibstand {
   Schreibstand(this.vorher, this.nachher, this.status);
@@ -125,8 +125,65 @@ class Schreibvorgang {
       'Nicht erneut schreiben. Mit aendern_status(vorgang: "$id") lesend prüfen; '
       'auch ein unveränderter Ausgangsstand erlaubt keine Wiederholung.';
 
+  /// Wie lange ein abgeschlossener Vorgang abrufbar bleibt (Status nach Nummer).
+  static const aufbewahrung = Duration(days: 30);
+
+  /// Löscht abgeschlossene Vorgänge samt ihrer Objektsperre: die älter sind als
+  /// [aelterAls], oder (mit [dieserInstanz]) alle der Instanz von [moodle], etwa beim
+  /// Löschen ihres Profils. Offene Vorgänge bleiben immer: Sie sperren, bis jemand
+  /// den Ausgang klärt. In den Dateien stehen Dateinamen und Prüfsummen von
+  /// Einstellungen; sie sollen nicht länger liegen, als der Status sie braucht.
+  static void abgeschlosseneLoeschen(
+    MoodleZugang moodle, {
+    Duration? aelterAls,
+    bool dieserInstanz = false,
+  }) {
+    final ordner = Directory(moodle.schreibvorgaengeOrdner);
+    if (!ordner.existsSync()) return;
+    final basis = moodle.basis;
+    final jetzt = DateTime.now();
+    final weg = <String>{};
+    try {
+      for (final f in ordner.listSync(followLinks: false).whereType<File>()) {
+        final name = p.basename(f.path);
+        if (!RegExp(r'^[a-f0-9]{64}\.json$').hasMatch(name)) continue;
+        try {
+          final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+          if (j['status'] == Schreibstatus.offen.name) continue;
+          final alt = aelterAls != null && jetzt.difference(f.lastModifiedSync()) >= aelterAls;
+          final meine = dieserInstanz &&
+              basis != null &&
+              j['objekt'] == schreibPruefsumme('$basis|${Formularziel.ausJson(j['ziel'] as Map).adresse}');
+          if (!alt && !meine) continue;
+          f.deleteSync();
+          weg.add(name.substring(0, 64));
+        } on FormatException {
+          continue; // Beschädigtes bleibt für die Verwaltung liegen.
+        } on TypeError {
+          continue;
+        } on ArgumentError {
+          continue;
+        }
+      }
+      for (final f in ordner.listSync(followLinks: false).whereType<File>()) {
+        if (!p.basename(f.path).startsWith('ziel-')) continue;
+        try {
+          final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+          if (weg.contains(j['id'])) f.deleteSync();
+        } on FormatException {
+          continue;
+        } on TypeError {
+          continue;
+        }
+      }
+    } on FileSystemException {
+      // Aufräumen ist nie Voraussetzung fürs Schreiben.
+    }
+  }
+
   void beginnen(Map<String, String> vorher, Map<String, String> nachher) {
     if (offen) throw MoodleFehler(hinweis);
+    abgeschlosseneLoeschen(moodle, aelterAls: aufbewahrung);
     final zufall = Random.secure();
     _nummer = List.generate(
       32,
@@ -149,6 +206,10 @@ class Schreibvorgang {
 
   /// Nur bei einer ausdrücklichen Antwort, dass Moodle nicht gespeichert hat.
   void verwerfen() => _statusSetzen(Schreibstatus.nichtGespeichert);
+
+  /// Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab: Der Stand ist
+  /// bekannt, der Vorgang sperrt nicht mehr.
+  void rueckgelesen() => _statusSetzen(Schreibstatus.rueckgelesen);
 
   void _statusSetzen(Schreibstatus status) {
     final j = _lesen(_datei);

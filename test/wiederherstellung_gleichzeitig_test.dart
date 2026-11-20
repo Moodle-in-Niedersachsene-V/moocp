@@ -36,7 +36,7 @@ class _Moodle extends MoodleZugang {
   _Moodle() : super(Protokoll());
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     if (name == 'core_course_get_enrolled_courses_by_timeline_classification') {
       return {
         'courses': [

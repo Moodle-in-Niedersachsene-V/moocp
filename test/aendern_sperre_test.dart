@@ -27,6 +27,8 @@ class _Doppel {
   bool antwortAbbrechen = false;
   bool speichernAnwenden = false;
   bool ruecklesenAbbrechen = false;
+  /// Moodle antwortet mit einem Formularfehler statt mit einer Umleitung.
+  bool formularAblehnen = false;
 
   static const benutzer = 'e.mustermann';
   static const passwort = 'test-geheim-23';
@@ -98,6 +100,9 @@ class _Doppel {
     if (pfad == '/course/modedit.php' && r.method == 'POST') {
       speichern.add(r.uri.query);
       final f = Uri.splitQueryString(await utf8.decoder.bind(r).join());
+      if (formularAblehnen) {
+        return _text(r, _html('<div class="alert-danger">Ungültige Eingabe</div>'));
+      }
       if (speichernAnwenden) text = f['page[text]']!;
       if (antwortAbbrechen) {
         final socket = await r.response.detachSocket(writeHeaders: false);
@@ -312,6 +317,79 @@ void main() {
     expect(status, contains('verified: false'));
     expect(status, contains('Ausgangsstand unverändert'));
     expect(doppel.speichern, hasLength(1));
+  });
+
+  test('Ein Formularfehler von Moodle sperrt das Objekt nicht', () async {
+    final ordner = await geaendertStarten();
+    doppel.formularAblehnen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    await expectLater(ergebnis, throwsA(isA<FormularAbgelehnt>()));
+    doppel.formularAblehnen = false;
+    doppel.speichernAnwenden = true;
+    final nochmal = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await nochmal;
+    expect(bericht, isNot(contains('Ausgang unklar')));
+    expect(bericht, contains('verified: true'));
+    expect(doppel.speichern, hasLength(2));
+  });
+
+  test('Eine abweichende Rückleseprobe sperrt das Objekt nicht', () async {
+    final ordner = await geaendertStarten();
+    // Moodle leitet um, übernimmt aber nichts: Die Probe liest den alten Stand.
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await ergebnis;
+    expect(bericht, contains('verified: false'));
+    expect(bericht, isNot(contains('Ausgang unklar')));
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(bericht);
+    expect(nummer, isNull);
+    // Der Ordner zeigt jetzt den gelesenen Stand; die Änderung kommt neu hinein.
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Zweiter Versuch</p>');
+    doppel.speichernAnwenden = true;
+    final nochmal = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    expect(await nochmal, contains('verified: true'));
+  });
+
+  test('Die Lehrkraft kann die Sperre nach unklarem Ausgang aufheben', () async {
+    final ordner = await geaendertStarten();
+    doppel.antwortAbbrechen = true;
+    final ergebnis = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final nummer = RegExp(r'Vorgang ([a-f0-9]{64})').firstMatch(await ergebnis)!.group(1)!;
+    // Ohne den Wunsch bleibt es beim Lesen.
+    expect(await aendernStatus(zugang, vorgang: nummer, arbeitsordner: arbeitsordner.path, freigaben: freigaben),
+        contains('Ausgangsstand unverändert'));
+    expect(freigaben.aktuell, isNull);
+    // Die Lehrkraft lässt die Sperre bestehen.
+    var status = aendernStatus(zugang,
+        vorgang: nummer, arbeitsordner: arbeitsordner.path, freigaben: freigaben, aufheben: true);
+    await aufFreigabe();
+    expect(freigaben.aktuell!.ab, Bestaetigungen.keine);
+    freigaben.entscheiden(false);
+    expect(await status, contains('bestehen lassen'));
+    doppel.antwortAbbrechen = false;
+    expect(await aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path), contains(nummer));
+    // Die Lehrkraft hebt sie auf.
+    status = aendernStatus(zugang,
+        vorgang: nummer, arbeitsordner: arbeitsordner.path, freigaben: freigaben, aufheben: true);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    expect(await status, contains('Sperre auf Entscheidung der Lehrkraft aufgehoben'));
+    doppel.speichernAnwenden = true;
+    await formularLesen(zugang, Formularziel.aktivitaet(101), arbeitsordner.path);
+    File(p.join(arbeitsordner.path, ordner, 'page.html')).writeAsStringSync('<p>ZZ Neu</p>');
+    final nochmal = aendern(zugang, freigaben, ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    expect(await nochmal, contains('verified: true'));
   });
 
   test('Offene Freigabe hält ein Lesen desselben Ordners nicht auf; die freigegebene Änderung ist dann weg und wird nicht geschrieben', () async {

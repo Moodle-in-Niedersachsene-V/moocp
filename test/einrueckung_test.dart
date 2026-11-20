@@ -24,7 +24,7 @@ class _Kurs extends MoodleZugang {
   var grenze = 1;
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     switch (name) {
       case 'core_course_get_enrolled_courses_by_timeline_classification':
         return {'courses': <Object?>[]};
@@ -109,7 +109,15 @@ void main() {
     final text = await rueck(11, 1, ziel: 1);
     expect(moodle.aktionen, ['cm_move 11', 'cm_moveright 11']);
     expect(gefragt, hasLength(1));
-    expect(text, contains('Einrückung von 0 auf 1 gesetzt. verified: true'));
+    expect(text, contains('Einrückung von 0 auf 1 gesetzt'));
+    expect(RegExp('verified').allMatches(text), hasLength(1));
+  });
+
+  test('Verschieben mit gescheiterter Einrückung: genau ein Urteil, und es ist false', () async {
+    moodle.grenze = 0;
+    final text = await rueck(11, 1, ziel: 1);
+    expect(RegExp('verified').allMatches(text), hasLength(1));
+    expect(text, endsWith('verified: false'));
   });
 
   test('schon auf der gewünschten Stufe: keine Freigabe, nichts geschrieben', () async {

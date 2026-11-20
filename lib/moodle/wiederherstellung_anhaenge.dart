@@ -180,7 +180,12 @@ List<QuellDateiOrt>? quelldateienMitOrt(Uint8List mbz, {required String modul, r
       final name = _text(f, 'filename') ?? '';
       if (name.isEmpty || name == '.') continue; // Verzeichniseinträge
       final komponente = _text(f, 'component') ?? '';
-      final dateimanager = komponente == 'mod_resource' || komponente == 'mod_folder';
+      // Nur der Bereich `content` ist der Dateimanager der Aktivität. Ein Bild der
+      // Beschreibung (`intro`) gehört zum Editorfeld, auch bei Datei und Verzeichnis:
+      // Als Dateimanager-Datei geplant, käme es als Zusatzdatei in die Datei- oder
+      // Verzeichnisliste, und das Bild im Text bliebe kaputt.
+      final dateimanager =
+          (komponente == 'mod_resource' || komponente == 'mod_folder') && _text(f, 'filearea') == 'content';
       if (!dateimanager && !eingebunden.contains(name)) continue;
       liste.add((
         name: name,

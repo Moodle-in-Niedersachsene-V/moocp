@@ -1150,6 +1150,10 @@ Future<String> _gegenlesen(
   // eindeutig zuordnen lässt, ist je Quiz eine Prüflücke, nie Gleichheit.
   final archivQuizTitel = [for (final a in erwartet) if (a.modul == 'quiz') a.titel];
   final vergleiche = <FragenVergleich>[];
+  // Woher die Fragen der neuen Tests kommen (nur lesen, aus derselben Zusammenstellung; ohne
+  // Einfluss auf verified). Ob Moodle beim Wiederherstellen in einen anderen Kurs die Bank des
+  // Quelltests weiter verwendet, ist nicht gemessen -- die Zeile nennt nur, was die Seite zeigt.
+  final herkunft = <String>[];
   if (archivQuizTitel.isNotEmpty) {
     final zuordnung = quizZuordnen(
       archivQuizTitel: archivQuizTitel,
@@ -1162,9 +1166,11 @@ Future<String> _gegenlesen(
         v = FragenVergleich(VergleichArt.pruefluecke,
             'Fragenvergleich nicht möglich (Prüflücke): ${z.luecke}');
       } else {
+        final zielTest = await testLesen(moodle, z.zielCmid!, banken: true);
+        herkunft.add('Herkunft der Fragen im Quiz „${z.titel}" (cmid ${z.zielCmid}): ${zielTest.herkunftText()}');
         v = fragenVergleichen(
           quelle: z.quelle,
-          ziel: [for (final p in (await testLesen(moodle, z.zielCmid!)).plaetze) (name: p.name, zufall: p.zufall)],
+          ziel: [for (final p in zielTest.plaetze) (name: p.name, zufall: p.zufall)],
         );
       }
       vergleiche.add(FragenVergleich(v.art, 'Quiz „${z.titel}": ${v.text}', fehlend: v.fehlend, zusaetzlich: v.zusaetzlich));
@@ -1190,6 +1196,7 @@ Future<String> _gegenlesen(
     if (texte != null) texte.text,
     'Einstellungen der Aktivitäten sind nicht gegengeprüft (Prüflücke); verified gilt nicht für sie.',
     for (final v in vergleiche) v.text,
+    ...herkunft,
     if (!herkunftOk) 'Fragenherkunft nicht bestätigt: Die Fragen sind nicht eindeutig als quizlokal nachgewiesen. '
         'Sie können aus einer geteilten Sammlung stammen; Abhängigkeiten von der Quellsammlung bleiben ungeprüft.',
     ?schreibPruefluecke,

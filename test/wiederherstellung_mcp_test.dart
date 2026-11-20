@@ -274,6 +274,8 @@ class _Moodle {
         answer = page(
           '<script>var quiz = {"quizid": 8};</script><li class="slot qtype_multichoice" id="slot-1"><span class="questionname">ZZ Frage</span></li>',
         );
+      } else if (path == '/question/banks.php') {
+        answer = page('<div id="region-main"><a href="/mod/qbank/view.php?id=31">ZZ Bank</a></div>');
       } else if (path == '/question/bank/importquestions/import.php') {
         answer = page('<select name="category"><option value="1,55">ZZ Sammlung (1)</option></select>');
       } else if (path == '/question/bank/exportquestions/export.php') {
@@ -876,6 +878,7 @@ void main() {
     external.completed = true;
     final status = await client.tool('wiederherstellung_status', {'id': number});
     expect('stimmen mit der Quelle überein'.allMatches(status).length, 2, reason: status);
+    expect('Herkunft der Fragen im Quiz'.allMatches(status).length, 2, reason: status);
     expect(status, contains('„ZZ Quiz B"'));
     expect(status, isNot(contains('nicht eindeutig')));
     expect(status, isNot(contains('Fragenherkunft nicht bestätigt')));

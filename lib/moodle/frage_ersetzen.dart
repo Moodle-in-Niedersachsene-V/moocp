@@ -27,6 +27,7 @@ import '../freigabe.dart';
 import 'formular.dart';
 import 'formular_schreiben.dart';
 import 'fragen.dart';
+import 'fragen_sicherung.dart';
 import 'fragen_xml.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
@@ -57,6 +58,7 @@ Future<String> frageErsetzen(
   required List<(int, String)> tests,
   required bool loeschen,
   required Future<String> Function(int frage) stackTesten,
+  required String sicherungsOrdner,
 }) async {
   // --- Prüfen; nichts wird geschrieben -----------------------------------
   if (tests.isEmpty) {
@@ -64,7 +66,8 @@ Future<String> frageErsetzen(
         'geht mit fragen_importieren und fragen_loeschen.');
   }
   if ({for (final (c, _) in tests) c}.length != tests.length) throw MoodleFehler('Ein Test ist doppelt genannt.');
-  final alt = (await loeschenPruefen(moodle, sammlung, [(frage, name)])).single;
+  final altGeprueft = (await loeschenPruefen(moodle, sammlung, [(frage, name)])).single;
+  final alt = altGeprueft.frage;
 
   final pfad = imArbeitsordner(datei, arbeitsordner);
   if (!File(pfad).existsSync()) throw MoodleFehler('Datei $pfad gibt es nicht.');
@@ -106,8 +109,18 @@ Future<String> frageErsetzen(
     plaene.add((t, c, plaetze));
   }
 
+  // Löscht der Aufruf die alte Frage, gilt dieselbe Regel wie bei fragen_loeschen (E20): Die
+  // Sicherung der alten Frage liegt vor der Freigabe da, und die Freigabe fragt auf jeder Stufe.
+  final sicherung =
+      loeschen ? await fragenSichern(sicherungsOrdner, sammlung, [(id: alt.id!, xml: altGeprueft.xml)]) : null;
+  void verwerfen() {
+    if (sicherung != null && File(sicherung).existsSync()) File(sicherung).deleteSync();
+  }
+
   // --- Freigabe ----------------------------------------------------------
-  final ja = await freigaben.anfragen(FreigabeAnfrage(
+  final bool ja;
+  try {
+    ja = await freigaben.anfragen(FreigabeAnfrage(
     titel: 'Frage ersetzen?',
     punkte: [
       'Fragensammlung cmid $sammlung, Kategorie „${k.name}"',
@@ -122,7 +135,8 @@ Future<String> frageErsetzen(
         if (t.hatVersuche) 'ACHTUNG: Zu „${c.name}" gibt es bereits Versuche -- der Tausch verschiebt Bewertungen.',
       loeschen
           ? 'Danach die alte Frage endgültig löschen, mit allen Versionen. Steckt sie noch in einem anderen Test, '
-              'verbirgt Moodle sie nur.'
+              'verbirgt Moodle sie nur. Vorher gesichert als XML: $sicherung -- gesichert ist die aktuelle '
+              'Version, nicht ihr Verlauf.'
           : 'Die alte Frage bleibt in der Sammlung.',
       if (nachher)
         loeschen
@@ -132,85 +146,120 @@ Future<String> frageErsetzen(
     vergleich: const [],
     knopf: 'Ersetzen',
     ohneEntscheidung: 'wird nichts geändert',
+    ab: loeschen ? Bestaetigungen.keine : Bestaetigungen.mittel,
+    abhaken: [
+      if (loeschen)
+        'Ich habe geprüft: „${alt.name}" (${alt.typ}, questionid ${alt.id}) wird mit allen Versionen endgültig '
+            'gelöscht; gesichert ist nur ihre aktuelle Version.',
+    ],
   ));
+  } catch (_) {
+    verwerfen();
+    rethrow;
+  }
+  if (!ja) verwerfen();
   if (!ja) return 'Nicht ersetzt: in der App abgelehnt oder nicht rechtzeitig freigegeben. Nichts geändert.';
+  // Die Sicherung gehört zu einem Löschen: Kommt der Aufruf nicht bis dahin (Abbruch nach dem
+  // Import, fehlgeschlagener Nachweis, geänderte alte Frage), bleibt keine Datei einer Frage
+  // liegen, die nicht gelöscht wurde -- wie bei fragen_loeschen.
+  var loeschenVersucht = false;
+  try {
 
-  // --- Ausführen ---------------------------------------------------------
-  final b = StringBuffer();
-  final i = await importAusfuehren(moodle, sammlung, k, p.basename(pfad), xml, 1);
-  b.write(i.text);
-  if (!i.ok || i.neu.length != 1 || i.neu.single.id == null) {
-    return '${b}Abgebrochen nach dem Import: Tests und alte Frage unverändert. verified: false';
-  }
-  final n = await importNachweise(moodle, sammlung, i.neu, stackTesten);
-  b.write(n.text);
-  if (!n.ok) {
-    return '$b\nAbgebrochen: Ein Nachweis ist nicht bestanden, deshalb steht die neue Frage in keinem Test. '
-        'Tests und alte Frage unverändert; die neue (${i.neu.single.id}) liegt in „${k.name}". Sie mit '
-        'fragen_loeschen entfernen, die Datei nachbessern und frage_ersetzen erneut aufrufen -- ein neuer Aufruf '
-        'importiert neu. verified: false';
-  }
-  // Rundlaufprobe (E38): Besteht die neue Frage sie nicht, wird sie wieder
-  // gelöscht, bevor sie in einen Test kommt.
-  final probe = await importProben(moodle, arbeitsordner, sammlung, i, n.neueIds, i.xml);
-  b.write(probe.text);
-  if (!probe.ok || !probe.verified) {
-    return '$b\nAbgebrochen: Die Rundlaufprobe der neuen Frage ist nicht vollständig bestanden, deshalb steht sie in keinem Test. '
-        'Tests und alte Frage unverändert. verified: false';
-  }
-  var neueId = n.neueIds[i.neu.single.id] ?? i.neu.single.id!;
-
-  // Was vom Auftrag abweicht; die Plätze stimmen hier schon alle.
-  final abweichend = <String>[];
-  b.writeln('\nPlätze:');
-  for (final (t0, c, plaetze) in plaene) {
-    var t = t0;
-    for (final x in plaetze) {
-      final (t1, zeile, gut) = await platzErsetzen(moodle, t, x, neueId);
-      t = t1;
-      b.writeln('  Test „${c.name}": $zeile');
-      if (!gut) {
-        return '$b\nAbgebrochen nach diesem Platz: Die übrigen Tests sind unverändert, die alte Frage ist nicht '
-            'gelöscht. verified: false\n\n${t.text()}';
-      }
+    // --- Ausführen ---------------------------------------------------------
+    final b = StringBuffer();
+    final i = await importAusfuehren(moodle, sammlung, k, p.basename(pfad), xml, 1);
+    b.write(i.text);
+    if (!i.ok || i.neu.length != 1 || i.neu.single.id == null) {
+      return '${b}Abgebrochen nach dem Import: Tests und alte Frage unverändert. verified: false';
     }
-    final f = t.befunde();
-    if (f.isNotEmpty) b.writeln('  Befunde zu „${c.name}": ${f.join(' ')}');
-  }
+    final n = await importNachweise(moodle, sammlung, i.neu, stackTesten);
+    b.write(n.text);
+    if (!n.ok) {
+      return '$b\nAbgebrochen: Ein Nachweis ist nicht bestanden, deshalb steht die neue Frage in keinem Test. '
+          'Tests und alte Frage unverändert; die neue (${i.neu.single.id}) liegt in „${k.name}". Sie mit '
+          'fragen_loeschen entfernen, die Datei nachbessern und frage_ersetzen erneut aufrufen -- ein neuer Aufruf '
+          'importiert neu. verified: false';
+    }
+    // Rundlaufprobe (E38): Besteht die neue Frage sie nicht, wird sie wieder
+    // gelöscht, bevor sie in einen Test kommt.
+    final probe = await importProben(moodle, arbeitsordner, sammlung, i, n.neueIds, i.xml);
+    b.write(probe.text);
+    if (!probe.ok || !probe.verified) {
+      return '$b\nAbgebrochen: Die Rundlaufprobe der neuen Frage ist nicht vollständig bestanden, deshalb steht sie in keinem Test. '
+          'Tests und alte Frage unverändert. verified: false';
+    }
+    var neueId = n.neueIds[i.neu.single.id] ?? i.neu.single.id!;
 
-  var weg = false;
-  if (loeschen) {
-    final (zeilen, alleWeg) = await loeschenOhneFreigabe(moodle, arbeitsordner, sammlung, [alt]);
-    weg = alleWeg;
-    if (!alleWeg) abweichend.add('alte Frage nicht gelöscht');
-    b.writeln('\nAlte Frage:\n$zeilen'.trimRight());
-  }
+    // Was vom Auftrag abweicht; die Plätze stimmen hier schon alle.
+    final abweichend = <String>[];
+    b.writeln('\nPlätze:');
+    for (final (t0, c, plaetze) in plaene) {
+      var t = t0;
+      for (final x in plaetze) {
+        final (t1, zeile, gut) = await platzErsetzen(moodle, t, x, neueId);
+        t = t1;
+        b.writeln('  Test „${c.name}": $zeile');
+        if (!gut) {
+          return '$b\nAbgebrochen nach diesem Platz: Die übrigen Tests sind unverändert, die alte Frage ist nicht '
+              'gelöscht. verified: false\n\n${t.text()}';
+        }
+      }
+      final f = t.befunde();
+      if (f.isNotEmpty) b.writeln('  Befunde zu „${c.name}": ${f.join(' ')}');
+    }
 
-  if (nachher) {
-    if (!weg) {
-      b.writeln('\nSachnummer $idn: bleibt bei der alten Frage, die neue ($neueId) hat keine.');
-    } else {
+    var weg = false;
+    if (loeschen) {
+      // Seit der Freigabe kann viel Zeit vergangen sein (Import, Nachweise, Tausch): Gelöscht wird
+      // nur, was noch genau das Gesicherte ist (A3), sonst bleibt die alte Frage stehen.
+      String? aenderung;
       try {
-        final f = await formularHolen(moodle, '/question/bank/editquestion/question.php?cmid=$sammlung&id=$neueId');
-        if (wertIn(f.felder, 'idnumber') == null) throw MoodleFehler('Das Formular hat kein Feld idnumber.');
-        setze(f.felder, 'idnumber', idn);
-        await absenden(moodle, f, knoepfe: const ['submitbutton']);
-        // Speichern legt eine neue Version an; die Sachnummer findet sie.
-        final mit = fragenAusXml(await exportieren(moodle, sammlung, k)).where((x) => x.idnummer == idn).toList();
-        final gesetzt = mit.length == 1;
-        if (gesetzt) neueId = mit.single.id ?? neueId;
-        if (!gesetzt) abweichend.add('Sachnummer nicht gesetzt');
-        b.writeln('\nSachnummer $idn an die neue Frage: ${gesetzt ? 'gesetzt (neue Version $neueId)' : 'NICHT gefunden'}');
-      } on MoodleFehler catch (x) {
-        abweichend.add('Sachnummer nicht gesetzt');
-        b.writeln('\nSachnummer $idn NICHT gesetzt: ${x.meldung}. Die neue Frage ($neueId) ist sonst fertig und '
-            'steht in den Tests; die Sachnummer setzt die Lehrkraft im Formular der Frage.');
+        final frisch = (await loeschenPruefen(moodle, sammlung, [(alt.id!, alt.name)])).single;
+        if (frisch.xml != altGeprueft.xml) aenderung = 'sie ist nicht mehr, wie sie gesichert wurde';
+      } on MoodleFehler catch (e) {
+        aenderung = e.meldung;
+      }
+      if (aenderung != null) {
+        abweichend.add('alte Frage nicht gelöscht');
+        b.writeln('\nAlte Frage: NICHT gelöscht, weil sich seit der Freigabe etwas geändert hat ($aenderung). Sie bleibt '
+            'in der Sammlung; mit fragen_lesen neu ansehen und bei Bedarf mit fragen_loeschen entfernen.');
+      } else {
+        loeschenVersucht = true;
+        final (zeilen, alleWeg) = await loeschenOhneFreigabe(moodle, arbeitsordner, sammlung, [alt]);
+        weg = alleWeg;
+        if (!alleWeg) abweichend.add('alte Frage nicht gelöscht');
+        b.writeln('\nAlte Frage:\n$zeilen'.trimRight());
       }
     }
+
+    if (nachher) {
+      if (!weg) {
+        b.writeln('\nSachnummer $idn: bleibt bei der alten Frage, die neue ($neueId) hat keine.');
+      } else {
+        try {
+          final f = await formularHolen(moodle, '/question/bank/editquestion/question.php?cmid=$sammlung&id=$neueId');
+          if (wertIn(f.felder, 'idnumber') == null) throw MoodleFehler('Das Formular hat kein Feld idnumber.');
+          setze(f.felder, 'idnumber', idn);
+          await absenden(moodle, f, knoepfe: const ['submitbutton']);
+          // Speichern legt eine neue Version an; die Sachnummer findet sie.
+          final mit = fragenAusXml(await exportieren(moodle, sammlung, k)).where((x) => x.idnummer == idn).toList();
+          final gesetzt = mit.length == 1;
+          if (gesetzt) neueId = mit.single.id ?? neueId;
+          if (!gesetzt) abweichend.add('Sachnummer nicht gesetzt');
+          b.writeln('\nSachnummer $idn an die neue Frage: ${gesetzt ? 'gesetzt (neue Version $neueId)' : 'NICHT gefunden'}');
+        } on MoodleFehler catch (x) {
+          abweichend.add('Sachnummer nicht gesetzt');
+          b.writeln('\nSachnummer $idn NICHT gesetzt: ${x.meldung}. Die neue Frage ($neueId) ist sonst fertig und '
+              'steht in den Tests; die Sachnummer setzt die Lehrkraft im Formular der Frage.');
+        }
+      }
+    }
+    b.writeln('\nNeue Frage: questionid $neueId, in allen genannten Tests an der Stelle der alten. '
+        '${abweichend.isEmpty ? '' : 'Abweichend vom Auftrag: ${abweichend.join('; ')}. '}verified: ${abweichend.isEmpty}');
+    return b.toString();
+  } finally {
+    if (!loeschenVersucht) verwerfen();
   }
-  b.writeln('\nNeue Frage: questionid $neueId, in allen genannten Tests an der Stelle der alten. '
-      '${abweichend.isEmpty ? '' : 'Abweichend vom Auftrag: ${abweichend.join('; ')}. '}verified: ${abweichend.isEmpty}');
-  return b.toString();
 }
 
 String _p(double? x) => x == null ? '?' : (x == x.roundToDouble() ? x.toInt().toString() : x.toString());

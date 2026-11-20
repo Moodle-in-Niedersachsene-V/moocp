@@ -65,6 +65,16 @@ kategorie_anlegen(sammlung, name: "Lernfeld 3 – Schutzmaßnahmen",
 Ohne `eltern` kommt sie auf die oberste Ebene der Sammlung. Die Antwort nennt
 die neue id — die brauchst du für den Import und für Zufallsfragen.
 
+**Umbenennen und verschieben** (`kategorie_aendern`): Erst der Plan im Chat — welche Kategorie (`fragen_lesen`: id und Name), neuer Name, neuer Elternteil und, bei einem Wechsel der Sammlung, welche; die Lehrkraft sagt Ja. Nichts wird gelöscht, Unterkategorien und Fragen ziehen mit.
+
+```
+kategorie_aendern(kurs, sammlung, kategorie: <id>, name: "<jetziger Name>",
+                  neuer_name: "…" (optional),
+                  ziel_sammlung: <cmid> (optional), ziel_eltern: <id oder Name> (optional))
+```
+
+Mit `ziel_sammlung` ohne `ziel_eltern` kommt die Kategorie auf die oberste Ebene dieser Sammlung. Das Werkzeug bricht ab, bevor etwas geschieht, bei der obersten Kategorie, einem Ziel in der eigenen Teilstruktur, dem einzigen Kind der obersten Ebene (das geht nur umzubenennen), einem gleichen Namen unter dem Ziel und einer Sachnummer, die im Ziel schon vergeben ist; sag der Lehrkraft den Grund und schlag eine Lösung vor. Hängt ein Test mit Zufallsfragen an einer der Kategorien, sieh vorher mit `test_lesen` nach und sag es: Ob der Zufallsplatz beim Verschieben mitzieht, prüft die App nicht (die Antwort sagt „nicht geprüft“). `verified: true` genügt; lies nicht selbst nach.
+
 **Wann eine Kategorie etwas trägt:** wenn Zufallsfragen aus ihr ziehen sollen — dann je Teilthema eine, damit ein Test „zwei Fragen zu Tagging, zwei zu Trunks" ziehen kann —, und wenn Übungsfragen und Fragen zur Leistungsfeststellung getrennt bleiben sollen, damit niemand die Klassenarbeit aus der Übung kennt. Für eine Handvoll Fragen ohne Zufall braucht es keine; eine Kategorie je Frage oder je Fragetyp gliedert nichts.
 
 ## Fragen thematisch sortieren
@@ -77,21 +87,24 @@ Für eine Neuordnung von Grund auf: Kategorien anlegen, dann die Fragen je
 Kategorie als eigenes XML importieren. Das hat den Vorteil, dass du die
 Struktur vorher mit dem Nutzer abstimmen kannst.
 
-### Nachträgliches Verschieben: nicht über die App
+### Nachträgliches Verschieben: `fragen_verschieben`
 
-In Moodle geht es so: Fragen ankreuzen → „Mit Auswahl" → „Verschieben
-nach …". Auf der Testinstanz **öffnete sich dieser Dialog nicht**: Das
-JavaScript-Modul `qbank_bulkmove/bulk_move` ließ sich nicht laden („No define
-call"), während andere Module einwandfrei luden. Geht der Dialog auch bei der
-Lehrkraft nicht auf, ist das etwas für die Administration — meist genügt ein
-Leeren der Caches.
+```
+fragen_verschieben(kurs, sammlung, fragen: [{id, name}, …],
+                   ziel_sammlung, ziel_kategorie)
+```
 
-Die App kann Fragen nicht verschieben; ein Umweg über
-Formularparameter trägt nicht (sechs Varianten geprüft), und das
-Bearbeitungsformular einer **bestehenden** Frage hat kein Kategoriefeld. Sag
-dem Nutzer offen, dass das Verschieben in Moodle von Hand erfolgen muss, und
-biete bei vielen Fragen den Weg über
-Kategorie-anlegen-und-neu-importieren an.
+Das Werkzeug verschiebt Fragen mit allen Versionen in eine andere Kategorie
+desselben Kurses, auch in eine andere Sammlung (`fragensammlungen`). Tests
+behalten die Fragen: Ihre Plätze zeigen auf die Frage, nicht auf die Kategorie.
+Das Werkzeug prüft vorher Namen, ob die Fragen in der Quellsammlung stehen und
+ob die Sachnummer im Ziel frei ist (sonst bricht es ab, ohne etwas zu
+schreiben), fragt in der App und liest danach je Frage zurück. Zufallsplätze von
+Tests hängen an der Kategorie: Wer aus einer Kategorie verschiebt, aus der ein
+Zufallsplatz zieht, verkleinert dessen Auswahl.
+
+Eine Kategorie selbst umbenennen oder verschieben geht mit `kategorie_aendern`
+(Abschnitt „Umbenennen und verschieben“ oben).
 
 **Kein Ausweg ist Export-und-Neuimport für bestehende Fragen**, die schon in
 Tests stecken: Dabei entstehen neue Fragen mit neuen ids. Tests, die auf die

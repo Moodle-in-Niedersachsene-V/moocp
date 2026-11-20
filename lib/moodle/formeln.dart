@@ -1,7 +1,7 @@
 // Formelfehler: Stellen im HTML, an denen MathJax eine LaTeX-Formel nicht
 // oder falsch setzen würde. Die Regeln stehen für die KI in
 // skills/gemeinsam/html.md („Formeln"); dasselbe prüft lernsituation_pruefen
-// am Entwurf (lernsituation_pruefung.dart, _formelFehler).
+// am Entwurf (lernsituation_pruefung.dart), mit denselben Regeln aus formelBlockPruefen.
 //
 // Ein Formelfehler ist ein Syntaxfehler, kein Schönheitsfehler: Die
 // Lernenden sehen kaputten Text. Deshalb bricht jedes Schreiben ab, dessen
@@ -33,14 +33,14 @@ import 'stack_skripte.dart';
 
 /// Elemente, die einen neuen Block beginnen: Eine Formel darf nicht über
 /// ihre Grenze reichen.
-const Set<String> _bloecke = {
+const Set<String> formelBloecke = {
   'p', 'div', 'li', 'ul', 'ol', 'dl', 'dt', 'dd', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', //
   'caption', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'figure', 'figcaption', 'section',
   'article', 'header', 'footer', 'aside', 'details', 'summary', 'hr', 'form', 'fieldset',
 };
 
 /// Elemente, deren Inhalt MathJax nicht setzt oder der kein Text ist.
-const Set<String> _auslassen = {'code', 'pre', 'script', 'style', 'svg', 'math', 'textarea', 'select'};
+const Set<String> formelAuslassen = {'code', 'pre', 'script', 'style', 'svg', 'math', 'textarea', 'select'};
 
 /// Die Formelfehler eines HTML-Felds, je einer als Satz. Leer: in Ordnung.
 List<String> formelFehler(String html) {
@@ -52,10 +52,10 @@ List<String> formelFehler(String html) {
     }
     if (n is dom.Element) {
       final tag = n.localName ?? '';
-      if (_auslassen.contains(tag)) return;
+      if (formelAuslassen.contains(tag)) return;
       // Die SchuCu-Tabelle folgt ihrer Vorlage und wird nicht geprüft.
       if (tag == 'table' && n.classes.contains('lernsituation')) return;
-      final block = _bloecke.contains(tag);
+      final block = formelBloecke.contains(tag);
       if (block) bloecke.add([]);
       for (final k in n.nodes) {
         besuche(k);
@@ -70,7 +70,7 @@ List<String> formelFehler(String html) {
 
   // Der Code einer STACK-Zeichnung ist kein Text (stack_skripte.dart).
   besuche(html_parser.parseFragment(ohneJsxgraphCode(html)));
-  return [for (final b in bloecke) if (b.isNotEmpty) ..._blockPruefen(b)];
+  return [for (final b in bloecke) if (b.isNotEmpty) ...formelBlockPruefen(b).map(formelSatz)];
 }
 
 String _kurz(String s, [int n = 40]) {
@@ -78,15 +78,39 @@ String _kurz(String s, [int n = 40]) {
   return t.length <= n ? t : '${t.substring(0, n)}…';
 }
 
-/// Prüft die Textstücke eines Blocks. Ein Textstück endet an jedem Tag.
-List<String> _blockPruefen(List<String> stuecke) {
+/// Was an einer Formel nicht stimmt.
+enum FormelArt { ohneEndeVorAnfang, endeOhneAnfang, htmlInFormel, ohneEnde, einfacheDollar }
+
+/// Ein Formelfehler: die [art], die betroffene Stelle als [text] (ungekürzt)
+/// und bei Anfang und Ende das fehlende oder überzählige Ende ([ende], `\)`
+/// oder `\]`). Den Satz bildet der Aufrufer: [formelSatz] für das Schreiben;
+/// die Prüfung von Entwürfen (`lernsituation_pruefen`) kürzt und
+/// normalisiert den Text wie ihre Python-Vorlage und hat eigene Sätze.
+typedef FormelBefund = ({FormelArt art, String text, String ende});
+
+/// Der Satz zu einem Befund, wie ihn das Schreiben meldet.
+String formelSatz(FormelBefund b) => switch (b.art) {
+      FormelArt.ohneEndeVorAnfang =>
+        'Formel ohne Ende: „${_kurz(b.text)}" -- vor dem nächsten Formelanfang fehlt ${b.ende}.',
+      FormelArt.endeOhneAnfang => 'Formelende „${b.ende}" ohne Anfang: „${_kurz(b.text)}".',
+      FormelArt.htmlInFormel => 'HTML in der Formel „${_kurz(b.text)}": Zwischen Anfang und Ende steht ein '
+          'Tag. Hervorhebung und Zeilenumbruch macht LaTeX selbst.',
+      FormelArt.ohneEnde => 'Formel ohne Ende: „${_kurz(b.text)}" -- ${b.ende} fehlt im selben '
+          'Absatz. Steht ein rohes < darin? Als &lt; oder \\lt schreiben.',
+      FormelArt.einfacheDollar =>
+        r'LaTeX zwischen einfachen $ wird nicht gesetzt: „' '${_kurz(b.text)}' r'" -- \( … \) schreiben.',
+    };
+
+/// Prüft die Textstücke eines Blocks: die einzige Quelle der Formelregeln.
+/// Ein Textstück endet an jedem Tag.
+List<FormelBefund> formelBlockPruefen(List<String> stuecke) {
   final s = stuecke.join();
   // Zu jeder Stelle das Textstück, aus dem sie stammt.
   final stueck = <int>[];
   for (var i = 0; i < stuecke.length; i++) {
     stueck.addAll(List.filled(stuecke[i].length, i));
   }
-  final aus = <String>[];
+  final aus = <FormelBefund>[];
   final ohneFormeln = StringBuffer();
   String? offen; // '(' oder '['
   var anfang = -1;
@@ -100,8 +124,11 @@ List<String> _blockPruefen(List<String> stuecke) {
     final n = s[i + 1];
     if (n == '(' || n == '[') {
       if (offen != null) {
-        aus.add('Formel ohne Ende: „${_kurz(s.substring(anfang, i))}" -- vor dem nächsten Formelanfang fehlt '
-            '${offen == '(' ? r'\)' : r'\]'}.');
+        aus.add((
+          art: FormelArt.ohneEndeVorAnfang,
+          text: s.substring(anfang, i),
+          ende: offen == '(' ? r'\)' : r'\]',
+        ));
       } else {
         ohneFormeln.write(s.substring(frei, i));
       }
@@ -110,10 +137,9 @@ List<String> _blockPruefen(List<String> stuecke) {
     } else if (n == ')' || n == ']') {
       final passt = (n == ')' && offen == '(') || (n == ']' && offen == '[');
       if (!passt) {
-        aus.add('Formelende „\\$n" ohne Anfang: „${_kurz(s.substring(i - (i < 30 ? i : 30), i + 2))}".');
+        aus.add((art: FormelArt.endeOhneAnfang, text: s.substring(i - (i < 30 ? i : 30), i + 2), ende: '\\$n'));
       } else if (stueck[anfang] != stueck[i + 1]) {
-        aus.add('HTML in der Formel „${_kurz(s.substring(anfang, i + 2))}": Zwischen Anfang und Ende steht ein '
-            'Tag. Hervorhebung und Zeilenumbruch macht LaTeX selbst.');
+        aus.add((art: FormelArt.htmlInFormel, text: s.substring(anfang, i + 2), ende: ''));
       }
       if (passt) {
         offen = null;
@@ -125,14 +151,13 @@ List<String> _blockPruefen(List<String> stuecke) {
     i += 2;
   }
   if (offen != null) {
-    aus.add('Formel ohne Ende: „${_kurz(s.substring(anfang))}" -- ${offen == '(' ? r'\)' : r'\]'} fehlt im selben '
-        'Absatz. Steht ein rohes < darin? Als &lt; oder \\lt schreiben.');
+    aus.add((art: FormelArt.ohneEnde, text: s.substring(anfang), ende: offen == '(' ? r'\)' : r'\]'));
   } else {
     ohneFormeln.write(s.substring(frei));
   }
   final dollar = RegExp(r'(?<![\\$])\$(?!\$)([^$]*?\\[A-Za-z]+[^$]*?)(?<![\\$])\$(?!\$)').firstMatch(ohneFormeln.toString());
   if (dollar != null) {
-    aus.add(r'LaTeX zwischen einfachen $ wird nicht gesetzt: „' '${_kurz(dollar.group(0)!)}' r'" -- \( … \) schreiben.');
+    aus.add((art: FormelArt.einfacheDollar, text: dollar.group(0)!, ende: ''));
   }
   return aus;
 }

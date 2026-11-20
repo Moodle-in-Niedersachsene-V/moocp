@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.13.0
+- KI-Werkzeuge einrichten: Der Dialog sagt bei jedem Werkzeug, wo die Verbindung wirkt, etwa in Claude Desktop nur im Reiter „Code“.
+- Lesen: Bricht ein Lesen ab oder schlägt fehl, bleibt der zuletzt gelesene Stand erhalten.
+- Mehrere Seiten speichern: Wurde ein Ordner während der Freigabe neu gelesen, wird keine Seite des Stapels gespeichert.
 - Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
 - Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.
 - Fragen: Fragen lassen sich in eine andere Kategorie des Kurses verschieben.

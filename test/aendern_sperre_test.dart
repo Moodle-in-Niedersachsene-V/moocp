@@ -24,6 +24,7 @@ class _Doppel {
 
   /// Der Text der Seite in Moodle; ein Test ändert ihn „von Hand".
   String text = '<p>ZZ Text</p>';
+  String text2 = '<p>ZZ Text zwei</p>';
   bool antwortAbbrechen = false;
   bool speichernAnwenden = false;
   bool ruecklesenAbbrechen = false;
@@ -32,16 +33,18 @@ class _Doppel {
   static const passwort = 'test-geheim-23';
   static const sesskey = 'sk23';
 
-  String get _seite =>
-      '''<form class="mform" method="post" action="/course/modedit.php">
+  String _seite(int id) {
+    final t = id == 102 ? text2 : text;
+    return '''<form class="mform" method="post" action="/course/modedit.php">
 <input type="hidden" name="sesskey" value="$sesskey">
 <input type="hidden" name="modulename" value="page">
 <input type="hidden" name="_qf__mod_page_mod_form" value="1">
 <input type="hidden" name="course" value="12">
-<input type="hidden" name="update" value="101">
-<div id="fitem_id_name" class="mb-3 row fitem"><div class="col-md-9 felement" data-fieldtype="text"><input type="text" name="name" id="id_name" value="ZZ Seite"></div></div>
-<div id="fitem_id_intro" class="mb-3 row fitem"><div class="col-md-9 felement" data-fieldtype="editor"><textarea name="page[text]">$text</textarea><input type="hidden" name="page[itemid]" value="777"></div></div>
+<input type="hidden" name="update" value="$id">
+<div id="fitem_id_name" class="mb-3 row fitem"><div class="col-md-9 felement" data-fieldtype="text"><input type="text" name="name" id="id_name" value="ZZ Seite $id"></div></div>
+<div id="fitem_id_intro" class="mb-3 row fitem"><div class="col-md-9 felement" data-fieldtype="editor"><textarea name="page[text]">$t</textarea><input type="hidden" name="page[itemid]" value="777"></div></div>
 </form>''';
+  }
 
   Uri get basis => Uri.parse('http://127.0.0.1:${_server.port}');
 
@@ -85,8 +88,9 @@ class _Doppel {
         return _text(r, 'nicht gefunden', status: HttpStatus.notFound);
       }
       return _text(r, jsonEncode([{'error': false, 'data': {
-        'section': [{'id': 1, 'number': 1, 'title': 'ZZ Abschnitt', 'visible': 1, 'cmlist': [101]}],
-        'cm': [{'id': 101, 'module': 'page', 'name': 'ZZ Seite', 'visible': 0, 'sectionid': 1}],
+        'section': [{'id': 1, 'number': 1, 'title': 'ZZ Abschnitt', 'visible': 1, 'cmlist': [101, 102]}],
+        'cm': [{'id': 101, 'module': 'page', 'name': 'ZZ Seite', 'visible': 0, 'sectionid': 1},
+          {'id': 102, 'module': 'page', 'name': 'ZZ Seite 102', 'visible': 0, 'sectionid': 1}],
       }}]));
     }
     if (pfad == '/pluginfile.php/55/mod_page/content/0/bild.png') {
@@ -98,7 +102,13 @@ class _Doppel {
     if (pfad == '/course/modedit.php' && r.method == 'POST') {
       speichern.add(r.uri.query);
       final f = Uri.splitQueryString(await utf8.decoder.bind(r).join());
-      if (speichernAnwenden) text = f['page[text]']!;
+      if (speichernAnwenden) {
+        if (f['update'] == '102') {
+          text2 = f['page[text]']!;
+        } else {
+          text = f['page[text]']!;
+        }
+      }
       if (antwortAbbrechen) {
         final socket = await r.response.detachSocket(writeHeaders: false);
         socket.destroy();
@@ -107,13 +117,13 @@ class _Doppel {
       return _umleiten(r, '/course/view.php?id=12');
     }
     if (pfad == '/course/modedit.php' &&
-        r.uri.queryParameters['update'] == '101') {
+        const ['101', '102'].contains(r.uri.queryParameters['update'])) {
       if (ruecklesenAbbrechen && speichern.isNotEmpty) {
         final socket = await r.response.detachSocket(writeHeaders: false);
         socket.destroy();
         return;
       }
-      return _text(r, _html(_seite));
+      return _text(r, _html(_seite(int.parse(r.uri.queryParameters['update']!))));
     }
     return _text(r, 'nicht gefunden', status: HttpStatus.notFound);
   }
@@ -346,5 +356,69 @@ void main() {
           (e) => e.meldung, 'Meldung', contains('seit dem Lesen geändert'))),
     );
     expect(doppel.speichern, isEmpty);
+  });
+
+  Future<List<String>> zweiGeaendertStarten() async {
+    for (final id in [101, 102]) {
+      await formularLesen(zugang, Formularziel.aktivitaet(id), arbeitsordner.path);
+      final datei = File(p.join(arbeitsordner.path, 'cm-$id', 'page.html'));
+      datei.writeAsStringSync('${datei.readAsStringSync()}<p>ZZ Zusatz $id</p>');
+    }
+    return ['cm-101', 'cm-102'];
+  }
+
+  test('Offene Freigabe von aendernMehrere hält ein Lesen ihrer Ordner nicht auf', () async {
+    final ordner = await zweiGeaendertStarten();
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+
+    await formularLesen(zugang, Formularziel.aktivitaet(102), arbeitsordner.path)
+        .timeout(const Duration(seconds: 10));
+
+    freigaben.entscheiden(false);
+    await ergebnis;
+  });
+
+  test('Wird ein Ordner des Stapels während der Freigabe neu gelesen, wird keine Seite geschrieben', () async {
+    final ordner = await zweiGeaendertStarten();
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+
+    await formularLesen(zugang, Formularziel.aktivitaet(102), arbeitsordner.path);
+    freigaben.entscheiden(true);
+    final text = await ergebnis;
+    expect(text, contains('Nicht gespeichert'));
+    expect(text, contains('cm-102'));
+    expect(text, isNot(contains('cm-101,')));
+    expect(doppel.speichern, isEmpty);
+  });
+
+  test('Ändert sich Moodle zwischen Freigabe und Schreiben, schreibt aendernMehrere keine Seite', () async {
+    final ordner = await zweiGeaendertStarten();
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+
+    doppel.text = '<p>ZZ Von Hand geändert</p>';
+    freigaben.entscheiden(true);
+
+    final text = await ergebnis;
+    expect(text, contains('seit dem Lesen geändert'));
+    expect(doppel.speichern, isEmpty);
+  });
+  test('Geänderter Moodle-Stand der zweiten Seite verhindert auch den ersten POST', () async {
+    final ordner = await zweiGeaendertStarten();
+    doppel.speichernAnwenden = true;
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    doppel.text2 = '<p>ZZ Zweite Seite von Hand geändert</p>';
+    freigaben.entscheiden(true);
+    final text = await ergebnis;
+    expect(text, contains('seit dem Lesen geändert'));
+    expect(doppel.speichern, isEmpty);
+    expect(doppel.text, '<p>ZZ Text</p>');
   });
 }

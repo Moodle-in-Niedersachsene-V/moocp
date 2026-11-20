@@ -589,6 +589,19 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    testWidgets('jedes Werkzeug sagt, wo die Verbindung wirkt, im Dialog und im Abschluss', (tester) async {
+      await aufbauen(tester);
+      await zeigen(tester);
+
+      const text = 'Wirkt in Codex und in Codex-Sitzungen der ChatGPT-App, nicht im normalen Chat der App.';
+      expect(find.text(text), findsOneWidget, reason: 'unter dem Namen des Werkzeugs');
+      expect(find.text('Verbindung und Skills sind aktuell.'), findsOneWidget);
+      expect(find.text('Codex CLI: $text'), findsOneWidget, reason: 'und im Abschluss');
+      expect(ClaudeCode(const {}).wirkt,
+          'Wirkt in Claude Code und im Reiter „Code“ von Claude Desktop, nicht im normalen Chat.');
+      expect(LmStudio(const {}, bruecke: 'b').wirkt, 'Wirkt im Agenten Bionic, nicht im klassischen LM Studio.');
+    });
+
     testWidgets('nur der wählbare Skill hat einen Haken mit seiner Beschreibung, vorgegeben aus', (tester) async {
       await aufbauen(tester);
       await zeigen(tester);

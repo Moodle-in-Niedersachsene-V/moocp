@@ -408,4 +408,17 @@ void main() {
     expect(text, contains('seit dem Lesen geändert'));
     expect(doppel.speichern, isEmpty);
   });
+  test('Geänderter Moodle-Stand der zweiten Seite verhindert auch den ersten POST', () async {
+    final ordner = await zweiGeaendertStarten();
+    doppel.speichernAnwenden = true;
+    final ergebnis = aendernMehrere(zugang, freigaben,
+        ordner: ordner, arbeitsordner: arbeitsordner.path);
+    await aufFreigabe();
+    doppel.text2 = '<p>ZZ Zweite Seite von Hand geändert</p>';
+    freigaben.entscheiden(true);
+    final text = await ergebnis;
+    expect(text, contains('seit dem Lesen geändert'));
+    expect(doppel.speichern, isEmpty);
+    expect(doppel.text, '<p>ZZ Text</p>');
+  });
 }

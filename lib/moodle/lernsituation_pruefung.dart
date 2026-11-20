@@ -1760,9 +1760,12 @@ final _markdown = [
 //    meldet es schon hier.
 //  - Die Adresse wird wie in der Python-Vorlage gekürzt (pyKurz) und der
 //    Satz endet ohne Punkt.
-//  - Muster sind Dart-Ausdrücke der App, nicht mit pyRe übersetzt: \w und \s
-//    in den Mustern der App meinen ASCII, nicht Unicode wie in Python.
+//  - Entwürfe behalten die Unicode-Grenzen der Python-Vorlage; die App nutzt
+//    Dart-Muster. Beide wenden dieselben Regeln mit ihrem jeweiligen Leser an.
 final _kopfTag = pyRe(r'<head\b', caseSensitive: false);
+
+RegExp _entwurfMuster(String muster, bool gross, bool mehrzeilig, bool alles) =>
+    pyRe(muster, caseSensitive: gross, multiLine: mehrzeilig, dotAll: alles);
 
 /// Was in einem interaktiven Element nicht geht, je als Satz
 /// (references/elemente.md).
@@ -1771,7 +1774,7 @@ List<String> _elementFehler(String text) {
   if (!_kopfTag.hasMatch(ohneKopf(text))) {
     raus.add('braucht ein Gerüst mit <head> (<!DOCTYPE html><html lang="de"><head>…</head><body>…)');
   }
-  for (final b in elementBefunde(text)) {
+  for (final b in elementBefunde(text, muster: _entwurfMuster)) {
     final adresse = b.adresse;
     raus.add(
       adresse == null
@@ -1795,15 +1798,37 @@ String _stelleKurz(Skriptstelle s) => switch (s.art) {
   SkriptArt.skript => '<script>',
   SkriptArt.srcdoc => '<${s.tag} srcdoc>',
   SkriptArt.javascriptAdresse => 'javascript: an <${s.tag}>',
-  SkriptArt.ereignis => '${ereignisName(s.attribut, s.wert)} an <${s.tag}>',
+  SkriptArt.ereignis => '${ereignisName(s.attribut, pyStrip(s.wert))} an <${s.tag}>',
   SkriptArt.komprimiert => skriptstelleText(s),
 };
 
 /// Die Stellen mit Code in einer Datei, die der Browser als Dokument öffnet;
 /// bei anderen Dateien leer.
 List<String> _codeInDatei(String name, List<int> daten) => [
-  for (final s in stellenInDatei(name, daten)) _stelleKurz(s),
+  for (final s in stellenInDatei(name, daten, lesen: _entwurfSkriptstellen)) _stelleKurz(s),
 ];
+
+// Der Fragmentparser der App repariert HTML und verwirft body-Attribute.
+// Entwürfe behalten ihren Leser und ihre Quellreihenfolge; nur die Regel,
+// welche Attribute Code auslösen, kommt aus elemente.dart.
+List<Skriptstelle> _entwurfSkriptstellen(String html) => (_Skriptstellen()..lesen(html)).stellen;
+
+class _Skriptstellen extends PyHtmlLeser {
+  final stellen = <Skriptstelle>[];
+
+  @override
+  void starttag(String tag, List<Attribut> attrs) {
+    if (tag == 'script') stellen.add((art: SkriptArt.skript, tag: tag, attribut: '', wert: ''));
+    for (final (k, w0) in attrs) {
+      final w = w0 ?? '';
+      final art = skriptArtVonAttribut(k, pyStrip(w), muster: _entwurfMuster);
+      if (art != null) stellen.add((art: art, tag: tag, attribut: k, wert: w));
+    }
+  }
+
+  @override
+  void startendtag(String tag, List<Attribut> attrs) => starttag(tag, attrs);
+}
 
 // Formelfehler: Die Regeln stehen in formeln.dart (formelBlockPruefen),
 // derselben Prüfung, die das Schreiben in Moodle abbricht -- hier fällt der
@@ -1965,10 +1990,10 @@ class _HtmlRegeln extends PyHtmlLeser {
       final w = w0 ?? '';
       // Welche Attribute Code sind, entscheidet die App (skriptArtVonAttribut);
       // die Sätze sind die des Entwurfs.
-      switch (skriptArtVonAttribut(k, w)) {
+      switch (skriptArtVonAttribut(k, pyStrip(w), muster: _entwurfMuster)) {
         case SkriptArt.ereignis:
           befund(
-            'Code im Text (${ereignisName(k, w)} an <$tag>) -- Interaktives als Element '
+            'Code im Text (${ereignisName(k, pyStrip(w))} an <$tag>) -- Interaktives als Element '
             '(references/elemente.md)',
           );
         case SkriptArt.srcdoc:

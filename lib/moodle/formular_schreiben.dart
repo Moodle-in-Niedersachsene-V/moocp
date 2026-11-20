@@ -1714,33 +1714,37 @@ Future<(String, bool)> _schreibenOhneSperre(
   });
 }
 
+/// Prüft den geplanten Stand ohne Mutation, im Stapel auch vor dem ersten POST.
+void _pruefeAenderungsStand(Formular f, Aenderung a) {
+  _pruefeStand(
+    f,
+    a.ziel,
+    a.stand,
+    felderIn(a.stand),
+    a.bereiche.map((b) => b.feld),
+    a.einstellungen.keys,
+    nurGruppeneinstellungen:
+        MoodleZugang.nurGruppenModule.contains(a.vorab.modul) &&
+        a.zuSchreiben.isEmpty &&
+        a.bereiche.isEmpty &&
+        a.neu.isEmpty &&
+        a.geaendert.isEmpty,
+  );
+  // Vor der Mutation: Moodle zeigt noch den Stand von der Planung.
+  if (a.gruppenStand.entries.any((e) => wertIn(f.felder, e.key) != e.value)) {
+    throw MoodleFehler('${typName(a.vorab.modul)}: Die Gruppeneinstellungen haben sich seit dem Planen geändert. Nichts gespeichert; neu lesen und planen.');
+  }
+}
+
 Future<(String, bool)> _schreibenMitProbe(
   MoodleZugang moodle,
   Aenderung a,
   String arbeitsordner,
   Schreibvorgang vorgang,
 ) async {
-  final alt = felderIn(a.stand);
   Future<(Map<String, String>, List<Gesetzt>, Antwort)> schreiben() async {
     final f = await formularHolen(moodle, a.ziel.adresse);
-    _pruefeStand(
-      f,
-      a.ziel,
-      a.stand,
-      alt,
-      a.bereiche.map((b) => b.feld),
-      a.einstellungen.keys,
-      nurGruppeneinstellungen:
-          MoodleZugang.nurGruppenModule.contains(a.vorab.modul) &&
-          a.zuSchreiben.isEmpty &&
-          a.bereiche.isEmpty &&
-          a.neu.isEmpty &&
-          a.geaendert.isEmpty,
-    );
-    // Vor der Mutation: Moodle zeigt noch den Stand von der Planung.
-    if (a.gruppenStand.entries.any((e) => wertIn(f.felder, e.key) != e.value)) {
-      throw MoodleFehler('${typName(a.vorab.modul)}: Die Gruppeneinstellungen haben sich seit dem Planen geändert. Nichts gespeichert; neu lesen und planen.');
-    }
+    _pruefeAenderungsStand(f, a);
     final gesetzt = einstellungenSetzen(f.form, f.felder, a.einstellungen);
     // Nach der Mutation: der Name ist jetzt auf eine ID aufgelöst; passt sie nicht zur geplanten, wird nichts gespeichert.
     if (a.gruppenWahl.entries.any((e) => wertIn(f.felder, e.key) != e.value)) {
@@ -2275,10 +2279,11 @@ Future<String> _ordnerAbdruck(String ordner) async {
 /// nicht, wird nichts gespeichert. Wie bei [aendern] liegt die Sperre jedes
 /// Ordners nur um sein Vorbereiten samt Abdruck und um sein Schreiben, nicht
 /// um die Freigabe; wurde ein Ordner währenddessen neu gelesen, wird nichts
-/// des Stapels geschrieben (alle Abdrücke vor dem ersten Schreiben). Danach wird der Reihe nach geschrieben und
-/// zurückgelesen. Beim ersten Fehler oder verified: false hört es auf, und
-/// die Antwort sagt genau, was gespeichert ist und was nicht -- ein halb
-/// gespeicherter Stapel, den niemand bemerkt, wäre schlimmer als ein Abbruch.
+/// des Stapels geschrieben (alle Abdrücke vor dem ersten Schreiben). Danach
+/// wird der Reihe nach geschrieben und zurückgelesen. Beim ersten Fehler oder
+/// verified: false hört es auf, und die Antwort sagt genau, was gespeichert ist
+/// und was nicht -- ein halb gespeicherter Stapel, den niemand bemerkt, wäre
+/// schlimmer als ein Abbruch.
 ///
 /// [titel], [vorspann] und [anmerkungen] (Ordner -> Zeile) lassen einen
 /// Aufrufer wie links_setzen in der Freigabe sagen, was er tut. [knapp]: Ist
@@ -2419,6 +2424,20 @@ Future<String> aendernMehrere(
     return 'Nicht gespeichert: ${neuGelesen.length == 1 ? "Der Ordner ${neuGelesen.single} wurde" : "Die Ordner ${neuGelesen.join(", ")} wurden"} '
         'während der Freigabe neu gelesen oder verändert; die freigegebene Änderung gibt es dort nicht '
         'mehr. Die Ordner und Moodle sind unverändert. Neu lesen und die Änderung noch einmal machen.';
+  }
+
+  // Eine während der Freigabe geänderte spätere Seite darf auch die erste
+  // Seite nicht mehr schreiben lassen. Unmittelbar vor jedem POST wird der
+  // Stand weiterhin erneut geprüft, um spätere Änderungen zu erkennen.
+  for (final a in alle) {
+    try {
+      await ordnerSperre(ordnerSchluessel(a.ziel, arbeitsordner), () async {
+        final f = await formularHolen(moodle, a.ziel.adresse);
+        _pruefeAenderungsStand(f, a);
+      });
+    } on MoodleFehler catch (x) {
+      return '${a.kopf(mitKurs: false)}: ${x.meldung} Nichts gespeichert. Die Ordner sind unverändert.';
+    }
   }
 
   final berichte = <String>[];

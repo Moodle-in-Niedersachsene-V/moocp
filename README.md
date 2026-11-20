@@ -185,7 +185,7 @@ Das gilt für die App selbst. Ein Plugin ist ein eigenes Programm, das nur läuf
 
 - Windows 10 oder 11, macOS ab 12 (Apple Silicon oder Intel) oder Linux (Debian 13)
 - Eines dieser KI-Werkzeuge auf demselben Rechner:
-  - [Claude Code](https://claude.com/claude-code), am einfachsten über die Claude-Desktop-App (siehe [Wo die Verbindung wirkt](#claude-code-codex-cli-und-lm-studio));
+  - [Claude Code](https://claude.com/claude-code), am einfachsten über die Claude-Desktop-App (siehe [Einrichtung der KI-Werkzeuge](#claude-code-codex-cli-und-lm-studio));
   - [Codex CLI](https://github.com/openai/codex) von OpenAI, ab Version 0.77;
   - [LM Studio](https://lmstudio.ai) mit seinem Agenten Bionic (eigenes Programm, einmal gestartet; nur unter Windows), mit einem lokalen oder einem Cloud-Modell. Das Modell muss mit vielen Werkzeugen und langen Anleitungen zurechtkommen; kleine lokale Modelle tun das oft nicht.
 
@@ -260,9 +260,9 @@ wenn Nummer und Name nicht zusammenpassen.
 
 ### Claude Code, Codex CLI und LM Studio
 
-In allen dreien arbeiten Sie gleich, siehe [Arbeiten](#arbeiten); die Skills nimmt die KI von selbst. Was je Werkzeug anders ist:
+Wo die Verbindung wirkt, sagt der Dialog „KI-Werkzeuge einrichten" bei jedem Werkzeug: Claude Code, auch im Reiter „Code“ von Claude Desktop (nicht im normalen Chat); Codex, auch in den Codex-Sitzungen der ChatGPT-App (nicht in ihrem normalen Chat); LM Studio im Agenten Bionic. ChatGPT und Claude im Browser sowie reine Chat-Fenster erreichen moocp nie.
 
-Wo die Verbindung wirkt, sagt der Dialog „KI-Werkzeuge einrichten" bei jedem Werkzeug: Claude Code, auch im Reiter „Code" von Claude Desktop (nicht im normalen Chat); Codex, auch in den Codex-Sitzungen der ChatGPT-App (nicht in ihrem normalen Chat); LM Studio im Agenten Bionic. ChatGPT und Claude im Browser sowie reine Chat-Fenster erreichen moocp nie.
+In allen dreien arbeiten Sie gleich, siehe [Arbeiten](#arbeiten); die Skills nimmt die KI von selbst. Was je Werkzeug anders ist:
 
 - **Claude Code**: in der Claude-Desktop-App im Reiter „Code" eine neue Sitzung beginnen. `/mcp` zeigt die Verbindung; `/moodle`, `/moodle-fragen` oder `/lernsituation` ruft einen Skill gezielt auf.
 - **Codex CLI**: in einer Eingabeaufforderung `codex` starten. `/mcp` zeigt die Verbindung; `$moodle`, `$moodle-fragen` oder `$lernsituation` in der Anfrage wählt einen Skill gezielt.

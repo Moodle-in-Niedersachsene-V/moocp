@@ -12,11 +12,11 @@
 // MCP-Clients, die auf demselben Rechner laufen, Skills im Format
 // `SKILL.md` laden und eigene Werkzeuge für Dateien haben -- mehr braucht
 // diese App von einem Client nicht. Der normale Chat der ChatGPT-App gehört
-// nicht dazu: Er erreicht nur öffentliche HTTPS-Server, und der Weg über OpenAIs Tunnel
-// führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6) und brächte
-// trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ihre Codex-Sitzungen
-// teilen dagegen `~/.codex` mit Codex CLI und sehen die Einträge. Ollama ist ein
-// Modellserver und gar kein MCP-Client.
+// nicht dazu: Er erreicht nur öffentliche HTTPS-Server, und der Weg über
+// OpenAIs Tunnel führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6)
+// und brächte trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ihre
+// Codex-Sitzungen teilen dagegen `~/.codex` mit Codex CLI und sehen die Einträge.
+// Ollama ist ein Modellserver und gar kein MCP-Client.
 //
 // Hier steht nur die Logik, ohne Oberfläche, damit sie sich an einem
 // nachgebauten Ordnerbaum prüfen lässt (test/einrichtung_test.dart).
@@ -415,10 +415,10 @@ class ClaudeCode extends KiWerkzeug {
   String get name => 'Claude Code';
   @override
   String get datenziel => 'Inhalte gehen an das eingestellte Modell, in der Regel bei Anthropic';
-  @override
-  // Claude Desktop bringt Claude Code im Reiter „Code" mit und teilt dessen
+  // Claude Desktop bringt Claude Code im Reiter „Code“ mit und teilt dessen
   // Konfiguration; der normale Chat sieht die Einträge nicht.
-  String get wirkt => 'Wirkt in Claude Code und im Reiter „Code" von Claude Desktop, nicht im normalen Chat.';
+  @override
+  String get wirkt => 'Wirkt in Claude Code und im Reiter „Code“ von Claude Desktop, nicht im normalen Chat.';
 
   /// Pfad der claude-Programmdatei (unter Windows claude.exe); null, wenn sie nicht gefunden wurde.
   String? get exe {
@@ -556,9 +556,9 @@ class CodexCli extends KiWerkzeug {
       'Inhalte gehen an das eingestellte Modell, in der Regel bei OpenAI. Der Moodle-Schlüssel steht im '
       'Klartext in config.toml im Codex-Ordner (in der Regel ~/.codex)';
 
-  @override
   // Codex-Sitzungen der ChatGPT-App teilen ~/.codex mit der Kommandozeile und
   // sehen die Einträge; der normale Chat der App ist kein Client.
+  @override
   String get wirkt => 'Wirkt in Codex und in Codex-Sitzungen der ChatGPT-App, nicht im normalen Chat der App.';
 
   /// CODEX_HOME verlegt Konfiguration und Skills; sonst `~/.codex`.

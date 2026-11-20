@@ -598,7 +598,7 @@ void main() {
       expect(find.text('Verbindung und Skills sind aktuell.'), findsOneWidget);
       expect(find.text('Codex CLI: $text'), findsOneWidget, reason: 'und im Abschluss');
       expect(ClaudeCode(const {}).wirkt,
-          'Wirkt in Claude Code und im Reiter „Code" von Claude Desktop, nicht im normalen Chat.');
+          'Wirkt in Claude Code und im Reiter „Code“ von Claude Desktop, nicht im normalen Chat.');
       expect(LmStudio(const {}, bruecke: 'b').wirkt, 'Wirkt im Agenten Bionic, nicht im klassischen LM Studio.');
     });
 

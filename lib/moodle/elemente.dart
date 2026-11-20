@@ -130,16 +130,17 @@ String mitKopf(String text, String kopf) {
   return '${t.substring(0, m.end)}\n$kopf${t.substring(m.end)}';
 }
 
-final RegExp _skriptInhalt = RegExp(r'<script\b[^>]*>([\s\S]*?)</script\s*>', caseSensitive: false);
-final RegExp _ereignisWert =
-    RegExp(r'''\son[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''', caseSensitive: false);
+/// Die Schreibprüfung nutzt Dart-Muster, Entwürfe die Unicode-Semantik ihrer
+/// Python-Vorlage. Die Regeln bleiben in beiden Fällen dieselben.
+typedef ElementMuster = RegExp Function(String muster, bool caseSensitive, bool multiLine, bool dotAll);
 
-/// Der Code einer Elementdatei: Inhalt der `<script>` und Werte der
-/// Ereignis-Attribute. Nur daran prüfen, was nur Code meint -- „We import
-/// goods" oder „on top." auf einer Vokabelkarte ist Text.
-String _code(String t) => [
-      for (final m in _skriptInhalt.allMatches(t)) m.group(1)!,
-      for (final m in _ereignisWert.allMatches(t)) m.group(1) ?? m.group(2) ?? m.group(3)!,
+RegExp _dartMuster(String muster, bool caseSensitive, bool multiLine, bool dotAll) =>
+    RegExp(muster, caseSensitive: caseSensitive, multiLine: multiLine, dotAll: dotAll);
+
+String _code(String t, ElementMuster muster) => [
+      for (final m in muster(r'<script\b[^>]*>(.*?)</script\s*>', false, false, true).allMatches(t)) m.group(1)!,
+      for (final m in muster(r'''\son[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''', false, false, false).allMatches(t))
+        m.group(1) ?? m.group(2) ?? m.group(3)!,
     ].join('\n');
 
 /// Ein Befund an einem Element: entweder eine fremde [adresse] (der Satz
@@ -150,25 +151,26 @@ typedef ElementBefund = ({String? adresse, String satz});
 /// Die Regeln für ein Element in fester Reihenfolge, geprüft ohne den Kopf
 /// der App. Die einzige Quelle: [elementFehler] (Schreiben) und die Prüfung
 /// von Entwürfen (`lernsituation_pruefen`) bilden daraus je ihren Wortlaut.
-List<ElementBefund> elementBefunde(String text) {
+List<ElementBefund> elementBefunde(String text, {ElementMuster muster = _dartMuster}) {
   final t = ohneKopf(text);
-  final code = _code(t);
+  final code = _code(t, muster);
   final aus = <ElementBefund>[];
+  RegExp bauen(String text, bool gross, bool mehrzeilig) => muster(text, gross, mehrzeilig, false);
   void wenn(String muster, String satz, {bool gross = false, bool nurCode = false}) {
-    if (RegExp(muster, caseSensitive: gross).hasMatch(nurCode ? code : t)) aus.add((adresse: null, satz: satz));
+    if (bauen(muster, gross, false).hasMatch(nurCode ? code : t)) aus.add((adresse: null, satz: satz));
   }
 
   // Adressen in Attributen, CSS und Zeichenketten. Namensräume des W3C
   // (SVG, XLink, MathML) sind keine Quelle, createElementNS braucht sie.
-  for (final m in RegExp('''(?:[=("'`]\\s*|@import\\s+)((?:https?:)?//[^\\s"'`)<>]+)''', caseSensitive: false)
+  for (final m in bauen('''(?:[=("'`]\\s*|@import\\s+)((?:https?:)?//[^\\s"'`)<>]+)''', false, false)
       .allMatches(t)) {
     final adresse = m.group(1)!;
-    if (RegExp(r'^(?:https?:)?//www\.w3\.org/', caseSensitive: false).hasMatch(adresse)) continue;
+    if (bauen(r'^(?:https?:)?//www\.w3\.org/', false, false).hasMatch(adresse)) continue;
     aus.add((adresse: adresse, satz: ''));
     break;
   }
   for (final (muster, was) in netzSchnittstellen) {
-    if (muster.hasMatch(code)) {
+    if (bauen(muster.pattern, muster.isCaseSensitive, muster.isMultiLine).hasMatch(code)) {
       aus.add((adresse: null, satz: 'Im Code steht $was: Ein Element lädt und sendet nichts.'));
     }
   }
@@ -204,12 +206,12 @@ typedef Skriptstelle = ({SkriptArt art, String tag, String attribut, String wert
 /// Ereignis-Attribut (auch per SVG-Animation gesetzt: attributeName="on…"),
 /// `srcdoc` oder eine `javascript:`-Adresse. Die einzige Regel dafür, für
 /// Felder ([skriptstellen]) wie für Entwürfe (`lernsituation_pruefen`).
-SkriptArt? skriptArtVonAttribut(String k, String w) {
+SkriptArt? skriptArtVonAttribut(String k, String w, {ElementMuster muster = _dartMuster}) {
   if (k.startsWith('on') || (k == 'attributename' && w.trim().toLowerCase().startsWith('on'))) {
     return SkriptArt.ereignis;
   }
   if (k == 'srcdoc') return SkriptArt.srcdoc;
-  if (w.replaceAll(RegExp(r'[\s\x00-\x1f]'), '').toLowerCase().startsWith('javascript:')) {
+  if (w.replaceAll(muster(r'[\s\x00-\x1f]', true, false, false), '').toLowerCase().startsWith('javascript:')) {
     return SkriptArt.javascriptAdresse;
   }
   return null;
@@ -409,8 +411,11 @@ void elementeVorbereiten(String quelle, Map<String, String> felder, String kopf,
 final RegExp _dokument = RegExp(r'\.(?:x?html?|xht|shtml|svgz?|xml|xslt?)$', caseSensitive: false);
 
 /// Die Stellen mit Code ([skriptstellenGenau]) in einer Datei, die der
-/// Browser als Dokument öffnet; bei anderen Dateien leer.
-List<Skriptstelle> stellenInDatei(String name, List<int> bytes) {
+/// Browser als Dokument öffnet; bei anderen Dateien leer. [lesen] bestimmt
+/// die Traversierung: Entwürfe behalten ihren Leser in Quellreihenfolge,
+/// die Schreibprüfung nutzt den HTML-Fragmentparser.
+List<Skriptstelle> stellenInDatei(String name, List<int> bytes,
+    {List<Skriptstelle> Function(String) lesen = skriptstellenGenau}) {
   if (!_dokument.hasMatch(name)) return const [];
   var b = bytes;
   if (name.toLowerCase().endsWith('.svgz')) {
@@ -420,7 +425,7 @@ List<Skriptstelle> stellenInDatei(String name, List<int> bytes) {
       return const [(art: SkriptArt.komprimiert, tag: '', attribut: '', wert: '')];
     }
   }
-  return skriptstellenGenau(utf8.decode(b, allowMalformed: true));
+  return lesen(utf8.decode(b, allowMalformed: true));
 }
 
 /// [stellenInDatei], je als voller Text.

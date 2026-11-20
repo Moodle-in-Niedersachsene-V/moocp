@@ -34,6 +34,7 @@ import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
 import 'moodle/moodle_zugang.dart';
+import 'moodle/schreibvorgang.dart' show Schreibvorgang;
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
@@ -964,6 +965,8 @@ class _HauptseiteState extends State<Hauptseite> {
       return;
     }
     await instanz.dienst.stoppen();
+    // Die Protokolle abgeschlossener Schreibvorgänge nennen Dateien dieser Instanz.
+    Schreibvorgang.abgeschlosseneLoeschen(instanz.moodle, dieserInstanz: true);
     instanz.moodle.abmelden();
     try {
       await Anmeldedaten.loeschen(

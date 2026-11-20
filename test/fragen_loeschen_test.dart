@@ -170,10 +170,61 @@ void main() {
     expect(anfrage.abhaken.firstWhere((z) => z.contains('ZZ Eins')), isNot(contains('verbirgt')));
     freigaben.entscheiden(true);
     final bericht = await f;
-    expect(bericht, contains('verified: false'));
+    expect(bericht, contains('verified: true'));
     expect(bericht, contains('gelöscht: „ZZ Eins"'));
     expect(bericht, contains('nur verborgen: „ZZ Zwei"'));
+    expect(bericht, isNot(contains('NOCH DA')));
     expect(moodle.geloescht, [idA]);
+  });
+
+  test('Die Rückfrage nennt „Name v1" (Moodle 5.1): benutzt wird erkannt, Moodles Text kommt ungekürzt und einmal', () async {
+    final a = moodle.legeAn('shortanswer', 'ZZ Frage 2', 'zz-1');
+    final b = moodle.legeAn('shortanswer', 'ZZ Frage 3 Doppel', 'zz-2');
+    moodle.inBenutzung.add(a.neueste.id);
+    final f = los([a, b]);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.abhaken.firstWhere((z) => z.contains('ZZ Frage 2')), contains('steckt in einem Test'));
+    expect(anfrage.abhaken.firstWhere((z) => z.contains('ZZ Frage 2')), isNot(contains('endgültig')));
+    expect(anfrage.abhaken.firstWhere((z) => z.contains('ZZ Frage 3 Doppel')), contains('endgültig gelöscht'));
+    final text = anfrage.punkte.join('\n');
+    expect('Fragen, die in Verwendung sind'.allMatches(text), hasLength(1));
+    expect(text, contains('außer die Option "Verborgene Fragen anzeigen" ist gewählt.'));
+    freigaben.entscheiden(false);
+    await f;
+  });
+
+  test('Die ältere Schreibweise „Name (Version n)" wird weiter erkannt', () async {
+    moodle.alteVersionsschreibweise = true;
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    moodle.inBenutzung.add(a.neueste.id);
+    final f = los([a]);
+    final anfrage = await aufFreigabe();
+    expect(anfrage.abhaken.single, contains('steckt in einem Test'));
+    freigaben.entscheiden(false);
+    await f;
+  });
+
+  test('Eine benutzte Frage, die nach dem Löschen noch in ihrer Kategorie steht, ist NOCH DA und nicht verified', () async {
+    moodle.verbergenWirktNicht = true;
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    moodle.inBenutzung.add(a.neueste.id);
+    final f = los([a]);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await f;
+    expect(bericht, contains('NOCH DA: „ZZ Eins"'));
+    expect(bericht, contains('verified: false'));
+  });
+
+  test('Eine nicht als benutzt gemeldete Frage, die noch da ist, bleibt NOCH DA', () async {
+    moodle.loeschenWirktNicht = true;
+    final a = moodle.legeAn('shortanswer', 'ZZ Eins', 'zz-1');
+    final f = los([a]);
+    await aufFreigabe();
+    freigaben.entscheiden(true);
+    final bericht = await f;
+    expect(bericht, contains('NOCH DA'));
+    expect(bericht, contains('verified: false'));
   });
 
   test('Mehr Fragen als der Dialog sinnvoll zeigt: Abbruch mit Hinweis auf Teilaufrufe', () async {

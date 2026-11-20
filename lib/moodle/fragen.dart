@@ -539,7 +539,7 @@ Future<String> fragenLoeschen(MoodleZugang moodle, Freigaben freigaben, String a
   final geprueft = await loeschenPruefen(moodle, sammlung, fragen);
   final gefunden = [for (final g in geprueft) g.frage];
   final r = await _loeschRueckfrage(moodle, arbeitsordner, sammlung, gefunden);
-  final benutzung = _inBenutzung(r.zeilen, gefunden);
+  final benutzung = fragenInBenutzung(r.zeilen, gefunden);
 
   // Die Sicherung entsteht vor der Freigabe, damit der Dialog ihren Ort nennt;
   // sie wird vor dem Löschen noch einmal gegen den Stand geprüft.
@@ -601,19 +601,23 @@ Future<String> fragenLoeschen(MoodleZugang moodle, Freigaben freigaben, String a
       'verified: $alleWeg\nSicherung (aktuelle Version jeder Frage, vor dem Löschen angelegt): $sicherung\n$b';
 }
 
-/// Welche der Fragen laut Moodles Rückfrage in Benutzung sind: Moodle setzt
-/// vor jede benutzte Version ein `* ` und nennt sie sonst „Name (Version n)".
-/// Die Zuordnung läuft über den ganzen Namen vor „(Version n)"; Fragen mit gleichem
-/// Namen lassen sich so nicht trennen, dann gilt vorsichtig beide als benutzt.
-/// Nicht gemessen: die Zeilenform auf einer Instanz; fehlt die Liste, gilt
-/// keine Frage als benutzt und das Zurücklesen entscheidet.
-Set<int?> _inBenutzung(List<String> zeilen, List<FrageKurz> fragen) {
+/// Welche der Fragen laut Moodles Rückfrage in Benutzung sind. Gemessen auf
+/// Moodle 5.1 (deutsche Oberfläche): Die Rückfrage steht in `#modal-body`,
+/// jede Version in einer Zeile, getrennt mit `<br />`, als „Name v1"; Moodle
+/// setzt vor jede benutzte Version ein `* `. Am Ende steht, ebenfalls mit
+/// `* `, der Erklärsatz „* Fragen, die in Verwendung sind …", der zu keiner Frage
+/// passt. Die ältere Schreibweise „Name (Version n)" wird weiter erkannt.
+/// Die Zuordnung läuft über den ganzen Namen vor dem Versionszusatz; Fragen mit
+/// gleichem Namen lassen sich so nicht trennen, dann gelten vorsichtig beide als
+/// benutzt. Fehlt die Liste, gilt keine Frage als benutzt, und das Zurücklesen
+/// entscheidet.
+Set<int?> fragenInBenutzung(List<String> zeilen, List<FrageKurz> fragen) {
   final aus = <int?>{};
   for (final z in zeilen) {
     if (!z.startsWith('* ')) continue;
     final text = z.substring(2).trim();
-    // „Name (Version n)": nur der Name davor zählt, damit „Frage" nicht „Frage 2" mitmeint.
-    final name = RegExp(r'^(.*?)\s*\([^()]*\d+\)$').firstMatch(text)?.group(1) ?? text;
+    // Nur der Name davor zählt, damit „Frage" nicht „Frage 2" mitmeint.
+    final name = RegExp(r'^(.*?)\s*(?:v\d+|\(Version\s*\d+\))$').firstMatch(text)?.group(1) ?? text;
     for (final f in fragen) {
       if (name == f.name.trim()) aus.add(f.id);
     }
@@ -745,19 +749,37 @@ Future<(String, bool)> _loeschAbsenden(
 
   final b = StringBuffer();
   var alleWeg = true;
+  // Gemessen auf Moodle 5.1: Eine benutzte Frage verbirgt Moodle nur. Sie fehlt dann
+  // im Export ihrer Kategorie und in der Fragenliste, lässt sich aber weiter einzeln
+  // nach id exportieren. Das Urteil „nur verborgen" braucht deshalb beides, und die
+  // Kategorien werden nur gelesen, wenn eine benutzte Frage noch einzeln zu holen ist.
+  Set<int?>? inKategorien;
+  Future<Set<int?>> kategorieFragen() async {
+    final aus = <int?>{};
+    for (final k in await kategorienLesen(moodle, sammlung)) {
+      if (k.anzahl == 0) continue;
+      aus.addAll(fragenAusXml(await exportieren(moodle, sammlung, k)).map((x) => x.id));
+    }
+    return aus;
+  }
+
   for (final f in fragen) {
     final e = await frageExport(moodle, sammlung, f.id!);
     if (e.xml == null && _frageFehlt.contains(e.fehlercode)) {
       b.writeln('  gelöscht: „${f.name}" (${f.id})');
     } else if (e.xml == null && inBenutzung.contains(f.id)) {
-      // Nicht gemessen: wie Moodle den Export einer verborgenen Frage ablehnt. Hier zählt, dass
-      // sie laut Rückfrage benutzt war und der Export nicht mehr „gibt es nicht" sagt.
+      // Nicht gemessen: ob Moodle den Einzelexport einer verborgenen Frage je ablehnt (auf
+      // Moodle 5.1 liefert er sie). Hier zählt, dass sie laut Rückfrage benutzt war und der
+      // Export nicht mehr „gibt es nicht" sagt; das gilt als unklar, nicht als erwartetes Ergebnis.
       alleWeg = false;
       b.writeln('  nur verborgen: „${f.name}" (${f.id}) -- steckt in einem Test, Moodle hat sie nicht gelöscht, '
           'sondern verborgen (Export abgelehnt mit ${e.fehlercode ?? 'unbekanntem Fehler'}).');
+    } else if (e.xml != null && inBenutzung.contains(f.id) && !(inKategorien ??= await kategorieFragen()).contains(f.id)) {
+      b.writeln('  nur verborgen: „${f.name}" (${f.id}) -- steckt in einem Test, Moodle hat sie wie angekündigt '
+          'nicht gelöscht, sondern in der Fragensammlung ausgeblendet.');
     } else if (e.xml != null) {
       alleWeg = false;
-      b.writeln('  NOCH DA: „${f.name}" (${f.id}) -- steckt vermutlich in einem Test; Moodle hat sie dann nur verborgen.');
+      b.writeln('  NOCH DA: „${f.name}" (${f.id}) -- ${inBenutzung.contains(f.id) ? 'steckt in einem Test und steht noch in ihrer Kategorie, ist also nicht einmal verborgen' : 'nicht als benutzt gemeldet und trotzdem nicht gelöscht'}.');
     } else {
       alleWeg = false;
       b.writeln('  UNKLAR: „${f.name}" (${f.id}) -- Export abgelehnt mit ${e.fehlercode ?? 'unbekanntem Fehler'}'

@@ -141,9 +141,19 @@ class FragenbankDoppel {
   bool loeschenWirktNicht = false;
 
   /// Versions-ids, die ein Test nutzt: Moodle markiert sie in der Rückfrage mit
-  /// `* ` und verbirgt sie beim Löschen nur (Gemessenes steht in fragen.dart;
-  /// der Export einer verborgenen Frage ist dort als nicht gemessen vermerkt).
+  /// `* ` und verbirgt sie beim Löschen nur. Eine so verborgene Frage fehlt danach
+  /// im Export ihrer Kategorie, lässt sich aber noch einzeln nach id exportieren
+  /// (auf Moodle 5.1 gemessen).
   final Set<int> inBenutzung = {};
+
+  /// Die Rückfrage nennt die Version wie ältere Moodle-Versionen: „Name (Version n)".
+  bool alteVersionsschreibweise = false;
+
+  /// Das Verbergen wirkt nicht: Die benutzte Frage bleibt in ihrer Kategorie.
+  bool verbergenWirktNicht = false;
+
+  /// Versionen, die Moodle in der Fragensammlung ausgeblendet hat.
+  final Set<int> versteckt = {};
 
   /// Verborgene Versionen: Moodle exportiert sie nicht (Fehlerseite mit anderem Code).
   final Set<int> verborgen = {};
@@ -309,7 +319,7 @@ class FragenbankDoppel {
       final kat = int.parse(pfad.split('/')[5]);
       final b = StringBuffer('<?xml version="1.0" encoding="UTF-8"?>\n<quiz>\n');
       for (final e in eintraege.where((e) => e.kategorie == kat)) {
-        if (e.versionen.isEmpty) continue;
+        if (e.versionen.isEmpty || versteckt.contains(e.neueste.id)) continue;
         b.writeln('<!-- question: ${e.neueste.id}  -->');
         b.writeln(_ausgeliefert(e.neueste));
       }
@@ -460,12 +470,14 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       final q = {...r.uri.queryParameters, if (koerper.isNotEmpty) ...Uri.splitQueryString(koerper)};
       if (!q.containsKey('confirm')) {
         final ids = q.keys.where((k) => RegExp(r'^q\d+$').hasMatch(k)).map((k) => k.substring(1)).join(',');
+        // Gemessen auf Moodle 5.1 (deutsche Oberfläche): Aufbau der Rückfrage wörtlich.
         final zeilen = [
           for (final s in ids.split(','))
             if (eintragVon(int.parse(s)) case final e?)
-              for (final v in e.versionen) '${inBenutzung.contains(v.id) ? '* ' : ''}${v.name} (Version ${v.nr})',
+              for (final v in e.versionen)
+                '${inBenutzung.contains(v.id) ? '* ' : ''}${v.name} ${alteVersionsschreibweise ? '(Version ${v.nr})' : 'v${v.nr}'}',
         ].join('<br />');
-        return _text(r, _seite('''<div id="modal-body">$zeilen</div><form method="post" action="/question/bank/deletequestion/delete.php">
+        return _text(r, _seite('''<div role="alert" data-aria-autofocus="true" id="modal-body" class="box py-3 modal-body"><p>Die folgende Fragen und alle ihre Versionen werden gelöscht: <br /><br />$zeilen<br /><br />* Fragen, die in Verwendung sind und nicht gelöscht werden können, werden hiermit gekennzeichnet. Stattdessen werden sie in der Fragensammlung ausgeblendet, außer die Option "Verborgene Fragen anzeigen" ist gewählt.</p></div><form method="post" action="/question/bank/deletequestion/delete.php">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="cmid" value="$sammlung">
 <input type="hidden" name="deleteselected" value="$ids"><input type="hidden" name="deleteall" value="${q['deleteall'] ?? '0'}">
 <input type="hidden" name="confirm" value="${'a' * 32}"><input type="submit" name="x" value="Löschen"></form>'''));
@@ -474,7 +486,7 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       for (final s in q['deleteselected']!.split(',')) {
         final id = int.parse(s);
         if (inBenutzung.contains(id)) {
-          verborgen.add(id);
+          if (!verbergenWirktNicht) versteckt.add(id);
           continue;
         }
         geloescht.add(id);

@@ -101,6 +101,15 @@ App das bewusst nicht kann.
   dann gehört in deinen Bericht, in welchem Test sie noch steckt, falls
   bekannt. Dasselbe gilt für `frage_ersetzen` mit `loeschen: true`. Leere
   Kategorien löscht die App nicht — das erledigt die Lehrkraft in Moodle.
+- **Eine ganze Fragensammlung löschen** (`loeschen` mit ihrer cmid) nimmt alle
+  Kategorien und Fragen mit und gilt deshalb wie das Löschen von Fragen: Liste
+  vorher im Chat jede Kategorie mit Fragenzahl und die Tests auf, in denen
+  Fragen stecken, und ruf das Werkzeug erst nach einem ausdrücklichen Ja auf.
+  Die App sichert vorher alle Fragen als XML (die Antwort nennt den Pfad) und
+  fragt auf jeder Stufe; die Lehrkraft hakt jede Kategorie einzeln ab.
+  **Verborgene Fragen liefert Moodles Export nicht aus, sie sind nicht in der
+  Sicherung** — sag das im Plan. Zurück kommt die Sicherung über
+  `fragen_importieren`.
 - **Wenn es bereits Versuche gibt** (`test_lesen` meldet das): anhalten und
   nachfragen. Punkte- oder Fragenänderungen verschieben dann rückwirkend
   Bewertungen.
@@ -524,7 +533,7 @@ Zwei verschiedene Dinge — und das kleinere ist nie der Ersatz für das größe
 
 Weil eine Sammlung eine Aktivität ist, gehört ihr **Name** in den Plan — den Abschnitt wählst du nicht: Moodle legt jede Sammlung im allgemeinen Abschnitt ab, einerlei welche `abschnitt_id` du mitgibst (verlangt wird sie trotzdem, weil jede andere Aktivität sie braucht). **Als Gliederung schlägst du eine eigene Sammlung je Lernsituation oder Thema vor**, mit Kategorien darin, wo sie etwas tragen — je Teilthema, damit Zufallsfragen gezielt ziehen, und Übungsfragen getrennt von denen für die Leistungsfeststellung, damit die Klassenarbeit nicht aus der Übung bekannt ist. Die Sammlung, die Moodle für den ganzen Kurs angelegt hat, bleibt unberührt, solange die Lehrkraft nichts anderes sagt. Sieh vorher mit `fragensammlungen(kurs)` nach: Gibt es schon eine Sammlung für das Thema, kommen die Fragen dorthin. Begründung und Einzelheiten: `references/sammlungen.md`.
 
-Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe und mit allem, was darin liegt.
+Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe auf jeder Stufe und mit allem, was darin liegt (Fragen vorher als XML gesichert, ohne verborgene Fragen; Einzelheiten im Abschnitt „Fragen löschen“ oben).
 
 ## Ab Moodle 5: Fragensammlungen sind Aktivitäten
 

@@ -37,6 +37,8 @@ import '../freigabe.dart';
 import 'elemente.dart';
 import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
+import 'fragen.dart';
+import 'fragen_sicherung.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
 import 'test.dart';
@@ -863,43 +865,180 @@ Future<FormularGelesen> _formulareVergleichen(MoodleZugang moodle, Probe probe, 
 // loeschen
 // ---------------------------------------------------------------------------
 
+/// Die Sicherungen der Fragensammlungen, die ein Löschen mitnimmt (E9, E20): Wer eine Sammlung löscht,
+/// löscht alle ihre Fragen, also gilt dasselbe wie bei fragen_loeschen -- Freigabe auf jeder Stufe mit einem
+/// Haken je Kategorie, vorher eine XML-Sicherung in den dauerhaften Ordner. Auch eine Sammlung in einem
+/// Abschnitt, der gelöscht wird, zählt dazu.
+class _Sicherungen {
+  _Sicherungen._(this._sammlungen);
+  final List<_GesicherteSammlung> _sammlungen;
+
+  bool get leer => _sammlungen.isEmpty;
+
+  /// Liest und sichert jede Sammlung; scheitert eine, bleiben die Dateien der anderen nicht liegen.
+  static Future<_Sicherungen> anlegen(MoodleZugang moodle, String ordner, List<(int, String)> sammlungen) async {
+    final s = _Sicherungen._([]);
+    try {
+      for (final (cmid, name) in sammlungen) {
+        late final List<SammlungsKategorie> stand;
+        try {
+          stand = await sammlungExportieren(moodle, cmid);
+        } on MoodleFehler catch (e) {
+          throw MoodleFehler('Abgebrochen, nichts gelöscht: Die Fragen der Sammlung „$name" (cmid $cmid) lassen sich '
+              'nicht sichern (${e.meldung}). Ohne Sicherung löscht die App nicht.');
+        }
+        final datei = await sammlungSichern(ordner, cmid, [for (final k in stand) (pfad: k.pfad, xml: k.xml)]);
+        s._sammlungen.add(_GesicherteSammlung(cmid, name, stand, datei));
+      }
+    } catch (_) {
+      s.verwerfen();
+      rethrow;
+    }
+    return s;
+  }
+
+  void verwerfen() {
+    for (final x in _sammlungen) {
+      final d = File(x.datei);
+      if (d.existsSync()) d.deleteSync();
+    }
+  }
+
+  /// Die Zeilen der Freigabe zu den Sicherungen.
+  List<String> get punkte => [
+        for (final x in _sammlungen) ...[
+          'Fragensammlung „${x.name}" (cmid ${x.cmid}) mit ${x.stand.length} Kategorie(n) und '
+              '${x.stand.fold<int>(0, (a, k) => a + k.kat.anzahl)} Frage(n); vorher gesichert als XML: ${x.datei} -- '
+              'gesichert ist die aktuelle Version jeder Frage, nicht ihr Verlauf. Zurück kommt sie mit fragen_importieren.',
+          if (x.stand.any((k) => k.exportiert < k.kat.anzahl))
+            'Die Kategorieliste nennt mehr Fragen, als die Sicherung enthält: ${[
+              for (final k in x.stand)
+                if (k.exportiert < k.kat.anzahl) '„${k.pfad.join(' / ')}" (${k.exportiert} von ${k.kat.anzahl})'
+            ].join(', ')}.',
+        ],
+        'Verborgene Fragen (etwa solche, die in einem Test stecken) liefert Moodles Export nicht aus: Sie sind '
+            'NICHT in der Sicherung und gehen mit der Sammlung verloren.',
+      ];
+
+  /// Ein Haken je Kategorie; eine Sammlung ohne Kategorie hakt die Sammlung selbst ab.
+  List<String> get abhaken => [
+        for (final x in _sammlungen)
+          if (x.stand.isEmpty)
+            'Ich habe geprüft: Die Fragensammlung „${x.name}" (cmid ${x.cmid}) wird endgültig gelöscht.'
+          else
+            for (final k in x.stand)
+              'Ich habe geprüft: Kategorie „${k.pfad.join(' / ')}" (${k.kat.anzahl} ${k.kat.anzahl == 1 ? 'Frage' : 'Fragen'}) '
+                  'der Fragensammlung „${x.name}" (cmid ${x.cmid}) wird mit allen Fragen darin endgültig gelöscht.',
+      ];
+
+  /// Lesen wie vor der Freigabe: Was jetzt in den Sammlungen steht, muss das Gesicherte und Freigegebene sein (A3).
+  Future<void> nachpruefen(MoodleZugang moodle) async {
+    for (final x in _sammlungen) {
+      final String jetzt;
+      try {
+        jetzt = _stand(await sammlungExportieren(moodle, x.cmid));
+      } on MoodleFehler catch (e) {
+        throw MoodleFehler('Abgebrochen, nichts gelöscht: Seit der Freigabe lässt sich Sammlung „${x.name}" nicht mehr '
+            'lesen (${e.meldung}). Neu lesen und neu freigeben lassen.');
+      }
+      if (jetzt != _stand(x.stand)) {
+        throw MoodleFehler('Abgebrochen, nichts gelöscht: Seit der Freigabe hat sich in der Fragensammlung „${x.name}" '
+            '(cmid ${x.cmid}) etwas geändert (Kategorien oder Fragen). Neu lesen und neu freigeben lassen.');
+      }
+    }
+  }
+
+  static String _stand(List<SammlungsKategorie> s) => [for (final k in s) '${k.kat.wert}|${k.pfad.join('/')}|${k.kat.anzahl}|${k.xml}'].join('\n');
+
+  /// Der Satz für die Antwort, der die Sicherung nennt.
+  String get antwort => [
+        for (final x in _sammlungen) 'Sicherung der Fragen von „${x.name}" (cmid ${x.cmid}), vor dem Löschen angelegt: ${x.datei}',
+        'Verborgene Fragen sind nicht darin.',
+      ].join('\n');
+}
+
+class _GesicherteSammlung {
+  _GesicherteSammlung(this.cmid, this.name, this.stand, this.datei);
+  final int cmid;
+  final String name;
+  final List<SammlungsKategorie> stand;
+  final String datei;
+}
+
+/// Die Fragensammlungen, die im Abschnitt [a] stehen, auch in seinen Unterabschnitten. UNGEMESSEN: ob die
+/// Kursstruktur eine Fragensammlung je in einem Abschnitt zeigt (Moodle 5 führt sie auf einer eigenen Seite);
+/// der Weg gilt vorsorglich.
+List<(int, String)> _sammlungenIn(KursStruktur k, KursAbschnitt a, [Set<int>? besucht]) {
+  final gesehen = besucht ?? <int>{};
+  if (!gesehen.add(a.id)) return const [];
+  return [
+    for (final c in k.inhalt(a)) ...[
+      if (c.modul == 'qbank') (c.cmid, c.name),
+      if (c.unterabschnittId != null && k.nachId[c.unterabschnittId] != null)
+        ..._sammlungenIn(k, k.nachId[c.unterabschnittId]!, gesehen),
+    ]
+  ];
+}
+
 /// Eine Fragensammlung löschen. Eigener Weg, weil sie nicht in der
 /// Kursstruktur steht (kurs.dart): Ohne ihn liefe jedes Aufräumen in „cmid …
 /// gibt es in Kurs … nicht", und die Lehrkraft müsste in Moodle nachsehen.
 Future<String> _fragensammlungLoeschen(
-    MoodleZugang moodle, Freigaben freigaben, int kurs, Fragensammlung s, String name) async {
+    MoodleZugang moodle, Freigaben freigaben, int kurs, Fragensammlung s, String name, String sicherungsOrdner) async {
   nameBestaetigen(name, s.name, 'cmid ${s.cmid}');
-  final ja = await freigaben.anfragen(FreigabeAnfrage(
-    titel: 'Fragensammlung endgültig löschen?',
-    punkte: [
-      'Fragensammlung „${s.name}" (cmid ${s.cmid}) in ${await kursBezeichnung(moodle, kurs)}',
-      'Mit allen Kategorien und Fragen darin, auch denen, die in Tests benutzt werden.',
-      'Zurückholen geht nur, wenn der Papierkorb des Kurses eingeschaltet ist.',
-    ],
-    vergleich: const [],
-    knopf: 'Löschen',
-  ));
-  if (!ja) return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
-  // Dieselbe Nachprüfung wie bei den Aktivitäten, nur über die Sammlungsliste.
-  final jetzt = (await fragensammlungenLesen(moodle, kurs)).where((x) => x.cmid == s.cmid).toList();
-  if (jetzt.length != 1 || jetzt.single.name != s.name) {
-    throw MoodleFehler('Seit der Freigabe hat sich in Moodle etwas geändert: Die Fragensammlung cmid '
-        '${s.cmid} heißt nicht mehr „${s.name}" oder ist weg. Nichts gelöscht.');
+  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, [(s.cmid, s.name)]);
+  final bool ja;
+  try {
+    ja = await freigaben.anfragen(FreigabeAnfrage(
+      titel: 'Fragensammlung endgültig löschen?',
+      punkte: [
+        'Fragensammlung „${s.name}" (cmid ${s.cmid}) in ${await kursBezeichnung(moodle, kurs)}',
+        'Mit allen Kategorien und Fragen darin, auch denen, die in Tests benutzt werden.',
+        ...sicherungen.punkte,
+        'Zurückholen geht nur, wenn der Papierkorb des Kurses eingeschaltet ist.',
+      ],
+      vergleich: const [],
+      knopf: 'Löschen',
+      // Wer die Sammlung löscht, löscht ihre Fragen: wie fragen_loeschen auf jeder Stufe, je Kategorie (E20).
+      ab: Bestaetigungen.keine,
+      abhaken: sicherungen.abhaken,
+    ));
+    if (ja) {
+      // Dieselbe Nachprüfung wie bei den Aktivitäten, nur über die Sammlungsliste.
+      final jetzt = (await fragensammlungenLesen(moodle, kurs)).where((x) => x.cmid == s.cmid).toList();
+      if (jetzt.length != 1 || jetzt.single.name != s.name) {
+        throw MoodleFehler('Seit der Freigabe hat sich in Moodle etwas geändert: Die Fragensammlung cmid '
+            '${s.cmid} heißt nicht mehr „${s.name}" oder ist weg. Nichts gelöscht.');
+      }
+      await sicherungen.nachpruefen(moodle);
+    }
+  } catch (_) {
+    sicherungen.verwerfen();
+    rethrow;
+  }
+  if (!ja) {
+    sicherungen.verwerfen();
+    return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
   }
   await kursAktion(moodle, kurs, 'cm_delete', [s.cmid]);
   final weg = !(await fragensammlungenLesen(moodle, kurs)).any((x) => x.cmid == s.cmid);
   return weg
       ? 'Gelöscht: Fragensammlung „${s.name}" (cmid ${s.cmid}) in ${await kursBezeichnung(moodle, kurs)}. '
-          'verified: true'
-      : 'Löschauftrag für „${s.name}" angenommen, aber die Sammlung steht noch in der Liste. verified: false';
+          'verified: true\n${sicherungen.antwort}'
+      : 'Löschauftrag für „${s.name}" angenommen, aber die Sammlung steht noch in der Liste. verified: false\n'
+          '${sicherungen.antwort}';
 }
 
 Future<String> loeschen(MoodleZugang moodle, Freigaben freigaben,
-    {required int kurs, int? cmid, int? abschnittId, required String name}) async {
+    {required int kurs,
+    int? cmid,
+    int? abschnittId,
+    required String name,
+    required String sicherungsOrdner}) async {
   var k = await kursLesen(moodle, kurs);
   if (cmid != null && !k.nachCmid.containsKey(cmid)) {
     final s = (await fragensammlungenLesen(moodle, kurs)).where((x) => x.cmid == cmid && x.geteilt).toList();
-    if (s.length == 1) return _fragensammlungLoeschen(moodle, freigaben, kurs, s.single, name);
+    if (s.length == 1) return _fragensammlungLoeschen(moodle, freigaben, kurs, s.single, name, sicherungsOrdner);
   }
   final z = _ziel(k, cmid, abschnittId, name);
   final kursText = await kursBezeichnung(moodle, kurs);
@@ -907,19 +1046,39 @@ Future<String> loeschen(MoodleZugang moodle, Freigaben freigaben,
   if (z.cm != null) {
     final c = z.cm!;
     final unter = c.unterabschnittId == null ? null : k.nachId[c.unterabschnittId];
-    final ja = await freigaben.anfragen(FreigabeAnfrage(
-      titel: 'Endgültig löschen?',
-      punkte: [
-        '${typName(c.modul)} „${c.name}" (cmid ${c.cmid}) in $kursText, Abschnitt „${k.nachId[c.abschnittId]?.titel ?? '?'}"',
-        if (unter != null) _inhaltText(k, unter),
-        'Mit allen Inhalten und Dateien. Zurückholen geht nur, wenn der Papierkorb des Kurses '
-            'eingeschaltet ist.',
-      ],
-      vergleich: const [],
-      knopf: 'Löschen',
-    ));
-    if (!ja) return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
-    await _nachFreigabe(moodle, kurs, cmid, abschnittId, name);
+    // Eine Fragensammlung (auch im Unterabschnitt) nimmt ihre Fragen mit: Sicherung und Haken je Kategorie.
+    final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, [
+      if (c.modul == 'qbank') (c.cmid, c.name),
+      if (unter != null) ..._sammlungenIn(k, unter),
+    ]);
+    final bool ja;
+    try {
+      ja = await freigaben.anfragen(FreigabeAnfrage(
+        titel: 'Endgültig löschen?',
+        punkte: [
+          '${typName(c.modul)} „${c.name}" (cmid ${c.cmid}) in $kursText, Abschnitt „${k.nachId[c.abschnittId]?.titel ?? '?'}"',
+          if (unter != null) _inhaltText(k, unter),
+          'Mit allen Inhalten und Dateien. Zurückholen geht nur, wenn der Papierkorb des Kurses '
+              'eingeschaltet ist.',
+          if (!sicherungen.leer) ...sicherungen.punkte,
+        ],
+        vergleich: const [],
+        knopf: 'Löschen',
+        ab: sicherungen.leer ? Bestaetigungen.mittel : Bestaetigungen.keine,
+        abhaken: sicherungen.abhaken,
+      ));
+      if (ja) {
+        await _nachFreigabe(moodle, kurs, cmid, abschnittId, name);
+        await sicherungen.nachpruefen(moodle);
+      }
+    } catch (_) {
+      sicherungen.verwerfen();
+      rethrow;
+    }
+    if (!ja) {
+      sicherungen.verwerfen();
+      return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
+    }
     await kursAktion(moodle, kurs, 'cm_delete', [c.cmid]);
     k = await kursLesen(moodle, kurs);
     var waise = '';
@@ -930,37 +1089,55 @@ Future<String> loeschen(MoodleZugang moodle, Freigaben freigaben,
       waise = ' Sein Abschnitt blieb zunächst stehen und wurde nachgelöscht.';
     }
     final weg = !k.nachCmid.containsKey(c.cmid) && (unter == null || !k.nachId.containsKey(unter.id));
+    final sicherung = sicherungen.leer ? '' : '\n${sicherungen.antwort}';
     return weg
-        ? 'Gelöscht: ${typName(c.modul)} „${c.name}" (cmid ${c.cmid}) in $kursText.$waise verified: true'
+        ? 'Gelöscht: ${typName(c.modul)} „${c.name}" (cmid ${c.cmid}) in $kursText.$waise verified: true$sicherung'
         : 'Löschauftrag für „${c.name}" angenommen, aber es steht noch in der Kursstruktur -- '
-            'vermutlich löscht Moodle im Hintergrund. verified: false';
+            'vermutlich löscht Moodle im Hintergrund. verified: false$sicherung';
   }
 
   final a = z.abschnitt!;
   if (a.nummer == 0 && !a.istUnterabschnitt) {
     throw MoodleFehler('Den allgemeinen Abschnitt (Nummer 0) löscht Moodle nicht.');
   }
-  final ja = await freigaben.anfragen(FreigabeAnfrage(
-    titel: 'Abschnitt endgültig löschen?',
-    punkte: [
-      'Abschnitt „${a.titel}" (id ${a.id}) in $kursText',
-      _inhaltText(k, a),
-      'Alles darin wird mitgelöscht, mit allen Inhalten und Dateien.',
-    ],
-    vergleich: const [],
-    knopf: 'Löschen',
-  ));
-  if (!ja) return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
-  k = await _nachFreigabe(moodle, kurs, cmid, abschnittId, name);
+  final sicherungen = await _Sicherungen.anlegen(moodle, sicherungsOrdner, _sammlungenIn(k, a));
+  final bool ja;
+  try {
+    ja = await freigaben.anfragen(FreigabeAnfrage(
+      titel: 'Abschnitt endgültig löschen?',
+      punkte: [
+        'Abschnitt „${a.titel}" (id ${a.id}) in $kursText',
+        _inhaltText(k, a),
+        'Alles darin wird mitgelöscht, mit allen Inhalten und Dateien.',
+        if (!sicherungen.leer) ...sicherungen.punkte,
+      ],
+      vergleich: const [],
+      knopf: 'Löschen',
+      ab: sicherungen.leer ? Bestaetigungen.mittel : Bestaetigungen.keine,
+      abhaken: sicherungen.abhaken,
+    ));
+    if (ja) {
+      k = await _nachFreigabe(moodle, kurs, cmid, abschnittId, name);
+      await sicherungen.nachpruefen(moodle);
+    }
+  } catch (_) {
+    sicherungen.verwerfen();
+    rethrow;
+  }
+  if (!ja) {
+    sicherungen.verwerfen();
+    return 'Nicht gelöscht: ${_nichtGefragt(freigaben)}';
+  }
   final unter = k.inhalt(a).where((c) => c.unterabschnittId != null).length;
   await kursAktion(moodle, kurs, 'section_delete', [a.id]);
   k = await kursLesen(moodle, kurs);
   final weg = !k.nachId.containsKey(a.id);
+  final sicherung = sicherungen.leer ? '' : '\n${sicherungen.antwort}';
   return weg
       ? 'Gelöscht: Abschnitt „${a.titel}" in $kursText, samt Inhalt. verified: true'
           '${unter == 0 ? '' : '\nDie $unter Unterabschnitt(e) darin löscht Moodle im Hintergrund; etwa eine '
-              'Minute lang stehen sie in kurs_uebersicht noch als leere Abschnitte. Nicht nachlöschen.'}'
-      : 'Abschnitt „${a.titel}" steht noch in der Kursstruktur. verified: false';
+              'Minute lang stehen sie in kurs_uebersicht noch als leere Abschnitte. Nicht nachlöschen.'}$sicherung'
+      : 'Abschnitt „${a.titel}" steht noch in der Kursstruktur. verified: false$sicherung';
 }
 
 // ---------------------------------------------------------------------------

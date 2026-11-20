@@ -68,7 +68,7 @@ part 'lernlandkarten.dart';
 /// Was die eingestellte Stufe für die Werkzeuge bedeutet, für `status`.
 const _stufenText = {
   Bestaetigungen.keine:
-      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen, das Löschen von Fragen und das Ersetzen eines '
+      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines '
       'Kurses durch eine Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche '
       'Entscheidung in der App. '
       'Die Freigabe je Bildschirmfoto bleibt davon unberührt.',
@@ -1190,7 +1190,9 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Löscht eine Aktivität (auch einen Unterabschnitt samt Inhalt über seine cmid, auch '
           'eine Fragensammlung samt Kategorien und Fragen) oder einen Abschnitt samt Inhalt -- nur nach '
-          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Nummer und Name müssen '
+          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Eine Fragensammlung '
+          '(auch in einem gelöschten Abschnitt) fragt auf jeder Stufe, jede Kategorie einzeln abgehakt, '
+          'und wird vorher als XML gesichert (ohne verborgene Fragen; die Antwort nennt den Pfad). Nummer und Name müssen '
           'zusammenpassen, vor der Freigabe und noch einmal danach. Prüft danach die Kursstruktur.',
       parameter: {
         'kurs': _kurs,
@@ -1207,6 +1209,7 @@ class McpDienst implements AufrufKontext {
         cmid: _zahlOder(a, 'cmid'),
         abschnittId: _zahlOder(a, 'abschnitt_id'),
         name: _text(a, 'name'),
+        sicherungsOrdner: _fragenSicherungen,
       ),
     );
 

@@ -94,6 +94,38 @@ Future<String> exportieren(MoodleZugang moodle, int sammlung, Kategorie k) async
   return x.text;
 }
 
+/// Eine Kategorie einer Sammlung mit ihrem Pfad ([pfad]: Namen von oben nach unten), der Fragenzahl,
+/// die Moodles Kategorieliste nennt ([Kategorie.anzahl]), und ihrem Export; [xml] ist bei einer leeren
+/// Kategorie null. [exportiert] sind die Fragen, die der Export wirklich enthält.
+typedef SammlungsKategorie = ({Kategorie kat, List<String> pfad, String? xml, int exportiert});
+
+/// Liest alle Kategorien einer Sammlung samt Export, für die Sicherung vor dem Löschen der ganzen
+/// Sammlung. Der Export liefert keine verborgenen Fragen (gemessen, siehe [exportieren]); die Zahl
+/// in [Kategorie.anzahl] zeigt, ob mehr in der Kategorie stehen. UNGEMESSEN: ob diese Zahl
+/// verborgene Fragen mitzählt; ein Unterschied wird deshalb nur als Hinweis gemeldet, nie als Beleg.
+/// Scheitert der Export einer nicht leeren Kategorie, bricht das Lesen ab.
+Future<List<SammlungsKategorie>> sammlungExportieren(MoodleZugang moodle, int sammlung) async {
+  final kats = await kategorienLesen(moodle, sammlung);
+  final namen = <String>[];
+  final aus = <SammlungsKategorie>[];
+  for (final k in kats) {
+    // Die Einrückung der Liste ist die Tiefe: Der Pfad ist die Kette der Namen bis hierher.
+    if (k.tiefe < namen.length) namen.removeRange(k.tiefe, namen.length);
+    while (namen.length < k.tiefe) {
+      namen.add('');
+    }
+    namen.add(k.name);
+    final xml = k.anzahl == 0 ? null : await exportieren(moodle, sammlung, k);
+    aus.add((
+      kat: k,
+      pfad: List.of(namen),
+      xml: xml,
+      exportiert: xml == null ? 0 : fragenAusXml(xml).length,
+    ));
+  }
+  return aus;
+}
+
 String _sammlungsOrdner(String arbeitsordner, int sammlung) => p.join(arbeitsordner, 'fragen-$sammlung');
 
 // ---------------------------------------------------------------------------

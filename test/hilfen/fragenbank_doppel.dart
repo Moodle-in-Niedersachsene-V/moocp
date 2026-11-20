@@ -25,6 +25,14 @@ class DoppelVersion {
   String get name => XmlDocument.parse('<r>$xml</r>').findAllElements('name').first.innerText.trim();
 }
 
+class DoppelPlatz {
+  DoppelPlatz(this.slotid, this.frage, this.seite, this.punkte);
+  final int slotid;
+  int frage;
+  int seite;
+  double punkte;
+}
+
 class DoppelEintrag {
   DoppelEintrag(this.kategorie, this.idnummer, this.typ);
   int kategorie;
@@ -56,6 +64,36 @@ class FragenbankDoppel {
 
   /// Ein Schutzdienst hält die Übersicht der Sammlungen (`banks.php`) an.
   bool schutzBeiBanken = false;
+
+  // --- Kursstruktur (core_courseformat_get_state / _update_course) ---------
+  /// Aktivitäten der Kursstruktur: cmid -> Name, Modul, Abschnitt. Eine Fragensammlung steht
+  /// dort nicht (Moodle 5 zeigt sie nicht auf der Kursseite); wer sie trotzdem braucht, trägt sie ein.
+  final Map<int, ({String name, String modul, int abschnitt})> kursAktivitaeten = {};
+
+  /// Abschnitte der Kursstruktur: id -> Titel.
+  final Map<int, String> kursAbschnitte = {4: 'Allgemein', 5: 'Thema 1'};
+
+  /// Jeder Aufruf von core_courseformat_update_course: Aktion und ids.
+  final List<({String aktion, List<int> ids})> kursAktionen = [];
+
+  /// Die Löschaktionen melden Erfolg und ändern nichts.
+  bool kursLoeschenWirktNicht = false;
+
+  /// Wird aufgerufen, kurz bevor eine Kursaktion ausgeführt wird.
+  void Function()? beiKursAktion;
+
+  /// Zusammenstellung von Tests: cmid -> Plätze (`mod/quiz/edit.php`, `edit_rest.php`).
+  final Map<int, List<DoppelPlatz>> testPlaetze = {};
+  int _naechsterPlatz = 500;
+
+  /// Wird aufgerufen, kurz bevor ein Platz in einen Test eingefügt wird.
+  void Function()? beiPlatzEinfuegen;
+
+  /// Legt einen Test an: Eintrag der Kursstruktur und Plätze (Frage, Seite, Punkte).
+  void legeTestAn(int cmid, String name, List<(DoppelEintrag, int, double)> plaetze) {
+    kursAktivitaeten[cmid] = (name: name, modul: 'quiz', abschnitt: 5);
+    testPlaetze[cmid] = [for (final (e, seite, punkte) in plaetze) DoppelPlatz(_naechsterPlatz++, e.neueste.id, seite, punkte)];
+  }
 
   /// Die Zusammenstellungsseiten von Tests (`mod/quiz/edit.php`): cmid -> HTML.
   final Map<int, String> quizSeiten = {};
@@ -327,12 +365,46 @@ class FragenbankDoppel {
       return _text(r, b.toString());
     }
     if (pfad == '/mod/quiz/edit.php') {
-      final seite = quizSeiten[int.tryParse(r.uri.queryParameters['cmid'] ?? '')];
+      final cmid = int.tryParse(r.uri.queryParameters['cmid'] ?? '');
+      final plaetze = testPlaetze[cmid];
+      if (plaetze != null && r.uri.queryParameters.containsKey('addquestion')) {
+        beiPlatzEinfuegen?.call();
+        final seite = int.tryParse(r.uri.queryParameters['addonpage'] ?? '') ?? 0;
+        final letzte = plaetze.fold<int>(1, (m, x) => x.seite > m ? x.seite : m);
+        final s = seite == 0 ? letzte : seite;
+        final nach = plaetze.lastIndexWhere((x) => x.seite == s);
+        plaetze.insert(nach < 0 ? plaetze.length : nach + 1,
+            DoppelPlatz(_naechsterPlatz++, int.parse(r.uri.queryParameters['addquestion']!), s, 1));
+        return _um(r, '/mod/quiz/edit.php?cmid=$cmid');
+      }
+      final seite = plaetze != null ? _testSeite(cmid!, plaetze) : quizSeiten[cmid];
       if (seite == null) {
         r.response.statusCode = 404;
         return _text(r, _seite('<p>nicht gefunden</p>'));
       }
       return _text(r, seite);
+    }
+    if (pfad == '/mod/quiz/edit_rest.php') {
+      final f = Uri.splitQueryString(koerper);
+      final plaetze = testPlaetze.values.firstWhere((l) => l.any((x) => '${x.slotid}' == f['id']), orElse: () => []);
+      final platz = plaetze.where((x) => '${x.slotid}' == f['id']).firstOrNull;
+      r.response.headers.contentType = ContentType.json;
+      if (platz == null) {
+        r.response.write(jsonEncode({'error': 'Platz ${f['id']} gibt es nicht'}));
+        return r.response.close();
+      }
+      if (f['action'] == 'DELETE') {
+        plaetze.remove(platz);
+      } else if (f['field'] == 'move') {
+        final davor = plaetze.where((x) => '${x.slotid}' == f['previousid']).firstOrNull;
+        plaetze.remove(platz);
+        platz.seite = int.tryParse(f['page'] ?? '') ?? platz.seite;
+        plaetze.insert(davor == null ? 0 : plaetze.indexOf(davor) + 1, platz);
+      } else if (f['field'] == 'updatemaxmark') {
+        platz.punkte = double.parse(f['maxmark']!);
+      }
+      r.response.write('{}');
+      return r.response.close();
     }
     if (pfad == '/question/banks.php') {
       if (schutzBeiBanken) {
@@ -353,6 +425,36 @@ class FragenbankDoppel {
       };
       if (aufruf['methodname'] == 'core_form_dynamic_form') {
         r.response.write(jsonEncode([_kategorieFormular((aufruf['args'] as Map).cast<String, dynamic>(), fehler)]));
+        return r.response.close();
+      }
+      if (aufruf['methodname'] == 'core_courseformat_get_state') {
+        r.response.write(jsonEncode([
+          {'error': false, 'data': jsonEncode(_kursZustand())}
+        ]));
+        return r.response.close();
+      }
+      if (aufruf['methodname'] == 'core_courseformat_update_course') {
+        final a = (aufruf['args'] as Map).cast<String, dynamic>();
+        final ids = [for (final x in a['ids'] as List) (x as num).toInt()];
+        kursAktionen.add((aktion: '${a['action']}', ids: ids));
+        beiKursAktion?.call();
+        if (!kursLoeschenWirktNicht) {
+          if (a['action'] == 'cm_delete') {
+            for (final id in ids) {
+              _aktivitaetWeg(id);
+            }
+          } else if (a['action'] == 'section_delete') {
+            for (final id in ids) {
+              for (final c in [for (final e in kursAktivitaeten.entries) if (e.value.abschnitt == id) e.key]) {
+                _aktivitaetWeg(c);
+              }
+              kursAbschnitte.remove(id);
+            }
+          }
+        }
+        r.response.write(jsonEncode([
+          {'error': false, 'data': '[]'}
+        ]));
         return r.response.close();
       }
       if (aufruf['methodname'] == 'qbank_managecategories_move_category') {
@@ -557,6 +659,64 @@ ${nurKind ? '' : '<select name="parent">$optionen</select>'}
       }
     }
     return {'error': false, 'data': <Object?>[]};
+  }
+
+  /// Löscht eine Aktivität; eine Fragensammlung nimmt Kategorien und Fragen mit.
+  void _aktivitaetWeg(int cmid) {
+    kursAktivitaeten.remove(cmid);
+    testPlaetze.remove(cmid);
+    if (kursBanken.remove(cmid) != null) {
+      for (final k in [for (final k in kategorien.keys) if (_bank(k) == cmid) k]) {
+        for (final e in eintraege.where((e) => e.kategorie == k)) {
+          e.versionen.clear();
+        }
+        kategorien.remove(k);
+      }
+    }
+  }
+
+  Map<String, dynamic> _kursZustand() => {
+        'course': {'sectionlist': kursAbschnitte.keys.map((i) => '$i').toList()},
+        'section': [
+          for (final a in kursAbschnitte.entries)
+            {
+              'id': '${a.key}',
+              'number': kursAbschnitte.keys.toList().indexOf(a.key),
+              'title': a.value,
+              'visible': true,
+              'cmlist': [for (final c in kursAktivitaeten.entries) if (c.value.abschnitt == a.key) '${c.key}'],
+            }
+        ],
+        'cm': [
+          for (final c in kursAktivitaeten.entries)
+            {
+              'id': '${c.key}',
+              'name': c.value.name,
+              'module': c.value.modul,
+              'visible': true,
+              'sectionid': '${c.value.abschnitt}',
+            }
+        ],
+      };
+
+  String _testSeite(int cmid, List<DoppelPlatz> plaetze) {
+    final b = StringBuffer();
+    var seite = 0;
+    var summe = 0.0;
+    for (final x in plaetze) {
+      while (seite < x.seite) {
+        seite++;
+        b.write('<li class="pagenumber" id="page-$seite"></li>');
+      }
+      final v = version(x.frage);
+      summe += x.punkte;
+      b.write('<li class="slot qtype_shortanswer" id="slot-${x.slotid}">'
+          '<a href="/question/bank/editquestion/question.php?cmid=$sammlung&id=${x.frage}">Bearbeiten</a>'
+          '<span class="questionname">${v?.name ?? 'unbekannt'}</span>'
+          '<span class="instancemaxmark">${x.punkte.toStringAsFixed(2).replaceAll('.', ',')}</span></li>');
+    }
+    return _seite('<script>var q = {"quizid":"7"};</script><ul>$b</ul>'
+        '<p>Summe der Punkte: ${summe.toStringAsFixed(2).replaceAll('.', ',')}</p>');
   }
 
   String _ausgeliefert(DoppelVersion v) => beimExport?.call(v.xml) ?? v.xml;

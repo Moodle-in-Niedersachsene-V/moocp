@@ -24,7 +24,7 @@ class _Moodle extends MoodleZugang {
   int abfragen = 0;
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     // Der Zielkurs ist leer: Gegenlesen findet nichts Neues.
     if (name == 'core_courseformat_get_state') return {'cm': <Object?>[], 'section': <Object?>[]};
     final i = abfragen < antworten.length ? abfragen : antworten.length - 1;

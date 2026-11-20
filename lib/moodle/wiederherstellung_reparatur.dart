@@ -11,10 +11,14 @@
 //      sich eindeutig einer Stelle zuordnen lässt, ein Eintrag. Alles andere (fremde,
 //      mehrdeutige, unbekannte, nicht lesbare Ziele) bleibt unangetastet und steht
 //      als Befund in der Antwort.
-//   3. Die Reparaturdateien kommen ausschließlich aus dem gelesenen Ordner der Aktivität
-//      im Arbeitsordner (`dateien/<name>`, `bereiche/<feld>/<pfad>`), und ihr Inhalt muss
-//      genau der Quellaufnahme entsprechen (SHA-1). Eine Datei, die nicht passt, bricht ab,
-//      bevor etwas geschieht; die Meldung nennt, was fehlt.
+//   3. Die Reparaturdateien liegen im gelesenen Ordner der Aktivität im Arbeitsordner
+//      (`dateien/<name>`, `bereiche/<feld>/<pfad>`), und ihr Inhalt muss genau der
+//      Quellaufnahme entsprechen (SHA-1). Fehlt eine, legt die App sie selbst aus der
+//      Sicherungsdatei des Vorgangs dorthin (nur die Dateien des Plans, nur mit passender
+//      Prüfsumme): Die KI muss die Sicherung weder suchen noch entpacken, und mit
+//      `files.xml` und `questions.xml` kommen Namen der Autorinnen und Autoren nie zu ihr
+//      (A1, E29). Eine Datei, die nicht passt, bricht ab, bevor etwas geschieht; die Meldung
+//      nennt, was fehlt.
 //   4. Freigabe wie bei aendern (gleiche Stufe, gleiche Sperre des Ordners): Die Übersicht
 //      nennt je Datei Name, Ort und Aktion. Danach prüft die App Moodle und den Ordner
 //      erneut und schreibt nur, wenn alles noch dem Freigegebenen entspricht.
@@ -31,7 +35,9 @@
 // und /draftfile.php eingebunden sind. Das bleibt eine Prüflücke und wird genannt.
 
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
@@ -82,6 +88,12 @@ class ReparaturEintrag {
 
   /// Die Editorfelder, deren Text die Datei einbindet.
   final List<String> felder;
+
+  /// Ob die Datei in Moodle liegt und etwas anderes enthält als die Quelle. Das kann
+  /// ein Schaden der Wiederherstellung sein oder eine Änderung der Lehrkraft danach
+  /// (E17: Moodle ist maßgeblich); die App kann beides nicht unterscheiden. Ersetzen
+  /// fragt darum auf jeder Stufe und einzeln.
+  bool get ueberschreibtInhalt => ist == 'Inhalt weicht ab';
 
   /// Wo die Reparaturdatei im gelesenen Ordner liegt, relativ zu ihm.
   String get lokal => dateibereich ? 'bereiche/$feld$pfad$name' : 'dateien/$name';
@@ -273,6 +285,33 @@ bool _sicherName(String name) => name.isNotEmpty && name != '.' && name != '..' 
 bool _sicherPfad(String pfad) => !pfad.split('/').any((s) => s == '..') && !pfad.contains(r'\');
 
 String _sha1(List<int> bytes) => sha1.convert(bytes).toString();
+
+/// Legt die Dateien des Plans, die im Ordner noch fehlen, aus der Sicherungsdatei dorthin.
+/// Gesucht wird nur nach der Prüfsumme des Plans (`files/<ab>/<sha1>`); was nicht passt
+/// oder fehlt, bleibt fehlen und fällt in [_dateienPruefen] auf. Ein Ordner, in dem die
+/// Datei schon liegt, bleibt unberührt: Auch eine falsche liegt dann dort, und die
+/// Prüfung nennt sie.
+void _ausSicherungLegen(Uint8List mbz, String quelle, ReparaturPlan plan) {
+  final fehlend = [for (final e in plan.eintraege) if (!File(p.join(quelle, e.lokal)).existsSync()) e];
+  if (fehlend.isEmpty) return;
+  final Map<String, List<int>> inhalte;
+  try {
+    final tar = TarDecoder().decodeBytes(GZipDecoder().decodeBytes(mbz));
+    inhalte = {
+      for (final f in tar.files)
+        if (f.isFile) f.name.replaceFirst(RegExp(r'^\./'), ''): f.content as List<int>,
+    };
+  } catch (_) {
+    return; // Die Prüfung nennt, was fehlt.
+  }
+  for (final e in fehlend) {
+    final inhalt = e.sha1.length < 3 ? null : inhalte['files/${e.sha1.substring(0, 2)}/${e.sha1}'];
+    if (inhalt == null || _sha1(inhalt) != e.sha1) continue;
+    final datei = File(p.join(quelle, e.lokal));
+    datei.parent.createSync(recursive: true);
+    datei.writeAsBytesSync(inhalt);
+  }
+}
 
 /// Prüft, dass jede Reparaturdatei im Ordner liegt und genau den Inhalt der Quelle hat.
 /// Wirft eine Meldung, die nennt, was fehlt oder nicht passt.
@@ -481,11 +520,13 @@ Future<String> _reparieren(
   if (plan.eintraege.isEmpty) {
     final bericht = 'Nichts zu reparieren: ${plan.inOrdnung} Datei(en) stimmen mit der Quellaufnahme überein, nichts '
         'Eindeutiges fehlt oder weicht ab. Nichts geschrieben, keine Freigabe.${offenText(plan)}';
-    await vorgaenge.befundAnhaengen(vg, 'Anhangsreparatur: „$name“: $bericht');
+    // Wiederholte Leerläufe ersetzen einander; eine tatsächliche Reparatur bleibt als Eintrag stehen.
+    await vorgaenge.befundAnhaengen(vg, 'Anhangsreparatur: „$name": $bericht', ersetzt: 'Anhangsreparatur: „$name": Nichts zu reparieren');
     return bericht;
   }
 
   // 3. Reparaturdateien und Änderung: nur die Reparatur.
+  _ausSicherungLegen(mbz, quelle, plan);
   _dateienPruefen(quelle, plan);
   final a = await aenderungVorbereiten(moodle, ordner: ordner, arbeitsordner: arbeitsordner);
   if (a == null) {
@@ -495,6 +536,7 @@ Future<String> _reparieren(
   _aenderungPruefen(a, plan);
 
   // 4. Freigabe.
+  final ueberschreibende = [for (final e in plan.eintraege) if (e.ueberschreibtInhalt) e];
   final ja = await freigaben.anfragen(
     FreigabeAnfrage(
       titel: 'Anhänge reparieren?',
@@ -502,12 +544,24 @@ Future<String> _reparieren(
         a.kopf(),
         'Quelle: Wiederherstellung ${vg.id} (Sicherungsdatei ${vg.datei}). Verglichen wurde der Inhalt (SHA-1), nicht die Adresse.',
         for (final e in plan.eintraege) e.zeile,
-        'Die Dateien kommen aus dem gelesenen Ordner im Arbeitsordner und haben genau den Inhalt der Quelle.',
+        'Die Dateien liegen im gelesenen Ordner im Arbeitsordner (fehlende hat die App aus der Sicherungsdatei dorthin gelegt) '
+            'und haben genau den Inhalt der Quelle.',
         'Nichts anderes ändert sich: kein Text, keine Einstellung, nichts wird gelöscht.',
+        if (ueberschreibende.isNotEmpty)
+          'Achtung: ${ueberschreibende.length} Datei(en) in Moodle haben anderen Inhalt als die Quelle und würden überschrieben. '
+              'Das kann Schaden aus der Wiederherstellung sein oder eine spätere Änderung der Lehrkraft.',
       ],
       vergleich: a.vergleich,
       knopf: 'Reparieren',
-      ab: await fuellenAb(moodle, a.vorab.kurs, [a.cmid]),
+      // Ersetzen überschreibt, was in Moodle steht, ohne dass die App weiß, ob die
+      // Lehrkraft es nach der Wiederherstellung absichtlich geändert hat (E17):
+      // Das fragt auf jeder Stufe und einzeln; Ergänzen folgt der Stufe.
+      abhaken: [
+        for (final e in ueberschreibende)
+          '„${e.dateibereich ? '${e.pfad.substring(1)}${e.name}' : e.name}" in Moodle ansehen: Ich habe sie nach der '
+              'Wiederherstellung nicht absichtlich geändert; sie darf durch die Datei der Quelle ersetzt werden.',
+      ],
+      ab: ueberschreibende.isNotEmpty ? Bestaetigungen.keine : await fuellenAb(moodle, a.vorab.kurs, [a.cmid]),
     ),
   );
   if (!ja) {
@@ -530,6 +584,7 @@ Future<String> _reparieren(
     throw MoodleFehler('Moodle hat sich seit dem Planen geändert (Dateien der Aktivität sind anders als bei der Freigabe). '
         'Nichts geschrieben; erneut prüfen und den Ordner neu lesen.');
   }
+  _ausSicherungLegen(mbz, quelle, plan1);
   _dateienPruefen(quelle, plan1);
   final b = await aenderungVorbereiten(moodle, ordner: ordner, arbeitsordner: arbeitsordner);
   if (b == null) {
@@ -559,7 +614,9 @@ Future<String> _reparieren(
           ? 'Rücklesen: Jede reparierte Datei stimmt jetzt im Inhalt (SHA-1) mit der Quellaufnahme überein.'
           : 'Abweichung beim Rücklesen: ${nichtBehoben.map((e) => e.zeile).join('; ')}.';
   final bericht = [
-    'Anhänge repariert (Wiederherstellung ${vg.id}): ${plan.eintraege.map((e) => e.zeile).join('; ')}.',
+    // Nur ein bestätigtes Ergebnis heißt „repariert": Bei unklarem Ausgang oder
+    // abweichender Rückleseprobe ist nicht belegt, dass etwas geschrieben wurde.
+    '${verified ? 'Anhänge repariert' : 'Reparatur nicht bestätigt'} (Wiederherstellung ${vg.id}): ${plan.eintraege.map((e) => e.zeile).join('; ')}.',
     schreibText,
     befund,
     if (!namePasst) 'Name oder Kurs der Aktivität passen nach dem Schreiben nicht mehr zu den Angaben.',

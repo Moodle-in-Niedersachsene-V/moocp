@@ -568,6 +568,14 @@ void nameSetzen(dom.Element form, Felder f, String name) {
   f.removeWhere((e) => e.key == 'usedefaultname' && e.value != '0');
 }
 
+/// Moodle hat das Formular beantwortet und nicht angenommen (Prüffehler im
+/// Formular, 403 von Moodle oder einem Filter davor): Es wurde nichts
+/// gespeichert. Anders als ein Abbruch ohne Antwort ist der Ausgang bekannt,
+/// darum sperrt er das Objekt nicht (E37).
+class FormularAbgelehnt extends MoodleFehler {
+  FormularAbgelehnt(super.meldung);
+}
+
 /// Sendet das Formular mit „Speichern" (bei Aktivitäten „Speichern und zum
 /// Kurs", das es bei jedem Typ gibt). Erfolg ist eine Umleitung; sonst
 /// sammelt die Meldung Moodles Hinweise aus dem Formular.
@@ -618,7 +626,11 @@ Future<Antwort> absenden(
       feld.isEmpty ? text : '„$feld"${name == null ? '' : ' ($name)'}: $text',
     );
   }
-  throw MoodleFehler(formularAbgelehnt(antwort.status, meldungen));
+  final meldung = formularAbgelehnt(antwort.status, meldungen);
+  // Ab 500 weiß niemand, ob der Server vorher gespeichert hat.
+  throw antwort.status >= 500
+      ? MoodleFehler(meldung)
+      : FormularAbgelehnt(meldung);
 }
 
 /// Die Meldung, wenn Moodle ein Formular nicht annimmt. Bei HTTP 403 ohne
@@ -962,6 +974,7 @@ Future<String> aktivitaetAnlegen(
           if (e.value.trim().isNotEmpty) '${e.key}: ${e.value.length} Zeichen',
         for (final e in einstellungen.entries)
           'Einstellung ${e.key}: ${e.value}',
+        if (einrueckung != null) 'Einrückung: Stufe $einrueckung (gehört zum Anlegen)',
         if (kartenVorlage != null)
           'Kartenvorlage: ${(kartenVorlage['orte'] as List).length} Orte, '
               '${(kartenVorlage['wege'] as List).length} Wege; Ziele bleiben zunächst leer.',
@@ -1071,16 +1084,31 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
-  // Einrücken folgt direkt auf das Anlegen und braucht keine eigene Freigabe.
+  // Einrücken gehört zum Anlegen: Die Freigabe zum Anlegen nennt es, eine eigene
+  // gibt es nicht (E20). Ein Fehler dabei kommt als Ergebnis, nicht als Ausnahme:
+  // Die Aktivität steht schon, und ihre cmid muss in der Antwort bleiben.
   final einr = einrueckung == null
       ? null
       : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 
-  final g = await formularLesen(
-    moodle,
-    Formularziel.aktivitaet(cmid),
-    arbeitsordner,
-  );
+  final FormularGelesen g;
+  try {
+    g = await formularLesen(
+      moodle,
+      Formularziel.aktivitaet(cmid),
+      arbeitsordner,
+    );
+  } on MoodleAbgebrochen {
+    rethrow;
+  } on MoodleFehler catch (x) {
+    // Nach dem Anlegen darf ein Lesefehler die cmid nicht verschweigen: Die KI
+    // legte die Aktivität sonst ein zweites Mal an.
+    throw MoodleFehler(
+      '${x.meldung}\nDie Aktivität ist bereits angelegt (${typName(typ)}, cmid $cmid, '
+      '${sichtbar ? 'SICHTBAR' : 'verborgen'}). Nicht erneut anlegen; mit aktivitaet_lesen nachsehen.'
+      '${einr == null ? '' : '\n${einr.text}'}',
+    );
+  }
   final probe = await zuruecklesen(
     g,
     felder: geschrieben,
@@ -1092,6 +1120,8 @@ Future<String> aktivitaetAnlegen(
     // hat keinen eigenen Namen; Moodle bildet ihn aus dem Text.
     name: typ == 'label' ? null : name,
   );
+  // Ein Urteil: Scheitert die Einrückung, ist auch die Rückleseprobe nicht bestanden.
+  if (einr != null) probe.pruefe(einr.ok, 'Einrückung');
   if (typ == 'learningmap') {
     probe.pruefe(g.modul == typ, 'Modultyp (gelesen ${g.modul})');
     probe.pruefe(g.kurs == kurs, 'Kurs (gelesen ${g.kurs})');
@@ -1126,7 +1156,7 @@ Future<String> aktivitaetAnlegen(
       fehler: angehalten,
       angelegt:
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
-          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}'}',
+          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}.'}',
     );
   }
   return [
@@ -1142,7 +1172,7 @@ Future<String> aktivitaetAnlegen(
     if (gesetzt.isNotEmpty)
       'Einstellungen: ${gesetzt.map((s) => '${s.label}: ${s.nachher}').join("; ")}.',
     probe.text,
-    if (einr != null) einr.text,
+    if (einr != null) '${einr.text}.',
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',
@@ -1706,7 +1736,16 @@ Future<(String, bool)> _schreibenOhneSperre(
         vorgang.abschliessen();
         return ergebnis;
       }
-      return ('${vorgang.hinweis}\n${ergebnis.$1}', false);
+      // Die Rückleseprobe hat gelesen und Abweichungen gefunden: Der Stand
+      // in Moodle ist bekannt, der Ausgang nicht unklar. Der Vorgang bleibt
+      // dokumentiert, sperrt aber nicht; vor jeder weiteren Änderung wird
+      // frisch gelesen (E17).
+      vorgang.rueckgelesen();
+      return (
+        '${ergebnis.$1}\nMoodle zeigt einen abweichenden Stand (verified: false). '
+            'Frisch lesen und neu planen; der Ordner zeigt den gelesenen Stand.',
+        false,
+      );
     } catch (e) {
       // Vor dem letzten POST gibt es noch keinen Vorgang. Nach seinem Beginn
       // ist auch ein Fehler beim Rücklesen kein Nachweis eines Misserfolgs.
@@ -1790,6 +1829,16 @@ Future<(String, bool)> _schreibenMitProbe(
       vorgang.verwerfen();
       rethrow;
     } on SchutzPruefung {
+      vorgang.verwerfen();
+      rethrow;
+    } on FormularAbgelehnt {
+      vorgang.verwerfen();
+      rethrow;
+    } on AnfrageGesperrt {
+      // Moodle hat die Anfrage nie gesehen.
+      vorgang.verwerfen();
+      rethrow;
+    } on NichtAngemeldet {
       vorgang.verwerfen();
       rethrow;
     }
@@ -2129,12 +2178,19 @@ Future<(String, bool)> _uebergeben(
   }
 }
 
-/// Klärt einen offenen Vorgang ausschließlich lesend. Ein unveränderter Stand
-/// beweist nicht, dass Moodle einen noch laufenden POST später nicht ausführt.
+/// Klärt einen offenen Vorgang lesend. Ein unveränderter Stand beweist nicht,
+/// dass Moodle einen noch laufenden POST später nicht ausführt; er hebt die
+/// Sperre darum nicht von selbst auf. Mit [aufheben] fragt die App die
+/// Lehrkraft (auf jeder Stufe, E20): Sie entscheidet, ob sie in Moodle
+/// nachgesehen hat und die Sperre fällt -- der Ausweg, wenn die Anfrage nie
+/// ankam, die Lehrkraft das Objekt von Hand in Ordnung gebracht hat oder der
+/// Stand nicht prüfbar ist (Fragen).
 Future<String> aendernStatus(
   MoodleZugang moodle, {
   required String vorgang,
   required String arbeitsordner,
+  Freigaben? freigaben,
+  bool aufheben = false,
 }) async {
   final v = Schreibvorgang.laden(moodle, vorgang);
   final ziel = v.ziel;
@@ -2146,10 +2202,45 @@ Future<String> aendernStatus(
         return 'Vorgang $vorgang abgeschlossen (verified: true).';
       }
       if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      if (j.status == Schreibstatus.rueckgelesen) {
+        return 'Vorgang $vorgang: Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab (verified: false). '
+            'Keine Sperre; frisch lesen und neu planen.';
+      }
+
+      Future<String> ungeklaert(String befund) async {
+        if (!aufheben) {
+          return '${v.hinweis}\n$befund'
+              '${freigaben == null ? '' : '\nHat die Lehrkraft in Moodle nachgesehen und ist die Sperre nicht mehr nötig, '
+                  'aendern_status mit sperre_aufheben aufrufen: Die Lehrkraft entscheidet dann in der App.'}';
+        }
+        if (freigaben == null) return '${v.hinweis}\n$befund\nDie Sperre lässt sich hier nicht aufheben.';
+        final frei = await freigaben.anfragen(FreigabeAnfrage(
+          titel: 'Sperre nach unklarem Speichern aufheben',
+          punkte: [
+            ziel.bezeichnung,
+            befund,
+            'Beim Speichern ist der Ausgang unklar geblieben. Hebt die Sperre auf, wer in Moodle nachgesehen hat '
+                'und weiß, dass die Änderung nicht (mehr) kommt oder nicht mehr gilt.',
+            'Wurde die Anfrage doch noch verarbeitet, kann die Änderung später oder doppelt erscheinen.',
+          ],
+          vergleich: const [],
+          abhaken: const ['Ich habe in Moodle nachgesehen und will dieses Objekt wieder ändern lassen.'],
+          knopf: 'Sperre aufheben',
+          ablehnen: 'Gesperrt lassen',
+          ohneEntscheidung: 'bleibt das Objekt gesperrt',
+          // Eine Entscheidung der Lehrkraft, keine Freigabe zum Schreiben.
+          ab: Bestaetigungen.keine,
+        ));
+        if (!frei) return '${v.hinweis}\n$befund\nDie Lehrkraft hat die Sperre bestehen lassen.';
+        v.verwerfen();
+        return 'Vorgang $vorgang: Sperre auf Entscheidung der Lehrkraft aufgehoben (verified: false, nichts als gespeichert belegt). '
+            'Vor einer weiteren Änderung frisch lesen und planen.';
+      }
+
       // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
       // Frage zurückzulesen wäre ein falscher Nachweis.
       if (ziel.art == Zielart.frage) {
-        return '${v.hinweis}\nNeue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.';
+        return ungeklaert('Neue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.');
       }
       final temp = await Directory(arbeitsordner)
           .createTemp('.aendern-status-');
@@ -2164,10 +2255,10 @@ Future<String> aendernStatus(
           return 'Vorgang $vorgang: Zielstand bestätigt (verified: true). '
               'Vor einer weiteren Änderung frisch lesen und planen. Kein POST wiederholt.';
         }
-        return '${v.hinweis}\n${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
-            'Prozessende nicht belegt; durch die Lehrkraft beziehungsweise Verwaltung klären lassen.';
+        return await ungeklaert('${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
+            'Prozessende nicht belegt.');
       } on MoodleFehler catch (e) {
-        return '${v.hinweis}\nStatus nicht lesbar: ${e.meldung}';
+        return ungeklaert('Status nicht lesbar: ${e.meldung}');
       } finally {
         await temp.delete(recursive: true);
       }

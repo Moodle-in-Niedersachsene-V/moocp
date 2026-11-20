@@ -761,12 +761,24 @@ class McpDienst implements AufrufKontext {
       titel: 'Schreibausgang prüfen',
       beschreibung: 'Prüft einen unklaren aendern-Vorgang lesend gegen Ausgangs- und Zielstand. '
           'Wiederholt keinen POST. Ein unveränderter Ausgangsstand erlaubt keine Wiederholung. '
-          'Nur ein eindeutig bestätigter Zielstand schließt den Vorgang ab; danach frisch lesen und planen.',
+          'Nur ein eindeutig bestätigter Zielstand schließt den Vorgang ab; danach frisch lesen und planen. '
+          'Mit sperre_aufheben fragt die App die Lehrkraft, ob die Sperre fällt (sie sieht in Moodle nach); '
+          'nur aufrufen, wenn die Lehrkraft es will.',
       parameter: {
         'vorgang': JsonSchema.string(description: 'Vorgangsnummer aus der Meldung Ausgang unklar'),
+        'sperre_aufheben': JsonSchema.boolean(
+          description: 'true = die Lehrkraft in der App fragen, ob die Sperre aufgehoben wird; auf jeder Stufe, '
+              'keine Freigabe zum Schreiben. Schreibt nichts nach Moodle.',
+        ),
       },
       pflicht: ['vorgang'],
-      ausfuehren: (a) => aendernStatus(moodle, vorgang: _text(a, 'vorgang'), arbeitsordner: ao),
+      ausfuehren: (a) => aendernStatus(
+        moodle,
+        vorgang: _text(a, 'vorgang'),
+        arbeitsordner: ao,
+        freigaben: freigaben,
+        aufheben: a['sperre_aufheben'] == true,
+      ),
     );
 
     _aufrufe.registrieren(

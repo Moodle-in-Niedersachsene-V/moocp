@@ -467,6 +467,10 @@ class MoodleZugang {
 
   static bool _zahl(String? s) => istZahl(s);
 
+  /// Eine Nummer ab 1: `update=0` bei einem Bearbeitungsformular wäre kein Bearbeiten
+  /// einer bestehenden Aktivität, und Anlegen ist für diese Typen nicht erlaubt.
+  static bool _nummer(String? s) => _zahl(s) && (int.tryParse(s!) ?? 0) > 0;
+
   /// Nur die Form eines Werts für die Fehlersuche (nie der Wert): Zahl, Hex32, Text
   /// aus Buchstaben und Unterstrichen, sonst gemischt, jeweils mit Länge.
   static String _wertform(String v) {
@@ -1024,10 +1028,10 @@ class MoodleZugang {
                     wertIn(f, '_qf__mod_${modul}_mod_form') != null ||
                 optionsModule.containsKey(modul) &&
                     wertIn(f, '_qf__mod_${modul}_mod_form') != null &&
-                    _zahl(wertIn(f, 'update')) ||
+                    _nummer(wertIn(f, 'update')) ||
                 nurGruppenModule.contains(modul) &&
                     wertIn(f, '_qf__mod_${modul}_mod_form') != null &&
-                    _zahl(wertIn(f, 'update')) &&
+                    _nummer(wertIn(f, 'update')) &&
                     const {'0', '1', '2'}.contains(wertIn(f, 'groupmode')) &&
                     _zahl(wertIn(f, 'groupingid')) ||
                 modul == 'learningmap' &&
@@ -2129,7 +2133,7 @@ class MoodleZugang {
   /// Ruft einen Moodle-AJAX-Dienst auf (lib/ajax/service.php) und gibt das
   /// Ergebnis zurück. Nur Dienste aus [dienste]. Bei abgelaufener Sitzung
   /// einmal neu anmelden und wiederholen.
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     for (var versuch = 0; versuch < 2; versuch++) {
       final key = await sesskey();
       final rumpf = jsonEncode([
@@ -2139,6 +2143,7 @@ class MoodleZugang {
         'POST',
         _adresse('/lib/ajax/service.php?sesskey=$key&info=$name'),
         rumpf: rumpf,
+        abbruch: abbruch,
       );
       Object? j;
       try {

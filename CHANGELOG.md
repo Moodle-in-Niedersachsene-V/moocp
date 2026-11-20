@@ -6,6 +6,7 @@
 - Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
 - Wiederherstellung: Die App vergleicht Texte (auch Links, einschließlich bedeutenden Leerraums) und Anhänge mit der Sicherung und meldet, was ungeprüft bleibt; Einstellungen vergleicht sie weiterhin nicht; fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren, und ersetzt wird eine abweichende Datei nur nach Ihrer ausdrücklichen Bestätigung.
+- Entwicklerbau mit Testbetrieb: Das Fenster trägt oben einen roten Balken „DEBUG – TESTBETRIEB“ und einen roten Rahmen, damit er nicht mit der normalen App verwechselt wird.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.

@@ -54,6 +54,7 @@ import 'profil.dart';
 import 'protokoll.dart';
 import 'ueber.dart';
 import 'update/update.dart';
+import 'testbetrieb_rahmen.dart';
 import 'testschalter.dart';
 import 'update/update_dialoge.dart';
 
@@ -448,8 +449,10 @@ class MoocpApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: appName,
+      title: testbetriebAktiv ? '$appName – DEBUG TESTBETRIEB' : appName,
       debugShowCheckedModeBanner: false,
+      // Über allen Seiten und Dialogen: im Testbetrieb der rote Hinweis.
+      builder: (context, kind) => TestbetriebRahmen(kind: kind ?? const SizedBox.shrink()),
       theme: ThemeData(
         colorSchemeSeed: const Color(0xFF0851A0),
         useMaterial3: true,

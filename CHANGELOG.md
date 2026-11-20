@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Entwicklerbau mit Testbetrieb: Das Fenster trägt oben einen roten Balken „DEBUG – TESTBETRIEB“ und einen roten Rahmen, damit er nicht mit der normalen App verwechselt wird.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.

@@ -286,13 +286,19 @@ bool _sicherPfad(String pfad) => !pfad.split('/').any((s) => s == '..') && !pfad
 
 String _sha1(List<int> bytes) => sha1.convert(bytes).toString();
 
-/// Legt die Dateien des Plans, die im Ordner noch fehlen, aus der Sicherungsdatei dorthin.
-/// Gesucht wird nur nach der Prüfsumme des Plans (`files/<ab>/<sha1>`); was nicht passt
-/// oder fehlt, bleibt fehlen und fällt in [_dateienPruefen] auf. Ein Ordner, in dem die
-/// Datei schon liegt, bleibt unberührt: Auch eine falsche liegt dann dort, und die
-/// Prüfung nennt sie.
+/// Legt die Dateien des Plans aus der Sicherungsdatei in den Ordner, wenn dort nicht schon
+/// genau diese Datei liegt. Gesucht wird nur nach der Prüfsumme des Plans
+/// (`files/<ab>/<sha1>`); fehlt sie in der Sicherung, bleibt der Ordner wie er ist und
+/// [_dateienPruefen] nennt, was nicht passt. Auch eine vorhandene, andere Datei ersetzt
+/// die App: Beim Ersetzen liegt nach dem Lesen die jetzige Datei aus Moodle im Ordner,
+/// also gerade die abweichende. Der Plan und die Freigabe nennen, was am Ende dort liegt.
 void _ausSicherungLegen(Uint8List mbz, String quelle, ReparaturPlan plan) {
-  final fehlend = [for (final e in plan.eintraege) if (!File(p.join(quelle, e.lokal)).existsSync()) e];
+  bool passt(ReparaturEintrag e) {
+    final datei = File(p.join(quelle, e.lokal));
+    return datei.existsSync() && _sha1(datei.readAsBytesSync()) == e.sha1;
+  }
+
+  final fehlend = [for (final e in plan.eintraege) if (!passt(e)) e];
   if (fehlend.isEmpty) return;
   final Map<String, List<int>> inhalte;
   try {

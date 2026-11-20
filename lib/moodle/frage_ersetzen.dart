@@ -30,6 +30,7 @@ import 'fragen.dart';
 import 'fragen_xml.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
+import 'rundlaufprobe.dart';
 import 'test.dart';
 
 /// Leert die Sachnummer [idnummer] in den Fragen des XML (nicht in
@@ -148,6 +149,14 @@ Future<String> frageErsetzen(
         'Tests und alte Frage unverändert; die neue (${i.neu.single.id}) liegt in „${k.name}". Sie mit '
         'fragen_loeschen entfernen, die Datei nachbessern und frage_ersetzen erneut aufrufen -- ein neuer Aufruf '
         'importiert neu. verified: false';
+  }
+  // Rundlaufprobe (E38): Besteht die neue Frage sie nicht, wird sie wieder
+  // gelöscht, bevor sie in einen Test kommt.
+  final probe = await importProben(moodle, arbeitsordner, sammlung, i, n.neueIds, i.xml);
+  b.write(probe.text);
+  if (!probe.ok || !probe.verified) {
+    return '$b\nAbgebrochen: Die Rundlaufprobe der neuen Frage ist nicht vollständig bestanden, deshalb steht sie in keinem Test. '
+        'Tests und alte Frage unverändert. verified: false';
   }
   var neueId = n.neueIds[i.neu.single.id] ?? i.neu.single.id!;
 

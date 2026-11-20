@@ -23,8 +23,9 @@ diesen.
 | Sammlungen | `fragensammlungen`, `fragetypen`; anlegen über `aktivitaet_anlegen` (Typ `qbank`) |
 | Kategorien | `kategorie_anlegen` — die Gliederung *innerhalb* einer Sammlung |
 | Fragen lesen | `fragen_lesen`, `frage_lesen` |
-| Fragen anlegen | `fragen_importieren`, dazu die Bauhilfen `stack_xml`, `coderunner_xml` |
-| Fragen ändern | `frage_lesen`, dann `aendern`; Umbauten und Fragen, deren Formular abgewiesen wird: `frage_ersetzen` |
+| Fragen anlegen | `fragetyp_notiz_lesen`, dann `fragen_importieren`, dazu die Bauhilfen `stack_xml`, `coderunner_xml` |
+| Fragen ändern | `fragen_lesen`, XML bearbeiten, `fragen_version_importieren` (neue Version, Verlauf bleibt); kleine Änderungen auch `frage_lesen`, dann `aendern`; Typwechsel und Instanzen ohne das Plugin: `frage_ersetzen` |
+| Wissen zum Fragetyp | `fragetyp_notiz_lesen`, `fragetyp_notiz_schreiben` |
 | Fragen löschen | `fragen_lesen`, dann `fragen_loeschen` |
 | STACK | `stack_cas`, `stack_testen`, `stack_varianten` |
 | Tests | `test_lesen`, `test_aendern`; anlegen und Einstellungen über `aktivitaet_anlegen`, `aktivitaet_lesen`, `aendern` |
@@ -562,7 +563,7 @@ exportiert.
    `dateien\`, im Text als `src="@@PLUGINFILE@@/<name>"`.
 2. `fragen_importieren(sammlung, kategorie, datei)`.
 
-Die App **prüft vorher** — nur anlegbare Typen, `ordering` mit
+Die App **prüft vorher** — `ordering` mit
 `<shownumcorrect/>`, CodeRunner mit Musterlösung und Testfällen, STACK mit
 Pflichtelementen und Testfällen, Sachnummern eindeutig — und lädt **gar
 nichts** hoch, wenn etwas davon nicht stimmt. Sie bettet die Dateien aus
@@ -571,6 +572,45 @@ questionids. Die Meldung „11 Fragen werden importiert" wäre kein Nachweis;
 das Nachzählen ist einer. Danach laufen die **Nachweise**: die Fragetests
 jeder STACK-Frage, und jede CodeRunner-Frage wird einmal über das Formular
 gespeichert (Abschnitt „CodeRunner").
+
+### Jeder Typ, den die Instanz kennt: die Rundlaufprobe
+
+Eine Liste „anlegbarer Typen" gibt es nicht mehr. Die App prüft **jede** Frage,
+die sie anlegt, nach dem Speichern selbst: Sie exportiert sie wieder und
+vergleicht sie mit deiner Datei (alles, was du geschrieben hast, muss da sein;
+was Moodle ergänzt, ist erlaubt), öffnet Bearbeitungsformular und Vorschau und
+speichert das Formular einmal unverändert als Entwurf – so steht fest, dass
+eine Kollegin die Frage von Hand weiterbearbeiten kann. Die Probeversion löscht
+sie wieder. Fällt eine Frage durch, nennt die App den Befund und ob sie
+aufgeräumt wurde. Fehlt ein direkter Herkunftsnachweis für ihre Nummer oder ist
+der Schreibausgang unklar, bleibt sie zur manuellen Prüfung stehen und kann
+weiterhin in Tests aktiv sein. Erkläre das der Lehrkraft mit der genannten
+Nummer; das ist kein Auftrag zum Löschen oder erneuten Importieren.
+**`verified: true` heißt: alle vier Teile bestanden.** Steht in
+der Antwort „nicht geprüft", hat sich ein Teil nicht prüfen lassen, etwa weil
+die Instanz den Status „Entwurf" nicht anbietet – das ist kein Durchfallen,
+aber auch kein `verified`, und du sagst es der Lehrkraft so. Prototypen legst
+du nie an.
+
+**Bei einem Typ, den du nicht kennst:** erst `fragetyp_notiz_lesen(typ)`. Gibt
+es eine Notiz, baust du an ihrem Minimalbeispiel und beachtest die
+Stolpersteine; die Antwort nennt, ob sie aus dem Skill kommt oder von dieser
+Instanz und für welche Moodle-Version sie bewiesen ist – eine ältere Version
+heißt: etwas kann sich geändert haben. Gibt es keine, exportierst du eine
+vorhandene Frage dieses Typs aus der Fragensammlung (`fragen_lesen`) und baust
+daran; gibt es keine, bittest du die Lehrkraft, eine Beispielfrage von Hand
+anzulegen. Nach höchstens drei Versuchen, die die Probe nicht bestehen, hörst
+du auf und bittest um diese Beispielfrage, statt weiter zu raten. Schlag der
+Lehrkraft nach dem ersten Typ ohne Notiz ein **Bildschirmfoto der Vorschau**
+vor (jedes Bild braucht ihre Freigabe): Die Probe sieht Fehlermeldungen, nicht,
+ob die Frage gut aussieht.
+
+**Eine Notiz festhalten:** Hat eine Frage dieses Typs die Probe bestanden
+(`verified: true`) und gibt es keine Notiz oder eine ältere, biete es einmal an
+und frag die Lehrkraft im Chat. Bei einem Ja ruft `fragetyp_notiz_schreiben`
+auf: Das Minimalbeispiel setzt die App aus der bestandenen Probe ein, du
+lieferst Pflichtstruktur, Stolpersteine (Symptom, Ursache, Abhilfe – auch, was
+beim Probieren scheiterte) und Ausbaustufen. Schreib nur, was du erlebt hast.
 
 **Beim Anlegen immer eine Sachnummer vergeben** (`<idnumber>`) und sie dem
 Nutzer nennen — sie ist die einzige Kennung, die eine Änderung überlebt.
@@ -792,8 +832,40 @@ Welche Rundung, schlägst du im Plan vor (geltende Ziffern, wo die Werte über G
 
 Details: **`references/fragetypen.md`**, Abschnitt „Bestehende Fragen ändern"
 
-Der Import legt immer neu an. Geändert wird über das Bearbeitungsformular der
-Frage, und das erledigt die App:
+**Wo das Moodle das Plugin „Import question as new version" hat, ist der
+Hauptweg die neue Version aus XML:** `fragen_lesen` exportiert die Kategorie
+nach `fragen-<sammlung>/kategorie-<id>.xml`; du bearbeitest die Fragen in einer
+Kopie (der Kommentar `<!-- question: <id> -->` vor jeder Frage bleibt stehen –
+er sagt der App, von welcher Version du ausgehst), und
+`fragen_version_importieren(sammlung, kategorie, datei)` spielt jede Frage als
+nächste Version ein, zugeordnet über ihre Sachnummer. Verlauf, Sachnummer und
+die Plätze in Tests bleiben; Tests mit „Immer die neueste" nehmen die neue
+Version sofort (siehe unten, vorher fragen). Auch Umbauten (eine Antwort mehr,
+eine Lücke, ein Ablagebereich) gehen so. Eine Datei darf mehrere Fragen
+enthalten; sie geht durch eine Freigabe mit Zeilenvergleich je Frage. Bricht das
+Werkzeug vor der Freigabe ab (kein Treffer für eine Sachnummer, mehrdeutig,
+anderer Typ), ist nichts geschehen.
+
+- **Eine neuere Version ist da:** Hat jemand die Frage seit deinem Lesen von
+  Hand gespeichert, bricht das Werkzeug ab und nennt die neuere `questionid`.
+  Frag die Lehrkraft; will sie diese Version bewusst übergehen, rufst du mit
+  `uebergehen: <genau diese questionid>` noch einmal auf – sie bleibt im
+  Verlauf. Sonst liest du neu und wiederholst deine Änderung auf dem neuen Stand.
+- **Das Plugin fehlt:** Die App antwortet mit einem festen Satz. Gib ihn der
+  Lehrkraft weiter, mit den Wegen, die bleiben: Ändern über das Formular
+  (unten) oder `frage_ersetzen` (neue Frage ohne gemeinsamen Verlauf). Du
+  improvisierst keinen dritten Weg; die Lehrkraft kann ihre Moodle-Administration
+  bitten, das Plugin zu installieren.
+- **Wie bei jedem Schreiben:** `verified: true` heißt, die Rundlaufprobe ist
+  bestanden. Das Plugin meldet die neue Versionsnummer nicht direkt; die App
+  ermittelt sie durch Rücklesen. Durchgefallene importierte Versionen bleiben
+  deshalb zur manuellen Prüfung stehen und können in Tests aktiv sein. Gib
+  Nummer und Befund weiter; die App löscht nur direkt bestätigte Probeversionen. Nach
+  einer Sperre („Ausgang unklar") wiederholst du nicht, sondern sagst es der
+  Lehrkraft: Sie löst die Sperre selbst in der App.
+
+Kleine Änderungen (ein Text, eine Punktzahl) gehen weiter über das
+Bearbeitungsformular der Frage, und das erledigt die App:
 
 1. `frage_lesen(sammlung, frage)` → `frage-<id>/` mit `questiontext.html`,
    `generalfeedback.html`, den Antwort- und Rückmeldungsfeldern, `dateien/`
@@ -827,7 +899,7 @@ ehrlichere Weg — mit `frage_ersetzen`, nicht in Einzelschritten.
 
 ### Eine Frage ersetzen: `frage_ersetzen`
 
-Wo `aendern` nicht reicht, tauscht `frage_ersetzen` die alte Frage gegen eine neue aus einer XML-Datei, in einem Aufruf und nach einer Freigabe: Es importiert die neue in die Kategorie der alten, lässt die Nachweise laufen wie `fragen_importieren`, setzt sie in jedem genannten Test genau auf den Platz der alten — dieselbe Seite, dieselbe Stelle, dieselben Punkte, auch bei von Hand gesetzten Seitenumbrüchen — und löscht danach auf Wunsch die alte mit allen Versionen. Bau den Austausch nicht selbst aus `fragen_importieren`, `test_aendern` und `fragen_loeschen` zusammen: Das kostet viele Aufrufe, und jede Zwischenstufe ist ein halber Zustand, den niemand freigegeben hat.
+**Nur noch für einen Typwechsel und für Instanzen ohne das Plugin** (sonst ist `fragen_version_importieren` der bessere Weg: Die Frage behält ihren Verlauf, und `frage_ersetzen` verliert ihn – das sagst du der Lehrkraft im Plan). Wo `aendern` nicht reicht, tauscht `frage_ersetzen` die alte Frage gegen eine neue aus einer XML-Datei, in einem Aufruf und nach einer Freigabe: Es importiert die neue in die Kategorie der alten, lässt die Nachweise laufen wie `fragen_importieren`, setzt sie in jedem genannten Test genau auf den Platz der alten — dieselbe Seite, dieselbe Stelle, dieselben Punkte, auch bei von Hand gesetzten Seitenumbrüchen — und löscht danach auf Wunsch die alte mit allen Versionen. Bau den Austausch nicht selbst aus `fragen_importieren`, `test_aendern` und `fragen_loeschen` zusammen: Das kostet viele Aufrufe, und jede Zwischenstufe ist ein halber Zustand, den niemand freigegeben hat.
 
 Anlässe sind ein geänderter Aufbau (Abschnitt oben), ein geänderter STACK-Testfall (`references/stack.md`) und Fragen, deren Formular ein Schutzdienst abweist (`references/html.md`): Der Import kommt dort durch, das Formular nicht. Das ist die eine Ausnahme von der Regel, solche Objekte stehen zu lassen. Für alles, was das Formular kann, bleibt `aendern` der bessere Weg — die Frage behält ihre Geschichte, und Versuche bleiben bei ihrer Version.
 

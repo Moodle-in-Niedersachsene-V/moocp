@@ -126,6 +126,10 @@ const werkzeugGet = [
   '/question/type/stack/deploy.php?questionid=5005&cmid=5002&sesskey=abc&deploymany=5&deploymanybtn=1&deployhalt=on',
   '/question/type/stack/deploy.php?questionid=5005&cmid=5002&sesskey=abc&deploy=667371&deploysinglebtn=1',
   '/question/bank/deletequestion/delete.php?cmid=5002&deleteselected=1&deleteall=1&returnurl=%2Fquestion%2Fedit.php%3Fcmid%3D5002&q5006=1&q5009=1',
+  // Rundlaufprobe und neue Fragenversion (E38)
+  '/question/bank/previewquestion/preview.php?id=5006&cmid=5002',
+  '/question/bank/previewquestion/preview.php?id=5006&cmid=5002&previewid=77',
+  '/question/bank/importasversion/import.php?id=5006&cmid=5002',
 ];
 
 void main() {
@@ -156,6 +160,20 @@ void main() {
       }
     },
   );
+
+  test('Die Fragenübersicht und der Verlauf einer Frage bleiben ungelesen (Namen, A1); das Plugin hat nur seine eine Seite', () {
+    final z = MoodleZugang(Protokoll());
+    for (final a in [
+      '/question/edit.php?cmid=5002',
+      '/question/bank/history/history.php?entryid=5&cmid=5002',
+      '/question/bank/importasversion/import.php?id=5006',
+      '/question/bank/importasversion/import.php?id=5006&cmid=5002&x=1',
+      '/question/bank/importasversion/andere.php?id=5006&cmid=5002',
+      '/question/bank/previewquestion/preview.php?id=5006&cmid=5002&x=1',
+    ]) {
+      expect(z.erlaubt('GET', Uri.parse('https://m.example$a')), isFalse, reason: a);
+    }
+  });
 
   test('STACK-Einsetzen: nur das Formular der Testseite, nicht jede Variante von deploy.php', () {
     final z = MoodleZugang(Protokoll());

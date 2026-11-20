@@ -34,6 +34,9 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_version.dart';
+import '../moodle/fragetyp_notizen.dart';
+import '../moodle/rundlaufprobe.dart';
 import '../moodle/fortschrittsliste.dart';
 import '../moodle/fragen.dart';
 import '../moodle/gruppierung.dart';
@@ -114,6 +117,8 @@ class McpDienst implements AufrufKontext {
     this.antwortfrist = const Duration(minutes: 1),
     this.werkzeugquellen = const [],
     this.schucuVorlagen,
+    this.notizenOrdner,
+    this.fragetypNotizGeliefert,
   });
 
   final Einstellungen einstellungen;
@@ -162,6 +167,31 @@ class McpDienst implements AufrufKontext {
   /// Sie sind Assets der App; laden kann sie nur Flutter, deshalb kommt der
   /// Zugriff von main.dart. Ohne ihn meldet das Werkzeug, dass sie fehlen.
   final Future<Map<String, String>> Function()? schucuVorlagen;
+
+  /// Lokale Fragetyp-Notizen dieses Profils (E38); ohne Angabe der dauerhafte
+  /// Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? notizenOrdner;
+
+  /// Die mit dem Skill gelieferte Notiz zu einem Typ (Asset der App; laden kann
+  /// sie nur Flutter, deshalb kommt der Zugriff von main.dart).
+  final Future<String?> Function(String typ)? fragetypNotizGeliefert;
+
+  late final FragetypNotizen _notizen = FragetypNotizen(
+    lokalerOrdner: notizenOrdner ?? p.join(einstellungenOrdner, 'fragetyp-notizen', profil.kennung),
+    geliefert: fragetypNotizGeliefert ?? (_) async => null,
+  );
+
+  /// Der Nachweis für eine Notiz nach bestandener Probe; ein Fehler dabei
+  /// ändert nichts am Urteil über die Frage.
+  void _nachweis(String typ, String xml, String? moodleVersion) {
+    try {
+      _notizen.nachweis(typ, xml, moodleVersion);
+    } on MoodleFehler {
+      // Ein Typname außerhalb des erlaubten Musters bekommt keine Notiz.
+    } on FileSystemException {
+      // Ohne Nachweis gibt es keine Notiz; die Frage bleibt, wie sie ist.
+    }
+  }
 
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
@@ -1950,7 +1980,105 @@ class McpDienst implements AufrufKontext {
           i.neu,
           (f) => stackTesten(moodle, sammlung: s, frage: f),
         );
-        return '${i.text}${n.text}';
+        // Die Probe urteilt; ohne Herkunftsnachweis bleibt das Objekt stehen.
+        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml,
+            beiBestanden: i.ok && n.ok ? _nachweis : null);
+        return '${i.text}${n.text}${r.text}'
+            'verified: ${i.ok && n.ok && r.verified}'
+            '${i.ok && n.ok && r.ok && !r.verified ? ' (ein Teil der Rundlaufprobe war nicht prüfbar, siehe oben)' : ''}\n';
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_version_importieren',
+      titel: 'Fragen als neue Version einspielen',
+      beschreibung:
+          'Spielt Fragen aus einer Moodle-XML-Datei im Arbeitsordner als NEUE VERSION der vorhandenen Fragen ein '
+          '(Verlauf, Sachnummer und Plätze in Tests bleiben; Tests mit „neueste Version" nehmen sie sofort). '
+          'Jede Frage der Datei wird über ihre Sachnummer (<idnumber>) EINER Frage der Kategorie zugeordnet; kein '
+          'Treffer, mehrdeutig oder anderer Typ bricht ab, bevor etwas geschieht. Die Datei geht von der Version '
+          'aus, die fragen_lesen geliefert hat (der Kommentar „question: <id>" bleibt vor jeder Frage stehen); ist '
+          'inzwischen eine neuere gespeichert, bricht das Werkzeug ab und nennt sie -- nur mit uebergehen: <genau '
+          'diese questionid> geht es trotzdem. Braucht das Moodle-Plugin „Import question as new version"; fehlt es, '
+          'kommt ein fester Satz mit den Wegen, die bleiben, und nichts wird geändert. Eine Freigabe für die ganze '
+          'Datei, mit Zeilenvergleich je Frage. Danach prüft das Werkzeug jede Frage (Rundlaufprobe: Export und '
+          'Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern). Die Probeversion wird '
+          'aufgeräumt. Das Plugin meldet die importierte Versionsnummer nicht direkt; sie wird durch Rücklesen '
+          'ermittelt. Bei Fehlern bleibt diese Version zur manuellen Prüfung stehen und kann in Tests aktiv sein. '
+          'verified bestätigt den zurückgelesenen Inhalt und die bestandene Probe, nicht die Herkunft der Nummer; was sich nicht '
+          'prüfen ließ, steht als „nicht geprüft" da.',
+      parameter: {
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.string(
+          description: 'Kategorie-id oder Name, in der die Fragen stehen (aus fragen_lesen)',
+        ),
+        'datei': JsonSchema.string(
+          description: 'Pfad der XML-Datei im Arbeitsordner',
+        ),
+        'uebergehen': JsonSchema.integer(
+          description:
+              'Optional: die questionid der neueren Version, die der Aufruf ausdrücklich übergehen darf (so, wie die '
+              'Abbruchmeldung sie nennt). Nur nach Rückfrage bei der Lehrkraft setzen.',
+        ),
+      },
+      pflicht: ['sammlung', 'kategorie', 'datei'],
+      ausfuehren: (a) => fragenVersionImportieren(
+        moodle,
+        freigaben,
+        ao,
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: '${a['kategorie']}',
+        datei: _text(a, 'datei'),
+        uebergehen: a['uebergehen'] is num ? (a['uebergehen'] as num).toInt() : null,
+        beiBestanden: _nachweis,
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_lesen',
+      titel: 'Fragetyp-Notiz lesen',
+      beschreibung:
+          'Liest die Notiz zu einem Fragetyp, BEVOR du eine Frage dieses Typs baust: bewiesenes Minimalbeispiel, '
+          'Pflichtstruktur, Stolpersteine, Ausbaustufen. Eine Notiz dieser Instanz geht der mitgelieferten vor; die '
+          'Antwort nennt die Quelle und die Moodle-Version, für die sie bewiesen ist. Gibt es keine, sagt die Antwort, '
+          'wie du ohne vorgehst. Nur lesen.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle, etwa multichoice, ddwtos, gapselect'),
+      },
+      pflicht: ['typ'],
+      nurLesen: true,
+      ausfuehren: (a) => _notizen.lesen(_text(a, 'typ')),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_schreiben',
+      titel: 'Fragetyp-Notiz festhalten',
+      beschreibung:
+          'Hält fest, was über einen Fragetyp auf dieser Instanz bewiesen ist -- nur nachdem eine Frage dieses Typs '
+          'in diesem Profil die Rundlaufprobe bestanden hat (fragen_importieren oder fragen_version_importieren '
+          'meldete verified: true), und nur nachdem die Lehrkraft im Chat zugestimmt hat: erst fragen, dann '
+          'aufrufen. Das Minimalbeispiel setzt die App aus der bestandenen Probe ein; du lieferst Pflichtstruktur, '
+          'Stolpersteine (Symptom, Ursache, Abhilfe) und Ausbaustufen als Text. Schreibt nur eine lokale Datei der '
+          'App, nichts in Moodle.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle'),
+        'pflichtstruktur': JsonSchema.string(description: 'Was die Frage dieses Typs mindestens enthalten muss'),
+        'stolpersteine': JsonSchema.string(description: 'Was schiefging oder schiefgehen kann: Symptom, Ursache, Abhilfe'),
+        'ausbaustufen': JsonSchema.string(description: 'Was über das Minimalbeispiel hinaus bewiesen ist (oder: noch nichts)'),
+      },
+      pflicht: ['typ', 'pflichtstruktur', 'stolpersteine', 'ausbaustufen'],
+      ausfuehren: (a) async {
+        final pfad = await _notizen.schreiben(
+          _text(a, 'typ'),
+          pflichtstruktur: _text(a, 'pflichtstruktur'),
+          stolpersteine: _text(a, 'stolpersteine'),
+          ausbaustufen: _text(a, 'ausbaustufen'),
+        );
+        return 'Notiz festgehalten (lokal, für dieses Instanzprofil): $pfad. Sie gilt vor der mitgelieferten Notiz. '
+            'Bewährte Notizen können über ein Issue oder einen Pull Request in den Skill kommen.';
       },
     );
 
@@ -2040,7 +2168,8 @@ class McpDienst implements AufrufKontext {
           'fragen_importieren, setzt sie in jedem genannten Test auf den Platz der alten (dieselbe Seite und '
           'Stelle, dieselben Punkte, die Seitenaufteilung bleibt) und löscht danach auf Wunsch die alte mit '
           'allen Versionen. Trägt die neue die Sachnummer der alten, geht sie nach dem Löschen an die neue. '
-          'Für Umbauten, die aendern nicht kann (Aufbau, STACK-Testfälle); für reine Inhaltsänderungen '
+          'Nur für Typwechsel oder Instanzen ohne Versionsimport-Plugin; der gemeinsame Verlauf geht verloren. '
+          'Für Umbauten desselben Typs fragen_version_importieren, für kleine Inhaltsänderungen '
           'frage_lesen und aendern. Prüft vorher Namen, Plätze und XML und bricht sonst ab, bevor etwas '
           'geschieht; besteht ein Nachweis nicht, kommt die neue Frage in keinen Test.',
       parameter: {

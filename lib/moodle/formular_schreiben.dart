@@ -2202,6 +2202,10 @@ Future<String> aendernStatus(
         return 'Vorgang $vorgang abgeschlossen (verified: true).';
       }
       if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      if (j.status == Schreibstatus.aufgehoben) {
+        return 'Vorgang $vorgang: Die Lehrkraft hat die Sperre in der App aufgehoben (verified: false). Neu lesen, '
+            'bevor etwas geändert wird.';
+      }
       if (j.status == Schreibstatus.rueckgelesen) {
         return 'Vorgang $vorgang: Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab (verified: false). '
             'Keine Sperre; frisch lesen und neu planen.';

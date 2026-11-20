@@ -34,6 +34,7 @@ import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
 import 'moodle/moodle_zugang.dart';
+import 'sperren_dialog.dart';
 import 'moodle/schreibvorgang.dart' show Schreibvorgang;
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
@@ -262,8 +263,19 @@ Instanz _instanzFuer(
       profil: pr,
       werkzeugquellen: _werkzeugquellen(plugins),
       schucuVorlagen: _schucuVorlagen,
+      fragetypNotizGeliefert: _fragetypNotizGeliefert,
     ),
   );
+}
+
+/// Die mit dem Skill moodle-fragen gelieferte Fragetyp-Notiz (pubspec.yaml,
+/// E38); null, wenn es zu dem Typ keine gibt.
+Future<String?> _fragetypNotizGeliefert(String typ) async {
+  try {
+    return await rootBundle.loadString('skills/moodle-fragen/fragetypen/$typ.md', cache: false);
+  } on FlutterError {
+    return null;
+  }
 }
 
 /// Die CD-Vorlagen der SchuCu-Tabelle für lernsituation_pruefen: Assets aus
@@ -880,6 +892,8 @@ class _HauptseiteState extends State<Hauptseite> {
         await _profilBearbeiten(neu: true);
       case EinstellungenErgebnis.plugins:
         await _pluginsVerwalten();
+      case EinstellungenErgebnis.sperren:
+        await showDialog<void>(context: context, builder: (_) => SperrenDialog(moodle: widget.moodle));
       case EinstellungenErgebnis.fertig:
       case null:
         break;

@@ -1,0 +1,129 @@
+name: Desktop builds
+run-name: Desktop build (${{ github.event.head_commit.message || inputs.platform }})
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Plattformen (linux, windows, macos; mit Komma oder all)
+        type: string
+        default: linux
+      task:
+        description: Umfang
+        type: choice
+        options: [all, tests, builds]
+        default: all
+permissions:
+  contents: read
+jobs:
+  select:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ci:')
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      task: ${{ steps.select.outputs.task }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Build client tests
+        run: python tool/test_ci_bau.py -v
+      - id: select
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          PLATFORM: ${{ inputs.platform }}
+          TASK: ${{ inputs.task }}
+        shell: python
+        run: |
+          import os, subprocess, sys
+          matrix = subprocess.check_output([sys.executable, 'tool/ci_bau.py', '--matrix'], text=True).strip()
+          message = os.environ['MESSAGE']
+          task = os.environ['TASK'] or ('tests' if '[ci:tests]' in message else 'builds' if '[ci:builds]' in message else 'all')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('matrix=' + matrix + '\n' + 'task=' + task + '\n')
+  desktop:
+    needs: select
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Native Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev libayatana-appindicator3-dev libkeybinder-3.0-dev libx11-dev libxi-dev libxtst-dev
+      - name: Flutter 3.50.0 (Dart 3.14)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+          cache: false
+      - name: Skills assets
+        run: python skills/build.py
+      - name: Dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analysis
+        if: needs.select.outputs.task != 'builds'
+        run: flutter analyze
+      - name: Complete test suite
+        if: needs.select.outputs.task != 'builds'
+        run: flutter test --concurrency 2 --reporter expanded
+      - name: Release build
+        if: needs.select.outputs.task != 'tests'
+        run: flutter build ${{ matrix.platform }} --release
+      - name: Linux archive
+        if: matrix.platform == 'linux' && needs.select.outputs.task != 'tests'
+        run: |
+          mkdir -p dist
+          cp docs/icon/icon.png build/linux/x64/release/bundle/moocp.png
+          tar -czf dist/moocp-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - name: Debian 13 runtime check
+        if: matrix.platform == 'linux' && needs.select.outputs.task != 'tests'
+        run: |
+          docker run --rm -v "$PWD/build/linux/x64/release/bundle:/bundle:ro" debian:13 bash -euxc '
+            apt-get update
+            apt-get install -y libgtk-3-0t64 libsecret-1-0 libstdc++6 libayatana-appindicator3-1 libkeybinder-3.0-0 libxtst6 libegl1 libgles2 libgl1-mesa-dri xvfb xauth
+            cd /bundle
+            find . -type f \( -name "*.so" -o -name moocp \) -exec ldd {} \; > /tmp/ldd.txt
+            cat /tmp/ldd.txt
+            ! grep -q "not found" /tmp/ldd.txt
+            set +e
+            xvfb-run -a timeout 15s ./moocp --kein-update > /tmp/start.log 2>&1
+            result=$?
+            cat /tmp/start.log
+            test "$result" = 124
+          '
+      - name: Windows archive
+        if: matrix.platform == 'windows' && needs.select.outputs.task != 'tests'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/moocp-windows-x64.zip
+      - name: macOS archive
+        if: matrix.platform == 'macos' && needs.select.outputs.task != 'tests'
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/moocp.app dist/moocp-macos-arm64.zip
+      - name: Bundle artifact
+        if: needs.select.outputs.task != 'tests'
+        uses: actions/upload-artifact@v7
+        with:
+          name: moocp-${{ matrix.platform }}-${{ matrix.platform == 'macos' && 'arm64' || 'x64' }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

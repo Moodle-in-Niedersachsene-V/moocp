@@ -918,8 +918,10 @@ class _Sicherungen {
 
   static const _verborgenHinweis =
       'Fragen, die in diesen Tests benutzt werden, können verborgen sein: Sie sind in den Zahlen oben nicht '
-      'mitgezählt und nicht in der Sicherung. Was Moodle beim Löschen der Sammlung mit ihnen und mit den Plätzen '
-      'in den Tests macht, ist nicht geprüft. Tests in anderen Kursen sieht moocp nicht.';
+      'mitgezählt und nicht in der Sicherung. Moodle behält sie aber: Nach kurzer Zeit verschiebt es sie in eine '
+      'geteilte Fragensammlung des Kurses („System geteilte Fragensammlung“ oder ähnlich), und die Tests benutzen '
+      'sie von dort weiter. Fragen, die in keinem Test stecken, werden mit der Sammlung gelöscht. '
+      'Tests in anderen Kursen sieht moocp nicht.';
 
   /// Die Zeilen der Freigabe zu den Sicherungen.
   List<String> get punkte => [
@@ -981,6 +983,10 @@ typedef _TestNutzung = ({int cmid, String name, int plaetze, int unbekannt});
 /// Liest jeden Test des Kurses (die Zusammenstellungsseite, wie test_lesen) und sammelt je Sammlung die Tests, die
 /// Plätze aus ihr haben. Verborgene Fragen zählt Moodles Kategorieliste nicht (auf Moodle 5.1 gemessen), und der
 /// Export liefert sie nicht: Die Plätze sind der einzige Hinweis, dass eine Sammlung solche Fragen haben kann.
+/// Beim Löschen der Sammlung zerstört Moodle sie nicht: Das Löschen der Aktivität läuft im Hintergrund (gleich
+/// danach zeigt der Platz im Test noch auf die alte cmid), und nach einigen Minuten liegt die benutzte Frage in
+/// einer neu angelegten geteilten Fragensammlung des Kurses („System geteilte Fragensammlung“), die der Platz
+/// weiter benutzt (auf Moodle 5.1 gemessen); nicht benutzte Fragen werden mit der Sammlung gelöscht.
 /// Tests anderer Kurse sind für moocp nicht sichtbar. Lässt sich ein Test nicht lesen, bricht das Löschen ab.
 Future<Map<int, List<_TestNutzung>>> _testsLesen(MoodleZugang moodle, KursStruktur kurs, Set<int> sammlungen) async {
   final aus = <int, List<_TestNutzung>>{};

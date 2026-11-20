@@ -177,7 +177,7 @@ void main() {
     final text = anfrage.punkte.join('\n');
     expect(text, contains('Test „ZZ Test" (cmid 40): 2 Plätze aus der Sammlung „ZZ Bank"'));
     expect(text, isNot(contains('ZZ Anderer Test')));
-    expect(text, allOf(contains('können verborgen sein'), contains('nicht geprüft'), contains('anderen Kursen')));
+    expect(text, allOf(contains('können verborgen sein'), contains('System geteilte Fragensammlung'), contains('anderen Kursen')));
     // Die verborgene Frage ist in Moodles Zahl nicht enthalten: „ZZ Probe" zählt nur „ZZ Eins".
     expect(anfrage.abhaken[0], allOf(contains('ZZ Probe'), contains('1 Frage')));
     expect(kursAktion('cm_delete'), isFalse);

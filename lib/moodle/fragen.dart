@@ -103,8 +103,9 @@ typedef SammlungsKategorie = ({Kategorie kat, List<String> pfad, String? xml, in
 /// Sammlung. Eine Frage, die in einem Test benutzt und „gelöscht" wurde, ist in Moodle nur verborgen
 /// (auf Moodle 5.1 gemessen): Moodles Kategorieliste zählt sie nicht mit, und der Export der Kategorie
 /// liefert sie nicht. Eine Kategorie mit Zahl 0 wird deshalb nicht angefragt und gilt als leer; verborgene
-/// Fragen sind nie in der Sicherung. Nicht gemessen: was Moodle beim Löschen der Sammlung mit verborgenen
-/// Fragen und den Plätzen in Tests macht. Scheitert der Export einer Kategorie mit Zahl über 0 (etwa weil
+/// Fragen sind nie in der Sicherung. Moodle zerstört sie beim Löschen der Sammlung nicht, sondern verschiebt
+/// sie nach kurzer Zeit in eine geteilte Fragensammlung des Kurses, die die Tests weiter benutzen (siehe
+/// `_testsLesen` in kurs_aendern.dart). Scheitert der Export einer Kategorie mit Zahl über 0 (etwa weil
 /// Moodle keinen Download nennt), bricht das Lesen ab; sie gilt nie stillschweigend als leer.
 Future<List<SammlungsKategorie>> sammlungExportieren(MoodleZugang moodle, int sammlung) async {
   final kats = await kategorienLesen(moodle, sammlung);

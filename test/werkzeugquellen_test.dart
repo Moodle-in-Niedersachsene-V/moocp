@@ -43,6 +43,7 @@ const _eingebaut = [
   'sicherung_status',
   'wiederherstellen_datei',
   'wiederherstellung_status',
+  'anhaenge_reparieren',
   'sichern_auswahl',
   'uebertragen',
   'buch_lesen',

@@ -17,6 +17,7 @@ import 'package:moocp/moodle/sicherung.dart';
 import 'package:moocp/moodle/wiederherstellung.dart';
 import 'package:moocp/moodle/wiederherstellung_anhaenge.dart';
 import 'package:moocp/moodle/wiederherstellung_regeln.dart';
+import 'package:moocp/moodle/wiederherstellung_texte.dart';
 import 'package:moocp/protokoll.dart';
 
 String _sha(List<int> bytes) => sha1.convert(bytes).toString();
@@ -84,6 +85,11 @@ class _Moodle extends MoodleZugang {
   /// Zusätzliche neue Aktivitäten im Kurs (cmid, modul, titel).
   final List<(int, String, String)> neueCmids;
   final List<String> abrufe = [];
+
+  /// Adresse der Zielinstanz, wie sie die angemeldete Sitzung kennt.
+  Uri? zielBasis;
+  @override
+  Uri? get basis => zielBasis;
   final Map<int, bool> sichtbar = {1: true};
   final Map<int, String> namen = {1: 'Alt'};
 
@@ -155,6 +161,23 @@ void main() {
       });
       expect(quelldateienAus(mbz, modul: 'resource', titel: 'Blatt'),
           [(name: 'blatt.pdf', sha1: 'abc', dateimanager: true)]);
+    });
+
+    test('Bild der Beschreibung einer Datei-Aktivität liegt nicht im Dateimanager', () {
+      final mbz = _mbz({
+        'moodle_backup.xml': utf8.encode('<moodle_backup><activities><activity><modulename>resource</modulename>'
+            '<title>Blatt</title><directory>activities/resource_3</directory></activity></activities></moodle_backup>'),
+        'activities/resource_3/inforef.xml': utf8.encode('<inforef><fileref><file><id>1</id></file><file><id>2</id></file></fileref></inforef>'),
+        'activities/resource_3/resource.xml': utf8.encode('<activity><resource><intro>&lt;img src="@@PLUGINFILE@@/skizze.png"&gt;</intro></resource></activity>'),
+        'files.xml': utf8.encode('<files><file id="1"><contenthash>abc</contenthash><filename>blatt.pdf</filename>'
+            '<component>mod_resource</component><filearea>content</filearea></file>'
+            '<file id="2"><contenthash>def</contenthash><filename>skizze.png</filename>'
+            '<component>mod_resource</component><filearea>intro</filearea></file></files>'),
+      });
+      expect(quelldateienAus(mbz, modul: 'resource', titel: 'Blatt'), [
+        (name: 'blatt.pdf', sha1: 'abc', dateimanager: true),
+        (name: 'skizze.png', sha1: 'def', dateimanager: false),
+      ]);
     });
 
     test('fehlende Quellaufnahme ist null, nicht leer', () {
@@ -370,6 +393,179 @@ void main() {
       final p = vergleicheAnhaenge(quelle: null, ziel: [ok('bild.png', 'aaa')]);
       expect(p.vollstaendig, isFalse);
       expect(p.text, contains('Quellaufnahme fehlt'));
+    });
+  });
+
+  group('Statusaufruf mit Textprüfung', () {
+    late Directory ordner;
+    late DateTime nun;
+
+    setUp(() {
+      nun = DateTime(2026, 10, 18, 10, 0);
+      ordner = Directory.systemTemp.createTempSync('texte');
+      jetzt = () => nun;
+      schlafe = (d) async => nun = nun.add(d);
+    });
+
+    tearDown(() {
+      jetzt = DateTime.now;
+      schlafe = (d) => Future<void>.delayed(d);
+      ordner.deleteSync(recursive: true);
+    });
+
+    /// Eine Seite „Infoblatt" mit Beschreibung und Inhalt; Quellinstanz moodle.schule.example.
+    Uint8List archivMit(String intro, String inhalt) => _mbz({
+          'moodle_backup.xml': utf8.encode('<moodle_backup><information><original_wwwroot>'
+              'https://moodle.schule.example</original_wwwroot></information><activities><activity>'
+              '<modulename>page</modulename><title>Infoblatt</title><directory>activities/page_7</directory>'
+              '</activity></activities></moodle_backup>'),
+          'activities/page_7/page.xml': utf8.encode(
+              '<activity><page><intro><![CDATA[$intro]]></intro><content><![CDATA[$inhalt]]></content></page></activity>'),
+          'activities/page_7/inforef.xml': utf8.encode('<inforef><fileref><file><id>1</id></file></fileref></inforef>'),
+          'files.xml': utf8.encode('<files><file id="1"><contenthash>${_sha(bild)}</contenthash>'
+              '<filename>bild.png</filename><filepath>/</filepath><component>mod_page</component>'
+              '<filearea>content</filearea></file></files>'),
+        });
+
+    Future<({String status, Vorgang? nachher})> lauf(Uint8List archiv, String? formular) async {
+      final vg = Vorgaenge(ordner.path);
+      File('${ordner.path}/b.mbz').writeAsBytesSync(archiv);
+      final v = await vg.neuWiederherstellung(kurs: 12, datei: 'b.mbz',
+          fingerabdruck: fingerabdruck(archiv, instanz: 'Test', kurs: 12, weg: Zielweg.aktuellerKursVerschmelzen));
+      await vg.aktualisieren(v,
+          wiederherstellung: WiederherstellungStand.laufend,
+          backupid: 'r-1',
+          kontext: 77,
+          vorherCmids: [1],
+          wiederherstellungAktivitaeten: [(modul: 'page', titel: 'Infoblatt')]);
+      const bildPfad = '/draftfile.php/12/user/draft/77/bild.png';
+      final moodle = _Moodle({
+        if (formular != null) '/course/modedit.php?update=2': _antwort(200, utf8.encode(formular)),
+        bildPfad: _antwort(200, bild),
+      }, neueCmids: [(2, 'page', 'Infoblatt')])
+        ..zielBasis = Uri.parse('https://m.example');
+      final status = await wiederherstellungStatus(moodle, vg, id: v.id);
+      return (status: status, nachher: await vg.finde(v.id));
+    }
+
+    String form(String intro, String inhalt) => '<form class="mform">'
+        '<textarea name="introeditor[text]">${const HtmlEscape().convert(intro)}</textarea>'
+        '<textarea name="page[text]">${const HtmlEscape().convert(inhalt)}</textarea></form>';
+
+    const quellInhalt = r'<p>Siehe <a href="https://moodle.schule.example/mod/page/view.php?id=41">Blatt 2</a></p>'
+        r'<img class="img-fluid" src="$@FILEPHP@$$@SLASH@$bild.png" alt="Bild">';
+    const zielInhalt = '<p>Siehe <a href="https://m.example/mod/page/view.php?id=41">Blatt 2</a></p>\n'
+        '<img class="img-fluid" src="@@PLUGINFILE@@/bild.png" alt="Bild">';
+
+    test('kürzere Zieldomain, unveränderte Linkziele, Zeilenenden: keine falsche Differenz, verified', () async {
+      final r = await lauf(archivMit('<p>Intro</p>', quellInhalt), form('<p>Intro</p>\r\n', zielInhalt));
+      expect(r.nachher!.verified, isTrue, reason: r.status);
+      expect(r.nachher!.text, contains('Texte: verglichen, übereinstimmend.'));
+      expect(r.nachher!.text, contains('Einstellungen der Aktivitäten sind nicht gegengeprüft'));
+    });
+
+    test('echte Textabweichung: Abweichung mit Feldname, ohne Inhalt, nicht verified', () async {
+      final r = await lauf(archivMit('<p>Intro</p>', quellInhalt),
+          form('<p>Intro</p>', zielInhalt.replaceFirst('Siehe', 'Sehen Sie Geheimwort')));
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('„Infoblatt": Feld „Seiteninhalt" weicht von der Quelle ab'));
+      expect(r.nachher!.text, isNot(contains('Geheimwort')));
+    });
+
+    for (final tag in ['pre', 'textarea']) {
+      test('Bedeutender Leerraum in $tag bleibt beim Wiederherstellungsvergleich erhalten', () async {
+        final r = await lauf(archivMit('', '<$tag>a\nb</$tag>'), form('', '<$tag>a b</$tag>'));
+        expect(r.nachher!.verified, isFalse);
+        expect(r.nachher!.text, contains('Feld „Seiteninhalt" weicht von der Quelle ab'));
+      });
+    }
+
+    test('Zeilenenden in vorformatiertem Text sind weiterhin gleichwertig', () async {
+      final r = await lauf(archivMit('', '<pre>a\r\nb</pre>'), form('', '<pre>a\nb</pre>'));
+      expect(r.nachher!.verified, isTrue, reason: r.status);
+    });
+
+    test('Beschreibung weicht ab: Feld „Beschreibung" genannt', () async {
+      final r = await lauf(archivMit('<p>Intro</p>', quellInhalt), form('<p>Anderes</p>', zielInhalt));
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('Feld „Beschreibung" weicht'));
+    });
+
+    test('anderes Linkziel (andere Art) ist eine Abweichung', () async {
+      final r = await lauf(archivMit('', quellInhalt),
+          form('', zielInhalt.replaceFirst('/mod/page/view.php', '/mod/url/view.php')));
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('Seiteninhalt'));
+    });
+
+    test('anderer Dateiname im Bild: Abweichung', () async {
+      final r = await lauf(archivMit('', quellInhalt), form('', zielInhalt.replaceFirst('bild.png', 'anders.png')));
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('Feld „Seiteninhalt" weicht'));
+    });
+
+    test('Bild mit Zähler im Namen: kein Textunterschied', () async {
+      final r = await lauf(archivMit('', quellInhalt),
+          form('', zielInhalt.replaceFirst('bild.png', 'bild%20%281%29.png')));
+      expect(r.nachher!.text, isNot(contains('weicht')));
+    });
+
+    test('Formular nicht lesbar: Prüflücke, nicht verified', () async {
+      final r = await lauf(archivMit('', quellInhalt), null);
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('Texte nicht vollständig verifiziert'));
+      expect(r.nachher!.text, contains('Prüflücke'));
+    });
+
+    test('Feld im Formular fehlt, Quelle hat Text: Prüflücke', () async {
+      final r = await lauf(archivMit('', quellInhalt), '<form class="mform"><textarea name="page[text]"></textarea></form>');
+      expect(r.nachher!.verified, isFalse);
+    });
+
+    test('unbekannter Platzhalter der Sicherung: Prüflücke, nie Gleichheit', () async {
+      final r = await lauf(archivMit('', r'<p>$@UNBEKANNT*5@$</p>'), form('', '<p>x</p>'));
+      expect(r.nachher!.verified, isFalse);
+      expect(r.nachher!.text, contains('Platzhalter'));
+    });
+  });
+
+  group('Texte im Archiv', () {
+    test('mehrdeutige Aktivität im Archiv: Prüflücke', () {
+      final mbz = _mbz({
+        'moodle_backup.xml': utf8.encode('<moodle_backup><activities>'
+            '<activity><modulename>page</modulename><title>A</title><directory>activities/page_1</directory></activity>'
+            '<activity><modulename>page</modulename><title>A</title><directory>activities/page_2</directory></activity>'
+            '</activities></moodle_backup>'),
+      });
+      expect(quelltexteAus(mbz, modul: 'page', titel: 'A').luecke, isNotNull);
+    });
+
+    test('nicht lesbare Aktivitäts-XML: Prüflücke', () {
+      final mbz = _mbz({
+        'moodle_backup.xml': utf8.encode('<moodle_backup><activities>'
+            '<activity><modulename>page</modulename><title>A</title><directory>activities/page_1</directory></activity>'
+            '</activities></moodle_backup>'),
+        'activities/page_1/page.xml': utf8.encode('<activity><page>'),
+      });
+      expect(quelltexteAus(mbz, modul: 'page', titel: 'A').luecke, isNotNull);
+    });
+
+    test('Buchkapitel bleiben eine benannte Prüflücke', () {
+      final mbz = _mbz({
+        'moodle_backup.xml': utf8.encode('<moodle_backup><activities>'
+            '<activity><modulename>book</modulename><title>B</title><directory>activities/book_1</directory></activity>'
+            '</activities></moodle_backup>'),
+        'activities/book_1/book.xml': utf8.encode('<activity><book><intro>x</intro></book></activity>'),
+      });
+      final q = quelltexteAus(mbz, modul: 'book', titel: 'B');
+      final r = vergleicheTexte(modul: 'book', titel: 'B', quelle: q, ziel: {'introeditor[text]': 'x'});
+      expect(r.befunde.single, contains('Kapitel nicht verglichen'));
+    });
+
+    test('Normalisierung unterdrückt keine Wortunterschiede', () {
+      expect(textNormalisiert('<p>a</p>'), isNot(textNormalisiert('<p>b</p>')));
+      expect(textNormalisiert('<a href="https://fremd.example/x">t</a>', instanzen: ['https://m.example']),
+          contains('fremd.example'));
     });
   });
 

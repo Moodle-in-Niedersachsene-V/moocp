@@ -44,6 +44,7 @@ import 'sicherung_regeln.dart';
 import 'test.dart';
 import 'wiederherstellung_anhaenge.dart';
 import 'wiederherstellung_regeln.dart';
+import 'wiederherstellung_texte.dart';
 
 /// Vorgänge, die gerade laufen (Freigabe, Upload oder Abfrage) in dieser Sitzung.
 final Set<String> _laufendeWiederherstellungen = {};
@@ -1125,6 +1126,12 @@ Future<String> _gegenlesen(
           for (final cmid in lesbar)
             (cmid: cmid, modul: jetzt.nachCmid[cmid]!.modul, titel: jetzt.nachCmid[cmid]!.name),
         ]);
+  final texte = lesbar.isEmpty
+      ? null
+      : await textePruefen(moodle, vorgaenge, vg, [
+          for (final cmid in lesbar)
+            (cmid: cmid, modul: jetzt.nachCmid[cmid]!.modul, titel: jetzt.nachCmid[cmid]!.name),
+        ]);
   final basis = zugeordnet == null
       ? 'Importierte Aktivitäten konnten nicht eindeutig von anderen neuen Aktivitäten unterschieden werden. Keine Aktivität wurde verborgen; bitte prüfen.'
       : !zuordnungUnveraendert
@@ -1135,9 +1142,9 @@ Future<String> _gegenlesen(
       : sichtbarkeitOk
           ? 'Neu im Kurs: $liste.'
           : 'Neu im Kurs: $liste. Nicht alle sind verborgen; bitte prüfen.';
-  // Verglichen wird hier nie Text mit Adressen: Aktivitäten nach Typ und Titel, Anhänge nach
-  // Inhalt (SHA-1), Fragen nach Name. Instanzadressen (Quell- und Zieldomain) spielen keine
-  // Rolle. Ein Feldvergleich schreibbarer Typen müsste sie normalisieren.
+  // Verglichen wird: Aktivitäten nach Typ und Titel, Anhänge nach Inhalt (SHA-1), die Texte der
+  // Editorfelder nach Normalisierung von Instanzadresse und Dateipfaden
+  // (`wiederherstellung_texte.dart`), Fragen nach Name. Einstellungen werden nicht verglichen.
   // Fragenvergleich nach dem Wiederherstellen: je Quiz aus dem Archiv, zugeordnet
   // über den Titel (bei genau einem Quiz auf beiden Seiten auch ohne). Was sich nicht
   // eindeutig zuordnen lässt, ist je Quiz eine Prüflücke, nie Gleichheit.
@@ -1165,12 +1172,13 @@ Future<String> _gegenlesen(
   }
   // Der Sichtbarkeitsvergleich mit der Quelle ist bei „wie Quelle“ ausdrücklich ausgenommen.
   final anhangOk = anhang == null || anhang.vollstaendig;
+  final texteOk = texte == null || texte.vollstaendig;
   final vergleichOk = vergleiche.every(quizVerifiziert);
   // Nur eigene Fragen und lesbare Aktivitätstypen erlauben eine vollständige Verifikation.
   final herkunftOk = erwartet.every((a) => a.modul != 'quiz') || herkunftEigen;
   final schreibPruefluecke = nichtSchreibbarePruefluecke(erwartet.map((a) => a.modul));
   final verifiziert = zuordnungUnveraendert && zugeordnet.isNotEmpty && sichtbarkeitOk &&
-      anhangOk && vergleichOk && herkunftOk && schreibPruefluecke == null && loeschOk;
+      anhangOk && texteOk && vergleichOk && herkunftOk && schreibPruefluecke == null && loeschOk;
   final zusatz = [
     gruppierungsHinweis,
     ?loeschText,
@@ -1179,15 +1187,28 @@ Future<String> _gegenlesen(
           'gegengeprüft (Teilnehmende werden nicht gelesen).',
     if (!verbergen) 'Sichtbarkeit und Voraussetzungen nicht gegengeprüft; verified gilt für die übrigen Prüfungen.',
     if (anhang != null) anhang.text,
+    if (texte != null) texte.text,
+    'Einstellungen der Aktivitäten sind nicht gegengeprüft (Prüflücke); verified gilt nicht für sie.',
     for (final v in vergleiche) v.text,
     if (!herkunftOk) 'Fragenherkunft nicht bestätigt: Die Fragen sind nicht eindeutig als quizlokal nachgewiesen. '
         'Sie können aus einer geteilten Sammlung stammen; Abhängigkeiten von der Quellsammlung bleiben ungeprüft.',
     ?schreibPruefluecke,
   ].join(' ');
+  // Nur die während dieses Laufs zweimal bestätigte Zuordnung ist Provenienz.
+  vg.importierteAktivitaeten = bestaetigt == null
+      ? null
+      : [
+          for (final cmid in bestaetigt)
+            (
+              cmid: cmid,
+              modul: jetzt.nachCmid[cmid]!.modul,
+              titel: jetzt.nachCmid[cmid]!.name,
+            ),
+        ];
   final text = zusatz.isEmpty ? basis : '$basis $zusatz';
   final pruefbefund = verifiziert
       ? (verbergen ? 'verborgen: verified; verified: true' : 'verified: true (ohne Sichtbarkeit und Voraussetzungen)')
-      : 'verified: false; nicht verifiziert: Zuordnung, Sichtbarkeitswahl oder Anhänge/Vergleich nicht bestätigt, siehe Prüfbefund';
+      : 'verified: false; nicht verifiziert: Zuordnung, Sichtbarkeitswahl oder Anhänge, Texte oder Vergleich nicht bestätigt, siehe Prüfbefund';
   if (fehler != null) {
     // Moodle meldete einen Fehler: Ob er den Inhalt betrifft, zeigt nur der Vergleich mit der Quelle.
     final abweichungen = [
@@ -1195,6 +1216,7 @@ Future<String> _gegenlesen(
       if (verbergen && zuordnungUnveraendert && !alleVerborgen) 'Nicht alle neuen Aktivitäten sind verborgen.',
       if (altUebrig.isNotEmpty || (ersetzt && !loeschPruefbar)) ?loeschText,
       if (anhang != null && anhang.abweichend) anhang.text,
+      if (texte != null && texte.abweichend) texte.text,
       for (final v in vergleiche) if (v.art == VergleichArt.abweichung) v.text,
     ];
     if (abweichungen.isNotEmpty) {

@@ -31,9 +31,11 @@
 //   7. Rückleseprobe: Der Bereich muss genau den Stand ohne die eine Datei zeigen.
 //      Fehlt etwas anderes, nennt die Antwort es und `verified: false`.
 //
-// Umgesetzt nach Moodles Quelltext (backup/backupfilesedit.php und
-// repository/draftfiles_ajax.php, Moodle 4.5) und gegen eine Attrappe getestet; auf einer
-// Instanz ist der Ablauf nicht durchgespielt. Die Seiten und Felder, die sich als Annahme herausstellen, stehen
+// Geprüft auf einer Testinstanz (Moodle 4.5, Spike): zwei eigene Sicherungsdateien
+// gelöscht, 70 und 69 übrige Dateien des Bereichs danach zurückgelesen. Gemessen: Der Dateimanager
+// sendet ohne Query; `contextid` ist der Benutzerkontext, `currentcontext` der Kurskontext der
+// Sicherung. Der Dateiname in Moodle (setting_root_filename) ist nicht der im Sicherungsordner.
+// Nicht gemessen: ein Abbruch in der Lücke zwischen letztem Vergleich und Speichern. Die Seiten und Felder, die sich als Annahme herausstellen, stehen
 // als UNGEMESSEN im Code.
 
 import 'dart:convert';

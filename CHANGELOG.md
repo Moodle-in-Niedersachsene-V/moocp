@@ -2,6 +2,7 @@
 
 ## 0.13.0
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
+- Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.

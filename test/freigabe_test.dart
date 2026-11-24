@@ -347,6 +347,40 @@ void main() {
     expect([await erste, await zweite], [false, false]);
   });
 
+  testWidgets('Abhaken unter den Punkten läuft nicht über, auch bei langem Text und 125 % Schrift', (tester) async {
+    tester.view.physicalSize = const Size(1366, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final f = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
+    final antwort = f.anfragen(FreigabeAnfrage(
+      titel: 'Anhänge reparieren?',
+      punkte: const [
+        'cmid 12 „Muster"',
+        'Quelle: Wiederherstellung 1 (Sicherungsdatei muster.mbz). Verglichen wurde der Inhalt, nicht die Adresse.',
+        '„bild.png" (Text im Feld page): wird ersetzt (jetzt in Moodle: Inhalt weicht ab)',
+        'Nichts anderes ändert sich: kein Text, keine Einstellung, nichts wird gelöscht.',
+        'Achtung: 1 Datei(en) in Moodle haben anderen Inhalt als die Quelle und würden überschrieben.',
+      ],
+      vergleich: const [],
+      abhaken: const ['„bild.png" in Moodle ansehen: Ich habe sie nach der Wiederherstellung nicht absichtlich geändert; sie darf durch die Datei der Quelle ersetzt werden.'],
+      ab: Bestaetigungen.keine,
+    ));
+    for (final skala in [1.0, 1.25]) {
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(skala)),
+            child: Scaffold(body: FreigabeDialog(f.aktuell!, f)),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'kein Überlauf bei ${(skala * 100).round()} %');
+    }
+    f.entscheiden(false);
+    await antwort;
+  });
+
   testWidgets('Die Übergabe kommt auf jeder Stufe, kopiert erst auf Klick und schließt erst nach allen Schritten', (tester) async {
     // Hält ein Schutzdienst das Speichern an, speichert die Lehrkraft im
     // Browser (formular_schreiben.dart, _uebergeben). Auch bei „keine": Sonst

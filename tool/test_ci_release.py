@@ -11,9 +11,12 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 
-import ci_release
+# Auch mit `python -I` und aus jedem Arbeitsverzeichnis: das Skript liegt daneben.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_release  # noqa: E402
 
 REPO = ci_release.OFFICIAL_REPO
 MAIN_SHA = 'c' * 40
@@ -33,6 +36,8 @@ class FakeGitHub:
         self.compare = {}
         self.labels = []
         self.commands = []
+        # Commit -> Liste der Check-Runs; fehlt der Commit, sind beide Prüfungen grün.
+        self.check_runs = {}
 
     def add_nightly(self, tag, sha, release=True):
         self.tags[tag] = sha
@@ -76,6 +81,10 @@ class FakeGitHub:
             if tag in self.tags:
                 return json.dumps({'ref': f'refs/tags/{tag}'})
             missing()
+        if path.startswith('commits/') and '/check-runs' in path:
+            sha = path.removeprefix('commits/').split('/')[0]
+            default = [{'id': 1, 'name': n, 'conclusion': 'success'} for n in ci_release.REQUIRED_CHECKS]
+            return json.dumps({'check_runs': self.check_runs.get(sha, default)})
         if path.startswith('commits/'):
             tag = path.removeprefix('commits/')
             if tag in self.tags:
@@ -146,6 +155,36 @@ class PlanTest(unittest.TestCase):
     def test_nightly_is_a_prerelease_and_publishes_from_main(self):
         result = self.plan()
         self.assertEqual((result['publish'], result['prerelease'], result['build']), ('true', 'true', 'true'))
+
+    def test_nothing_is_published_without_green_checks(self):
+        cases = {
+            'rot': [{'id': 1, 'name': 'flutter analyze', 'conclusion': 'success'},
+                    {'id': 2, 'name': 'flutter test', 'conclusion': 'failure'}],
+            'fehlt': [{'id': 1, 'name': 'flutter analyze', 'conclusion': 'success'}],
+            'läuft noch': [{'id': 1, 'name': 'flutter analyze', 'conclusion': 'success'},
+                           {'id': 2, 'name': 'flutter test', 'conclusion': None}],
+        }
+        for label, runs in cases.items():
+            self.github.check_runs[MAIN_SHA] = runs
+            with self.subTest(label), self.assertRaisesRegex(ci_release.ReleaseError, 'flutter test'):
+                self.plan()
+
+    def test_a_green_rerun_counts_over_an_earlier_failure(self):
+        self.github.check_runs[MAIN_SHA] = [
+            {'id': 1, 'name': 'flutter analyze', 'conclusion': 'success'},
+            {'id': 2, 'name': 'flutter test', 'conclusion': 'failure'},
+            {'id': 3, 'name': 'flutter test', 'conclusion': 'success'},
+        ]
+        self.assertEqual(self.plan()['publish'], 'true')
+
+    def test_a_dry_run_does_not_need_green_checks(self):
+        self.github.check_runs[MAIN_SHA] = []
+        result = self.plan(publish=False)
+        self.assertEqual((result['build'], result['publish']), ('true', 'false'))
+
+    def test_scheduled_run_in_a_fork_builds_nothing(self):
+        result = self.plan(event='schedule', repo='someone/moocp')
+        self.assertEqual((result['build'], result['publish']), ('false', 'false'))
 
     def test_pubspec_must_have_plain_version(self):
         for pubspec in ['0.13', '0.13.0-nightly.1+1', 'x']:

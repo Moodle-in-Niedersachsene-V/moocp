@@ -53,7 +53,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Script tests
-        run: python tool/test_ci_release.py -v
+        run: python -m unittest discover -s tool -p 'test_ci_*.py' -v
       - name: Plan
         id: plan
         env:
@@ -92,14 +92,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      # Dieselbe Einrichtung wie Checks und Desktop builds (Flutter-Version an einer Stelle);
+      # die Paketskripte brauchen unter Linux zusätzlich fakeroot und xvfb.
+      - uses: ./.github/actions/flutter-setup
         with:
-          python-version: '3.12'
-      - name: Native Linux dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev libayatana-appindicator3-dev libkeybinder-3.0-dev libx11-dev libxi-dev libxtst-dev fakeroot xvfb xauth
+          extra-packages: fakeroot xvfb xauth
       - name: NSIS
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -107,22 +104,12 @@ jobs:
           if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
             choco install nsis -y --no-progress
           }
-      - name: Flutter 3.50.0 (Dart 3.14)
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.50.0'
-          channel: stable
-          cache: false
       # Die Nightly-Version kommt nur in die Arbeitskopie dieses Runners, in keinen Commit.
       - name: Nightly version
         if: needs.plan.outputs.version_suffix != ''
         env:
           BUILD_NUMBER: ${{ needs.plan.outputs.build_number }}
         run: python tool/ci_release.py set-version --version "$VERSION" --build "$BUILD_NUMBER"
-      - name: Skills assets
-        run: python skills/build.py
-      - name: Dependencies
-        run: flutter pub get --enforce-lockfile
       - name: Linux packages
         if: matrix.platform == 'linux'
         run: |
@@ -145,7 +132,8 @@ jobs:
         if: matrix.platform == 'windows'
         shell: cmd
         env:
-          # Analyse und Tests laufen in den Prüfungen von main, nicht noch einmal hier.
+          # Analyse und Tests laufen in Checks; veröffentlicht wird nur ein Commit, auf dem
+          # sie grün waren (tool/ci_release.py, checks_passed).
           MOOCP_OHNE_PRUEFUNG: '1'
           MOOCP_VERSION_ZUSATZ: ${{ needs.plan.outputs.version_suffix }}
         run: create_installer.bat
@@ -178,7 +166,8 @@ jobs:
           name: moocp-${{ matrix.platform }}
           path: installer/moocp_*
           if-no-files-found: error
-          retention-days: 7
+          # Eine stabile Version wartet im Environment auf die Bestätigung, bis zu 30 Tage.
+          retention-days: ${{ needs.plan.outputs.channel == 'stable' && 30 || 7 }}
   # Die Pakete aller drei Plattformen zusammen, wie ein Release sie bekäme: Erst wenn alle
   # fünf da sind, darf veröffentlicht werden. Läuft auch ohne Veröffentlichen, damit ein
   # Probelauf denselben Weg geht.

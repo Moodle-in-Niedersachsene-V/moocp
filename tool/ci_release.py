@@ -143,6 +143,25 @@ def nightly_due(repo, sha):
     return comparison.get('ahead_by', 1) > 0
 
 
+# Die Namen der Aufträge im Workflow Checks, zugleich die erforderlichen Prüfungen von main.
+REQUIRED_CHECKS = ('flutter analyze', 'flutter test')
+
+
+def failed_checks(repo, sha):
+    """Welche der erforderlichen Prüfungen auf dem Commit nicht grün sind (leer = alle grün).
+
+    Je Name zählt der jüngste Lauf: ein wiederholter grüner Lauf hebt ein früheres Rot auf.
+    """
+    runs = (api(f'repos/{repo}/commits/{sha}/check-runs?per_page=100') or {}).get('check_runs', [])
+    latest = {}
+    for check in runs:
+        name = check.get('name')
+        if name in REQUIRED_CHECKS and (name not in latest or check.get('id', 0) > latest[name].get('id', 0)):
+            latest[name] = check
+    return [name for name in REQUIRED_CHECKS
+            if latest.get(name, {}).get('conclusion') != 'success']
+
+
 def is_on_release_line(repo, sha):
     """Ob der Commit auf `main` oder einem Zweig `release/x.y` liegt (E39, Hotfix)."""
     branches = ['main']
@@ -204,6 +223,10 @@ def plan(env, today_value=None, pubspec='pubspec.yaml'):
 
     if channel == 'nightly':
         date = today_value or today()
+        if scheduled and not official:
+            # Ein Fork mit eingeschalteten Actions baut nachts nicht alle drei Plattformen umsonst.
+            result.update(build='false', reason='nicht das offizielle Repository')
+            return result
         if scheduled and not nightly_due(repo, sha):
             result.update(build='false', reason='keine neuen Commits seit der letzten Nightly')
             return result
@@ -222,6 +245,12 @@ def plan(env, today_value=None, pubspec='pubspec.yaml'):
         result['tag'] = tag_ref
 
     if publish:
+        # Veröffentlicht wird nur, was Checks geprüft hat: Der Release-Workflow selbst
+        # prüft und testet nicht noch einmal (E39, Datenschutz in jeder Nightly).
+        failed = failed_checks(repo, sha)
+        if failed:
+            raise ReleaseError(f'Auf {sha[:12]} sind die Prüfungen nicht grün: {", ".join(failed)}. '
+                               'Erst Checks abwarten oder neu starten.')
         if api(f'repos/{repo}/releases/tags/{result["tag"]}') is not None:
             raise ReleaseError(f'Zum Tag {result["tag"]} gibt es schon ein Release.')
         result['publish'] = 'true'

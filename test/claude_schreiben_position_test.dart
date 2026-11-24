@@ -186,6 +186,28 @@ void main() {
     await ordner.delete(recursive: true);
   }
 
+  test('Bereits am Anfang: keine Freigabe zum Verschieben', () async {
+    final (d, ordner, moodle, freigaben) = await vorbereiten(stufe: Bestaetigungen.alle);
+    d.reihenfolge..remove(20)..insert(0, 20);
+    final titel = <String>[];
+    freigaben.addListener(() {
+      final frage = freigaben.aktuell;
+      if (frage != null) {
+        titel.add(frage.titel);
+        scheduleMicrotask(() => freigaben.entscheiden(true));
+      }
+    });
+    try {
+      final bericht = await claudeSchreiben(moodle, freigaben, kurs: 12, inhalt: 'Neu', arbeitsordner: ordner.path);
+      expect(d.reihenfolge, [20, 10, 30]);
+      expect(d.verschiebungen, 0);
+      expect(titel, isNot(contains('Verschieben?')));
+      expect(bericht, contains('Position am Abschnittsanfang geprüft. verified: true'));
+    } finally {
+      await aufraeumen(d, ordner, moodle);
+    }
+  });
+
   test('Abgelehnte Verschiebung lässt die Reihenfolge unverändert', () async {
     final (d, ordner, moodle, freigaben) = await vorbereiten(
       stufe: Bestaetigungen.mittel,
@@ -253,8 +275,9 @@ void main() {
       final frage = freigaben.aktuell;
       if (frage != null) {
         scheduleMicrotask(() {
-          if (frage.titel == 'Verschieben?')
+          if (frage.titel == 'Verschieben?') {
             d.verzeichnisname = 'Anderes Verzeichnis';
+          }
           freigaben.entscheiden(true);
         });
       }

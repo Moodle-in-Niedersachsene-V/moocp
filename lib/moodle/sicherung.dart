@@ -919,6 +919,7 @@ Future<String> _geladenePruefen(Vorgaenge vorgaenge, Vorgang vg, File ziel, int 
       text: '');
   return [
     'Gesichert: ${vg.datei} ($bytes Bytes, Nummer ${vg.id}). verified: true',
+    if (vg.dateiname != null) 'Name der Datei in Moodle (für sicherung_loeschen): ${vg.dateiname}',
     archivPruefbericht(befund.ungeprueft),
     if (befund.code.isNotEmpty)
       'Achtung: Die Datei enthält Code im Text oder in Dateien (${befund.code.length} '
@@ -975,7 +976,8 @@ String _zeile(Vorgang v) {
   final hinweis = v.text.isEmpty ? '' : '\n${v.text}';
   final wer = v.auswahl ?? 'cmid ${v.cmid}';
   final folge = _offen(v) ? '\nFolgeaufruf: sicherung_status ${v.id}' : '';
-  return '${v.id} · Kurs ${v.kurs} · $wer · ${v.stand.text} · ${v.datei}$verified$hinweis$folge';
+  final inMoodle = v.dateiname != null && !_offen(v) ? '\nName der Datei in Moodle: ${v.dateiname}' : '';
+  return '${v.id} · Kurs ${v.kurs} · $wer · ${v.stand.text} · ${v.datei}$verified$hinweis$inMoodle$folge';
 }
 
 bool _offen(Vorgang v) => v.wiederherstellung != null

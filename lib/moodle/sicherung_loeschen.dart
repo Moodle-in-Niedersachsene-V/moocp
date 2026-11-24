@@ -304,7 +304,7 @@ Future<String> _ergebnis(
     return 'Nicht geprüft: Der Sicherungsbereich ließ sich nach dem Speichern nicht lesen. '
         '${ausgang ?? ''} Mit sicherung_status und der Seite Wiederherstellen in Moodle nachsehen. verified: false';
   }
-  final u = bereichsUnterschied(bleiben, jetzt.namen);
+  final u = bereichsUnterschied(bleiben, [for (final n in jetzt.namen) if (n != dateiname) n]);
   final weg = !jetzt.namen.contains(dateiname);
   if (weg && u.fehlt.isEmpty && u.neu.isEmpty) {
     if (bleiben.isEmpty) {

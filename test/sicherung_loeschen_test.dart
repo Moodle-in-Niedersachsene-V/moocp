@@ -66,7 +66,7 @@ class _Moodle {
         ];
         final q = r.uri.queryParameters;
         antwort = _seite(
-          '<form class="mform" action="/backup/backupfilesedit.php?currentcontext=${q['currentcontext']}&amp;contextid=${q['contextid']}&amp;component=user&amp;filearea=backup" method="post">'
+          '<form class="mform" action="/backup/backupfilesedit.php" method="post">'
           '<input type="hidden" name="sesskey" value="sk"><input type="hidden" name="_qf__backup_files_edit_form" value="1">'
           '<input type="hidden" name="files_filemanager" id="id_files_filemanager" value="9001">'
           '<input type="hidden" name="contextid" value="${q['contextid']}"><input type="hidden" name="currentcontext" value="${q['currentcontext']}">'
@@ -173,7 +173,7 @@ void main() {
       expect(zugang.erlaubt('GET', get), isTrue);
       expect(zugang.erlaubt('GET', Uri.parse(get.toString().replaceFirst('filearea=backup', 'filearea=course'))), isFalse);
       expect(zugang.erlaubt('GET', Uri.parse('/backup/backupfilesedit.php?currentcontext=55&contextid=77&filearea=backup&component=user')), isFalse);
-      final post = Uri.parse('/backup/backupfilesedit.php?currentcontext=55&contextid=77&component=user&filearea=backup');
+      final post = Uri.parse('/backup/backupfilesedit.php');
       List<MapEntry<String, String>> felder([Map<String, String> extra = const {}]) => [
             const MapEntry('sesskey', 'sk'),
             const MapEntry('_qf__backup_files_edit_form', '1'),
@@ -189,7 +189,7 @@ void main() {
       expect(zugang.erlaubt('POST', post, felder()), isTrue);
       expect(zugang.erlaubt('POST', post, felder({'fremd': '1'})), isFalse);
       expect(zugang.erlaubt('POST', post, [for (final e in felder()) e.key == 'filearea' ? const MapEntry('filearea', 'course') : e]), isFalse);
-      expect(zugang.erlaubt('POST', Uri.parse(post.toString().replaceFirst('filearea=backup', 'filearea=course')), felder()), isFalse);
+      expect(zugang.erlaubt('POST', Uri.parse('/backup/backupfilesedit.php?currentcontext=55&contextid=77&component=user&filearea=course'), felder()), isFalse);
     });
   });
 

@@ -949,12 +949,16 @@ class MoodleZugang {
       'POST',
       r'^/backup/backupfilesedit\.php$',
       'Sicherungsbereich: Dateimanager speichern',
+      // Gemessen (Spike, Moodle 4.5): Das Formular sendet ohne Query (moodleform schneidet
+      // sie von der Adresse ab); Kontext, Bereich und Rücksprung stehen nur in den Feldern.
+      // Mit Query gelten dieselben Werte wie beim Öffnen.
       parameter: (q) =>
-          _nurSchluessel(q, {'currentcontext', 'contextid', 'filearea', 'component', 'returnurl'}) &&
-          _zahl(q['currentcontext']) &&
-          _zahl(q['contextid']) &&
-          q['filearea'] == 'backup' &&
-          q['component'] == 'user',
+          q.isEmpty ||
+          (_nurSchluessel(q, {'currentcontext', 'contextid', 'filearea', 'component', 'returnurl'}) &&
+              _zahl(q['currentcontext']) &&
+              _zahl(q['contextid']) &&
+              q['filearea'] == 'backup' &&
+              q['component'] == 'user'),
       formular: (f) =>
           f.every(
             (e) => const {

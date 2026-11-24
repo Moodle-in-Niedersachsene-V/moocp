@@ -1217,7 +1217,7 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Löscht die eine Datei, die eine Sicherung der App (sichern_aktivitaet, sichern_auswahl) im '
           'persönlichen Sicherungsbereich in Moodle zurückgelassen hat, nach Freigabe in der App. Die Kopie im '
-          'Sicherungsordner der App bleibt. Nummer und Dateiname (wie die Antwort der Sicherung ihn nennt) '
+          'Sicherungsordner der App bleibt. Nummer und Dateiname in Moodle (wie die Antwort der Sicherung ihn nennt) '
           'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
           'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
           'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen noch unter ihrem Namen '
@@ -1226,7 +1226,7 @@ class McpDienst implements AufrufKontext {
       parameter: {
         'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),
         'name': JsonSchema.string(
-          description: 'Dateiname der Sicherung in Moodle (setting_root_filename, steht in der Antwort der Sicherung)',
+          description: 'Dateiname der Sicherung in Moodle, nicht der im Sicherungsordner (steht als „Name der Datei in Moodle“ in der Antwort der Sicherung und in sicherung_status)',
         ),
       },
       pflicht: ['id', 'name'],

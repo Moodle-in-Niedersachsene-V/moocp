@@ -133,7 +133,7 @@ release/0.13   A ── F                     F = F′ cherry-picked → tag v0.
 
 1. Fix the bug on `main` with a normal PR (F′). The next nightly has it.
 2. If `release/0.13` does not exist yet, create it from the stable tag: `git switch -c release/0.13 v0.13.0`, push it.
-3. On a branch from `release/0.13`, cherry-pick only the fix: `git cherry-pick -x <commit of F′>`. `-x` notes the original commit in the message. Because a fix is small, conflicts are rare; if there is one, resolve it like a merge conflict. Open the PR against `release/0.13` (kind Ask), bump the patch version in `pubspec.yaml` and add the `CHANGELOG.md` line.
+3. On a branch from `release/0.13`, cherry-pick only the fix: `git cherry-pick -x <commit of F′>`. `-x` notes the original commit in the message. Because a fix is small, conflicts are rare; if there is one, resolve it like a merge conflict. If the release branch has no `.github/workflows/checks.yml` yet (it was cut before the checks existed), cherry-pick the commit that added it first; otherwise the required checks never report and the PR stays blocked. Open the PR against `release/0.13` (kind Ask), bump the patch version in `pubspec.yaml` and add the `CHANGELOG.md` line.
 4. After the merge, tag the branch `v0.13.1` and run the release workflow for that tag. No waiting period: the fix was already tested on `main`.
 
 Stable users get 0.13.1. Nightly users already have the fix and are not offered it, because 0.13.1 is lower than 0.14.0-nightly. A release branch is never merged back into `main`; the next hotfix of the same version continues on it.
@@ -142,6 +142,7 @@ Stable users get 0.13.1. Nightly users already have the fix and are not offered 
 
 These settings carry the rules; changing them is a rule change (Ask):
 
-- `main`: PR required, required status checks `flutter analyze` and `flutter test`, required approvals 0, review from code owners not required, no force-push, no deletion. Ask relies on the agreement between the maintainers; if that proves too loose, "require review from code owners" is switched on again.
+- `main`: PR required, required status checks `flutter analyze` and `flutter test` (the job names of the `Checks` workflow, which runs on Linux for every PR and every push to `main`; rename a job only together with this rule), required approvals 0, review from code owners not required, no force-push, no deletion. Ask relies on the agreement between the maintainers; if that proves too loose, "require review from code owners" is switched on again.
 - `release/*`: same, but one approval required.
 - Environment `stable`: required reviewer is the other maintainer; the person who started the run cannot approve it.
+- Workflows: `Checks` (`flutter analyze`, `flutter test`) runs automatically on every PR and every push to `main`, Linux only. Builds and tests on Windows and macOS run only on request, never automatically (their runners are scarce and slow): `python3 tool/ci_bau.py <platforms>` from a branch, the commit markers `[ci:linux]`, `[ci:windows]`, `[ci:macos]`, or "Run workflow" with `platform` and `task`. Details in the README (part 4, "Prüfen und Bauen mit GitHub Actions"). Workflows use pinned major versions of actions and `permissions: contents: read`.

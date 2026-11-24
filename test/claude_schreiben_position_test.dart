@@ -208,6 +208,25 @@ void main() {
     }
   });
 
+  test('Abgelehnte Neuanlage meldet, dass nichts angelegt wurde', () async {
+    final (d, ordner, moodle, freigaben) = await vorbereiten(stufe: Bestaetigungen.alle);
+    d.vorhanden = false;
+    d.reihenfolge.remove(20);
+    freigaben.addListener(() {
+      if (freigaben.aktuell != null) {
+        scheduleMicrotask(() => freigaben.entscheiden(false));
+      }
+    });
+    try {
+      final bericht = await claudeSchreiben(moodle, freigaben, kurs: 12, inhalt: 'Neu', arbeitsordner: ordner.path);
+      expect(bericht, contains('Nicht angelegt'));
+      expect(bericht, isNot(contains('nicht vollständig geprüft')));
+      expect(d.reihenfolge, [10, 30]);
+    } finally {
+      await aufraeumen(d, ordner, moodle);
+    }
+  });
+
   test('Abgelehnte Verschiebung lässt die Reihenfolge unverändert', () async {
     final (d, ordner, moodle, freigaben) = await vorbereiten(
       stufe: Bestaetigungen.mittel,

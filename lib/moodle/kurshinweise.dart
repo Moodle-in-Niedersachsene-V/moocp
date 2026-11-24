@@ -385,6 +385,8 @@ Future<String> claudeMitreiten(MoodleZugang moodle, KursStruktur k, {int? abschn
   }
 }
 
+/// Verschiebt nur nach Prüfung des gesamten Abschnitts; die allgemeine
+/// Verschiebung prüft nicht die Reihenfolge aller mitbetroffenen Aktivitäten.
 Future<String> _claudeAnAnfang(
   MoodleZugang moodle,
   Freigaben freigaben,
@@ -501,7 +503,10 @@ Future<String> claudeSchreiben(
         arbeitsordner: arbeitsordner,
         ordner: q.path,
         einstellungen: const {'display': '1', 'showdescription': true});
-    if (!ok || cmid == null) {
+    if (cmid == null) {
+      return bericht;
+    }
+    if (!ok) {
       return 'Das Anlegen des Verzeichnisses wurde nicht vollständig geprüft. Position nicht geändert.\n$bericht';
     }
     final position = await _claudeAnAnfang(

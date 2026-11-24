@@ -49,8 +49,9 @@ Geschrieben wird `CLAUDE.md` mit `claude_schreiben`; das Verzeichnis entsteht
 dabei von selbst. Steht es nicht am Anfang des Abschnitts, verschiebt das
 Werkzeug es dorthin; dafür gilt die reguläre Freigabe zum Verschieben. Die
 Antwort meldet, ob auch die Position geprüft ist. Die weiteren Dateien erreichst
-du über die cmid des Verzeichnisses, die in jeder Fassung steht: `aktivitaet_lesen(cmid)` holt sie
-in den Arbeitsordner, `aendern` schreibt sie zurück — hinzufügen, ersetzen,
+du über die cmid des Verzeichnisses, die in jeder Fassung steht:
+`aktivitaet_lesen(cmid)` holt sie in den Arbeitsordner, `aendern` schreibt sie
+zurück — hinzufügen, ersetzen,
 entfernen in `bereiche/files/` wie bei jedem Verzeichnis. Das ganze
 Verzeichnis entfernt `loeschen`.
 

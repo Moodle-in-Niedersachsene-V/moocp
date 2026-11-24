@@ -52,7 +52,6 @@ jobs:
           COVERED: ${{ steps.covered.outputs.covered }}
         run: echo "matrix=$(python tool/ci_bau.py --matrix)" >> "$GITHUB_OUTPUT"
   desktop:
-    name: ${{ matrix.platform }}
     needs: select
     if: needs.select.outputs.matrix != '{"include":[]}'
     strategy:

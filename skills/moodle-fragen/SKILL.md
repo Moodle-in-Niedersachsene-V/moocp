@@ -370,7 +370,9 @@ Was dort steht, fragst du nicht noch einmal. Fehlt eine Angabe, die der Auftrag 
 **Der Steckbrief steht nur in der Fassung des Kurses und nur mit dem, was für den ganzen Kurs gilt.** Was eine Lernsituation betrifft, etwa Lernfeld, Zeitrichtwert oder welche Phase im Computerraum läuft, steht in ihrer SchuCu-Tabelle und ihrer Handreichung. Eine Fassung im Abschnitt wiederholt das nicht; sie hält nur eine Abweichung fest, für die dort kein Platz ist.
 
 Geschrieben wird `CLAUDE.md` mit `claude_schreiben`; das Verzeichnis entsteht
-dabei von selbst. Die weiteren Dateien erreichst du über die cmid des
+dabei von selbst. Steht es nicht am Anfang des Abschnitts, verschiebt das
+Werkzeug es dorthin; dafür gilt die reguläre Freigabe zum Verschieben. Die
+Antwort meldet, ob auch die Position geprüft ist. Die weiteren Dateien erreichst du über die cmid des
 Verzeichnisses, die in jeder Fassung steht: `aktivitaet_lesen(cmid)` holt sie
 in den Arbeitsordner, `aendern` schreibt sie zurück — hinzufügen, ersetzen,
 entfernen in `bereiche/files/` wie bei jedem Verzeichnis. Das ganze

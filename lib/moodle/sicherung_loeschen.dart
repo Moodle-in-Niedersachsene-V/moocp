@@ -35,8 +35,7 @@
 // gelöscht, 70 und 69 übrige Dateien des Bereichs danach zurückgelesen. Gemessen: Der Dateimanager
 // sendet ohne Query; `contextid` ist der Benutzerkontext, `currentcontext` der Kurskontext der
 // Sicherung. Der Dateiname in Moodle (setting_root_filename) ist nicht der im Sicherungsordner.
-// Nicht gemessen: ein Abbruch in der Lücke zwischen letztem Vergleich und Speichern. Die Seiten und Felder, die sich als Annahme herausstellen, stehen
-// als UNGEMESSEN im Code.
+// Nicht gemessen: ein Abbruch in der Lücke zwischen letztem Vergleich und Speichern.
 
 import 'dart:convert';
 
@@ -219,7 +218,7 @@ Future<String> sicherungLoeschen(
         'Bitte noch einmal von vorn.');
   }
 
-  // 4. Entwurf. UNGEMESSEN: die Feldnamen des Formulars folgen Moodles Quelltext.
+  // 4. Entwurf. Die Felder des Formulars sind auf der Testinstanz gemessen.
   final f = await formularHolen(
     moodle,
     dateimanagerAdresse(kontext: kontext, benutzerKontext: stand.benutzerKontext),

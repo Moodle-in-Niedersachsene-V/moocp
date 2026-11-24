@@ -88,15 +88,32 @@ void main() {
 
     test('unbekannte Pluginfelder bleiben bei Änderungen erhalten, bekannte Werte werden validiert', () {
       final e = Einstellungen.aus({
-        'plugins': {'beispiel': {'version': '1', 'pruefsumme': 'abc', 'zugestimmt': true, 'neu': [1, null]}},
+        'plugins': {
+          'beispiel': {'version': '1', 'pruefsumme': 'abc', 'zugestimmt': true, 'neu': [1, null]},
+          'ungueltig': {'version': '1', 'pruefsumme': 'abc', 'zugestimmt': 'ja'},
+        },
         'pluginUpdates': {'beispiel': {'aus': 'ungültig', 'neu': {'x': true}}},
       }, _standard());
       expect(e.pluginUpdates['beispiel']!.aus, isFalse);
+      expect(e.plugins.containsKey('ungueltig'), isFalse);
       e.plugins['beispiel'] = e.plugins['beispiel']!.mitProfilen({'standard'});
       e.pluginUpdates['beispiel'] = e.pluginUpdates['beispiel']!.mit(aus: true);
       final j = e.zuJson();
       expect((j['plugins'] as Map)['beispiel']['neu'], [1, null]);
       expect((j['pluginUpdates'] as Map)['beispiel'], {'aus': true, 'neu': {'x': true}});
+    });
+
+    test('unbekannte Profilfelder bleiben auch bei gleichen Kennungen beim jeweiligen Profil', () {
+      final e = Einstellungen.aus({
+        'profile': [
+          {..._a.toJson(), 'neu': 'erstes'},
+          {..._a.toJson(), 'neu': 'zweites'},
+        ],
+      }, _standard());
+      e.profile = [e.profile.last.copyWith(name: 'Neu'), e.profile.first];
+      final profile = e.zuJson()['profile'] as List;
+      expect(profile.map((p) => (p as Map)['neu']), ['zweites', 'erstes']);
+      expect((profile.first as Map)['name'], 'Neu');
     });
 
     test('fehlender Port und Servername werden vergeben, Namen bleiben eindeutig', () {

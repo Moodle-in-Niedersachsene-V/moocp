@@ -26,14 +26,12 @@ class Einstellungen {
     'updateErwartet', 'plugins', 'pluginUpdates', 'pluginSkillOrdner',
     'fremdeSkillOrdner', 'skillFehlerGesehen', 'schnittstelleGesehen',
   };
-  static const _profilFelder = {'kennung', 'name', 'adresse', 'port', 'mcpName', 'bestaetigungen', 'schluessel'};
   static const _pluginFelder = {'version', 'pruefsumme', 'zugestimmt', 'profile', 'werkzeuge'};
   static const _updateFelder = {'aus', 'zuletzt'};
 
   // Nur unbekannte Felder aufbewahren: bekannte, auch ungültige Werte dürfen
   // beim Speichern die validierten Werte oder deren Weglassen nicht überlagern.
   Map<String, Object?> _unbekannt = {};
-  Map<String, Map<String, Object?>> _unbekannteProfile = {};
   Map<String, Map<String, Object?>> _unbekanntePlugins = {};
   Map<String, Map<String, Object?>> _unbekannteUpdates = {};
 
@@ -44,6 +42,7 @@ class Einstellungen {
   static Map<String, Map<String, Object?>> _resteJeEintrag(Object? wert, Set<String> bekannt) => wert is Map
       ? {for (final e in wert.entries) if (e.key is String) e.key as String: _rest(e.value, bekannt)}
       : {};
+
   /// [moodleAdresse] ist der Altbestand eines einzelnen Moodle und wird zum
   /// ersten Profil ([profile]). Mit [profile] gewinnt die Liste.
   Einstellungen({
@@ -108,13 +107,9 @@ class Einstellungen {
         mcp = '$basis-${zaehler++}';
       }
       namen.add(mcp);
-      ergebnis.add(Profil(
-        kennung: p.kennung,
-        name: p.name,
-        adresse: p.adresse,
+      ergebnis.add(p.copyWith(
         port: port,
         mcpName: mcp,
-        bestaetigungen: p.bestaetigungen,
         schluessel: p.istStandard
             ? ''
             : p.schluessel.isNotEmpty
@@ -310,11 +305,6 @@ class Einstellungen {
       schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
     ergebnis._unbekannt = _rest(j, _bekannt);
-    ergebnis._unbekannteProfile = {
-      if (gespeicherteProfile != null)
-        for (final p in gespeicherteProfile)
-          if (p is Map && p['kennung'] is String) p['kennung'] as String: _rest(p, _profilFelder),
-    };
     ergebnis._unbekanntePlugins = _resteJeEintrag(j['plugins'], _pluginFelder);
     ergebnis._unbekannteUpdates = _resteJeEintrag(j['pluginUpdates'], _updateFelder);
     return ergebnis;
@@ -324,7 +314,7 @@ class Einstellungen {
   Map<String, Object?> zuJson() => {
         ..._unbekannt,
         'moodleAdresse': moodleAdresse,
-        'profile': [for (final p in profile) {...?_unbekannteProfile[p.kennung], ...p.toJson()}],
+        'profile': [for (final p in profile) p.toJson()],
         'port': port,
         'schluessel': schluessel,
         'bestaetigungen': bestaetigungen.text,

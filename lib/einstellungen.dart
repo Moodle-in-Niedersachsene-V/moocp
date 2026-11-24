@@ -222,21 +222,22 @@ class Einstellungen {
     return List.generate(32, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
   }
 
-  static Future<Einstellungen> laden() async {
+  static Future<Einstellungen> laden({File? datei}) async {
+    final quelle = datei ?? _datei;
     final standard = Einstellungen(
       moodleAdresse: '',
       schluessel: neuerSchluessel(),
     );
     try {
-      if (await _datei.exists()) {
-        final j = jsonDecode(await _datei.readAsString()) as Map<String, dynamic>;
+      if (await quelle.exists()) {
+        final j = jsonDecode(await quelle.readAsString()) as Map<String, dynamic>;
         final e = Einstellungen.aus(j, standard);
         // Frisch vergebene Schlüssel gleich festhalten: Sonst bekäme das
         // Profil bei jedem Start einen neuen, und die Einträge in den
         // KI-Werkzeugen wären jedes Mal veraltet.
         if (schluesselFehlen(j)) {
           try {
-            await e.speichern();
+            await e._speichern(quelle);
           } catch (_) {
             // Nicht schreibbar: Die Schlüssel gelten für diesen Lauf; der
             // Fall nach dem catch unten (Standardwerte schreiben) ist es nicht.
@@ -247,7 +248,7 @@ class Einstellungen {
     } catch (_) {
       // Kaputte Datei: mit den Standardwerten weiter und beim Speichern ersetzen.
     }
-    await standard.speichern();
+    await standard._speichern(quelle);
     return standard;
   }
 
@@ -332,8 +333,10 @@ class Einstellungen {
         if (schnittstelleGesehen.isNotEmpty) 'schnittstelleGesehen': (schnittstelleGesehen.toList()..sort()),
       };
 
-  Future<void> speichern() async {
-    await Directory(einstellungenOrdner).create(recursive: true);
-    await _datei.writeAsString(const JsonEncoder.withIndent('  ').convert(zuJson()));
+  Future<void> speichern() => _speichern(_datei);
+
+  Future<void> _speichern(File ziel) async {
+    await ziel.parent.create(recursive: true);
+    await ziel.writeAsString(const JsonEncoder.withIndent('  ').convert(zuJson()));
   }
 }

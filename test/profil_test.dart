@@ -1,5 +1,6 @@
 // Offline prüfbar: Instanzprofile (E31). Altbestand-Migration der
 // Einstellungen, Port und Servername je Profil, und die Registry der Zugänge.
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,23 @@ final _b = Profil(
 
 void main() {
   group('Altbestand und Einstellungen', () {
+    test('beschädigte Einstellungsdatei fällt auf Vorgaben zurück und wird ersetzt', () async {
+      final ordner = await Directory.systemTemp.createTemp('moocp_einstellungen_test_');
+      addTearDown(() => ordner.delete(recursive: true));
+      final datei = File('${ordner.path}/einstellungen.json');
+      await datei.writeAsString('{ ungültiges JSON');
+
+      final geladen = await Einstellungen.laden(datei: datei);
+
+      expect(geladen.profile, isEmpty);
+      expect(geladen.port, standardPort);
+      expect(geladen.bestaetigungen, Bestaetigungen.vorgabe);
+      expect(geladen.updatePruefen, isNull);
+      expect(geladen.schluessel, matches(RegExp(r'^[0-9a-f]{64}$')));
+      final erneut = await Einstellungen.laden(datei: datei);
+      expect(erneut.zuJson(), geladen.zuJson());
+    });
+
     test('nur moodleAdresse wird zum Standardprofil mit Port 47811 und Servername moodle', () {
       final e = Einstellungen.aus({'moodleAdresse': 'https://moodle.schule.example'}, _standard());
       expect(e.profile, hasLength(1));

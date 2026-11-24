@@ -37,10 +37,10 @@ String einstellungenOrdnerFuer(
     // Spezifikation verlangt, ein relativer Wert wird ignoriert), sonst
     // ~/.config.
     final xdg = umgebung['XDG_CONFIG_HOME'];
-    if (xdg != null && p.isAbsolute(xdg)) return p.join(xdg, 'moocp');
+    if (xdg != null && p.posix.isAbsolute(xdg)) return p.join(xdg, 'moocp');
     final heim = umgebung['HOME'];
-    if (heim == null || heim.isEmpty) {
-      throw StateError('Der Benutzerordner (HOME) ist nicht gesetzt; die Einstellungen können nicht gespeichert werden.');
+    if (heim == null || !p.posix.isAbsolute(heim)) {
+      throw StateError('Der absolute Benutzerordner (HOME) ist nicht gesetzt; die Einstellungen können nicht gespeichert werden.');
     }
     return p.join(heim, '.config', 'moocp');
   }

@@ -1,0 +1,37 @@
+# Die Prüfungen, die jede Änderung durchlaufen muss (CONTRIBUTING.md, „Repository settings“).
+# Die Namen der beiden Aufträge sind die Namen der erforderlichen Statusprüfungen
+# im Regelsatz von `main`: nicht umbenennen, ohne den Regelsatz anzupassen.
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  analyze:
+    name: flutter analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/flutter-setup
+      - run: flutter analyze
+  test:
+    name: flutter test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/flutter-setup
+      - name: Build client tests
+        run: python tool/test_ci_bau.py -v
+      - name: Complete test suite
+        run: flutter test --concurrency 2 --reporter expanded

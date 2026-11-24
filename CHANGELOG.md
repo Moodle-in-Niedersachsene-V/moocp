@@ -2,6 +2,7 @@
 
 ## 0.13.0
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
+- Entwicklung: Prüfung und Tests laufen für jeden Pull Request automatisch auf GitHub; Bauten für Linux, Windows und macOS lassen sich gezielt anfordern.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Neu: moocp für Linux (Debian 13), als Installer, AppImage und Debian-Paket (systemweit, mit Administratorrechten). Der Installer legt Startmenü-Eintrag und Verknüpfung an und lässt sich wieder entfernen.

@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Einrichtung: Auf dem Mac findet moocp Codex auch, wenn es nur in der ChatGPT-App installiert ist, und nennt es „Codex (ChatGPT-App oder CLI)“.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.

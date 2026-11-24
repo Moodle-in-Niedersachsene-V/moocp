@@ -20,6 +20,30 @@ import 'plugin/entscheidung.dart';
 import 'profil.dart';
 
 class Einstellungen {
+  static const _bekannt = {
+    'moodleAdresse', 'profile', 'port', 'schluessel', 'bestaetigungen',
+    'wahlSkills', 'werkzeugeAbgewaehlt', 'updatePruefen', 'updateZuletzt',
+    'updateErwartet', 'plugins', 'pluginUpdates', 'pluginSkillOrdner',
+    'fremdeSkillOrdner', 'skillFehlerGesehen', 'schnittstelleGesehen',
+  };
+  static const _profilFelder = {'kennung', 'name', 'adresse', 'port', 'mcpName', 'bestaetigungen', 'schluessel'};
+  static const _pluginFelder = {'version', 'pruefsumme', 'zugestimmt', 'profile', 'werkzeuge'};
+  static const _updateFelder = {'aus', 'zuletzt'};
+
+  // Nur unbekannte Felder aufbewahren: bekannte, auch ungültige Werte dürfen
+  // beim Speichern die validierten Werte oder deren Weglassen nicht überlagern.
+  Map<String, Object?> _unbekannt = {};
+  Map<String, Map<String, Object?>> _unbekannteProfile = {};
+  Map<String, Map<String, Object?>> _unbekanntePlugins = {};
+  Map<String, Map<String, Object?>> _unbekannteUpdates = {};
+
+  static Map<String, Object?> _rest(Object? wert, Set<String> bekannt) => wert is Map
+      ? {for (final e in wert.entries) if (e.key is String && !bekannt.contains(e.key)) e.key as String: e.value}
+      : {};
+
+  static Map<String, Map<String, Object?>> _resteJeEintrag(Object? wert, Set<String> bekannt) => wert is Map
+      ? {for (final e in wert.entries) if (e.key is String) e.key as String: _rest(e.value, bekannt)}
+      : {};
   /// [moodleAdresse] ist der Altbestand eines einzelnen Moodle und wird zum
   /// ersten Profil ([profile]). Mit [profile] gewinnt die Liste.
   Einstellungen({
@@ -267,7 +291,7 @@ class Einstellungen {
         profile[i] = profile[i].mitBestaetigungen(alteStufe);
       }
     }
-    return Einstellungen(
+    final ergebnis = Einstellungen(
       moodleAdresse: altAdresse,
       profile: profile,
       schluessel: j['schluessel'] as String? ?? standard.schluessel,
@@ -285,12 +309,22 @@ class Einstellungen {
       skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
       schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
+    ergebnis._unbekannt = _rest(j, _bekannt);
+    ergebnis._unbekannteProfile = {
+      if (gespeicherteProfile != null)
+        for (final p in gespeicherteProfile)
+          if (p is Map && p['kennung'] is String) p['kennung'] as String: _rest(p, _profilFelder),
+    };
+    ergebnis._unbekanntePlugins = _resteJeEintrag(j['plugins'], _pluginFelder);
+    ergebnis._unbekannteUpdates = _resteJeEintrag(j['pluginUpdates'], _updateFelder);
+    return ergebnis;
   }
 
   /// Der Inhalt der Datei, wie ihn [speichern] schreibt.
   Map<String, Object?> zuJson() => {
+        ..._unbekannt,
         'moodleAdresse': moodleAdresse,
-        'profile': [for (final p in profile) p.toJson()],
+        'profile': [for (final p in profile) {...?_unbekannteProfile[p.kennung], ...p.toJson()}],
         'port': port,
         'schluessel': schluessel,
         'bestaetigungen': bestaetigungen.text,
@@ -299,9 +333,9 @@ class Einstellungen {
         if (updatePruefen != null) 'updatePruefen': updatePruefen,
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
-        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
+        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: {...?_unbekanntePlugins[e.key], ...e.value.toJson()}},
         if (pluginUpdates.isNotEmpty)
-          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
+          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: {...?_unbekannteUpdates[e.key], ...e.value.toJson()}},
         if (pluginSkillOrdner.isNotEmpty) 'pluginSkillOrdner': (pluginSkillOrdner.toList()..sort()),
         if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
         if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),

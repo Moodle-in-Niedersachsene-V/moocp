@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Einstellungen: Beim Wechsel zwischen Programmversionen bleiben auch Einstellungen erhalten, die die aktuelle Version nicht kennt.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.

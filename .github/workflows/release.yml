@@ -13,8 +13,6 @@
 name: Release
 run-name: Release ${{ inputs.channel || 'nightly' }} (${{ github.event_name }}${{ inputs.publish == false && ', nur Bau' || '' }})
 on:
-  push: # TEMPORARY for the dry runs of this PR, removed before the PR is finished
-    branches: [ci/132-release-workflow]
   schedule:
     # Nicht zur vollen Stunde: Dort ist bei GitHub am meisten los (03:41 deutscher Zeit im Winter).
     - cron: '41 2 * * *'

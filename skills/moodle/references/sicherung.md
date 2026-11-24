@@ -29,7 +29,7 @@ Jede Sicherung lässt eine Datei im persönlichen Sicherungsbereich der Lehrkraf
 
 - **Bevor du es anbietest, sag der Lehrkraft das Risiko.** Moodle schreibt beim Speichern den ganzen Bereich neu und hat keinen Papierkorb. Die App vergleicht den Bereich noch einmal unmittelbar vor dem Speichern und bricht bei einer Abweichung ab, aber eine Datei, die in diesem Augenblick aus einer anderen Sitzung (etwa einer Sicherung im Browser) dazukommt, kann trotzdem verloren gehen. Rate zu einem Zeitpunkt, an dem die Lehrkraft nirgends sonst sichert.
 - Läuft gerade eine Sicherung oder Wiederherstellung, lehnt das Werkzeug ab: erst mit `sicherung_status` abwarten.
-- Nach `verified: true` stimmt der Bereich: genau diese Datei fehlt, alle übrigen sind unverändert da; lies nicht selbst nach. Meldet die Antwort `verified: false` oder eine Abweichung, gib sie der Lehrkraft unverändert weiter, nenne die fehlenden Dateien und wiederhole den Aufruf nicht von selbst.
+- Nach `verified: true` stimmt der Bereich: genau diese Datei fehlt und alle übrigen stehen noch unter ihrem Namen im Bereich (Inhalte werden nicht verglichen); lies nicht selbst nach. War es die einzige Datei, meldet die App „nicht geprüft“: Lass die Lehrkraft die Seite Wiederherstellen in Moodle ansehen. Meldet die Antwort `verified: false` oder eine Abweichung, gib sie der Lehrkraft unverändert weiter, nenne die fehlenden Dateien und wiederhole den Aufruf nicht von selbst.
 
 ## Die Antwortfrist: „läuft weiter“ ist kein Fehler
 

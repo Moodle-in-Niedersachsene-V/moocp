@@ -1220,8 +1220,8 @@ class McpDienst implements AufrufKontext {
           'Sicherungsordner der App bleibt. Nummer und Dateiname (wie die Antwort der Sicherung ihn nennt) '
           'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
           'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
-          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen unverändert '
-          'da sind. Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
+          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen noch unter ihrem Namen '
+          'da sind (Inhalte werden nicht verglichen). Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
           'das nennt die Freigabe. Während einer Sicherung oder Wiederherstellung in der App wird nichts gelöscht.',
       parameter: {
         'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),

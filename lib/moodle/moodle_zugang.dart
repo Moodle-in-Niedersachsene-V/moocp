@@ -930,7 +930,9 @@ class MoodleZugang {
     // sicherung_loeschen.dart). Nur dieser Bereich (component=user, filearea=backup),
     // und die Rücksprungadresse ist die Seite Wiederherstellen desselben Kontexts.
     // Das Speichern schreibt den GANZEN Bereich neu; die Regel kann den Stand nicht
-    // vergleichen, das tut der Aufrufer vor und nach dem Speichern.
+    // vergleichen, das tut der Aufrufer vor und nach dem Speichern. Dass `contextid` der
+    // eigene Benutzerkontext ist, prüft die Regel nicht (nur eine Zahl): Der Aufrufer liest sie
+    // von der eigenen Seite Wiederherstellen, und Moodles Rechteprüfung bleibt maßgeblich.
     Erlaubt(
       'GET',
       r'^/backup/backupfilesedit\.php$',

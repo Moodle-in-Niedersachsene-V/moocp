@@ -31,9 +31,9 @@
 //   7. Rückleseprobe: Der Bereich muss genau den Stand ohne die eine Datei zeigen.
 //      Fehlt etwas anderes, nennt die Antwort es und `verified: false`.
 //
-// Gemessen ist der Ablauf an Moodles Quelltext (backup/backupfilesedit.php und
-// repository/draftfiles_ajax.php, Moodle 4.5); die Antworten sind je Instanz noch
-// nicht gemessen. Die Seiten und Felder, die sich als Annahme herausstellen, stehen
+// Umgesetzt nach Moodles Quelltext (backup/backupfilesedit.php und
+// repository/draftfiles_ajax.php, Moodle 4.5) und gegen eine Attrappe getestet; auf einer
+// Instanz ist der Ablauf nicht durchgespielt. Die Seiten und Felder, die sich als Annahme herausstellen, stehen
 // als UNGEMESSEN im Code.
 
 import 'dart:convert';
@@ -108,8 +108,10 @@ String dateimanagerAdresse({required int kontext, required int benutzerKontext})
     '/backup/backupfilesedit.php?currentcontext=$kontext&contextid=$benutzerKontext'
     '&filearea=backup&component=user&returnurl=${Uri.encodeQueryComponent(_bereichsAdresse(kontext))}';
 
-/// Liest den Bereich. [leerOk]: Eine Seite ohne jeden Link ist ein leerer Bereich (nur beim
-/// Rücklesen nach dem Löschen); sonst bricht das Lesen ab, weil dann keine Datei zu löschen ist.
+/// Liest den Bereich. [leerOk]: Eine Seite ohne jeden Link wird als leerer Bereich geliefert
+/// (nur beim Rücklesen nach dem Löschen); sonst bricht das Lesen ab, weil dann keine Datei zu
+/// löschen ist. Ob die Seite wirklich einen leeren Bereich zeigt oder eine Fehlerseite ist, lässt
+/// sich nicht erkennen; das Rücklesen behandelt den Fall deshalb als nicht geprüft.
 Future<({int benutzerKontext, List<String> namen})> _bereichLesen(MoodleZugang moodle, int kontext,
     {bool leerOk = false}) async {
   final r = await moodle.lesen(_bereichsAdresse(kontext));
@@ -274,9 +276,10 @@ Future<String> sicherungLoeschen(
   }
   try {
     await moodle.senden(f.aktion, [...f.felder, const MapEntry('submitbutton', 'Änderungen speichern')]);
-  } on MoodleFehler {
-    // Ob Moodle gespeichert hat, zeigt erst das Rücklesen.
-    return await _ergebnis(moodle, kontext, id, dateiname, bleiben, ausgang: 'Moodle meldete beim Speichern einen Fehler.');
+  } catch (_) {
+    // Ob Moodle gespeichert hat, zeigt erst das Rücklesen; wiederholt wird nie.
+    return await _ergebnis(moodle, kontext, id, dateiname, bleiben,
+        ausgang: 'Das Speichern endete mit einem Fehler, ob Moodle es ausgeführt hat, ist offen.');
   }
 
   // 7. Rückleseprobe.
@@ -304,7 +307,13 @@ Future<String> _ergebnis(
   final u = bereichsUnterschied(bleiben, jetzt.namen);
   final weg = !jetzt.namen.contains(dateiname);
   if (weg && u.fehlt.isEmpty && u.neu.isEmpty) {
-    return 'Gelöscht: $dateiname (Sicherung $id). ${bleiben.isEmpty ? 'Der Sicherungsbereich enthält jetzt keine Datei mehr.' : 'Die übrigen ${bleiben.length} ${bleiben.length == 1 ? 'Datei ist' : 'Dateien sind'} im Sicherungsbereich zurückgelesen und unverändert.'} verified: true';
+    if (bleiben.isEmpty) {
+      return 'Nicht geprüft (Sicherung $id): Die Seite zeigt keine Datei mehr. Das passt zu einem leeren '
+          'Sicherungsbereich, lässt sich aber nicht von einer Seite ohne Dateiliste unterscheiden. ${ausgang ?? ''} '
+          'verified: false';
+    }
+    return 'Gelöscht: $dateiname (Sicherung $id). Die übrigen ${bleiben.length} ${bleiben.length == 1 ? 'Datei steht' : 'Dateien stehen'} '
+        'noch unter ihrem Namen im Sicherungsbereich; Inhalte wurden nicht verglichen. ${ausgang ?? ''} verified: true';
   }
   final teile = [
     if (!weg) 'Die Datei „$dateiname" steht noch im Sicherungsbereich.',

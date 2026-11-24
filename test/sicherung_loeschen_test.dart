@@ -28,6 +28,9 @@ class _Moodle {
   /// Moodle meldet Erfolg, löscht aber mehr, als im Entwurf fehlt.
   bool loeschtZuViel = false;
   bool ordnerImEntwurf = false;
+  bool speichernFehler = false;
+  bool entwurfBehaeltDatei = false;
+  bool entwurfOhneErsteDatei = false;
 
   Uri get basis => Uri.parse('http://127.0.0.1:${server.port}');
   String _seite(String body) => '<script>M.cfg = {"sesskey":"sk","courseId":12,"contextid":"55"};</script>$body';
@@ -56,6 +59,7 @@ class _Moodle {
       } else if (path == '/backup/backupfilesedit.php' && r.method == 'GET') {
         dateimanager++;
         entwurf = [...bereich];
+        if (entwurfOhneErsteDatei) entwurf = entwurf.sublist(1);
         final liste = [
           for (final n in entwurf) {'filename': n, 'filepath': '/'},
           if (ordnerImEntwurf) {'filename': 'Ordner', 'filepath': '/', 'type': 'folder'},
@@ -75,12 +79,17 @@ class _Moodle {
         var neu = [...entwurf];
         if (loeschtZuViel && neu.length > 1) neu = neu.sublist(1);
         bereich = neu;
+        if (speichernFehler) {
+          // Die Verbindung bricht ab, nachdem Moodle gespeichert hat.
+          (await r.response.detachSocket(writeHeaders: false)).destroy();
+          return;
+        }
         r.response.redirect(Uri.parse('/backup/restorefile.php?contextid=55'), status: 303);
         await r.response.close();
         return;
       } else if (path == '/repository/draftfiles_ajax.php' && r.uri.queryParameters['action'] == 'delete') {
         entwurfLoeschen++;
-        entwurf.remove(felder['filename']);
+        if (!entwurfBehaeltDatei) entwurf.remove(felder['filename']);
         beimEntwurfLoeschen?.call();
         antwort = jsonEncode({'filepath': '/', 'filename': felder['filename']});
       } else if (path == '/repository/draftfiles_ajax.php') {
@@ -205,12 +214,41 @@ void main() {
       expect(punkte, contains('verloren gehen'));
     });
 
-    test('letzte Datei: Bereich ist danach leer, verified: true', () async {
+    test('letzte Datei: Bereich ist danach leer, aber nicht von einer Fehlerseite zu unterscheiden', () async {
       moodle.bereich = ['ZZ-eigene.mbz'];
       final r = await loeschen();
       expect(moodle.bereich, isEmpty);
-      expect(r, contains('keine Datei mehr'));
-      expect(r, contains('verified: true'));
+      expect(r, contains('Nicht geprüft'));
+      expect(r, contains('verified: false'));
+      expect(r, isNot(contains('verified: true')));
+    });
+
+    test('Fehler beim Speichern: Rücklesen entscheidet, nie ein zweiter Versuch', () async {
+      moodle.speichernFehler = true;
+      final r = await loeschen();
+      expect(moodle.speichern, 1);
+      expect(r, contains('ob Moodle es ausgeführt hat'));
+      expect(r, contains('verified: true')); // Moodle hat trotz Fehlerantwort gespeichert, das Rücklesen zeigt es
+    });
+
+    test('Entwurf zeigt nach dem Entfernen nicht die übrigen Dateien: Abbruch vor dem Speichern', () async {
+      moodle.entwurfBehaeltDatei = true;
+      await expectLater(loeschen(), throwsA(isA<MoodleFehler>()));
+      expect(moodle.speichern, 0);
+      expect(moodle.bereich, hasLength(3));
+    });
+
+    test('Entwurf weicht schon vor dem Entfernen vom Bereich ab: Abbruch', () async {
+      moodle.entwurfOhneErsteDatei = true;
+      await expectLater(loeschen(), throwsA(isA<MoodleFehler>()));
+      expect(moodle.entwurfLoeschen, 0);
+      expect(moodle.speichern, 0);
+    });
+
+    test('Wiederherstellung als Vorgang wird abgewiesen', () async {
+      final w = await vorgaenge.neuWiederherstellung(kurs: 12, datei: 'z.mbz');
+      await expectLater(loeschen(id: w.id), throwsA(isA<MoodleFehler>()));
+      expect(moodle.dateimanager, 0);
     });
 
     test('abgelehnt: nichts geschrieben, der Dateimanager wird nicht einmal geöffnet', () async {

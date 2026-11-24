@@ -131,12 +131,13 @@ jobs:
           bash tool/linux_installer.sh
           bash tool/linux_appimage.sh
           bash tool/linux_deb.sh
+      # `moocp --version` schreibt unter Linux nichts nach stdout; die Version steht
+      # in den Assets des Baus, aus denen die App sie liest.
       - name: Version of the Linux build
         if: matrix.platform == 'linux'
         run: |
-          out="$(xvfb-run -a build/linux/x64/release/bundle/moocp --version)"
-          echo "moocp --version: $out"
-          [[ "$out" == "$VERSION"* ]]
+          cat build/linux/x64/release/bundle/data/flutter_assets/version.json
+          grep -q "\"version\":\"$VERSION\"" build/linux/x64/release/bundle/data/flutter_assets/version.json
       - name: create_installer.bat keeps CRLF
         if: matrix.platform == 'windows'
         run: |
@@ -160,12 +161,17 @@ jobs:
       - name: macOS disk image
         if: matrix.platform == 'macos'
         run: bash tool/mac_dmg.sh
+      # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
+      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. Geprüft wird nur, dass sie
+      # mit der Version aus pubspec.yaml beginnt.
       - name: Version of the macOS build
         if: matrix.platform == 'macos'
+        env:
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
         run: |
           out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
           echo "moocp --version: $out"
-          [[ "$out" == "$VERSION"* ]]
+          [[ "$out" == "$BASE_VERSION"* ]]
       - name: Check packages
         run: python tool/ci_release.py check-assets --version "$VERSION" --platform ${{ matrix.platform }}
       - name: Packages
@@ -175,8 +181,30 @@ jobs:
           path: installer/moocp_*
           if-no-files-found: error
           retention-days: 7
-  publish-nightly:
+  # Die Pakete aller drei Plattformen zusammen, wie ein Release sie bekäme: Erst wenn alle
+  # fünf da sind, darf veröffentlicht werden. Läuft auch ohne Veröffentlichen, damit ein
+  # Probelauf denselben Weg geht.
+  verify:
     needs: [plan, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: moocp-*
+          merge-multiple: true
+          path: assets
+      - name: Check all five packages
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: python tool/ci_release.py check-assets --version "$VERSION" --dir assets
+  publish-nightly:
+    needs: [plan, verify]
     if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'nightly'
     runs-on: ubuntu-24.04
     permissions:
@@ -207,7 +235,7 @@ jobs:
   # dass er die Nightly selbst lange genug benutzt hat (E39). Zwei Jobs statt eines, weil
   # `environment` nicht je nach Kanal ausbleiben kann.
   publish-stable:
-    needs: [plan, build]
+    needs: [plan, verify]
     if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'stable'
     runs-on: ubuntu-24.04
     environment: stable

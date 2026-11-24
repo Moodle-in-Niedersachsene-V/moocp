@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Neu: Testversionen (Nightlies) mit den neuesten Änderungen gibt es auf GitHub, für Windows, Linux und den Mac.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.

@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
 - Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.

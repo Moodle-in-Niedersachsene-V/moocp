@@ -751,6 +751,16 @@ final List<_Fall> _faelle = [
     r'\(ab-01-auftrag\)\s+"Infoblatt 1, Abschnitt 5": dort gibt es keinen Abschnitt 5',
   ),
   (
+    'Verweis auf einen riesigen Bereich',
+    _r(_ab1, _lies4, '<strong>Lies:</strong> Infoblatt 1, Abschnitte 1 bis 999999999999999999999.'),
+    r'\(ab-01-auftrag\)\s+"Infoblatt 1, Abschnitte 1 bis 999999999999999999999": dort gibt es keinen Abschnitt -1',
+  ),
+  (
+    'Aufgabe mit riesiger Nummer',
+    _r(_ab2, '<h3>Aufgabe 1 (', '<h3>Aufgabe 99999999999999999999 ('),
+    r'\(ab-02-umsetzung\)\s+Aufgaben -1, ',
+  ),
+  (
     'Verweis auf fehlende Abbildung',
     _r(_ab2, 'aus Abb. 1 auf Arbeitsblatt 1.', 'aus Abb. 2 auf Arbeitsblatt 1.'),
     r'dort gibt es keine Abb. 2',

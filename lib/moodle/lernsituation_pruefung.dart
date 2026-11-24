@@ -172,6 +172,10 @@ String textNorm(String t) => pyStrip(t.replaceAll('\xa0', ' ').replaceAll(_leer,
 
 bool _istZahl(String s) => _ziffern.hasMatch(s);
 
+/// Eine Ziffernfolge aus dem Entwurf als Zahl; zu lang für `int`: -1. Das passt auf
+/// keine Nummer und keine Summe und wird so zum Befund, statt die Prüfung abzubrechen.
+int _zahl(String s) => int.tryParse(s) ?? -1;
+
 final _nummernTeiler = pyRe(r',|\bund\b');
 final _nummernBereich = pyReGanz(r'\s*(\d+)\s*(?:bis|–|-)\s*(\d+)\s*');
 
@@ -181,11 +185,18 @@ List<int> _nummernListe(String s) {
   for (final teil in s.split(_nummernTeiler)) {
     final m = pyMatch(_nummernBereich, teil);
     if (m != null) {
-      for (var n = int.parse(m[1]!); n <= int.parse(m[2]!); n++) {
-        raus.add(n);
+      final von = _zahl(m[1]!), bis = _zahl(m[2]!);
+      // Einen Bereich über mehr als 1000 Nummern gibt es auf keinem Blatt; er wird
+      // nicht ausgeschrieben, sondern trifft nichts und wird so zum Befund.
+      if (von >= 0 && bis >= von && bis - von < 1000) {
+        for (var n = von; n <= bis; n++) {
+          raus.add(n);
+        }
+      } else {
+        raus.add(-1);
       }
     } else if (_istZahl(pyStrip(teil))) {
-      raus.add(int.parse(pyStrip(teil)));
+      raus.add(_zahl(pyStrip(teil)));
     }
   }
   return raus;
@@ -200,7 +211,7 @@ final _kennungDatei = pyRe(r'(AB|IB)-(\d+)-.*?(-hilfe|-vertiefung)?(-loesung)?\.
 (String?, bool) _kennung(String datei) {
   final m = pyMatch(_kennungDatei, datei);
   if (m == null) return (null, false);
-  final nr = int.parse(m[2]!);
+  final nr = _zahl(m[2]!);
   if (m[1] == 'AB' && nr == 0) return ('Handlungssituation', false);
   var k = '${m[1] == 'AB' ? 'Arbeitsblatt' : 'Infoblatt'} $nr';
   if (m[3] != null) k = '${m[3] == '-hilfe' ? 'Hilfe' : 'Vertiefung'} zu $k';
@@ -223,9 +234,9 @@ typedef _Gliederung = (List<int>, List<String>, List<int>);
 
 /// Nummerierte Abschnitte, Bildunterschriften und Aufgaben eines Blatts.
 _Gliederung _gliederung(String t) => (
-  [for (final n in findeGruppe(_abschnittKopf, t)) int.parse(n)],
+  [for (final n in findeGruppe(_abschnittKopf, t)) _zahl(n)],
   findeGruppe(_abbUnterschrift, t),
-  [for (final n in findeGruppe(_aufgabeKopf, t)) int.parse(n)],
+  [for (final n in findeGruppe(_aufgabeKopf, t)) _zahl(n)],
 );
 
 bool _listenGleich<T>(List<T> a, List<T> b) {
@@ -488,14 +499,14 @@ class _Pruefung {
         if (istTrenner(z) || z.length <= groesster) continue;
         final zeit = pyStrip(z[iz].replaceAll('*', ''));
         if (z.join(' ').toLowerCase().contains('summe')) {
-          summenzeile = _istZahl(zeit) ? int.parse(zeit) : null;
+          summenzeile = _istZahl(zeit) ? _zahl(zeit) : null;
           continue;
         }
         nr++;
         if (!_istZahl(zeit)) {
           befund(name, 'Ablaufplan Zeile $nr: Zeit ist keine Zahl (${pyRepr(zeit)})');
         } else {
-          summe += int.parse(zeit);
+          summe += _zahl(zeit);
         }
         if (ip >= 0 && pyStrip(zelle(z, ip)).isEmpty) {
           befund(name, 'Ablaufplan Zeile $nr: Phase fehlt');
@@ -778,9 +789,9 @@ class _Pruefung {
     final mm = _minuten.firstMatch(w);
     final us = _stunden.firstMatch(w);
     if (mm != null) {
-      richt = int.parse(mm[1]!);
+      richt = _zahl(mm[1]!);
     } else if (us != null) {
-      richt = int.parse(us[1]!) * _ustd;
+      richt = _zahl(us[1]!) * _ustd;
     }
     if (richt == null) {
       befund(name, 'Zeitrichtwert nicht lesbar (erwartet "n UStd" oder "n min")');
@@ -860,7 +871,7 @@ class _Pruefung {
       befund(name, 'keine Aufgabe in der Form <h3>Aufgabe n (n min · Sozialform · AFB x)</h3>');
       return [];
     }
-    final nummern = [for (final (nr, _) in aufgaben) int.parse(nr)];
+    final nummern = [for (final (nr, _) in aufgaben) _zahl(nr)];
     if (!_listenGleich(nummern, [for (var i = 1; i <= nummern.length; i++) i])) {
       befund(name, 'Aufgaben ${nummern.join(', ')} -- jedes Blatt zählt seine Aufgaben ab 1, ohne Lücke');
     }
@@ -876,7 +887,7 @@ class _Pruefung {
       if (m == null) {
         befund(name, 'Aufgabe $nr: Zeit fehlt oder nicht "n min" (${pyRepr(zeit)})');
       } else {
-        summe += int.parse(m[1]!);
+        summe += _zahl(m[1]!);
       }
       if (sozial.isEmpty) befund(name, 'Aufgabe $nr: Sozialform fehlt');
       if (pyMatch(_afb, afb) == null) {
@@ -886,7 +897,7 @@ class _Pruefung {
     final m = _zeitGesamt.firstMatch(t);
     if (m == null) {
       befund(name, 'Kopf: "Zeit gesamt: n min" fehlt');
-    } else if (int.parse(m[1]!) != summe) {
+    } else if (_zahl(m[1]!) != summe) {
       befund(name, 'Kopf sagt ${m[1]} min, die Aufgaben ergeben $summe');
     }
     platzhalter(name, t);
@@ -900,7 +911,7 @@ class _Pruefung {
     final t = lies(name);
     titel(name, t);
     fuerSich(name, t);
-    final n = [for (final x in findeGruppe(_aufgabeKopf, t)) int.parse(x)];
+    final n = [for (final x in findeGruppe(_aufgabeKopf, t)) _zahl(x)];
     if (n.length != blatt.length) {
       befund(name, 'Lösung hat ${n.length} Aufgabenabschnitte, das Blatt ${blatt.length}');
     } else if (!_listenGleich(n, blatt)) {
@@ -1651,7 +1662,7 @@ String? _pruefname(String name, Map<String, _Seite> belegt) {
   final m = pyMatch(_rolle, name);
   if (m == null) return null;
   final loes = m[1], zusatz = m[2], art = m[3], nr = m[4]!;
-  final kern = '${art == 'Arbeitsblatt' ? 'AB' : 'IB'}-${int.parse(nr).toString().padLeft(2, '0')}-x';
+  final kern = '${art == 'Arbeitsblatt' ? 'AB' : 'IB'}-${_zahl(nr).toString().padLeft(2, '0')}-x';
   final rest =
       (zusatz == 'Hilfe'
           ? '-hilfe'

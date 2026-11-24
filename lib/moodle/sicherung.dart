@@ -78,6 +78,7 @@ class Vorgang {
     this.wiederherstellung,
     this.wiederherstellungDatei,
     this.vorherCmids,
+    this.importierteAktivitaeten,
     this.wiederherstellungAktivitaeten,
     this.fingerabdruck,
     this.wiederholungVon,
@@ -130,6 +131,9 @@ class Vorgang {
   WiederherstellungStand? wiederherstellung;
   String? wiederherstellungDatei;
   List<int>? vorherCmids;
+
+  /// Beim Gegenlesen bestätigte Importziele; null bei Altvorgängen.
+  List<WiederhergestellteAktivitaet>? importierteAktivitaeten;
   List<ArchivAktivitaet>? wiederherstellungAktivitaeten;
 
   /// Doppelstart-Schutz: Inhalts- und Zielschlüssel (fingerabdruck) und
@@ -177,6 +181,9 @@ class Vorgang {
         'wiederherstellung_status': wiederherstellung?.name,
         'wiederherstellung_laufzeit': wiederherstellungDatei,
         'vorher_cmids': vorherCmids,
+        'importierte_aktivitaeten': importierteAktivitaeten
+        ?.map((a) => {'cmid': a.cmid, 'modul': a.modul, 'titel': a.titel})
+        .toList(),
         'wiederherstellung_aktivitaeten': wiederherstellungAktivitaeten?.map((a) => {'modul': a.modul, 'titel': a.titel}).toList(),
         'fingerabdruck': fingerabdruck,
         'wiederholung_von': wiederholungVon,
@@ -216,6 +223,21 @@ class Vorgang {
       wiederherstellung: WiederherstellungStand.aus(o['wiederherstellung_status'] as String?),
       wiederherstellungDatei: o['wiederherstellung_laufzeit'] as String?,
       vorherCmids: (o['vorher_cmids'] as List?)?.whereType<int>().toList(),
+      importierteAktivitaeten: (o['importierte_aktivitaeten'] as List?)
+          ?.whereType<Map>()
+          .where(
+            (a) =>
+                a['cmid'] is int &&
+                a['modul'] is String &&
+                a['titel'] is String,
+          )
+          .map(
+            (a) => (
+              cmid: a['cmid'] as int,
+              modul: a['modul'] as String,
+              titel: a['titel'] as String,
+            ),
+          ).toList(),
       wiederherstellungAktivitaeten: (o['wiederherstellung_aktivitaeten'] as List?)
           ?.whereType<Map>()
           .where((a) => a['modul'] is String && a['titel'] is String)
@@ -422,7 +444,27 @@ class Vorgaenge {
     await _speichern(v);
   }
 
-  Future<void> _speichern(Vorgang v) {
+  /// Hängt einen Befund unter der Speichersperre an den frischen Vorgang an.
+  /// Parallele Reparaturen verschiedener Aktivitäten dürfen einander nicht verdrängen.
+  /// Mit [ersetzt] (der Anfang der Befundzeile) fällt ein früherer Befund mit demselben
+  /// Anfang weg: Der Status wächst sonst mit jeder Reparatur derselben Aktivität.
+  static String _ohneBefund(String text, String anfang) {
+    // Ein Befund reicht bis zur nächsten Zeile, die mit „Anhangsreparatur: " beginnt.
+    const kopf = 'Anhangsreparatur: ';
+    final zeilen = text.split('\n');
+    final aus = <String>[];
+    var weg = false;
+    for (final z in zeilen) {
+      if (z.startsWith(kopf)) weg = z.startsWith(anfang);
+      if (!weg) aus.add(z);
+    }
+    return aus.join('\n');
+  }
+
+  Future<void> befundAnhaengen(Vorgang v, String befund, {String? ersetzt}) =>
+      _speichern(v, befund: befund, ersetzt: ersetzt);
+
+  Future<void> _speichern(Vorgang v, {String? befund, String? ersetzt}) {
     final vorher = _schreibend[_schluessel] ?? Future<void>.value();
     final schreiben = vorher.catchError((Object _) {
       // Ein früher fehlgeschlagener Auftrag meldet seinen Fehler selbst; ein
@@ -430,7 +472,13 @@ class Vorgaenge {
     }).then((_) async {
       final liste = await _lesen();
       final i = liste.indexWhere((x) => x.id == v.id);
-      if (i < 0) {
+      if (befund != null) {
+        if (i < 0) throw MoodleFehler('Der Vorgang fehlt; Reparaturbefund konnte nicht gespeichert werden.');
+        final frisch = liste[i];
+        pruefeBindung(frisch);
+        frisch.text = '${ersetzt == null ? frisch.text : _ohneBefund(frisch.text, ersetzt)}\n$befund';
+        frisch.aktualisiert = DateTime.now();
+      } else if (i < 0) {
         liste.add(v);
       } else {
         liste[i] = v;

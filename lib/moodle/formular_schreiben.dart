@@ -1371,8 +1371,8 @@ String _was(Formularziel z, Formular f) => switch (z.art) {
 /// Moodle geprüft, mit allem, was die Freigabe zeigt. Geschrieben ist noch
 /// nichts -- so gehen eine Änderung (aendern) und mehrere mit einer Freigabe
 /// (aendernMehrere) denselben Weg.
-class _Aenderung {
-  _Aenderung({
+class Aenderung {
+  Aenderung({
     required this.ordner,
     required this.quelle,
     required this.ziel,
@@ -1438,7 +1438,7 @@ class _Aenderung {
 
 /// Prüft einen Ordner gegen den Stand in Moodle und baut, was die Freigabe
 /// zeigt. null: nichts geändert.
-Future<_Aenderung?> _vorbereiten(
+Future<Aenderung?> _vorbereiten(
   MoodleZugang moodle, {
   required String ordner,
   required String arbeitsordner,
@@ -1665,7 +1665,7 @@ Future<_Aenderung?> _vorbereiten(
     einzelheiten.add('Moodle legt dafür eine neue Version der Frage an.');
   }
 
-  return _Aenderung(
+  return Aenderung(
     ordner: ordner,
     quelle: quelle,
     ziel: ziel,
@@ -1686,12 +1686,31 @@ Future<_Aenderung?> _vorbereiten(
   );
 }
 
+/// Prüft einen gelesenen Ordner gegen Moodle und baut die Änderung samt dem, was eine
+/// Freigabe zeigt; geschrieben wird nichts. null: nichts zu ändern. Für Werkzeuge, die
+/// den Ordner wie [aendern] schreiben, aber vorher selbst begrenzen, was er enthalten darf
+/// (anhaenge_reparieren). Innerhalb der [ordnerSperre] des Ordners aufrufen.
+Future<Aenderung?> aenderungVorbereiten(
+  MoodleZugang moodle, {
+  required String ordner,
+  required String arbeitsordner,
+}) => _vorbereiten(moodle, ordner: ordner, arbeitsordner: arbeitsordner);
+
+/// Schreibt eine mit [aenderungVorbereiten] gebaute und freigegebene Änderung: frisches
+/// Formular, erneute Prüfung des Stands, Schreiben, Rückleseprobe. Innerhalb der
+/// [ordnerSperre] des Ordners aufrufen. Bei einem Schutzdienst wirft es [SchutzPruefung].
+Future<(String, bool)> aenderungSchreiben(
+  MoodleZugang moodle,
+  Aenderung a,
+  String arbeitsordner,
+) => _schreibenOhneSperre(moodle, a, arbeitsordner);
+
 /// Schreibt eine freigegebene Änderung -- mit frischem Formular, denn die
 /// Freigabe kann gedauert haben; der Stand wird dabei noch einmal geprüft --
 /// und liest zurück. Gibt den Bericht und das Ergebnis der Rückleseprobe.
 Future<(String, bool)> _schreiben(
   MoodleZugang moodle,
-  _Aenderung a,
+  Aenderung a,
   String arbeitsordner,
 ) => ordnerSperre(
   ordnerSchluessel(a.ziel, arbeitsordner),
@@ -1700,7 +1719,7 @@ Future<(String, bool)> _schreiben(
 
 Future<(String, bool)> _schreibenOhneSperre(
   MoodleZugang moodle,
-  _Aenderung a,
+  Aenderung a,
   String arbeitsordner,
 ) async {
   final vorgang = Schreibvorgang(moodle, a.ziel);
@@ -1743,7 +1762,7 @@ Future<(String, bool)> _schreibenOhneSperre(
 
 Future<(String, bool)> _schreibenMitProbe(
   MoodleZugang moodle,
-  _Aenderung a,
+  Aenderung a,
   String arbeitsordner,
   Schreibvorgang vorgang,
 ) async {
@@ -1987,7 +2006,7 @@ Future<String> inhaltUebergeben(
 Future<(String, bool)> _uebergeben(
   MoodleZugang moodle,
   Freigaben freigaben,
-  _Aenderung a,
+  Aenderung a,
   String arbeitsordner,
   SchutzPruefung e, {
   String? stelle,
@@ -2369,7 +2388,7 @@ Future<String> aendernMehrere(
 }) async {
   if (ordner.isEmpty) throw MoodleFehler('Keine Ordner angegeben.');
   const nichts = 'Nichts gespeichert.';
-  final alle = <_Aenderung>[];
+  final alle = <Aenderung>[];
   final unveraendert = <String>[];
   final ziele = <String>{};
   for (final o in ordner) {
@@ -2383,7 +2402,7 @@ Future<String> aendernMehrere(
     if (!ziele.add(ziel.adresse)) {
       throw MoodleFehler('$o steht doppelt in der Liste. $nichts');
     }
-    final _Aenderung? a;
+    final Aenderung? a;
     try {
       a = await _vorbereiten(moodle, ordner: o, arbeitsordner: arbeitsordner);
     } on MoodleFehler catch (x) {
@@ -2413,7 +2432,7 @@ Future<String> aendernMehrere(
     return s?.id;
   }
 
-  int? abschnittVon(_Aenderung a) => switch (a.ziel.art) {
+  int? abschnittVon(Aenderung a) => switch (a.ziel.art) {
     Zielart.aktivitaet => oben(k.nachCmid[a.ziel.id]?.abschnittId),
     Zielart.abschnitt => oben(a.ziel.id),
     Zielart.buchkapitel => oben(k.nachCmid[a.ziel.cmid]?.abschnittId),

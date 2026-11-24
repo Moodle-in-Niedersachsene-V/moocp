@@ -100,7 +100,7 @@ Page custom HinweisSeite HinweisSeiteEnde
 !define MUI_FINISHPAGE_RUN_TEXT "${NAME} starten"
 !insertmacro MUI_PAGE_FINISH
 
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "${NAME} wird entfernt, zusammen mit Einstellungen, Protokoll, gespeicherten Anmeldedaten und Arbeitsordner. Auch die Verbindung in Claude Code, Codex CLI und LM Studio und die Skills der App werden entfernt."
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "${NAME} wird entfernt, zusammen mit Einstellungen, Protokoll, gespeicherten Anmeldedaten und Arbeitsordner. Auch die Verbindung in Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio und die Skills der App werden entfernt."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
@@ -339,7 +339,7 @@ Section "Uninstall"
   StrCpy $1 ""
   IntOp $2 $0 & 1
   ${If} $2 <> 0
-    StrCpy $1 "$1$\n$\n• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: in einer Eingabeaufforderung$\n    claude mcp remove moodle --scope user$\nCodex CLI: den Abschnitt [mcp_servers.moodle] in %USERPROFILE%\.codex\config.toml löschen.$\nLM Studio: in Bionic unter Einstellungen, MCP den Server moodle löschen."
+    StrCpy $1 "$1$\n$\n• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: in einer Eingabeaufforderung$\n    claude mcp remove moodle --scope user$\nCodex (ChatGPT-App oder CLI): den Abschnitt [mcp_servers.moodle] in %USERPROFILE%\.codex\config.toml löschen.$\nLM Studio: in Bionic unter Einstellungen, MCP den Server moodle löschen."
   ${EndIf}
   IntOp $2 $0 & 2
   ${If} $2 <> 0

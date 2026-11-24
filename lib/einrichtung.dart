@@ -609,7 +609,7 @@ class CodexCli extends KiWerkzeug {
   @override
   String? get hinweis => !heim.existsSync() && exe == null && chatgptApp != null
       ? 'Codex aus der ChatGPT-App hat seinen Ordner ${heim.path} noch nicht angelegt. Öffnen Sie Codex in der '
-          'ChatGPT-App einmal, bevor Sie installieren; sonst legt die App den Ordner an.'
+          'ChatGPT-App einmal, bevor Sie installieren; sonst legt moocp den Ordner selbst an.'
       : null;
 
   @override

@@ -31,7 +31,7 @@ fi
 echo "$TOOL_SHA256  $TOOL" | sha256sum -c --quiet - || { rm -f "$TOOL"; echo 'Prüfsumme von appimagetool stimmt nicht' >&2; exit 1; }
 bash tool/linux_bau.sh release
 BUNDLE="build/linux/x64/release/bundle"
-VERSION="$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml | head -1)"
+VERSION="$(sed -nE 's/^version: *([0-9][0-9.]*(-[0-9A-Za-z.]+)?).*/\1/p' pubspec.yaml | head -1)"
 [[ -n "$VERSION" ]] || { echo 'Version in pubspec.yaml nicht gefunden' >&2; exit 1; }
 AUS="installer/moocp_${VERSION}-x86_64.AppImage"
 T="$(mktemp -d)"

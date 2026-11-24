@@ -3,13 +3,19 @@
 # im Regelsatz von `main`: nicht umbenennen, ohne den Regelsatz anzupassen.
 name: Checks
 on:
+  # `edited`: Wird bei gestapelten Pull Requests die Basis auf `main` umgehängt,
+  # läuft die Prüfung gegen die neue Basis neu. Kein `if:` an den Aufträgen: Ein
+  # übersprungener Auftrag zählt als bestanden und überdeckte ein früheres Rot.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 permissions:
   contents: read
 concurrency:
-  group: checks-${{ github.ref }}
+  # Pull Requests: der neue Lauf ersetzt den alten. Pushes auf `main`: je Commit eine
+  # eigene Gruppe, damit kein Commit ohne Prüfung bleibt (eine Nightly verlangt sie).
+  group: checks-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   analyze:
@@ -31,7 +37,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/flutter-setup
-      - name: Build client tests
-        run: python tool/test_ci_bau.py -v
+      - name: Tests of the CI scripts
+        run: python -m unittest discover -s tool -p 'test_ci_*.py' -v
       - name: Complete test suite
         run: flutter test --concurrency 2 --reporter expanded

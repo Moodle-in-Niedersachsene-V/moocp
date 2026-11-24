@@ -738,11 +738,11 @@ Die Skripte `tool/neustart.sh`, `tool/mcp_aufruf.sh` und `tool/linux_bau.sh` / `
 
 ### Prüfen und Bauen mit GitHub Actions
 
-Zwei Workflows tun, was auf GitHub nötig ist, und trennen strikt, was von selbst läuft und was auf Anforderung.
+Für Prüfen und Bauen gibt es zwei Workflows; sie trennen strikt, was von selbst läuft und was auf Anforderung. Das Veröffentlichen steht unter „Veröffentlichen“.
 
 **Automatisch** läuft der Workflow `Checks` für jeden Pull Request und jeden Push auf `main`, nur auf Linux (`ubuntu-24.04`), ohne Marker: der Auftrag `flutter analyze` (Analyse) und der Auftrag `flutter test` (die vollständige Testsuite samt `tool/test_ci_bau.py`). Das sind die Namen der erforderlichen Statusprüfungen im Regelsatz von `main` ([CONTRIBUTING.md](CONTRIBUTING.md), „Repository settings“); wer einen Auftrag umbenennt, passt den Regelsatz im selben Zug an. Ein neuer Push auf einen Pull Request ersetzt den noch laufenden Lauf.
 
-**Auf Anforderung** läuft der Workflow `Desktop builds`: Er baut und prüft den gepushten Stand eines Zweigs für `linux`, `windows`, `macos`, eine kommagetrennte Auswahl oder `all`. Ohne Anforderung läuft er nicht; Windows und macOS laufen nie von selbst (macOS-Minuten kosten ein Mehrfaches). Linux und Windows sind x64, macOS ist arm64. Dafür reichen auf dem anfordernden Rechner Git, Python ab 3.12 und angemeldetes GitHub CLI (`gh`); Flutter und die Zielplattform müssen dort nicht installiert sein.
+**Auf Anforderung** läuft der Workflow `Desktop builds`: Er baut und prüft den gepushten Stand eines Zweigs für `linux`, `windows`, `macos`, eine kommagetrennte Auswahl oder `all`. Ohne Anforderung läuft er nicht; Windows und macOS laufen nie von selbst, weil ihre Runner knapp sind und lange brauchen. Linux und Windows sind x64, macOS ist arm64. Dafür reichen auf dem anfordernden Rechner Git, Python ab 3.12 und angemeldetes GitHub CLI (`gh`); Flutter und die Zielplattform müssen dort nicht installiert sein.
 
 Aus einem sauberen eigenen Zweig:
 
@@ -754,7 +754,7 @@ python3 tool/ci_bau.py all
 
 Der Client erzeugt einen leeren Auslöse-Commit und pusht nur den aktuellen Zweig nach `origin`. Auf `main`, `master` oder ohne ausgecheckten Zweig bricht er ab. Die Commit-Marker `[ci:linux]`, `[ci:windows]` und `[ci:macos]` wählen dieselben Ziele auch bei einem normalen Push (`[ci:tests]` und `[ci:builds]` den Umfang); ohne CI-Marker startet kein Bau, und ein Push auf `main` fordert nie etwas an. `--task tests` fordert nur Analyse und vollständige Tests an, `--task builds` nur Release-Bundles. Die Vorgabe `all` prüft und baut. Im Actions-Dialog („Run workflow“, Zweig wählen) lässt sich dieselbe Auswahl über die Felder `platform` (`linux`, `windows`, `macos`, kommagetrennt oder `all`) und `task` (`all`, `tests`, `builds`) anfordern. Jeder Auftrag läuft unabhängig; ein weiterer Bau bricht ihn nicht ab.
 
-Dieselbe Prüfung läuft nie doppelt: Hat der Commit einen offenen Pull Request, prüft und testet `Checks` Linux schon, und eine Anforderung per Push baut für Linux nur noch. Windows und macOS prüfen und testen immer, wenn der Umfang es verlangt. „Run workflow“ führt aus, was angefordert ist, ohne diese Rücksicht.
+Dieselbe Prüfung läuft in der Regel nicht doppelt: Hat der Commit beim Push schon einen offenen Pull Request, prüft und testet `Checks` Linux schon, und eine Anforderung per Push baut für Linux nur noch. Windows und macOS prüfen und testen immer, wenn der Umfang es verlangt. Wird der Pull Request erst nach dem Push geöffnet, läuft Linux einmal doppelt. „Run workflow“ führt aus, was angefordert ist, ohne diese Rücksicht.
 
 Der Client gibt den Commit und den Befehl zum Finden des Laufs aus. Nach erfolgreichem Abschluss lädt er nur Artefakte genau dieses Commits und Workflows herunter; fehlgeschlagene, abgebrochene oder noch laufende Aufträge werden abgewiesen:
 

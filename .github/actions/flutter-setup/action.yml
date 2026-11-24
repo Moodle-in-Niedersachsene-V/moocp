@@ -13,7 +13,8 @@ runs:
       with:
         python-version: '3.12'
     - name: Flutter 3.50.0 (Dart 3.14)
-      uses: subosito/flutter-action@v2
+      # Action eines Dritten, auf den Commit gepinnt (v2.23.0): sie läuft vor jedem Bau.
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
       with:
         flutter-version: '3.50.0'
         channel: stable

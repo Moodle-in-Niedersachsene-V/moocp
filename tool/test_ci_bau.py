@@ -11,7 +11,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import ci_bau
+# Auch mit `python -I` und aus jedem Arbeitsverzeichnis: das Skript liegt daneben.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_bau  # noqa: E402
 
 
 class CiBauTest(unittest.TestCase):

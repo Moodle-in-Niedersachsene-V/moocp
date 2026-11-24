@@ -202,6 +202,7 @@ void main() {
       extern.basis,
       benutzer: 'e.mustermann',
       passwort: 'erfunden',
+      schreibvorgaengeOrdner: vorgaenge.path,
       antwortfrist: antwortfrist,
       langsamAb: langsamAb,
     );

@@ -5,6 +5,7 @@
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
+- Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.

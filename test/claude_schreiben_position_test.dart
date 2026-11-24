@@ -18,6 +18,7 @@ class KursDoppel {
   int verschiebungen = 0;
   bool verschiebungIgnorieren = false;
   String verzeichnisname = 'CLAUDE';
+  String ersterModul = 'page';
   Uri get basis => Uri.parse('http://127.0.0.1:${server.port}');
 
   Future<void> starten() async {
@@ -61,7 +62,7 @@ class KursDoppel {
               for (final id in reihenfolge)
                 {
                   'id': id,
-                  'module': id == 20 ? 'folder' : 'page',
+                  'module': id == 20 ? 'folder' : (id == 10 ? ersterModul : 'page'),
                   'name': id == 20 ? verzeichnisname : 'Seite $id',
                   'visible': 0,
                   'sectionid': 1,
@@ -185,6 +186,18 @@ void main() {
     await d.server.close(force: true);
     await ordner.delete(recursive: true);
   }
+
+  test('Ein Unterabschnitt am Anfang zählt mit: das Verzeichnis kommt davor', () async {
+    final (d, ordner, moodle, freigaben) = await vorbereiten();
+    d.ersterModul = 'subsection';
+    try {
+      final bericht = await claudeSchreiben(moodle, freigaben, kurs: 12, inhalt: 'Alt', arbeitsordner: ordner.path);
+      expect(d.reihenfolge, [20, 10, 30]);
+      expect(bericht, contains('verified: true'));
+    } finally {
+      await aufraeumen(d, ordner, moodle);
+    }
+  });
 
   test('Bereits am Anfang: keine Freigabe zum Verschieben', () async {
     final (d, ordner, moodle, freigaben) = await vorbereiten(stufe: Bestaetigungen.alle);

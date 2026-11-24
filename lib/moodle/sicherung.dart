@@ -50,6 +50,9 @@ import 'wiederherstellung_fragen.dart';
 /// Vorgänge, die gerade laufen (Freigabe oder Abfrage) in dieser Sitzung der App.
 final Set<String> _laufend = {};
 
+/// Ob in dieser App gerade eine Sicherung läuft (sicherung_loeschen wartet dann ab).
+bool get sicherungLaeuft => _laufend.isNotEmpty;
+
 /// Uhr und Wartezeit. Nur Testnähte: Tests setzen sie auf
 /// einen Zeitverlauf, damit Zeitlimit und Stillstand ohne echtes Warten laufen.
 DateTime Function() jetzt = DateTime.now;

@@ -49,6 +49,7 @@ import '../moodle/lernlandkarte_verteilen.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sicherung_regeln.dart';
 import '../moodle/sicherung.dart';
+import '../moodle/sicherung_loeschen.dart';
 import '../moodle/stack.dart';
 import '../moodle/test.dart';
 import '../moodle/wiederherstellung.dart';
@@ -1207,6 +1208,30 @@ class McpDienst implements AufrufKontext {
         antwortfrist,
         () => laufText('Die Sicherung', a['id'] as String?, 'sicherung_status'),
       ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'sicherung_loeschen',
+      titel: 'Sicherungsdatei in Moodle löschen',
+      beschreibung:
+          'Löscht die eine Datei, die eine Sicherung der App (sichern_aktivitaet, sichern_auswahl) im '
+          'persönlichen Sicherungsbereich in Moodle zurückgelassen hat, nach Freigabe in der App. Die Kopie im '
+          'Sicherungsordner der App bleibt. Nummer und Dateiname (wie die Antwort der Sicherung ihn nennt) '
+          'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
+          'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
+          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen unverändert '
+          'da sind. Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
+          'das nennt die Freigabe. Während einer Sicherung oder Wiederherstellung in der App wird nichts gelöscht.',
+      parameter: {
+        'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),
+        'name': JsonSchema.string(
+          description: 'Dateiname der Sicherung in Moodle (setting_root_filename, steht in der Antwort der Sicherung)',
+        ),
+      },
+      pflicht: ['id', 'name'],
+      zerstoerend: true,
+      ausfuehren: (a) => sicherungLoeschen(moodle, freigaben, vorgaenge, id: _text(a, 'id'), name: _text(a, 'name')),
     );
 
     // ---- Wiederherstellen einer Sicherungsdatei in einen bestehenden Kurs (E29, moodle/wiederherstellung.dart)

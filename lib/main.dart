@@ -2521,6 +2521,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
 
   bool get _ordnerFrei =>
       !anfrage.schritteVerlangt || anfrage.oeffnen == null || _geoeffnet;
+  double _schrift(BuildContext context) => MediaQuery.textScalerOf(context).scale(1);
+
   bool get _abhakenFrei =>
       _ordnerFrei &&
       (!anfrage.schritteVerlangt || anfrage.ordner == null || _ordnerOffen);
@@ -2721,6 +2723,13 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
               ? 560
               : anfrage.vomPlugin != null
               ? 360
+              // Eine Bestätigung zum Abhaken (mehrzeilig, fett) unter den Punkten braucht
+              // ihren Platz zusätzlich, auch bei größerer Schrift, sonst läuft der Dialog
+              // unten über.
+              : bestaetigen
+              ? (264 + 110 * anfrage.abhaken.length * _schrift(context) * _schrift(context))
+                    .clamp(264, 720)
+                    .toDouble()
               : 264,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

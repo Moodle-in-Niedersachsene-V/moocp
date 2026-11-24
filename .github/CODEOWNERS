@@ -1,10 +1,10 @@
-# Requests a review from the other maintainer on every PR (the author is never
-# requested). After moving to an organization, replace the names by a team,
+# Paths that are always "Ask": a PR touching one of them waits for the other
+# maintainer's review before it is merged (Ship / Show / Ask, CONTRIBUTING.md,
+# E39). Everything else is "Show" and is reviewed after the merge, so there is
+# deliberately no catch-all "*" line. GitHub never requests the author, and
+# "require review from code owners" on main makes these reviews mandatory.
+# After moving to an organization team, replace the names by the team,
 # e.g. @Moodle-in-Niedersachsene-V/maintainers.
-*                                  @topse @matthiasgruenwald
-
-# Areas where a careful second look is mandatory (see CONTRIBUTING.md).
-# Same owners for now; listed separately so they can be tightened later.
 /lib/moodle/sperrliste.dart        @topse @matthiasgruenwald
 /lib/moodle/moodle_zugang.dart     @topse @matthiasgruenwald
 /lib/moodle/browserliste.dart      @topse @matthiasgruenwald
@@ -19,3 +19,5 @@
 /CLAUDE.md                         @topse @matthiasgruenwald
 /AGENTS.md                         @topse @matthiasgruenwald
 /docs/adr/                         @topse @matthiasgruenwald
+/CONTRIBUTING.md                   @topse @matthiasgruenwald
+/.github/                          @topse @matthiasgruenwald

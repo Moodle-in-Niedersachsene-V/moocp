@@ -30,6 +30,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
@@ -45,6 +46,7 @@ import 'formular_lesen.dart';
 import 'fragen.dart';
 import 'gruppierung.dart';
 import 'kurs.dart';
+import 'kurs_aendern.dart' show einrueckungPruefen, einrueckungSetzen;
 import 'lernlandkarte_entwurf.dart';
 import 'moodle_zugang.dart';
 import 'stack_skripte.dart';
@@ -76,6 +78,7 @@ String typName(String? typ) => switch (typ) {
   'forum' => 'Forum',
   'collabora' => 'Collabora',
   'choicegroup' => 'Gruppenwahl',
+  'lightboxgallery' => 'Bildergalerie',
   _ => typ ?? '?',
 };
 
@@ -884,7 +887,14 @@ Future<String> aktivitaetAnlegen(
   String? ordner,
   bool sichtbar = false,
   Map<String, Object?> einstellungen = const {},
+  int? einrueckung,
 }) async {
+  if (einrueckung != null) {
+    einrueckungPruefen(einrueckung);
+    if (typ == 'qbank') {
+      throw MoodleFehler('Eine Fragensammlung steht nicht auf der Kursseite; einrueckung gilt dafür nicht.');
+    }
+  }
   if (!MoodleZugang.anlegbareModule.contains(typ)) {
     throw MoodleFehler(
       'Typ „$typ" kann die App nicht anlegen. Möglich: '
@@ -955,6 +965,7 @@ Future<String> aktivitaetAnlegen(
           if (e.value.trim().isNotEmpty) '${e.key}: ${e.value.length} Zeichen',
         for (final e in einstellungen.entries)
           'Einstellung ${e.key}: ${e.value}',
+        if (einrueckung != null) 'Einrückung: Stufe $einrueckung (gehört zum Anlegen)',
         if (kartenVorlage != null)
           'Kartenvorlage: ${(kartenVorlage['orte'] as List).length} Orte, '
               '${(kartenVorlage['wege'] as List).length} Wege; Ziele bleiben zunächst leer.',
@@ -1064,12 +1075,31 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
+  // Einrücken gehört zum Anlegen: Die Freigabe zum Anlegen nennt es, eine eigene
+  // gibt es nicht (E20). Ein Fehler dabei kommt als Ergebnis, nicht als Ausnahme:
+  // Die Aktivität steht schon, und ihre cmid muss in der Antwort bleiben.
+  final einr = einrueckung == null
+      ? null
+      : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 
-  final g = await formularLesen(
-    moodle,
-    Formularziel.aktivitaet(cmid),
-    arbeitsordner,
-  );
+  final FormularGelesen g;
+  try {
+    g = await formularLesen(
+      moodle,
+      Formularziel.aktivitaet(cmid),
+      arbeitsordner,
+    );
+  } on MoodleAbgebrochen {
+    rethrow;
+  } on MoodleFehler catch (x) {
+    // Nach dem Anlegen darf ein Lesefehler die cmid nicht verschweigen: Die KI
+    // legte die Aktivität sonst ein zweites Mal an.
+    throw MoodleFehler(
+      '${x.meldung}\nDie Aktivität ist bereits angelegt (${typName(typ)}, cmid $cmid, '
+      '${sichtbar ? 'SICHTBAR' : 'verborgen'}). Nicht erneut anlegen; mit aktivitaet_lesen nachsehen.'
+      '${einr == null ? '' : '\n${einr.text}'}',
+    );
+  }
   final probe = await zuruecklesen(
     g,
     felder: geschrieben,
@@ -1081,6 +1111,8 @@ Future<String> aktivitaetAnlegen(
     // hat keinen eigenen Namen; Moodle bildet ihn aus dem Text.
     name: typ == 'label' ? null : name,
   );
+  // Ein Urteil: Scheitert die Einrückung, ist auch die Rückleseprobe nicht bestanden.
+  if (einr != null) probe.pruefe(einr.ok, 'Einrückung');
   if (typ == 'learningmap') {
     probe.pruefe(g.modul == typ, 'Modultyp (gelesen ${g.modul})');
     probe.pruefe(g.kurs == kurs, 'Kurs (gelesen ${g.kurs})');
@@ -1115,7 +1147,7 @@ Future<String> aktivitaetAnlegen(
       fehler: angehalten,
       angelegt:
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
-          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}',
+          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}.'}',
     );
   }
   return [
@@ -1131,6 +1163,7 @@ Future<String> aktivitaetAnlegen(
     if (gesetzt.isNotEmpty)
       'Einstellungen: ${gesetzt.map((s) => '${s.label}: ${s.nachher}').join("; ")}.',
     probe.text,
+    if (einr != null) '${einr.text}.',
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',
@@ -1167,6 +1200,34 @@ List<String> uebrigeFelderAbweichung(Felder vorher, Felder nachher) {
     for (final k in {...a.keys, ...b.keys})
       if (a[k]?.join('\u0000') != b[k]?.join('\u0000')) k,
   ]..sort();
+}
+
+// Die Gruppenlisten werden von JavaScript aus diesen Hidden-Feldern aufgebaut.
+// Weder selectedGroups noch availableGroups sind die gespeicherte Auswahl.
+Map<String, String> _wahlgruppen(Felder felder) => {
+  for (final e in felder)
+    if (e.key == 'serializedselectedgroups' ||
+        RegExp(r'^group_\d+_limit$').hasMatch(e.key)) e.key: e.value,
+};
+
+bool _gleicheWahlgruppen(Felder a, Felder b) {
+  final vorher = _wahlgruppen(a), nachher = _wahlgruppen(b);
+  return vorher.length == nachher.length &&
+      vorher.entries.every((e) => nachher[e.key] == e.value);
+}
+
+// Auch unreferenzierte Dateien prüfen: Ein Galerie-Upload darf nicht als
+// erfolgreiche Beschreibungseinstellung verschwinden.
+bool _dateienGeaendert(String quelle, String stand) {
+  Map<String, List<int>> lesen(String basis) => {
+    for (final teil in ['dateien', 'bereiche'])
+      if (Directory(p.join(basis, teil)).existsSync())
+        for (final f in Directory(p.join(basis, teil)).listSync(recursive: true).whereType<File>())
+          p.relative(f.path, from: basis): f.readAsBytesSync(),
+  };
+  final a = lesen(quelle), b = lesen(stand);
+  return a.length != b.length || a.entries.any((e) =>
+      !b.containsKey(e.key) || !gleicheBytes(e.value, b[e.key]!));
 }
 
 /// Das Hauptformular aus dem gespeicherten Stand (`.stand`-Ordner); null, wenn es fehlt.
@@ -1209,11 +1270,30 @@ void _pruefeStand(
   }
   if (ziel.art == Zielart.aktivitaet &&
       !MoodleZugang.schreibbareModule.contains(f.modul) &&
+      !MoodleZugang.optionsModule.containsKey(f.modul) &&
       !nurGruppenAenderung) {
     throw MoodleFehler(
       'Ändern geht bisher für ${MoodleZugang.schreibbareModule.map(typName).join(", ")}; '
       '${ziel.bezeichnung} ist ${typName(f.modul)}.',
     );
+  }
+  if (MoodleZugang.optionsModule.containsKey(f.modul) ||
+      MoodleZugang.optionsModule.containsKey(vorherModul)) {
+    if (f.modul != vorherModul || vorher == null ||
+        wertIn(werte, 'course') != '${f.kurs}' ||
+        wertIn(f.felder, 'update') != '${ziel.id}') {
+      throw MoodleFehler('Aktivitätsart oder Kurs geändert. Neu lesen; nichts gespeichert.');
+    }
+    final erlaubt = MoodleZugang.optionsModule[f.modul]!;
+    final unzulaessig = einstellungen.where((k) => !erlaubt.contains(k)).toList();
+    if (unzulaessig.isNotEmpty || bereiche.isNotEmpty) {
+      throw MoodleFehler('${typName(f.modul)}: Nur Beschreibung und normale Optionen; '
+          'Gruppenauswahl, Gruppenlimits, Bilder und Dateien können nicht geändert werden. '
+          'Nicht unterstützt: ${unzulaessig.join(', ')}. Nichts gespeichert.');
+    }
+    if (f.modul == 'choicegroup' && !_gleicheWahlgruppen(werte, f.felder)) {
+      throw MoodleFehler('Gruppenauswahl oder Gruppenlimits seit dem Lesen geändert. Nichts gespeichert; neu lesen.');
+    }
   }
   const hinweis =
       'Nichts überschrieben. Erst neu lesen und die Änderung auf dem neuen Stand aufbauen.';
@@ -1359,6 +1439,13 @@ Future<_Aenderung?> _vorbereiten(
   final quelle = imArbeitsordner(ordner, arbeitsordner);
   final ziel = Formularziel.ausOrdner(quelle);
   final stand = p.join(quelle, '.stand');
+  final gespeichertesFormular = _gespeichertesFormular(stand);
+  final gespeicherteArt = gespeichertesFormular == null ? null :
+      wertIn(formularFelder(gespeichertesFormular), 'modulename');
+  if (MoodleZugang.optionsModule.containsKey(gespeicherteArt) &&
+      _dateienGeaendert(quelle, stand)) {
+    throw MoodleFehler('${typName(gespeicherteArt)}: Bilder und Dateien ändern wird nicht unterstützt. Nichts gespeichert.');
+  }
   final lokal = felderIn(quelle);
   final alt = felderIn(stand);
   final unbekannt = lokal.keys.where((k) => !alt.containsKey(k)).toList();
@@ -1367,6 +1454,17 @@ Future<_Aenderung?> _vorbereiten(
       '${unbekannt.map((k) => '$k.html').join(", ")}: kein Editorfeld dieses Formulars '
       '(vorhanden: ${alt.keys.join(", ")}).',
     );
+  }
+
+  if (MoodleZugang.optionsModule.containsKey(gespeicherteArt)) {
+    String medien(String text) => html_parser.parseFragment(text)
+        .querySelectorAll('img, iframe, video, audio, source, picture, object, embed, svg')
+        .map((e) => e.outerHtml).join('\u0000');
+    if (lokal.entries.any((e) =>
+        (e.key != 'introeditor' && e.value != alt[e.key]) ||
+        medien(e.value) != medien(alt[e.key] ?? ''))) {
+      throw MoodleFehler('${typName(gespeicherteArt)}: Nur Beschreibungstext und normale Optionen; Bilder und Dateien ändern wird nicht unterstützt. Nichts gespeichert.');
+    }
   }
 
   // Eingebundene Dateien einordnen.
@@ -1473,14 +1571,14 @@ Future<_Aenderung?> _vorbereiten(
         !neuSpeichern,
   );
   final gruppenStand = <String, String>{
-    if (MoodleZugang.nurGruppenModule.contains(vorab.modul))
+    if (MoodleZugang.nurGruppenModule.contains(vorab.modul) || vorab.modul == 'choicegroup')
       for (final k in MoodleZugang.gruppenFelder) k: wertIn(vorab.felder, k) ?? '',
   };
   gruppierungPruefen(vorab.form, einstellungen['groupingid'], vorab.kurs);
   final probeFelder = [...vorab.felder];
   final probeSetzen = einstellungenSetzen(vorab.form, probeFelder, einstellungen);
   final gruppenWahl = <String, String>{
-    if (MoodleZugang.nurGruppenModule.contains(vorab.modul))
+    if (MoodleZugang.nurGruppenModule.contains(vorab.modul) || vorab.modul == 'choicegroup')
       for (final k in MoodleZugang.gruppenFelder) k: wertIn(probeFelder, k) ?? '',
   };
   final kurs = vorab.kurs;
@@ -1672,15 +1770,33 @@ Future<(String, bool)> _schreibenOhneSperre(
   if (a.gruppenWahl.isNotEmpty) {
     final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
     final rueckWerte = rueckForm == null ? <MapEntry<String, String>>[] : formularFelder(rueckForm);
-    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs && g.name == a.vorab.name,
+    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs && (a.einstellungen.containsKey('name') || g.name == a.vorab.name),
         '${typName(a.vorab.modul)}: Aktivitätsart, Kurs und Name');
     for (final e in a.gruppenWahl.entries) {
       probe.pruefe(wertIn(rueckWerte, e.key) == e.value, '${typName(a.vorab.modul)}: exakter Wert ${e.key}');
     }
     // Alles andere muss unverändert sein: Der Typ ist nur für diese zwei Felder gemessen.
-    final anders = uebrigeFelderAbweichung(a.vorab.felder, rueckWerte);
+    final anders = MoodleZugang.nurGruppenModule.contains(a.vorab.modul)
+        ? uebrigeFelderAbweichung(a.vorab.felder, rueckWerte) : <String>[];
     probe.pruefe(anders.isEmpty,
         '${typName(a.vorab.modul)}: übrige Felder unverändert${anders.isEmpty ? '' : ' (abweichend: ${anders.join(', ')})'}');
+  }
+  if (MoodleZugang.optionsModule.containsKey(a.vorab.modul)) {
+    final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
+    final anders = rueckForm == null ? ['Formular fehlt'] :
+        uebrigeFelderAbweichung(a.vorab.felder, formularFelder(rueckForm))
+          .where((k) => !a.einstellungen.keys.any((e) => k == e || k.startsWith('$e[')) &&
+              !a.zuSchreiben.any((e) => k.startsWith('$e['))).toList();
+    probe.pruefe(g.modul == a.vorab.modul && g.kurs == a.vorab.kurs,
+        'Aktivitätsart und Kurs unverändert');
+    probe.pruefe(anders.isEmpty,
+        'übrige Felder unverändert${anders.isEmpty ? '' : ' (abweichend: ${anders.join(', ')})'}');
+  }
+  if (a.vorab.modul == 'choicegroup') {
+    final rueckForm = _gespeichertesFormular(p.join(g.ordner, '.stand'));
+    probe.pruefe(rueckForm != null &&
+        _gleicheWahlgruppen(a.vorab.felder, formularFelder(rueckForm)),
+        'Gruppenauswahl und Gruppenlimits unverändert');
   }
   final text = [
     'Gespeichert: ${_was(a.ziel, a.vorab)} „${g.name}" (${zurueck.bezeichnung}${a.wo}).',
@@ -1952,9 +2068,16 @@ Future<(String, bool)> _uebergeben(
 /// Schreibt einen gelesenen und bearbeiteten Ordner zurück. [neuSpeichern]:
 /// auch ohne Änderung einmal über das Formular speichern (CodeRunner prüft
 /// seine Musterlösung nur dort).
-/// Die Sperre des Ordners umfasst das Prüfen des Stands (.stand) bis zum Schreiben
-/// Parallel gelesen oder geschrieben wird dieser Ordner dann nicht.
-/// Sie gilt auch während der Freigabe; das wartet auf die Lehrkraft (höchstens die Frist).
+///
+/// Die Sperre des Ordners ([ordnerSperre]) schützt dessen Dateien: Ein Lesen
+/// löscht und füllt den Ordner, ein Schreiben liest `.stand` und `dateien/`.
+/// Sie liegt deshalb nur um das Vorbereiten (Dateien lesen, Abdruck des
+/// Ordners bilden) und um das Schreiben, nicht um die Freigabe, die bis zur
+/// Frist (30 Minuten) auf die Lehrkraft wartet. Wird der Ordner während der
+/// Freigabe neu gelesen, ist die Änderung samt `.stand` weg; der Abdruck
+/// zeigt das unter der Sperre, und es wird nichts geschrieben. Dass Moodle
+/// selbst noch den gelesenen Stand zeigt, prüft das Schreiben unter der
+/// Sperre mit frisch geholtem Formular (E17, [_pruefeStand]).
 Future<String> aendern(
   MoodleZugang moodle,
   Freigaben freigaben, {
@@ -1962,36 +2085,22 @@ Future<String> aendern(
   required String arbeitsordner,
   Map<String, Object?> einstellungen = const {},
   bool neuSpeichern = false,
-}) {
+}) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
-  return ordnerSperre(
-    ordnerSchluessel(Formularziel.ausOrdner(quelle), arbeitsordner),
-    () => _aendernOhneSperre(
+  final schluessel = ordnerSchluessel(
+    Formularziel.ausOrdner(quelle),
+    arbeitsordner,
+  );
+  final (a, abdruck) = await ordnerSperre(schluessel, () async {
+    final a = await _vorbereiten(
       moodle,
-      freigaben,
       ordner: ordner,
       arbeitsordner: arbeitsordner,
       einstellungen: einstellungen,
       neuSpeichern: neuSpeichern,
-    ),
-  );
-}
-
-Future<String> _aendernOhneSperre(
-  MoodleZugang moodle,
-  Freigaben freigaben, {
-  required String ordner,
-  required String arbeitsordner,
-  Map<String, Object?> einstellungen = const {},
-  bool neuSpeichern = false,
-}) async {
-  final a = await _vorbereiten(
-    moodle,
-    ordner: ordner,
-    arbeitsordner: arbeitsordner,
-    einstellungen: einstellungen,
-    neuSpeichern: neuSpeichern,
-  );
+    );
+    return (a, a == null ? '' : await _ordnerAbdruck(a.quelle));
+  });
   if (a == null) {
     return 'Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.';
   }
@@ -2008,12 +2117,37 @@ Future<String> _aendernOhneSperre(
     return 'Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
         '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.';
   }
-  try {
-    return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
-  } on SchutzPruefung catch (e) {
-    // Die Sperre des Ordners hält diese Funktion (aendern).
-    return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+  return ordnerSperre(schluessel, () async {
+    if (await _ordnerAbdruck(a.quelle) != abdruck) {
+      return 'Nicht gespeichert: Der Ordner ${a.ordner} wurde während der Freigabe neu gelesen oder '
+          'verändert; die freigegebene Änderung gibt es dort nicht mehr. Der Ordner und Moodle sind '
+          'unverändert. Neu lesen und die Änderung noch einmal machen.';
+    }
+    try {
+      return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
+    } on SchutzPruefung catch (e) {
+      // Die Sperre des Ordners hält diese Funktion (aendern).
+      return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+    }
+  });
+}
+
+/// Prüfsumme über Namen und Inhalt aller Dateien des Ordners. Zeigt, ob der
+/// Ordner seit dem Vorbereiten derselbe geblieben ist ([aendern]).
+Future<String> _ordnerAbdruck(String ordner) async {
+  final wurzel = Directory(ordner);
+  if (!await wurzel.exists()) return 'fehlt';
+  final dateien = [
+    await for (final e in wurzel.list(recursive: true, followLinks: false))
+      if (e is File) e.path,
+  ]..sort();
+  final zeilen = StringBuffer();
+  for (final d in dateien) {
+    zeilen.writeln(
+      '${p.relative(d, from: ordner)}:${sha256.convert(await File(d).readAsBytes())}',
+    );
   }
+  return sha256.convert(utf8.encode(zeilen.toString())).toString();
 }
 
 /// Schreibt mehrere gelesene Ordner eines Abschnitts mit EINER Freigabe

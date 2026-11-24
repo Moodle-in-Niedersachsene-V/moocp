@@ -244,18 +244,47 @@ Future<String> lernlandkarteVerknuepfungenSetzen(
         gelesen.lernlandkarte?['svgcode'],
         erwarteteOrtsbeschriftungen,
       );
-  final karteOk =
-      svgGleich &&
+  final speicherOk =
       const JsonEncoder().convert(rueck) == const JsonEncoder().convert(store);
+  final karteOk = svgGleich && speicherOk;
+  final nameOk = gelesen.name == vorher.name && gelesen.kurs == kurs;
+  final felderOk = _gleicheFormularFelder(
+    aktuell,
+    rueckForm,
+    nachSpeichern: true,
+  );
+  final hintergrundOk = _gleicheHintergrund(hintergrundVorher, gelesen);
+  final textfelderOk = _gleicheFelder(lesestand, gelesen);
+  final einstellungenOk = _gleicheEinstellungen(
+    lesestand,
+    gelesen,
+    beschriftungenNeu: true,
+  );
   final formularOk =
-      gelesen.name == vorher.name &&
-      gelesen.kurs == kurs &&
-      _gleicheFormularFelder(aktuell, rueckForm, nachSpeichern: true) &&
-      _gleicheHintergrund(hintergrundVorher, gelesen) &&
-      _gleicheFelder(lesestand, gelesen) &&
-      _gleicheEinstellungen(lesestand, gelesen, beschriftungenNeu: true);
+      nameOk && felderOk && hintergrundOk && textfelderOk && einstellungenOk;
   final verified = karteOk && formularOk;
+  // Jede Teilprüfung einzeln, damit ein verified: false später zu erklären ist.
+  String teil(String name, bool ok) => '$name ${ok ? 'ok' : 'abweichend'}';
+  final pruefungen = [
+    teil(
+      'Verknüpfungen der Karte',
+      speicherOk,
+    ),
+    teil(
+      'Kartenzeichnung (SVG)',
+      svgGleich,
+    ) +
+        (beschriftungenBekannt
+            ? ''
+            : ' (Beschriftung eines Ziels nicht bekannt, nicht geprüft)'),
+    teil('Name und Kurs', nameOk),
+    teil('Formularfelder', felderOk),
+    teil('Hintergrundbild', hintergrundOk),
+    teil('Textfelder', textfelderOk),
+    teil('Einstellungen', einstellungenOk),
+  ].join('; ');
   return '${fachlicheEntscheidung ? 'Fachlicher Vorschlag bestätigt. ' : ''}'
       'Lernlandkarte „${gelesen.name}" zurückgelesen; Ortszuordnungen verified: $verified. '
+      'Rückleseprüfung: $pruefungen. '
       'Das gilt nur für die beauftragten Orte; ungelöste andere Ziele und der Übertragungsbericht bleiben offen.';
 }

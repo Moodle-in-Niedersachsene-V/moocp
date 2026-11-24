@@ -4,6 +4,16 @@
 // Neuverknüpfung, Rücklesen, Protokoll); nur Moodle ist ein lokaler HTTP-Server
 // mit erfundenen Daten. Der Server kopiert wirklich: Jedes Ziel bekommt neue,
 // fortlaufende Aktivitätsnummern, in jedem zweiten Ziel in umgekehrter Reihenfolge.
+//
+// Zeitgrenze: Die meisten Tests fahren vollständige Übertragungen (Sichern,
+// Prüfen, Wiederherstellen, Rücklesen). Unter Last kann dafür die Standardgrenze
+// von 30 Sekunden zu knapp sein. Die Reihenfolge bestimmen Completer, nicht
+// Wartezeiten. Die gemeinsame Grenze gilt zur Vereinfachung auch für die
+// kürzeren Zielkontext- und Verknüpfungstests ohne Wiederherstellung; dort
+// werden dadurch hängende Tests später erkannt.
+@Timeout(Duration(minutes: 3))
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -804,6 +814,8 @@ void main() {
     });
     expect(ergebnis, contains('bestätigt'));
     expect(ergebnis, contains('verified: true'));
+    expect(ergebnis, contains('Verknüpfungen der Karte ok'));
+    expect(ergebnis, isNot(contains('abweichend')));
     expect(links(moodle.karte)['p1'], moodle.seiteB.cmid);
     expect(kartenDialoge, 1);
     expect(moodle.restoreStarts, 0);
@@ -1708,6 +1720,9 @@ void main() {
       contains('verified: false'),
       reason: 'Nach dem Entkoppeln gibt es keinen belegten Zielnamen.',
     );
+    expect(kopieLink, contains('Rückleseprüfung:'));
+    expect(kopieLink, contains('Kartenzeichnung (SVG) abweichend'));
+    expect(kopieLink, contains('Formularfelder ok'));
     final kopierterStore =
         jsonDecode(kartenKopie.placestore!) as Map<String, dynamic>;
     expect(

@@ -294,7 +294,13 @@ extension Testkopien on Testbetrieb {
               ? null
               : [ids[ziel]!.modul, ids[ziel]!.titel];
         }
-        karte = [ohneOrtsbeschriftung(daten['svgcode']), store];
+        karte = [
+          ohneOrtsbeschriftung(
+            daten['svgcode'],
+            nurOrte: verknuepfteOrte((store['places'] as List).cast<Map>()),
+          ),
+          store,
+        ];
       }
       // JSON-Schlüssel unabhängig von der Reihenfolge im Moodle-Formular vergleichen.
       Object? sortiert(Object? x) => x is Map

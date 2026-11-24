@@ -3143,8 +3143,16 @@ class _ProtokollAnsichtState extends State<ProtokollAnsicht> {
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
           child: Row(
             children: [
-              Text('Protokoll', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
+              // Die Spalte hat nur, was neben den festen 460 px der linken
+              // bleibt: Bei schmalem Fenster kürzt sich die Überschrift, der
+              // Knopf „Leeren“ bleibt ganz.
+              Expanded(
+                child: Text(
+                  'Protokoll',
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
               TextButton(
                 onPressed: widget.protokoll.leeren,
                 child: const Text('Leeren'),

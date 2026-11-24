@@ -278,8 +278,10 @@ KursStruktur kursAuswerten(int kurs, Map zustand) {
   return KursStruktur(kurs, abschnitte, zustand);
 }
 
-Future<KursStruktur> kursLesen(MoodleZugang moodle, int kurs) async {
-  final roh = await moodle.dienst('core_courseformat_get_state', {'courseid': kurs});
+/// Liest die Kursstruktur. Mit [abbruch] (ein Lesen im Auftrag eines Werkzeugaufrufs)
+/// schließt sich die Anfrage, sobald der Client nicht mehr wartet.
+Future<KursStruktur> kursLesen(MoodleZugang moodle, int kurs, {Future<void>? abbruch}) async {
+  final roh = await moodle.dienst('core_courseformat_get_state', {'courseid': kurs}, abbruch: abbruch);
   final Map zustand;
   try {
     zustand = (roh is String ? jsonDecode(roh) : roh) as Map;

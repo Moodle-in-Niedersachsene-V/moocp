@@ -88,7 +88,7 @@ class _Moodle extends MoodleZugang {
   final Map<int, String> namen = {1: 'Alt'};
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     if (name == 'core_backup_get_async_backup_progress') {
       return [
         {'backupid': 'r-1', 'progress': 1, 'status': 1000},
@@ -127,7 +127,7 @@ class _Moodle extends MoodleZugang {
   }
 
   @override
-  Future<Antwort> lesen(String pfadMitQuery) async {
+  Future<Antwort> lesen(String pfadMitQuery, {Future<void>? abbruch}) async {
     abrufe.add(pfadMitQuery);
     return seiten[pfadMitQuery] ?? _antwort(404, utf8.encode('nicht gefunden'));
   }

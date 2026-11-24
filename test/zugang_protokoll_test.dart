@@ -188,7 +188,8 @@ void main() {
     test('Moodle nicht erreichbar: nur der Pfad, ohne Query, als Fehler', () async {
       await moodle.server.close(force: true);
       await expectLater(zugang.lesen('/course/modedit.php?update=34'), throwsA(isA<MoodleNichtErreichbar>()));
-      expect(zeilen(), ['fehler: GET /course/modedit.php: nicht erreichbar']);
+      expect(zeilen(), hasLength(1));
+      expect(zeilen().single, matches(r'^fehler: GET /course/modedit\.php: Verbindung abgebrochen \(SocketException\) \(Phase Verbindung, \d+ ms, 0 Bytes\)$'));
     });
   });
 

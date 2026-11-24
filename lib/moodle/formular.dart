@@ -231,6 +231,29 @@ String _zeilenwert(_Zeile z, dom.Element form) {
   ].join(' · ');
 }
 
+/// Optionen von [select], deren Anzeigetext dem von [text] gleicht und deren
+/// Wert sich unterscheidet. Gleichnamige Ziele (etwa zwei Aktivitäten mit
+/// demselben Namen) sind so nicht zu unterscheiden; gemeldet, nicht aufgelöst.
+List<dom.Element> _gleichnamigeOptionen(dom.Element select, String text) => [
+      for (final o in select.querySelectorAll('option'))
+        if (_gleich(_text(o), text)) o
+    ];
+
+bool _mehrdeutig(List<dom.Element> treffer) =>
+    treffer.map((o) => o.attributes['value'] ?? _text(o)).toSet().length > 1;
+
+/// Auswahlfelder, deren gerade gewählter Anzeigetext auf mehrere Optionen mit
+/// verschiedenem Wert passt: einstellungen.json zeigt nur den Text, ändern
+/// bricht bei einem solchen Text ab. Jeder Eintrag nennt Beschriftung und Schlüssel.
+List<String> mehrdeutigeAuswahlfelder(dom.Element form) => [
+      for (final z in _zeilen(form))
+        for (final e in z.steuer)
+          if (e.localName == 'select' &&
+              !e.attributes.containsKey('multiple') &&
+              _mehrdeutig(_gleichnamigeOptionen(e, steuerWert(e))))
+            '${z.label} (${e.attributes['name'] ?? z.schluessel})'
+    ];
+
 /// Die Zeilen eines Formulars (div.row.fitem), ohne Editoren, Dateibereiche,
 /// Knöpfe und reine Anzeigen.
 List<Einstellung> einstellungenLesen(dom.Element form) => [
@@ -302,7 +325,24 @@ String steuerSetzen(dom.Element form, Felder f, dom.Element e, Object? wert, Str
       }
       final optionen = e.querySelectorAll('option');
       final s = '$wert';
-      final o = optionen.where((o) => _gleich(_text(o), s)).firstOrNull ??
+      var nachText = _gleichnamigeOptionen(e, s);
+      final jetzt = e.querySelectorAll('option').where((o) => o.attributes.containsKey('selected')).lastOrNull;
+      if (jetzt != null && nachText.contains(jetzt) && _text(jetzt) == s.trim()) {
+        // Unverändert: die gewählte Option bleibt, auch wenn andere gleich heißen.
+        nachText = [jetzt];
+      } else if (_mehrdeutig(nachText)) {
+        // Genau eine Option mit exakt gleicher Schreibweise geht vor reinen Groß-/Kleinschreibungstreffern.
+        final exakt = nachText.where((o) => _text(o) == s.trim()).toList();
+        if (exakt.length == 1) nachText = exakt;
+      }
+      if (_mehrdeutig(nachText)) {
+        // Nie still eine wählen: Es würde unter Umständen das falsche Ziel.
+        final werte = nachText.map((o) => o.attributes['value'] ?? _text(o)).join(', ');
+        throw MoodleFehler('$wo: „$s" passt auf mehrere Möglichkeiten (Werte $werte). '
+            'Nichts wurde geschrieben. Gib stattdessen den Wert der gemeinten Option an '
+            '(einer der genannten Werte), oder mach den Namen in Moodle eindeutig.');
+      }
+      final o = nachText.firstOrNull ??
           optionen.where((o) => o.attributes['value'] == s).firstOrNull;
       if (o == null) {
         final moeglich = optionen.map(_text).take(20).join(' | ');

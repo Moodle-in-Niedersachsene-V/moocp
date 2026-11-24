@@ -28,7 +28,7 @@ Danach wird die Version Tag `v<Version>` und Release wie in E12, und `main` spri
 Jeder Pull Request gehört zu einer von drei Arten (nach Rouan Wilsenach, „Ship / Show / Ask“):
 
 - **Show** (Vorgabe): Wer ihn gestellt hat, merged selbst, sobald `flutter analyze` und `flutter test` grün sind; der andere Maintainer reviewt danach und setzt `post-reviewed`. Was er findet, wird ein Folge-Issue oder ein Folge-PR.
-- **Ask**: Der Pull Request wartet auf das Review des anderen. Pflicht für die Pfade in `.github/CODEOWNERS` (Sperrliste und Positivliste, Elemente, Freigabe, Anmeldung und Anmeldedaten, Update und Installer, CLAUDE.md, AGENTS.md, ADRs), für jeden Hotfix und für jede Änderung an diesen Regeln.
+- **Ask**: Gemergt wird erst, wenn der andere zugestimmt hat – im Gespräch, per Nachricht oder als Review in GitHub; wer merged, vermerkt die Zustimmung im Pull Request. Eine formale Freigabe in GitHub ist nicht nötig, das Regelwerk von `main` verlangt kein Review der Code-Owner: Zwei Maintainer, die sich ohnehin absprechen, sollen nicht auf einen Klick warten. Reicht die Absprache nicht, wird die Pflicht in GitHub wieder eingeschaltet. Ask ist Pflicht für die Pfade in `.github/CODEOWNERS` (Sperrliste und Positivliste, Elemente, Freigabe, Anmeldung und Anmeldedaten, Update und Installer, CLAUDE.md, AGENTS.md, ADRs), für jeden Hotfix und für jede Änderung an diesen Regeln.
 - **Ship**: Tippfehler und reine Textkorrekturen, kein Review.
 
 Ein Issue, ein Pull Request: Kleine Pull Requests lassen sich nach dem Merge einzeln ansehen, ein großer Sammel-PR macht daraus das Riesen-Review, das diese Regel vermeiden soll. Ein KI-Review läuft an jedem Pull Request mit; was davon übernommen wird, entscheidet ein Mensch. Datenschutz und Freigaben (A1, A3) sind in jeder Nightly so geschützt wie in einer stabilen Version, weil ihre Pfade immer „Ask“ sind.
@@ -66,6 +66,7 @@ Probleme mit einer Nightly melden Tester über die Issue-Vorlage „Problem in e
 
 - **Ein eigener Zweig `nightly` neben `main`:** Er läuft auseinander, Korrekturen müssten in beide Richtungen, und der Pull Request von `nightly` nach `main` wäre bei jeder Version ein Riesen-Review über alles, was Tester ohnehin schon hatten.
 - **Pflicht-Review vor jedem Merge, wie bisher:** Zwei Maintainer halten sich gegenseitig auf, und wer warten muss, sammelt mehrere Issues in einem großen Pull Request – das Gegenteil dessen, was ein Review leisten kann.
+- **Ask in GitHub erzwingen (Review der Code-Owner verpflichtend):** Die Absprache findet ohnehin statt, oft am selben Tisch; der Klick in GitHub hielte nur auf. Er bleibt der Rückweg, falls Absprachen verloren gehen.
 - **Gar kein Review mehr, nur Tester:** Tester finden Fehler im Verhalten, nicht nachlassende Qualität im Code; ohne zweiten Blick zerfiele der Code nach und nach.
 - **Ein Review des ganzen Unterschieds vor jeder stabilen Version:** bei einigen hunderttausend Zeichen nicht in vertretbarer Zeit zu leisten; die Schranke verlangt stattdessen, dass jeder kleine Pull Request schon reviewt ist.
 - **Ein eigener Hotfix-Kanal:** Eine Korrektur für Nightly-Nutzer ist eine Nightly von Hand, eine für stabile Nutzer eine Fehlerversion aus dem Release-Zweig; ein dritter Kanal brächte nichts.

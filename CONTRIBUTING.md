@@ -76,11 +76,11 @@ We follow **Ship / Show / Ask** (Rouan Wilsenach, martinfowler.com). Every PR is
 | Kind | When | Review |
 |---|---|---|
 | **Show** (default) | everything not listed under Ask or Ship | Merge it yourself once `flutter analyze` and `flutter test` are green. The other maintainer reviews it afterwards and sets the label `post-reviewed`. Findings become a follow-up issue or PR. |
-| **Ask** | any path in `.github/CODEOWNERS`, every hotfix, every change to these rules | Wait for the other maintainer's review before merging, as before. |
+| **Ask** | any path in `.github/CODEOWNERS`, every hotfix, every change to these rules | Merge only after the other maintainer has agreed, in person, by message or in a GitHub review. A formal approval in GitHub is not required; whoever merges notes the agreement in the PR. |
 | **Ship** | typos and wording only | none |
 
 - One issue, one PR. Small PRs can be reviewed one by one after the merge; a PR collecting several issues turns that into one huge review.
-- `.github/CODEOWNERS` lists the paths that are always Ask and requests the review automatically:
+- `.github/CODEOWNERS` lists the paths that are always Ask and requests the other maintainer as reviewer automatically:
   - the blocklist and allowlist (`sperrliste.dart`, `moodle_zugang.dart`, `browserliste.dart`) and interactive elements (`elemente.dart`),
   - approval logic (`freigabe.dart`) and credentials (`anmeldedaten.dart`, `anmeldung.dart`),
   - installer and update (`installer/`, `lib/update/`),
@@ -142,6 +142,6 @@ Stable users get 0.13.1. Nightly users already have the fix and are not offered 
 
 These settings carry the rules; changing them is a rule change (Ask):
 
-- `main`: PR required, required status checks `flutter analyze` and `flutter test`, required approvals 0, review from code owners required, no force-push, no deletion.
+- `main`: PR required, required status checks `flutter analyze` and `flutter test`, required approvals 0, review from code owners not required, no force-push, no deletion. Ask relies on the agreement between the maintainers; if that proves too loose, "require review from code owners" is switched on again.
 - `release/*`: same, but one approval required.
 - Environment `stable`: required reviewer is the other maintainer; the person who started the run cannot approve it.

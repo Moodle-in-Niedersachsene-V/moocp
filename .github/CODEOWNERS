@@ -1,8 +1,9 @@
-# Paths that are always "Ask": a PR touching one of them waits for the other
-# maintainer's review before it is merged (Ship / Show / Ask, CONTRIBUTING.md,
-# E39). Everything else is "Show" and is reviewed after the merge, so there is
-# deliberately no catch-all "*" line. GitHub never requests the author, and
-# "require review from code owners" on main makes these reviews mandatory.
+# Paths that are always "Ask": a PR touching one of them is merged only after
+# the other maintainer has agreed (Ship / Show / Ask, CONTRIBUTING.md, E39).
+# Everything else is "Show" and is reviewed after the merge, so there is
+# deliberately no catch-all "*" line. GitHub never requests the author. The
+# agreement may happen outside GitHub: "require review from code owners" is off
+# on main and is switched on again only if that proves too loose.
 # After moving to an organization team, replace the names by the team,
 # e.g. @Moodle-in-Niedersachsene-V/maintainers.
 /lib/moodle/sperrliste.dart        @topse @matthiasgruenwald

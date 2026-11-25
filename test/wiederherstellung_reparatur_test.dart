@@ -882,12 +882,14 @@ void main() {
         expect(moodle.akt[3]!.manager['/Ordner/b.txt'], _txt);
       });
 
-      test('eine falsche Datei im Ordner wird nicht überschrieben, sondern genannt', () async {
-        moodle.akt[2]!.eingebettet.remove('bild.png');
+      test('eine abweichende Datei im Ordner (die jetzige aus Moodle) ersetzt die App durch die der Sicherung', () async {
+        moodle.akt[2]!.eingebettet['zwei.png'] = utf8.encode('anderes Bild');
         final ordner = await lesen(2);
-        ablegen(ordner, 'dateien/bild.png', utf8.encode('falscher Inhalt'));
-        await expectLater(reparieren(ordner), throwsA(isA<MoodleFehler>().having((e) => e.meldung, 'Meldung', contains('Anderer Inhalt'))));
-        expect(moodle.schreiben, isEmpty);
+
+        final text = await reparieren(ordner);
+
+        expect(text, contains('verified: true'));
+        expect(moodle.akt[2]!.eingebettet['zwei.png'], _zwei);
       });
     });
 

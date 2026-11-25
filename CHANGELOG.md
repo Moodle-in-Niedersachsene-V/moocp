@@ -2,6 +2,10 @@
 
 ## 0.13.0
 - Neu: Testversionen (Nightlies) mit den neuesten Änderungen gibt es auf GitHub, für Windows, Linux und den Mac.
+- Plugins: Bei einem möglichen Namen oder geschützten Pfad in einer Antwort entscheidet jetzt die Lehrkraft, und ein Plugin kann moocp Pfade nennen, die nicht an die KI gehören.
+- Kurskonventionen: Das CLAUDE-Verzeichnis steht beim Schreiben am Anfang seines Abschnitts.
+- Sicherungen: Die Datei, die eine Sicherung in Moodle zurücklässt, lässt sich nach Ihrer Freigabe löschen.
+- Einstellungen: Beim Wechsel zwischen Versionen gehen unbekannte Einstellungen nicht mehr verloren.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.

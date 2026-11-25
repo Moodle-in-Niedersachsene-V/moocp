@@ -884,6 +884,22 @@ Future<String> aktivitaetAnlegen(
   String? ordner,
   bool sichtbar = false,
   Map<String, Object?> einstellungen = const {},
+}) async => (await aktivitaetAnlegenMitErgebnis(moodle, freigaben, kurs: kurs,
+    abschnittId: abschnittId, typ: typ, name: name, arbeitsordner: arbeitsordner,
+    ordner: ordner, sichtbar: sichtbar, einstellungen: einstellungen)).$1;
+
+/// Bericht, neue cmid und Ergebnis der Rückleseprüfung.
+Future<(String, int?, bool)> aktivitaetAnlegenMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required int kurs,
+  required int abschnittId,
+  required String typ,
+  required String name,
+  required String arbeitsordner,
+  String? ordner,
+  bool sichtbar = false,
+  Map<String, Object?> einstellungen = const {},
 }) async {
   if (!MoodleZugang.anlegbareModule.contains(typ)) {
     throw MoodleFehler(
@@ -966,9 +982,9 @@ Future<String> aktivitaetAnlegen(
     ),
   );
   if (!ja) {
-    return 'Nicht angelegt: ${sichtbar ? 'Sichtbares Anlegen' : 'Das Anlegen'} wurde in der App '
+    return ('Nicht angelegt: ${sichtbar ? 'Sichtbares Anlegen' : 'Das Anlegen'} wurde in der App '
         'abgelehnt oder nicht innerhalb von ${freigaben.frist.inMinutes} Minuten freigegeben.'
-        '${sichtbar ? ' Verborgen anlegen braucht nur bei Bestätigungen „alle" eine Freigabe.' : ''}';
+        '${sichtbar ? ' Verborgen anlegen braucht nur bei Bestätigungen „alle" eine Freigabe.' : ''}', null, false);
   }
 
   final vorher = istSammlung
@@ -1106,7 +1122,7 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (angehalten != null) {
-    return inhaltUebergeben(
+    final (bericht, ok) = await _inhaltUebergebenMitErgebnis(
       moodle,
       freigaben,
       ziel: Formularziel.aktivitaet(cmid),
@@ -1117,8 +1133,9 @@ Future<String> aktivitaetAnlegen(
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
           '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}',
     );
+    return (bericht, cmid, ok && probe.ok);
   }
-  return [
+  return ([
     'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
         '${sichtbar ? "SICHTBAR" : "verborgen"}.',
     if (istSammlung && abschnitt.nummer != 0)
@@ -1134,7 +1151,7 @@ Future<String> aktivitaetAnlegen(
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',
-  ].join('\n');
+  ].join('\n'), cmid, probe.ok);
 }
 
 // ---------------------------------------------------------------------------
@@ -1720,6 +1737,17 @@ Future<String> inhaltUebergeben(
   required String arbeitsordner,
   required SchutzPruefung fehler,
   required String angelegt,
+}) async => (await _inhaltUebergebenMitErgebnis(moodle, freigaben, ziel: ziel,
+    felder: felder, arbeitsordner: arbeitsordner, fehler: fehler, angelegt: angelegt)).$1;
+
+Future<(String, bool)> _inhaltUebergebenMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required Formularziel ziel,
+  required Map<String, String> felder,
+  required String arbeitsordner,
+  required SchutzPruefung fehler,
+  required String angelegt,
 }) => ordnerSperre(ordnerSchluessel(ziel, arbeitsordner), () async {
   final g = await formularLesenOhneSperre(moodle, ziel, arbeitsordner);
   for (final e in felder.entries) {
@@ -1731,7 +1759,7 @@ Future<String> inhaltUebergeben(
     ordner: g.ordner,
     arbeitsordner: arbeitsordner,
   );
-  if (a == null) return '$angelegt\nDer Inhalt steht schon so in Moodle.';
+  if (a == null) return ('$angelegt\nDer Inhalt steht schon so in Moodle.', true);
   final (text, ok) = await _uebergeben(
     moodle,
     freigaben,
@@ -1739,14 +1767,14 @@ Future<String> inhaltUebergeben(
     arbeitsordner,
     fehler,
   );
-  return [
+  return ([
     '$angelegt\nMIT PLATZHALTER: Der Schutzdienst vor Moodle hat das Anlegen mit diesem Inhalt '
         'angehalten; angelegt ist es mit „Inhalt folgt.", der Inhalt ging an die Lehrkraft.',
     text,
     if (!ok)
       '${a.kopf()} steht weiter mit Platzhalter im Kurs. Die Lehrkraft fragen, ob es gelöscht '
           'werden soll; nicht ungefragt löschen.',
-  ].join('\n');
+  ].join('\n'), ok);
 });
 
 /// Hält ein Schutzdienst das Speichern an (SchutzPruefung), kann die App es
@@ -1962,6 +1990,17 @@ Future<String> aendern(
   required String arbeitsordner,
   Map<String, Object?> einstellungen = const {},
   bool neuSpeichern = false,
+}) async => (await aendernMitErgebnis(moodle, freigaben, ordner: ordner,
+    arbeitsordner: arbeitsordner, einstellungen: einstellungen, neuSpeichern: neuSpeichern)).$1;
+
+/// Bericht und ob der Inhalt bestätigt oder unverändert ist.
+Future<(String, bool)> aendernMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required String ordner,
+  required String arbeitsordner,
+  Map<String, Object?> einstellungen = const {},
+  bool neuSpeichern = false,
 }) {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
   return ordnerSperre(
@@ -1977,7 +2016,7 @@ Future<String> aendern(
   );
 }
 
-Future<String> _aendernOhneSperre(
+Future<(String, bool)> _aendernOhneSperre(
   MoodleZugang moodle,
   Freigaben freigaben, {
   required String ordner,
@@ -1993,7 +2032,7 @@ Future<String> _aendernOhneSperre(
     neuSpeichern: neuSpeichern,
   );
   if (a == null) {
-    return 'Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.';
+    return ('Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.', true);
   }
 
   final ja = await freigaben.anfragen(
@@ -2005,14 +2044,14 @@ Future<String> _aendernOhneSperre(
     ),
   );
   if (!ja) {
-    return 'Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
-        '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.';
+    return ('Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
+        '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.', false);
   }
   try {
-    return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
+    return await _schreibenOhneSperre(moodle, a, arbeitsordner);
   } on SchutzPruefung catch (e) {
     // Die Sperre des Ordners hält diese Funktion (aendern).
-    return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+    return await _uebergeben(moodle, freigaben, a, arbeitsordner, e);
   }
 }
 

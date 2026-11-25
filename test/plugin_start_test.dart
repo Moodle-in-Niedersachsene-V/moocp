@@ -22,8 +22,8 @@ import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
-import 'package:moocp/plugin/moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
-import 'package:moocp/plugin/namenssperre.dart' show LetzteSperre;
+import 'package:moocp/plugin/moodle_schreiben.dart' show datenschutzAutomatischKennzeichnung, testantwortenKennzeichnung, zusatzKennzeichnung;
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung, Herkunft;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
 import 'package:moocp/plugin/werkzeugliste.dart';
@@ -98,6 +98,12 @@ void main() {
   late Directory wurzel;
   late Protokoll protokoll;
   late EinstellungenOhneDatei einstellungen;
+
+  /// Jede Datenschutzwarnung, die die Lehrkraft in diesem Test gesehen hat,
+  /// und wie sie antwortet (null: gar nicht, bis die Frist oder der Abbruch
+  /// sie beendet).
+  final warnungen = <Datenschutzwarnung>[];
+  bool? Function() warnantwort = () => false;
   final laufende = <LaufendePlugins>[];
   final dienste = <McpDienst>[];
   final clients = <McpTestClient>[];
@@ -105,7 +111,25 @@ void main() {
   setUp(() {
     wurzel = Directory.systemTemp.createTempSync('moocp_plugins_');
     protokoll = Protokoll();
+    warnungen.clear();
+    warnantwort = () => false;
   });
+
+  /// Freigaben, die eine Datenschutzwarnung wie die Lehrkraft beantworten:
+  /// [warnantwort] sagt true (senden), false (Sperren) oder null (keine
+  /// Entscheidung). Jede andere Anfrage lehnt sie ab.
+  Freigaben fragendeFreigaben({Duration frist = Freigaben.fristVorgabe}) {
+    final f = Freigaben(protokoll, frist: frist);
+    f.addListener(() {
+      final a = f.aktuell;
+      if (a == null || !a.offen) return;
+      final w = a.datenschutz;
+      if (w != null) warnungen.add(w);
+      final antwort = w == null ? false : warnantwort();
+      if (antwort != null) scheduleMicrotask(() => f.entscheiden(antwort));
+    });
+    return f;
+  }
 
   tearDown(() async {
     for (final c in clients) {
@@ -160,7 +184,7 @@ void main() {
       einstellungen,
       moodle ?? MoodleZugang(protokoll),
       protokoll,
-      freigaben ?? Freigaben(protokoll),
+      freigaben ?? fragendeFreigaben(),
       arbeitsordner,
       profil: profil,
       testzugang: testzugang,
@@ -552,9 +576,8 @@ void main() {
       addTearDown(() => moodle.server.close(force: true));
       final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
       moodle.angefragt.clear();
-      final hinweise = SperrHinweise();
       final profil = beispielProfil('standard', 'moodle', await freierPort());
-      final l = await starten(await beispielAngenommen([profil]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final l = await starten(await beispielAngenommen([profil]));
       final client = await verbinden(profil, l, moodle: zugang);
 
       final lauf = await client.tool('beispiel_lauf', {'cmid': 501});
@@ -602,12 +625,11 @@ void main() {
       final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
       moodle.angefragt.clear();
       final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
-      final hinweise = SperrHinweise();
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       final arbeitsordner = Directory(p.join(wurzel.path, 'arbeitsordner'))..createSync();
       final l = await starten(
         await beispielAngenommen([profil]),
-        mit: LaufendePlugins(protokoll, sperrHinweise: hinweise, downloads: downloads),
+        mit: LaufendePlugins(protokoll, downloads: downloads),
       );
       final client = await verbinden(profil, l, moodle: zugang, arbeitsordner: arbeitsordner.path);
 
@@ -635,16 +657,15 @@ void main() {
         expect(g['isError'], true, reason: t);
         expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'), reason: t);
       }
-      expect(hinweise.offen.map((t) => t.pfad), everyElement(isTrue));
-      expect(hinweise.offen, hasLength(2));
+      expect(warnungen, hasLength(2));
+      expect([for (final w in warnungen) w.hatPfade && !w.hatNamen], [true, true]);
       expect(await client.tool('beispiel_echo', {'text': 'Aufgabe 3'}), startsWith('Echo: Aufgabe 3'));
     });
 
-    test('letzte Sperre: Das Beispiel nennt einen Namen, seine Antwort und seine Protokollzeile damit gehen nicht hinaus', () async {
+    test('Datenschutzwarnung: Das Beispiel nennt einen Namen; seine Protokollzeile wird zum Platzhalter, seine Antwort fragt, Sperren hält sie an', () async {
       final eins = beispielProfil('standard', 'moodle', await freierPort());
       final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
-      final hinweise = SperrHinweise();
-      final l = await starten(await beispielAngenommen([eins, zwei]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final l = await starten(await beispielAngenommen([eins, zwei]));
       final a = await verbinden(eins, l);
       final b = await verbinden(zwei, l);
 
@@ -654,46 +675,257 @@ void main() {
       expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_namen'));
       expect(jsonEncode(r), isNot(contains('Erika')));
       expect(jsonEncode(r), isNot(contains('Mustermann')));
-      // Die Sperre gilt nach dem Ende des Aufrufs weiter, in jedem Profil, für
-      // jeden Teil des Namens; was keinen Namen trägt, geht durch.
+      expect(warnungen, hasLength(1));
+      expect(warnungen.single.plugin, 'Beispiel');
+      expect(warnungen.single.werkzeug, 'beispiel_namen');
+      // Die Entscheidung gilt für diese eine Antwort: Die nächste fragt wieder,
+      // in jedem Profil, für jeden Teil des Namens; was keinen Namen trägt,
+      // geht ohne Frage durch.
       for (final (client, text) in [(a, 'Erika'), (b, 'MUSTERMANN'), (b, 'Frau Mustermann')]) {
         final g = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
         expect(g['isError'], true, reason: text);
         expect(((g['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
       }
+      expect(warnungen, hasLength(4));
       expect(await b.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
+      expect(warnungen, hasLength(4), reason: 'ohne Treffer keine Frage');
       expect(await a.tool('beispiel_protokoll', {'text': 'Aufgabe 3 fertig'}), 'Die Zeile steht im Protokoll von moocp.');
 
       final zeilen = [for (final e in protokoll.eintraege) e.text];
       expect(zeilen, contains('Plugin „Beispiel“: 1 Name zum Sperren genannt'));
-      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_namen: Protokollzeile gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
-      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_namen: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
+      expect(zeilen, contains('Plugin „Beispiel“: [gesperrt: möglicher Name]'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_namen: Datenschutzwarnung, 2 Treffer, gesperrt'));
       expect(zeilen, contains('beispiel_namen: ${gesperrtText('Beispiel', 'beispiel_namen')}'));
       expect(zeilen, contains('Plugin „Beispiel“: Aufgabe 3 fertig'));
-      // Die Namen stehen in keiner Zeile, außer in den Argumenten, die die KI
-      // selbst geschickt hat.
+      // Kein Wort in einer Zeile, außer in den Argumenten, die die KI selbst
+      // geschickt hat.
       final ohneArgumente = zeilen.where((z) => !z.startsWith('beispiel_echo({'));
       expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
       expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('mustermann')));
-      // Die Lehrkraft sieht jedes Wort, gesammelt.
-      expect([for (final t in hinweise.offen) (t.werkzeug, t.stelle, t.wort)], [
-        ('beispiel_namen', SperrStelle.protokollzeile, 'Erika'),
-        ('beispiel_namen', SperrStelle.ergebnis, 'Erika'),
-        ('beispiel_echo', SperrStelle.ergebnis, 'Erika'),
-        ('beispiel_echo', SperrStelle.ergebnis, 'MUSTERMANN'),
-        ('beispiel_echo', SperrStelle.ergebnis, 'Mustermann'),
-      ]);
-      expect(hinweise.offen.map((t) => t.plugin).toSet(), {'Beispiel'});
     });
 
-    test('letzte Sperre: Das Beispiel lässt seine Antwort vorher prüfen, ersetzt den Namen, und sie geht durch', () async {
+    test('Datenschutzwarnung: „trotzdem senden“ gibt die Antwort unverändert hinaus, die nächste fragt wieder', () async {
       final eins = beispielProfil('standard', 'moodle', await freierPort());
-      final hinweise = SperrHinweise();
-      final l = await starten(await beispielAngenommen([eins]), mit: LaufendePlugins(protokoll, sperrHinweise: hinweise));
+      final l = await starten(await beispielAngenommen([eins]));
+      final a = await verbinden(eins, l);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      warnantwort = () => true;
+
+      final erste = await a.tool('beispiel_echo', {'text': 'Abgabe von Erika'});
+      final zweite = await a.tool('beispiel_echo', {'text': 'Abgabe von Erika'});
+
+      expect(erste, startsWith('Echo: Abgabe von Erika'));
+      expect(zweite, startsWith('Echo: Abgabe von Erika'));
+      expect(warnungen, hasLength(2), reason: 'nichts wird gemerkt');
+      final f = warnungen.first.funde.single;
+      expect([f.wort, f.davor, f.pfad], ['Erika', 'Echo: Abgabe von ', false]);
+      expect(
+        [for (final e in protokoll.eintraege) e.text],
+        contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, trotzdem gesendet'),
+      );
+    });
+
+    test('Testbetrieb: die Datenschutzwarnung aus der vorbereiteten Antwort, der Lauf geht nach einer Sperre weiter', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      final profil = Profil(
+        kennung: 'standard',
+        name: 'moodle',
+        adresse: moodle.basis.toString(),
+        port: await freierPort(),
+        mcpName: 'moodle',
+        schluessel: 'test',
+      );
+      // Erfunden: Die Zugangsdatei selbst liest hier niemand, nur ihr Ordner zählt.
+      final testzugang = Testzugang(
+        kennung: 'standard',
+        datei: p.join(wurzel.path, 'testzugang.env'),
+        adresse: profil.adresse,
+        kurse: const {12},
+      );
+      void antwort(String? ausgang) => File(p.join(wurzel.path, pluginDialogantwortenDatei)).writeAsStringSync(
+        jsonEncode({
+          'antworten': [
+            if (ausgang != null)
+              {'plugin': 'beispiel', 'art': 'datenschutz', 'titel': 'beispiel_echo', 'antwort': {'ausgang': ausgang}},
+          ],
+        }),
+      );
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l, moodle: zugang, testzugang: testzugang);
+      await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      Future<Map> echo() async => (await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Abgabe von Erika'}}));
+      String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+
+      antwort('sperren');
+      final gesperrt = await echo();
+      expect(gesperrt['isError'], true);
+      expect(text(gesperrt), '${datenschutzAutomatischKennzeichnung('Beispiel', gesendet: false)}\n\n${gesperrtText('Beispiel', 'beispiel_echo')}');
+      expect(text(gesperrt), isNot(contains('Erika')));
+
+      // Nach der Sperre läuft es weiter: Die nächste Antwort geht, mit „senden“ unverändert.
+      antwort('senden');
+      expect(
+        (await echo())['isError'],
+        isNot(true),
+      );
+      antwort('senden');
+      expect(
+        text(await echo()),
+        startsWith('${datenschutzAutomatischKennzeichnung('Beispiel', gesendet: true)}\n\nEcho: Abgabe von Erika'),
+      );
+
+      // Ohne vorbereitete Antwort: gesperrt, ohne dass die Lehrkraft gefragt wird.
+      antwort(null);
+      final ohne = await echo();
+      expect(ohne['isError'], true);
+      expect(text(ohne), contains(gesperrtText('Beispiel', 'beispiel_echo')));
+      expect(warnungen, isEmpty, reason: 'im Testbetrieb erscheint kein Dialog');
+
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, gesperrt (automatisch, ohne Lehrkraft)'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, trotzdem gesendet (automatisch, ohne Lehrkraft)'));
+      expect(zeilen, contains(contains('Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von Plugin „Beispiel“')));
+      // Ein vom Plugin gemeldeter Name bleibt ein Platzhalter, auch im Testbetrieb.
+      expect(zeilen, contains(contains('1 Treffer ([gesperrt: möglicher Name]) -- gesperrt')));
+      final ohneArgumente = zeilen.where((z) => !z.startsWith('beispiel_echo({') && !z.startsWith('beispiel_echo: Echo:'));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
+    });
+
+    test('ohne Testbetrieb (kein Testzugang) fragt die Lehrkraft, auch wenn eine Datei mit Antworten daliegt', () async {
+      File(p.join(wurzel.path, pluginDialogantwortenDatei)).writeAsStringSync(
+        jsonEncode({
+          'antworten': [
+            {'plugin': 'beispiel', 'art': 'datenschutz', 'titel': 'beispiel_echo', 'antwort': {'ausgang': 'senden'}},
+          ],
+        }),
+      );
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
+      final a = await verbinden(eins, l);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+
+      final r = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Erika'}});
+
+      expect(r['isError'], true);
+      expect(warnungen, hasLength(1));
+      expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
+    });
+
+    test('Datenschutzwarnung: ohne Entscheidung bis zur Frist oder bei Abbruch des Clients wird gesperrt', () async {
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
+      final freigaben = fragendeFreigaben(frist: const Duration(milliseconds: 300));
+      final a = await verbinden(eins, l, freigaben: freigaben);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      warnantwort = () => null;
+
+      final frist = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Erika'}});
+
+      expect(frist['isError'], true);
+      expect(((frist['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
+      expect(freigaben.aktuell, isNull, reason: 'der Dialog hat sich geschlossen');
+      expect(warnungen, hasLength(1));
+      expect([for (final e in protokoll.eintraege) e.text], contains(contains('Frist abgelaufen')));
+    });
+
+    test('Datenschutzwarnung: Bricht der Client den Aufruf ab, verfällt die offene Frage: gesperrt, der Dialog schließt sich', () async {
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
+      final freigaben = fragendeFreigaben();
+      warnantwort = () => null;
+      await verbinden(eins, l, freigaben: freigaben);
+      final abbruch = Completer<void>();
+      final warnung = Datenschutzwarnung(plugin: 'Beispiel', werkzeug: 'beispiel_echo', funde: const []);
+
+      final aus = dienste.last.datenschutzwarnung(warnung: warnung, abbruch: abbruch.future, aufrufer: 'Plugin „Beispiel“');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(freigaben.aktuell?.datenschutz, same(warnung));
+      abbruch.complete();
+
+      expect(await aus, DatenschutzAusgang.sperren);
+      expect(freigaben.aktuell, isNull);
+      expect([for (final e in protokoll.eintraege) e.text], contains(contains('Die KI wartet nicht mehr')));
+    });
+
+    test('Datenschutzwarnung: Name und Pfad in einer Antwort sind eine Anfrage; sie fragt auch auf der Stufe „keine“', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]), mit: LaufendePlugins(protokoll, downloads: downloads));
+      final freigaben = fragendeFreigaben()..stufe = Bestaetigungen.keine;
+      final a = await verbinden(eins, l, freigaben: freigaben);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+
+      final r = await a.call('tools/call', {
+        'name': 'beispiel_echo',
+        'arguments': {'text': 'Erika liegt in ${downloads.wurzel}'},
+      });
+
+      expect(r['isError'], true);
+      expect(warnungen, hasLength(1));
+      expect(warnungen.single.anzahl, greaterThanOrEqualTo(2), reason: 'Name und Pfad zusammen');
+      expect([warnungen.single.hatNamen, warnungen.single.hatPfade], [true, true]);
+      expect(freigaben.ausgelassen, 0, reason: 'diese Freigabe lässt keine Stufe aus');
+    });
+
+    test('Datenschutzwarnung: Das Beispiel nennt einen Pfad; seine Protokollzeile wird zum Platzhalter, seine Antwort fragt, Sperren hält sie an', () async {
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
       final a = await verbinden(eins, l);
 
-      expect(await a.tool('beispiel_namen_pruefen', {}), 'Ergebnis für [Name] [Name]: 3 von 4 Punkten.');
-      expect(hinweise.offen, isEmpty);
+      final r = await a.call('tools/call', {'name': 'beispiel_pfade', 'arguments': <String, Object?>{}});
+
+      expect(r['isError'], true);
+      expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_pfade'));
+      expect(jsonEncode(r), isNot(contains('Abgaben')));
+      expect(warnungen, hasLength(1));
+      expect([warnungen.single.hatPfade, warnungen.single.hatNamen], [true, false]);
+      expect(warnungen.single.funde.single.herkunft, [Herkunft.pluginPfad]);
+      expect(warnungen.single.funde.single.wort, '/home/e.mustermann/Klasse 9b/Abgaben');
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: 1 Pfad zum Sperren genannt'));
+      expect(zeilen, contains('Plugin „Beispiel“: [gesperrt: Pfad]'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_pfade: Datenschutzwarnung, 1 Treffer, gesperrt'));
+      expect(zeilen.join('\n'), isNot(contains('Abgaben')));
+    });
+
+    test('Datenschutzwarnung: Name, Pfad des Plugins und Ordner für Downloads in einer Antwort sind eine Warnung; „trotzdem senden“ gilt nur für diese Antwort', () async {
+      final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]), mit: LaufendePlugins(protokoll, downloads: downloads));
+      final a = await verbinden(eins, l);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      await a.call('tools/call', {'name': 'beispiel_pfade', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      final text = 'Erika: /home/e.mustermann/Klasse 9b/Abgaben/x.pdf und ${downloads.wurzel}';
+
+      final gesperrt = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
+      warnantwort = () => true;
+      final gesendet = await a.tool('beispiel_echo', {'text': text});
+      warnantwort = () => false;
+      final wieder = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
+
+      expect(gesperrt['isError'], true);
+      expect(gesendet, startsWith('Echo: $text'), reason: 'unverändert, erst nach ausdrücklichem Senden');
+      expect(wieder['isError'], true, reason: 'nichts wird gemerkt');
+      expect(warnungen, hasLength(3));
+      final w = warnungen.first;
+      expect([w.hatNamen, w.hatPfade], [true, true]);
+      expect(w.funde.expand((f) => f.herkunft).toSet(), {
+        Herkunft.pluginName,
+        Herkunft.pluginPfad,
+        Herkunft.downloadOrdner,
+      });
     });
 
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
@@ -1232,7 +1464,7 @@ void main() {
       expect(await g.client.tool('beispiel_echo', {'text': 'Hallo'}), startsWith('Echo: Hallo'));
     });
 
-    test('nennt das Plugin nach einem Neustart eine Werkzeugliste mit einem gesperrten Namen, startet es nicht und ist ausgefallen', () async {
+    test('nennt das Plugin nach einem Neustart eine Werkzeugliste mit einem Namen, läuft es weiter: Die Liste wird nicht geprüft', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());
       // Der Neustart ist ein anderes Programm: ein kleiner MCP-Server, dessen
       // Werkzeugbeschreibung den Namen trägt.
@@ -1268,10 +1500,8 @@ Future<void> main(List<String> a) async {
 ''');
       final pakete = File(p.join('.dart_tool', 'package_config.json')).absolute.path;
       final prozesse = <Process>[];
-      final hinweise = SperrHinweise();
       final l = LaufendePlugins(
         protokoll,
-        sperrHinweise: hinweise,
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
           final prozess = prozesse.isEmpty
               ? await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner)
@@ -1286,21 +1516,16 @@ Future<void> main(List<String> a) async {
       expect((await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}}))['isError'], true);
 
       absturzMeldung(await absturz(client));
-      ausfallMeldung(await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}}));
+      final danach = await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'x'}});
 
       final e = plugins.eintraege.single;
       expect(prozesse, hasLength(2));
-      expect(l.ausgefallen(e), isTrue);
-      expect(l.startfehler(e), werkzeuglisteGesperrt);
+      expect(l.ausgefallen(e), isFalse);
+      expect(text(danach), 'ok');
       final zeilen = [for (final z in protokoll.eintraege) z.text];
-      expect(zeilen, contains('Plugin „Beispiel“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
-      expect(zeilen.join('\n'), isNot(contains('Erika')));
-      expect(hinweise.offen.last.stelle, SperrStelle.werkzeugliste);
-      expect(hinweise.offen.last.wort, 'Erika');
-      expect(hinweise.offen.last.werkzeug, isNull);
-      expect(einstellungen.plugins['beispiel']!.werkzeuge!.map((w) => w.beschreibung).join(), isNot(contains('Erika')));
+      expect(zeilen.where((z) => z.contains('Werkzeugliste gesperrt')), isEmpty);
       for (final prozess in prozesse) {
-        expect(await prozessLaeuft(prozess.pid), isFalse);
+        expect(await prozessLaeuft(prozess.pid), prozess == prozesse.last);
       }
     });
 
@@ -1406,21 +1631,6 @@ Future<void> main(List<String> a) async {
       verstoss(['beispiel_erika', 'beispiel_erika'], 'Zwei Werkzeuge tragen denselben Namen');
       verstoss(['beispiel_erika'], 'schon gibt', vergeben: {'beispiel_erika'});
       werkzeugnamenPruefen(['beispiel_echo', 'beispiel_a_b-c', 'beispiel_${'x' * 31}'], 'beispiel', {'status'});
-    });
-
-    test('die letzte Sperre prüft auch die Namen der Werkzeuge, ohne den Kurznamen davor', () {
-      WerkzeugBeschreibung w(String name) =>
-          WerkzeugBeschreibung(name: name, beschreibung: 'Probe', eingabeSchema: const {'type': 'object'});
-      final sperre = LetzteSperre()..namenHinzufuegen('beispiel', ['Erika Mustermann', 'Max Beispiel']);
-
-      // „_“ und „-“ trennen Wörter: Der Vorname allein trifft.
-      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo'), w('beispiel_Erika_x')], 'beispiel')), 'Erika');
-      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_liste-mustermann')], 'beispiel')), 'mustermann');
-      // Heißt ein Kind wie der Kurzname, trifft nicht jeder Werkzeugname;
-      // dasselbe Wort hinter dem Kurznamen schon.
-      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo'), w('beispiel_max_a')], 'beispiel')), 'max');
-      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_echo')], 'beispiel')), isNull);
-      expect(sperre.treffer('beispiel', werkzeuglisteTexte([w('beispiel_a_beispiel')], 'beispiel')), 'beispiel');
     });
 
     test('mit langem Profilnamen über 64 Zeichen: Das Werkzeug fehlt nur in diesem Profil, einmal im Protokoll', () async {

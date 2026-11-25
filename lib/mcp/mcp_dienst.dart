@@ -20,6 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt, protokollPlatzhalterName, protokollPlatzhalterPfad;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
@@ -49,6 +50,7 @@ import '../moodle/lernlandkarte_verteilen.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sicherung_regeln.dart';
 import '../moodle/sicherung.dart';
+import '../moodle/sicherung_loeschen.dart';
 import '../moodle/stack.dart';
 import '../moodle/test.dart';
 import '../moodle/wiederherstellung.dart';
@@ -483,6 +485,77 @@ class McpDienst implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _datenschutzwarnung(warnung, abbruch, aufrufer);
+
+  /// Die Datenschutzwarnung (E36) durch die Freigaben dieses Profils: auf
+  /// jeder Stufe (`ab: keine`), im Testbetrieb ohne automatische Freigabe.
+  /// Das Protokoll nennt nur Plugin und Werkzeug, nie ein Wort (Freigaben
+  /// schreibt den Titel mit).
+  ///
+  /// Testbetrieb (E20): Nennt [testDialogantworten] eine Datei, beantwortet
+  /// sie die Warnung stattdessen, ohne Dialog ([_automatischeWarnung]).
+  Future<DatenschutzAusgang> _datenschutzwarnung(
+    Datenschutzwarnung warnung,
+    Future<void> abbruch,
+    String aufrufer,
+  ) async {
+    final datei = testDialogantworten;
+    if (datei != null) return _automatischeWarnung(warnung, datei, aufrufer);
+    final a = FreigabeAnfrage(
+      titel: 'Datenschutzwarnung',
+      punkte: const [],
+      vergleich: const [],
+      knopf: 'Kein Name – trotzdem an die KI geben',
+      ablehnen: 'Sperren',
+      ohneEntscheidung: 'wird die Antwort gesperrt',
+      ab: Bestaetigungen.keine,
+      datenschutz: warnung,
+      protokolltitel: 'Datenschutzwarnung',
+    );
+    final ja = await Freigaben.ohneTestfreigabe(
+      () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), aufrufer: aufrufer),
+    );
+    return ja ? DatenschutzAusgang.senden : DatenschutzAusgang.sperren;
+  }
+
+
+  /// Die Datenschutzwarnung im Testbetrieb (E20): beantwortet aus der Datei
+  /// [datei] ([datenschutzAntwort]), ohne Dialog; ohne Eintrag wird gesperrt.
+  /// Das Protokoll sagt, dass nicht die Lehrkraft entschieden hat, und nennt
+  /// Plugin, Werkzeug, Zahl der Treffer und die Entscheidung. Das Wort eines
+  /// Treffers steht nur dort, wo er allein aus dem gebundenen Testkonto oder
+  /// aus den Teilnehmenden eines gebundenen Testkurses stammt; bei jedem
+  /// anderen Treffer, auch einem, den zugleich eine andere Quelle trifft,
+  /// und bei jedem Pfad steht der Platzhalter.
+  Future<DatenschutzAusgang> _automatischeWarnung(Datenschutzwarnung warnung, String datei, String aufrufer) async {
+    final ausgang = datenschutzAntwort(datei, warnung.kurzname ?? '', warnung.werkzeug);
+    final zugang = testzugang ?? Testzugang.fuer(profil);
+    bool testquelle(Fund f) =>
+        !f.pfad &&
+        f.herkunft.isNotEmpty &&
+        f.herkunft.every(
+          (h) => switch (h.art) {
+            // Das angemeldete Konto ist hier das gebundene Testkonto: Die Datei gibt es nur dafür.
+            HerkunftArt.lehrkraft => true,
+            HerkunftArt.teilnehmende => h.kurs != null && _testbetrieb.gebundenerTestkurs(profil, zugang, h.kurs!),
+            _ => false,
+          },
+        );
+    final treffer = [for (final f in warnung.funde) testquelle(f) ? f.wort : (f.pfad ? protokollPlatzhalterPfad : protokollPlatzhalterName)];
+    final gesendet = ausgang.gesendet;
+    protokoll.eintrag(
+      gesendet ? Art.info : Art.gesperrt,
+      'Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von $aufrufer, Werkzeug ${warnung.werkzeug}, '
+      '${treffer.length} Treffer (${treffer.join(', ')}) -- ${gesendet ? 'trotzdem gesendet' : 'gesperrt'}',
+    );
+    return ausgang;
+  }
 
   @override
   String? get testDialogantworten => _testbetrieb.dialogantworten(profil, testzugang ?? Testzugang.fuer(profil));
@@ -1207,6 +1280,30 @@ class McpDienst implements AufrufKontext {
         antwortfrist,
         () => laufText('Die Sicherung', a['id'] as String?, 'sicherung_status'),
       ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'sicherung_loeschen',
+      titel: 'Sicherungsdatei in Moodle löschen',
+      beschreibung:
+          'Löscht die eine Datei, die eine Sicherung der App (sichern_aktivitaet, sichern_auswahl) im '
+          'persönlichen Sicherungsbereich in Moodle zurückgelassen hat, nach Freigabe in der App. Die Kopie im '
+          'Sicherungsordner der App bleibt. Nummer und Dateiname in Moodle (wie die Antwort der Sicherung ihn nennt) '
+          'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
+          'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
+          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen noch unter ihrem Namen '
+          'da sind (Inhalte werden nicht verglichen). Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
+          'das nennt die Freigabe. Während einer Sicherung oder Wiederherstellung in der App wird nichts gelöscht.',
+      parameter: {
+        'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),
+        'name': JsonSchema.string(
+          description: 'Dateiname der Sicherung in Moodle, nicht der im Sicherungsordner (steht als „Name der Datei in Moodle“ in der Antwort der Sicherung und in sicherung_status)',
+        ),
+      },
+      pflicht: ['id', 'name'],
+      zerstoerend: true,
+      ausfuehren: (a) => sicherungLoeschen(moodle, freigaben, vorgaenge, id: _text(a, 'id'), name: _text(a, 'name')),
     );
 
     // ---- Wiederherstellen einer Sicherungsdatei in einen bestehenden Kurs (E29, moodle/wiederherstellung.dart)
@@ -2207,7 +2304,9 @@ class McpDienst implements AufrufKontext {
           'es verborgen an, mit einer festen Beschreibung, die Menschen erklärt, was darin liegt. '
           'Gibt es die Datei schon, prüft die App zuerst, dass Moodle noch den Stand vom Lesen '
           'zeigt, und schreibt erst nach Freigabe in der App, die den Zeilenvergleich zeigt. '
-          'Danach Rückleseprobe (verified). Weitere Dateien des Verzeichnisses (Vorlagen, '
+          'Danach Rückleseprobe (verified). Steht das Verzeichnis nicht am Anfang seines '
+          'Abschnitts, verschiebt es das Werkzeug mit regulärer Freigabe und prüft die Reihenfolge. '
+          'Weitere Dateien des Verzeichnisses (Vorlagen, '
           'Skripte, Zeichnungsquellen) mit aktivitaet_lesen und aendern; das ganze Verzeichnis '
           'mit loeschen.',
       parameter: {
@@ -2654,6 +2753,13 @@ class _KontextImAufruf implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst._datenschutzwarnung(warnung, abbruch, aufrufer);
 
   @override
   String? get testDialogantworten => _dienst.testDialogantworten;

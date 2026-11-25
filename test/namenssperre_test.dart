@@ -1,9 +1,9 @@
-// Die Regel der letzten Sperre gegen Namen (E36, lib/plugin/namenssperre.dart):
+// Die Regel der Datenschutzprüfung gegen Namen (E36, lib/plugin/namenssperre.dart):
 // Namensteile, ganze Wörter, kurze Namen, Groß- und Kleinschreibung, Umlaute
 // und Akzente in beide Richtungen, Doppelnamen, Satzzeichen, Zeilenwechsel,
-// Namen in JSON, HTML und Pfaden, einfach kodierte Namen und Pfade
-// (Prozentkodierung, Unicode-Escapes, HTML-Zeichenreferenzen), leere Eingaben
-// und viele Namen. Alle Namen sind erfunden. Unsichtbare Zeichen stehen nur
+// Namen in JSON, HTML und Pfaden, einfach kodierte Namen (Unicode-Escapes,
+// HTML-Zeichenreferenzen; keine Prozentkodierung), leere Eingaben und viele
+// Namen. Alle Namen sind erfunden. Unsichtbare Zeichen stehen nur
 // als Escape im Quelltext, nie wörtlich.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/plugin/namenssperre.dart';
@@ -186,26 +186,12 @@ void main() {
       expect(s.treffer('https://moodle.schule.example/user/view.php?name=erika'), 'erika');
     });
 
-    test('Prozentkodierung, auch mit + als Leerzeichen und in UTF-8', () {
-      expect(s.treffer('Erik%61'), 'Erika', reason: 'das Wort, wie es aufgelöst dasteht');
-      expect(s.treffer('%45RIKA'), 'ERIKA');
-      expect(s.treffer('name=Erika%20Mustermann'), 'Erika');
-      expect(s.treffer('q=x+Musterman%6E+y'), 'Mustermann');
-      expect(_sperre(['Lotte Müller']).treffer('M%C3%BCller'), 'Müller');
-      expect(_sperre(['Lotte Müller']).treffer('M%c3%bcller'), 'Müller');
-    });
-
-    test('mehrfach prozentkodiert, bis zu einer festen Tiefe', () {
-      expect(s.treffer('Erik%2561'), 'Erika', reason: 'doppelt');
-      expect(s.treffer('Erik%252561'), 'Erika', reason: 'dreifach');
-    });
-
-    test('ungültige Prozentfolgen: kein Fehler, die gültigen werden aufgelöst, die Rohform zählt weiter', () {
+    test('Prozentkodierung wird nicht aufgelöst, der Rest des Texts trifft weiter', () {
+      expect(s.treffer('Erik%61'), isNull);
+      expect(s.treffer('%45RIKA'), isNull);
+      expect(s.treffer('name=Erika%20Mustermann'), 'Erika', reason: '„Erika“ steht als ganzes Wort davor');
+      expect(_sperre(['Lotte Müller']).treffer('M%C3%BCller'), isNull);
       expect(s.treffer('100% von Erika%'), 'Erika');
-      expect(s.treffer('Erik%61 %zz %4'), 'Erika');
-      expect(s.treffer('%E0%A4%A Erika'), 'Erika');
-      expect(s.treffer('%C3%28 %FF %'), isNull);
-      expect(s.treffer('%zzErika'), isNull, reason: 'ohne Trennung im Wort, roh wie aufgelöst');
     });
 
     test('Unicode-Escapes wie in JSON und JavaScript', () {
@@ -236,10 +222,10 @@ void main() {
       expect(s.treffer('&#1114112;Erika &#xD800; &#;'), 'Erika', reason: 'ungültige Referenzen werfen nicht');
     });
 
-    test('kombiniert und verschachtelt: Prozent über Escape, Entität über Entität', () {
-      expect(s.treffer('%5Cu0045rika'), 'Erika');
+    test('verschachtelt: Entität über Entität, bis zu einer festen Tiefe', () {
       expect(s.treffer('&amp;#69;rika'), 'Erika');
-      expect(s.treffer('%26%2369%3Brika'), 'Erika');
+      expect(s.treffer('&amp;amp;#69;rika'), 'Erika');
+      expect(s.treffer('&amp;amp;amp;amp;#69;rika'), isNull, reason: 'tiefer als die Grenze');
     });
 
     test('Base64 bleibt außen vor', () {
@@ -265,124 +251,6 @@ void main() {
       expect(Namenssperre().treffer('Erika Mustermann'), isNull);
       expect(_sperre(['Erika']).treffer(''), isNull);
       expect(_sperre(['Erika']).treffer('   \n\t '), isNull);
-    });
-  });
-
-  group('Je Plugin', () {
-    test('Namen eines Plugins sperren nur dessen Texte', () {
-      final gemeldet = <SperrTreffer>[];
-      final l = LetzteSperre(melden: gemeldet.add);
-      l.namenHinzufuegen('a', ['Erika Mustermann']);
-
-      expect(l.treffer('a', ['Text', 'von Erika']), 'Erika');
-      expect(l.treffer('b', ['von Erika']), isNull);
-      expect(l.anzahl('a'), 1);
-      expect(l.anzahl('b'), 0);
-      expect(l.gesperrt('b', ['Erika'], plugin: 'B', werkzeug: 'b_x', stelle: SperrStelle.ergebnis), isFalse);
-      expect(l.gesperrt('a', ['Erika'], plugin: 'A', werkzeug: 'a_x', stelle: SperrStelle.ergebnis), isTrue);
-      expect(gemeldet.single.wort, 'Erika');
-      expect(gemeldet.single.plugin, 'A');
-      expect(gemeldet.single.werkzeug, 'a_x');
-      expect(gemeldet.single.toString(), isNot(contains('Erika')));
-    });
-  });
-
-  group('Prüfen für ein Plugin (/v1/namen/pruefen)', () {
-    const pfad = r'C:\Temp\moocp_plugin_downloads';
-    LetzteSperre sperre() => LetzteSperre()
-      ..namenHinzufuegen('a', ['Erika Mustermann', 'René Groß'])
-      ..pfadSperren(pfad);
-
-    String ausgeschnitten(String text, List<(int, int)> stellen) =>
-        [for (final (anfang, ende) in stellen) text.substring(anfang, ende)].join('|');
-
-    test('nennt die Stellen im Rohtext, in jeder Schreibweise, ohne Warnung an die Lehrkraft', () {
-      final gemeldet = <SperrTreffer>[];
-      final l = LetzteSperre(melden: gemeldet.add)..namenHinzufuegen('a', ['Erika Mustermann', 'René Groß']);
-      const text = 'Abgabe von ERIKA (mustermann_erika.pdf), Rene Gross und Max. Maximal 10 Punkte.';
-
-      final r = l.pruefen('a', text);
-
-      expect(ausgeschnitten(text, r.stellen), 'ERIKA|mustermann|erika|Rene|Gross');
-      expect(r.kodiert, isFalse);
-      expect(r.pfad, isFalse);
-      expect(gemeldet, isEmpty);
-      expect(l.pruefen('b', text).stellen, isEmpty, reason: 'Namen eines Plugins gelten nur für seine Texte');
-    });
-
-    test('Stellen zählen UTF-16-Codeeinheiten', () {
-      const text = '\u{1F600} Erika';
-      expect(sperre().pruefen('a', text).stellen, [(3, 8)]);
-    });
-
-    test('ein Treffer erst nach dem Auflösen einer Kodierung heißt kodiert, ohne Stelle', () {
-      final l = sperre();
-      final nurKodiert = l.pruefen('a', 'Erik%61');
-      expect([nurKodiert.stellen, nurKodiert.kodiert, nurKodiert.pfad], [isEmpty, true, false]);
-      final beides = l.pruefen('a', 'Erika und &#77;ustermann');
-      expect(beides.stellen, [(0, 5)]);
-      expect(beides.kodiert, isTrue);
-      expect(l.pruefen('a', 'Erika &amp; Co., 100%').kodiert, isFalse, reason: 'Kodiertes ohne Namen zählt nicht');
-    });
-
-    test('der Ordner für Downloads zählt auch ohne Namen', () {
-      final l = LetzteSperre()..pfadSperren(pfad);
-      final r = l.pruefen('b', 'Datei unter ${Uri.encodeComponent(pfad)}');
-      expect([r.stellen, r.kodiert, r.pfad], [isEmpty, false, true]);
-    });
-
-    test('dasselbe Urteil wie die Sperre: ohne Stellen, kodiert und Pfad sperrt sie nicht, sonst schon', () {
-      final l = sperre();
-      for (final text in [
-        'Erika',
-        'Hallo',
-        'Erik%61 Muster',
-        'Frau%20M%C3%BCstermann',
-        r'Gro\u00df',
-        'Ren&eacute;',
-        'max. 10 Punkte',
-        '$pfad\\1.pdf',
-        'Erika&amp;#77;ustermann',
-        '',
-      ]) {
-        final r = l.pruefen('a', text);
-        final sperrt = r.stellen.isNotEmpty || r.kodiert || r.pfad;
-        expect(l.treffer('a', [text]) != null, sperrt, reason: text);
-        // Ohne die Stellen bleibt nur, was kodiert ist oder den Pfad nennt.
-        final rest = StringBuffer();
-        var bis = 0;
-        for (final (anfang, ende) in r.stellen) {
-          rest
-            ..write(text.substring(bis, anfang))
-            ..write('[Name]');
-          bis = ende;
-        }
-        rest.write(text.substring(bis));
-        expect(l.treffer('a', [rest.toString()]) != null, r.kodiert || r.pfad, reason: text);
-      }
-    });
-  });
-
-  group('Pfad des Ordners für Downloads, kodiert', () {
-    const pfad = r'C:\Temp\moocp_plugin_downloads';
-    final l = LetzteSperre()..pfadSperren(pfad);
-
-    test('prozentkodiert, auch doppelt, als Unicode-Escape und als HTML-Referenz', () {
-      for (final t in [
-        Uri.encodeComponent(pfad),
-        Uri.encodeComponent(Uri.encodeComponent(pfad)),
-        'file:///C:/Temp/moocp%5Fplugin%5Fdownloads/beispiel/A/1.pdf',
-        'C:${_u('005c')}Temp${_u('005C')}moocp_plugin_downloads${_u('005c')}1.pdf',
-        r'C:\u{5C}Temp\u{5c}moocp_plugin_downloads',
-        'C:&#92;Temp&#x5C;moocp&#95;plugin&#95;downloads',
-      ]) {
-        expect(l.treffer('beispiel', [t]), pfad, reason: t);
-      }
-    });
-
-    test('ein ähnlicher Pfad und Base64 gehen durch', () {
-      expect(l.treffer('beispiel', [Uri.encodeComponent(r'C:\Temp\moocp_arbeit')]), isNull);
-      expect(l.treffer('beispiel', ['QzpcVGVtcFxtb29jcF9wbHVnaW5fZG93bmxvYWRz']), isNull);
     });
   });
 

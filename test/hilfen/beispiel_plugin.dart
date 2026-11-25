@@ -30,7 +30,7 @@ const beispielWerkzeuge = [
   'beispiel_lauf',
   'beispiel_download',
   'beispiel_namen',
-  'beispiel_namen_pruefen',
+  'beispiel_pfade',
 ];
 
 /// Der Projektordner des Beispiel-Plugins, relativ zur Wurzel des

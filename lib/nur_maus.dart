@@ -41,7 +41,7 @@ class NurMaus extends StatelessWidget {
 ///
 /// Die Wartezeit beginnt neu, sobald der Dialog wieder der oberste ist: Die
 /// Dialoge der App liegen als eigene Routen übereinander (Freigaben je
-/// Profil, Dialoge der Plugins, die Warnung der letzten Sperre). Geht einer
+/// Profil, Dialoge der Plugins, die Warnung der Datenschutzprüfung). Geht einer
 /// über einer offenen Freigabe auf und wieder zu, ist deren Wartezeit längst
 /// um, und der zweite Klick eines Doppelklicks, der dem oberen galt, träfe
 /// sonst sie (E4).

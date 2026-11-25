@@ -27,6 +27,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'moodle/zeilenvergleich.dart';
+import 'datenschutzwarnung.dart' show Datenschutzwarnung;
 import 'protokoll.dart';
 import 'testschalter.dart';
 
@@ -108,6 +109,7 @@ class FreigabeAnfrage {
     this.zusatzSchreiben = false,
     this.vomPlugin,
     this.protokolltitel,
+    this.datenschutz,
   });
 
   final String titel;
@@ -149,6 +151,14 @@ class FreigabeAnfrage {
   /// einer Freigabe, um die ein Plugin bittet, bestimmt das Plugin, und der
   /// gehört nicht ins Protokoll.
   final String? protokolltitel;
+
+  /// Die Datenschutzwarnung, um die es geht (E36): Der Dialog zeigt dann statt
+  /// einer Freigabe die Treffer in ihrer Umgebung (main.dart,
+  /// datenschutz_dialog.dart); [knopf] gibt die Antwort an die KI weiter,
+  /// [ablehnen] sperrt sie. Null bei jeder anderen Anfrage. Die Warnung fragt
+  /// auf jeder Stufe ([ab] ist [Bestaetigungen.keine]); der Testbetrieb beantwortet
+  /// sie nur aus vorbereiteten Dialogantworten (E20), nie von selbst.
+  final Datenschutzwarnung? datenschutz;
 
   /// Der Name im Protokoll.
   String get _imProtokoll => protokolltitel ?? titel;

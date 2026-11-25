@@ -25,6 +25,7 @@ import 'einrichtung_dialog.dart';
 import 'einstellungen.dart';
 import 'einstellungen_dialog.dart';
 import 'einstellungen_ort.dart';
+import 'datenschutz_dialog.dart';
 import 'einzelstart.dart';
 import 'freigabe.dart';
 import 'installer/installer_start.dart';
@@ -165,7 +166,6 @@ Future<void> main(List<String> argumente) async {
   final laufendePlugins = LaufendePlugins(
     protokoll,
     dialoge: PluginDialoge(),
-    sperrHinweise: SperrHinweise(),
     downloads: downloads,
   );
   final instanzen = [
@@ -1694,14 +1694,6 @@ class _HauptseiteState extends State<Hauptseite> {
             nachVorn: _fensterZeigen,
             child: const SizedBox.shrink(),
           ),
-        // Die Warnungen der letzten Sperre gegen Namen, ebenso für alle
-        // Profile zusammen.
-        if (widget.laufendePlugins?.sperrHinweise case final hinweise?)
-          SperrHinweisAnzeige(
-            hinweise: hinweise,
-            nachVorn: _fensterZeigen,
-            child: const SizedBox.shrink(),
-          ),
         _seite(context),
       ],
     );
@@ -2542,6 +2534,11 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Die Datenschutzwarnung sieht anders aus als jede Freigabe und hat
+    // eigene Knöpfe (datenschutz_dialog.dart); sonst gilt hier dasselbe.
+    if (anfrage.datenschutz != null) {
+      return DatenschutzwarnungDialog(anfrage, freigaben, profilname: profilname, mcpName: mcpName);
+    }
     const mono = TextStyle(fontFamily: 'Consolas', fontSize: 12);
     Widget zeile(Zeile z) {
       final (zeichen, farbe) = switch (z.art) {

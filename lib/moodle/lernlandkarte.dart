@@ -43,6 +43,54 @@ int? ortsziel(Object? linkedActivity) => switch (linkedActivity) {
   _ => null,
 };
 
+/// Verknüpfung eines Kartenorts, wie aktivitaet_lesen sie aus den gelesenen
+/// Daten feststellt (Werkzeugausgabe, keine Ableitung der KI).
+///
+/// fehlend: kein Ziel gesetzt (Moodle speichert „(keine)" als 0 oder lässt es weg).
+/// verknüpft: zeigt auf eine Aktivität dieses Kurses.
+/// fremd: zeigt auf eine Aktivität eines anderen Kurses oder auf eine cmid,
+/// die es im Kurs nicht gibt.
+/// nicht prüfbar: das Ziel ist nicht lesbar, oder die Kursstruktur fehlt.
+///
+/// Ob das Ziel zum vorgesehenen Ziel passt, sagt das Werkzeug nicht: Dafür
+/// braucht es die Quellkarte (lernlandkarte_zielkontext).
+enum OrtVerknuepfung {
+  verknuepft('verknüpft'),
+  fehlend('fehlend'),
+  fremd('fremd'),
+  nichtPruefbar('nicht prüfbar');
+
+  const OrtVerknuepfung(this.bezeichnung);
+  final String bezeichnung;
+}
+
+/// Der Stand je Ziel-cmid: verknüpft oder fremd, je nachdem ob die cmid im
+/// Kurs liegt. Ohne Kursstruktur ([kursCmids] null) ist nichts prüfbar.
+Map<int, OrtVerknuepfung> zielStatusVon(Iterable<int> ziele, Set<int>? kursCmids) => {
+  for (final cmid in ziele)
+    cmid: kursCmids == null
+        ? OrtVerknuepfung.nichtPruefbar
+        : kursCmids.contains(cmid)
+        ? OrtVerknuepfung.verknuepft
+        : OrtVerknuepfung.fremd,
+};
+
+/// Die Verknüpfung eines Orts mit seinem [linkedActivity]-Wert, anhand des
+/// Stands aus [zielStatusVon]. Ein Ziel, das im Stand fehlt, ist nicht prüfbar.
+OrtVerknuepfung ortVerknuepfung(
+  Object? linkedActivity,
+  Map<int, OrtVerknuepfung> zielStatus,
+) {
+  if (linkedActivity == null ||
+      (linkedActivity is String && linkedActivity.trim().isEmpty)) {
+    return OrtVerknuepfung.fehlend;
+  }
+  final ziel = ortsziel(linkedActivity);
+  if (ziel == null) return OrtVerknuepfung.nichtPruefbar;
+  if (ziel == 0) return OrtVerknuepfung.fehlend;
+  return zielStatus[ziel] ?? OrtVerknuepfung.nichtPruefbar;
+}
+
 /// Die gespeicherten Kartendaten aus dem Lernlandkarten-Formular.
 ///
 /// SVG und Ortsdaten bleiben unverändert erhalten; die abgeleiteten Angaben
@@ -120,13 +168,26 @@ String? lernlandkarteRolle(Map karte, String id) {
   return null;
 }
 
-/// Bestehende Aufrufer und Tests: entfernt Ortsbeschriftungen für eine reine
-/// Darstellung. Die Schreibprüfung verwendet stattdessen den engeren Vergleich
+/// Kennungen der Orte mit Ziel. Ein Ziel ist eine Nummer ungleich 0 oder, in
+/// aufbereiteten Ständen, eine nicht leere Angabe (Modul, Titel).
+Set<String> verknuepfteOrte(Iterable<Map> orte) => {
+  for (final ort in orte)
+    if ((ort['linkedActivity'] is List &&
+            (ort['linkedActivity'] as List).isNotEmpty) ||
+        (ortsziel(ort['linkedActivity']) ?? 0) != 0)
+      '${ort['id']}',
+};
+
+/// Entfernt Ortsbeschriftungen für eine reine Darstellung. Ohne [nurOrte]
+/// gehen alle weg; mit [nurOrte] nur die der genannten Orte (Kennungen wie in
+/// `placestore`), alle anderen Beschriftungen bleiben Teil des Vergleichs. Die
+/// Schreibprüfung verwendet stattdessen den engeren Vergleich
 /// [_gleicheSvgMitNeubeschriftungen].
-String? ohneOrtsbeschriftung(Object? svg) => svg is String
+String? ohneOrtsbeschriftung(Object? svg, {Set<String>? nurOrte}) =>
+    svg is String
     ? svg.replaceAllMapped(
-        RegExp(r'(<(?:title|text) id="(?:title|text)[^"]*"[^>]*>)[^<]*'),
-        (m) => m[1]!,
+        RegExp(r'(<(?:title|text) id="(title|text)([^"]*)"[^>]*>)[^<]*'),
+        (m) => nurOrte == null || nurOrte.contains(m[3]) ? m[1]! : m[0]!,
       )
     : null;
 

@@ -1,0 +1,3 @@
+# Höchstens zwei Testdateien gleichzeitig: Ohne Angabe startet Flutter einen Testprozess je Prozessorkern,
+# jeder mit eigenem Arbeitsspeicher. Mit `-j <n>` lässt sich das für einen Lauf überschreiben.
+concurrency: 2

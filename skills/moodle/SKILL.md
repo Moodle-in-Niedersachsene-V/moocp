@@ -23,15 +23,15 @@ Moodle-Instanz hat einen eigenen Server mit eigenem Präfix (etwa
 | Anlegen | `aktivitaet_anlegen`, `abschnitt_anlegen`, `buchkapitel_anlegen`, `wikiseite_schreiben` |
 | Ändern | `aendern`, `aendern_mehrere`, `links_setzen`, `claude_schreiben`, `fortschrittsliste_aendern`, `board_aendern`, `kanban_aendern`, `bewertungsschema_setzen`, `buch_ordnen`, `buchkapitel_verschieben` |
 | Kursrahmen | `sichtbarkeit_setzen`, `verschieben`, `duplizieren`, `loeschen`, `buchkapitel_loeschen`, `wikiseite_loeschen` |
-| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status` |
-| Wiederherstellen | `wiederherstellen_datei`, `wiederherstellung_status` |
+| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status`, `sicherung_loeschen` |
+| Wiederherstellen | `wiederherstellen_datei`, `wiederherstellung_status`, `anhaenge_reparieren` |
 | Übertragung | `uebertragen` |
 | Ansehen | `bildschirmfoto` |
 | Tests und Fragen | im Skill `moodle-fragen` |
 
 Lernlandkarten (`learningmap`) legt `aktivitaet_anlegen` verborgen an, und `aktivitaet_lesen` liest SVG, Orte, Wege und die Ziele der Orte. Die Ziele ändert nur `lernlandkarte_verknuepfungen_setzen`, nach einer ausdrücklich entschiedenen Zuordnung; die Karte selbst, also Grafik, Orte und Wege, lässt sich nach dem Anlegen nicht bearbeiten. **Lies vor jeder Arbeit an einer Karte [Lernlandkarten](references/lernlandkarte.md).**
 
-Mit `sichern_aktivitaet` und `sichern_auswahl` legt die App eine Sicherungsdatei ohne Daten von Lernenden im Sicherungsordner ab, `wiederherstellen_datei` spielt sie in einen neuen oder vorhandenen Kurs zurück, und `uebertragen` bringt eine Auswahl in einem Auftrag in mehrere Kurse derselben Instanz. Vor jedem Wiederherstellen und jeder Übertragung steht ein Plan im Chat, der Weg, Zielkurse und die Sichtbarkeit der neuen Inhalte nennt; ein Weg, der Inhalte ersetzt, löscht alles im Zielkurs. „Läuft weiter“ nach der Antwortfrist ist kein Fehler und kein Abbruch: Frage mit dem Statuswerkzeug (`sicherung_status`, `wiederherstellung_status`) und derselben Nummer weiter und sende den Auftrag nie erneut. **Lies vor jedem Sichern, Wiederherstellen und Übertragen `references/sicherung.md`.**
+Mit `sichern_aktivitaet` und `sichern_auswahl` legt die App eine Sicherungsdatei ohne Daten von Lernenden im Sicherungsordner ab, `wiederherstellen_datei` spielt sie in einen neuen oder vorhandenen Kurs zurück, und `uebertragen` bringt eine Auswahl in einem Auftrag in mehrere Kurse derselben Instanz. Enthält die Kopie einen Test (Duplizieren, Wiederherstellen, Übertragen), nennt die Antwort, woher seine Fragen kommen; ruf vor Änderungen an seinen Fragen `test_lesen` auf (Skill `moodle-fragen`). Vor jedem Wiederherstellen und jeder Übertragung steht ein Plan im Chat, der Weg, Zielkurse und die Sichtbarkeit der neuen Inhalte nennt; ein Weg, der Inhalte ersetzt, löscht alles im Zielkurs. „Läuft weiter“ nach der Antwortfrist ist kein Fehler und kein Abbruch: Frage mit dem Statuswerkzeug (`sicherung_status`, `wiederherstellung_status`) und derselben Nummer weiter und sende den Auftrag nie erneut. **Lies vor jedem Sichern, Wiederherstellen und Übertragen `references/sicherung.md`.**
 
 **Fehlen die Werkzeuge**, oder meldet `status` „nicht angemeldet", dann bitte
 die Lehrkraft, die App zu starten bzw. sich darin anzumelden, und warte. Weich
@@ -152,7 +152,7 @@ ein Ja im Chat ersetzt sie nicht.
 
 Was du gerade selbst verborgen angelegt hast, ist dabei noch nichts Bestehendes: Es zu füllen oder zu ändern, solange es verborgen ist — die Spalten eines neuen Boards, die Fragen eines neuen Tests, die Links zwischen den Blättern einer neuen Lernsituation —, gehört zum Anlegen und fragt wie dieses erst bei „alle". Kopien zählen nicht dazu; bei ihnen zeigt die Freigabe, was sich gegenüber dem Original ändert.
 
-**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
+**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
 <!-- >>> gemeinsam/plan.md -->
 
 <!-- <<< gemeinsam/ueberarbeiten.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -273,6 +273,19 @@ Personendaten und keine Zugangsdaten.
 **Es macht nichts rückgängig.** Es beantwortet nur „was wurde hier angefasst". Jede Antwort eines schreibenden Werkzeugs nennt ohnehin, was angelegt oder geändert wurde, mit Nummer und Rückleseprobe (`verified`) — diese Nummern gehören in deine Antwort an den Nutzer.
 
 **Die Rückleseprobe ersetzt dein eigenes Nachlesen.** Das Werkzeug hat schon aus Moodle zurückgelesen und mit dem verglichen, was es schreiben sollte. `verified: true` heißt: angekommen. Lies dann nicht noch einmal, um zu prüfen. Ein gelesener Ordner zeigt nach dem Schreiben schon den neuen Stand, und die nächste Änderung baut auf ihm auf. Neu lesen musst du nur, wenn das Werkzeug es verlangt, wenn die Antwort etwas als „nicht geprüft" nennt, auf das es ankommt, oder wenn du sehen willst, wie es aussieht (`bildschirmfoto`). Bei `verified: false` nennt die Antwort, was abweicht.
+
+Meldet `aendern` „Ausgang unklar“, kann Moodle bereits gespeichert haben.
+Frage mit `aendern_status` und der genannten Vorgangsnummer lesend nach;
+wiederhole den Schreibauftrag nicht. Auch ein noch unveränderter Ausgangsstand
+gibt keine Wiederholung frei, denn Moodle könnte den Auftrag noch verarbeiten.
+Ein erneutes Lesen oder Neustarten der App hebt diese Sperre nicht auf.
+Hat die Lehrkraft in Moodle nachgesehen und will das Objekt wieder ändern
+lassen (die Anfrage kam nie an, sie hat es von Hand in Ordnung gebracht, oder
+bei einer Frage ist der Stand nicht prüfbar), ruf `aendern_status` mit
+`sperre_aufheben` auf: Die App fragt dann die Lehrkraft, du entscheidest es
+nicht und bietest es nie von dir aus an. Lehnt Moodle ein Formular nur ab oder
+weicht der zurückgelesene Stand ab, gibt es keine Sperre; lies frisch und plane
+neu.
 <!-- >>> gemeinsam/protokoll.md -->
 
 <!-- <<< gemeinsam/bildschirmfoto.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -387,9 +400,12 @@ Was dort steht, fragst du nicht noch einmal. Fehlt eine Angabe, die der Auftrag 
 **Der Steckbrief steht nur in der Fassung des Kurses und nur mit dem, was für den ganzen Kurs gilt.** Was eine Lernsituation betrifft, etwa Lernfeld, Zeitrichtwert oder welche Phase im Computerraum läuft, steht in ihrer SchuCu-Tabelle und ihrer Handreichung. Eine Fassung im Abschnitt wiederholt das nicht; sie hält nur eine Abweichung fest, für die dort kein Platz ist.
 
 Geschrieben wird `CLAUDE.md` mit `claude_schreiben`; das Verzeichnis entsteht
-dabei von selbst. Die weiteren Dateien erreichst du über die cmid des
-Verzeichnisses, die in jeder Fassung steht: `aktivitaet_lesen(cmid)` holt sie
-in den Arbeitsordner, `aendern` schreibt sie zurück — hinzufügen, ersetzen,
+dabei von selbst. Steht es nicht am Anfang des Abschnitts, verschiebt das
+Werkzeug es dorthin; dafür gilt die reguläre Freigabe zum Verschieben. Die
+Antwort meldet, ob auch die Position geprüft ist. Die weiteren Dateien erreichst
+du über die cmid des Verzeichnisses, die in jeder Fassung steht:
+`aktivitaet_lesen(cmid)` holt sie in den Arbeitsordner, `aendern` schreibt sie
+zurück — hinzufügen, ersetzen,
 entfernen in `bereiche/files/` wie bei jedem Verzeichnis. Das ganze
 Verzeichnis entfernt `loeschen`.
 
@@ -613,7 +629,18 @@ Buch (`book`), Test (`quiz`), Fragensammlung (`qbank`), Fortschrittsliste
 Lernlandkarte (`learningmap`), die du anlegst und deren Ziele du setzt, deren
 Karte du aber nicht bearbeitest (`references/lernlandkarte.md`).
 
-*Lesen* geht bei allen Typen. Für Forum, Glossar, H5P und die übrigen Plugins ist das Formular nicht gemessen; die App weigert sich mit „Typ … kann die App nicht anlegen" bzw. „Ändern geht bisher für …". Das ist eine **Lücke** (Abschnitt „Was der Skill nicht kann"). Offen bleiben die **Kursrahmen-Aktionen**: Ein von Hand angelegtes Forum darf verborgen, verschoben, dupliziert und gelöscht werden — sie sind typunabhängig. Nicht so die **Fragensammlung** (`qbank`): Sie steht nicht in der Kursstruktur, deshalb geht von diesen vieren nur `loeschen`. Moodle legt sie außerdem immer im allgemeinen Abschnitt an, einerlei welchen du angibst.
+*Lesen* geht bei allen Typen. Für Forum, Glossar, H5P und die übrigen Plugins ist das Formular nicht gemessen; die App weigert sich mit „Typ … kann die App nicht anlegen" bzw. „Ändern geht bisher für …". Das ist eine **Lücke** (Abschnitt „Was der Skill nicht kann"). Offen bleiben die **Kursrahmen-Aktionen**: Ein von Hand angelegtes Forum darf verborgen, verschoben, dupliziert und gelöscht werden — sie sind typunabhängig. Nicht so die **Fragensammlung** (`qbank`): Sie steht nicht in der Kursstruktur, deshalb geht von diesen vieren nur `loeschen`; das fragt auf jeder Stufe, die Lehrkraft hakt jede Kategorie einzeln ab, und die App sichert vorher alle Fragen als XML (verborgene Fragen nie darin). Liste vor dem Aufruf jede Kategorie mit Fragenzahl im Chat auf und warte auf ein ausdrückliches Ja. Moodle legt sie außerdem immer im allgemeinen Abschnitt an, einerlei welchen du angibst.
+
+### Einrückung auf der Kursseite
+
+Eine Aktivität steht auf der Kursseite eingerückt, wenn sie zu der darüberstehenden
+gehört, etwa ein Link zu einem Chatbot unter der Aufgabe, zu der er dient.
+`aktivitaet_anlegen` und `verschieben` nehmen dafür `einrueckung` (0 oder 1: Moodle kennt im Themenformat nur eine
+Einrückungsstufe);
+`verschieben` kann mit `kurs`, `cmid`, `name` und `einrueckung` allein nur einrücken,
+ohne die Stelle zu ändern. Das Anlegen rückt ohne eigene Freigabe ein, das Verschieben
+fragt wie jedes Verschieben. Meldet die Antwort bei der Einrückung `verified: false`,
+geht sie in diesem Kurs so nicht: nicht wiederholen, der Lehrkraft sagen.
 
 ### Welche Aktivität wofür: Anregungen, und Papier oder Gerät
 

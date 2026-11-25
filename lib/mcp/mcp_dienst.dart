@@ -20,6 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt, protokollPlatzhalterName, protokollPlatzhalterPfad;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
@@ -34,6 +35,11 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_kategorie.dart';
+import '../moodle/fragen_verschieben.dart';
+import '../moodle/fragen_version.dart';
+import '../moodle/fragetyp_notizen.dart';
+import '../moodle/rundlaufprobe.dart';
 import '../moodle/fortschrittsliste.dart';
 import '../moodle/fragen.dart';
 import '../moodle/gruppierung.dart';
@@ -49,10 +55,12 @@ import '../moodle/lernlandkarte_verteilen.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sicherung_regeln.dart';
 import '../moodle/sicherung.dart';
+import '../moodle/sicherung_loeschen.dart';
 import '../moodle/stack.dart';
 import '../moodle/test.dart';
 import '../moodle/wiederherstellung.dart';
 import '../moodle/wiederherstellung_regeln.dart';
+import '../moodle/wiederherstellung_reparatur.dart';
 import '../moodle/wiki.dart';
 import '../protokoll.dart';
 
@@ -62,8 +70,9 @@ part 'lernlandkarten.dart';
 /// Was die eingestellte Stufe für die Werkzeuge bedeutet, für `status`.
 const _stufenText = {
   Bestaetigungen.keine:
-      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen und das Ersetzen eines Kurses durch eine '
-      'Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche Entscheidung in der App. '
+      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines '
+      'Kurses durch eine Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche '
+      'Entscheidung in der App. '
       'Die Freigabe je Bildschirmfoto bleibt davon unberührt.',
   Bestaetigungen.mittel:
       'Freigabe vor Ändern, Verschieben, Sichtbarkeit, Löschen und sichtbarem '
@@ -113,6 +122,9 @@ class McpDienst implements AufrufKontext {
     this.antwortfrist = const Duration(minutes: 1),
     this.werkzeugquellen = const [],
     this.schucuVorlagen,
+    this.notizenOrdner,
+    this.fragenSicherungsOrdner,
+    this.fragetypNotizGeliefert,
   });
 
   final Einstellungen einstellungen;
@@ -161,6 +173,37 @@ class McpDienst implements AufrufKontext {
   /// Sie sind Assets der App; laden kann sie nur Flutter, deshalb kommt der
   /// Zugriff von main.dart. Ohne ihn meldet das Werkzeug, dass sie fehlen.
   final Future<Map<String, String>> Function()? schucuVorlagen;
+
+  /// Lokale Fragetyp-Notizen dieses Profils (E38); ohne Angabe der dauerhafte
+  /// Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? notizenOrdner;
+
+  /// Ordner der XML-Sicherungen vor dem Löschen von Fragen (E9); ohne Angabe
+  /// der dauerhafte Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? fragenSicherungsOrdner;
+
+  String get _fragenSicherungen => fragenSicherungsOrdner ?? p.join(einstellungenOrdner, 'fragen-sicherungen', profil.kennung);
+
+  /// Die mit dem Skill gelieferte Notiz zu einem Typ (Asset der App; laden kann
+  /// sie nur Flutter, deshalb kommt der Zugriff von main.dart).
+  final Future<String?> Function(String typ)? fragetypNotizGeliefert;
+
+  late final FragetypNotizen _notizen = FragetypNotizen(
+    lokalerOrdner: notizenOrdner ?? p.join(einstellungenOrdner, 'fragetyp-notizen', profil.kennung),
+    geliefert: fragetypNotizGeliefert ?? (_) async => null,
+  );
+
+  /// Der Nachweis für eine Notiz nach bestandener Probe; ein Fehler dabei
+  /// ändert nichts am Urteil über die Frage.
+  void _nachweis(String typ, String xml, String? moodleVersion) {
+    try {
+      _notizen.nachweis(typ, xml, moodleVersion);
+    } on MoodleFehler {
+      // Ein Typname außerhalb des erlaubten Musters bekommt keine Notiz.
+    } on FileSystemException {
+      // Ohne Nachweis gibt es keine Notiz; die Frage bleibt, wie sie ist.
+    }
+  }
 
   late final _testbetrieb = Testbetrieb(moodle, freigaben, arbeitsordner, sicherungsordner ?? sicherungenOrdner);
   late final _aufrufe = WerkzeugAufrufe(
@@ -362,6 +405,10 @@ class McpDienst implements AufrufKontext {
   static final _cmid = JsonSchema.integer(
     description: 'Aktivität: cmid, die Zahl hinter mod/<typ>/view.php?id= (oder aus kurs_uebersicht)',
   );
+  static final _einrueckung = JsonSchema.integer(
+    description:
+        'Aktivität: Einrückung auf der Kursseite, 0 oder 1 (0 = nicht eingerückt; Moodle kennt im Themenformat nur eine Stufe); die App liest danach zurück und meldet verified nur bei Gleichheit',
+  );
   static final _abschnittId = JsonSchema.integer(
     description:
         'Abschnitt: seine id aus kurs_uebersicht („[id …]"), nicht die Nummer',
@@ -483,6 +530,77 @@ class McpDienst implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _datenschutzwarnung(warnung, abbruch, aufrufer);
+
+  /// Die Datenschutzwarnung (E36) durch die Freigaben dieses Profils: auf
+  /// jeder Stufe (`ab: keine`), im Testbetrieb ohne automatische Freigabe.
+  /// Das Protokoll nennt nur Plugin und Werkzeug, nie ein Wort (Freigaben
+  /// schreibt den Titel mit).
+  ///
+  /// Testbetrieb (E20): Nennt [testDialogantworten] eine Datei, beantwortet
+  /// sie die Warnung stattdessen, ohne Dialog ([_automatischeWarnung]).
+  Future<DatenschutzAusgang> _datenschutzwarnung(
+    Datenschutzwarnung warnung,
+    Future<void> abbruch,
+    String aufrufer,
+  ) async {
+    final datei = testDialogantworten;
+    if (datei != null) return _automatischeWarnung(warnung, datei, aufrufer);
+    final a = FreigabeAnfrage(
+      titel: 'Datenschutzwarnung',
+      punkte: const [],
+      vergleich: const [],
+      knopf: 'Kein Name – trotzdem an die KI geben',
+      ablehnen: 'Sperren',
+      ohneEntscheidung: 'wird die Antwort gesperrt',
+      ab: Bestaetigungen.keine,
+      datenschutz: warnung,
+      protokolltitel: 'Datenschutzwarnung',
+    );
+    final ja = await Freigaben.ohneTestfreigabe(
+      () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), aufrufer: aufrufer),
+    );
+    return ja ? DatenschutzAusgang.senden : DatenschutzAusgang.sperren;
+  }
+
+
+  /// Die Datenschutzwarnung im Testbetrieb (E20): beantwortet aus der Datei
+  /// [datei] ([datenschutzAntwort]), ohne Dialog; ohne Eintrag wird gesperrt.
+  /// Das Protokoll sagt, dass nicht die Lehrkraft entschieden hat, und nennt
+  /// Plugin, Werkzeug, Zahl der Treffer und die Entscheidung. Das Wort eines
+  /// Treffers steht nur dort, wo er allein aus dem gebundenen Testkonto oder
+  /// aus den Teilnehmenden eines gebundenen Testkurses stammt; bei jedem
+  /// anderen Treffer, auch einem, den zugleich eine andere Quelle trifft,
+  /// und bei jedem Pfad steht der Platzhalter.
+  Future<DatenschutzAusgang> _automatischeWarnung(Datenschutzwarnung warnung, String datei, String aufrufer) async {
+    final ausgang = datenschutzAntwort(datei, warnung.kurzname ?? '', warnung.werkzeug);
+    final zugang = testzugang ?? Testzugang.fuer(profil);
+    bool testquelle(Fund f) =>
+        !f.pfad &&
+        f.herkunft.isNotEmpty &&
+        f.herkunft.every(
+          (h) => switch (h.art) {
+            // Das angemeldete Konto ist hier das gebundene Testkonto: Die Datei gibt es nur dafür.
+            HerkunftArt.lehrkraft => true,
+            HerkunftArt.teilnehmende => h.kurs != null && _testbetrieb.gebundenerTestkurs(profil, zugang, h.kurs!),
+            _ => false,
+          },
+        );
+    final treffer = [for (final f in warnung.funde) testquelle(f) ? f.wort : (f.pfad ? protokollPlatzhalterPfad : protokollPlatzhalterName)];
+    final gesendet = ausgang.gesendet;
+    protokoll.eintrag(
+      gesendet ? Art.info : Art.gesperrt,
+      'Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von $aufrufer, Werkzeug ${warnung.werkzeug}, '
+      '${treffer.length} Treffer (${treffer.join(', ')}) -- ${gesendet ? 'trotzdem gesendet' : 'gesperrt'}',
+    );
+    return ausgang;
+  }
 
   @override
   String? get testDialogantworten => _testbetrieb.dialogantworten(profil, testzugang ?? Testzugang.fuer(profil));
@@ -658,17 +776,18 @@ class McpDienst implements AufrufKontext {
           'Dateibereiche wie Zusätzliche Dateien oder den Inhalt eines Verzeichnisses '
           '(bereiche/<feld>/) und alle Einstellungen (einstellungen.json). Gibt eine Übersicht '
           'zurück: Gliederung mit Zeitangaben, je Bild Maße, Stelle und Alternativtext, bei SVG '
-          'Titel, Beschreibung und Beschriftungen, Verweise mit dem Titel des Ziels, die '
+          'Titel, Beschreibung und Beschriftungen, Verweise mit dem Titel des Ziels, bei einer Lernlandkarte je Ort der Verknüpfungsstatus (verknüpft, fehlend, fremd, nicht prüfbar), die '
           'wichtigen Einstellungen und Befunde nach den Regeln der Skills. Oft genügt die '
           'Übersicht, um zu entscheiden, welche Datei geöffnet werden muss. Zurückschreiben mit '
           'aendern. Nur lesen.',
       parameter: {'cmid': _cmid},
       pflicht: ['cmid'],
       nurLesen: true,
-      ausfuehren: (a) async => (await formularLesen(
+      ausfuehrenMitAbbruch: (a, abbruch) async => (await formularLesen(
         moodle,
         Formularziel.aktivitaet(_zahl(a, 'cmid')),
         ao,
+        abbruch: abbruch,
       )).zusammenfassung(),
     );
 
@@ -718,7 +837,10 @@ class McpDienst implements AufrufKontext {
           'bereiche/<feld>/ (hinzufügen, ersetzen, entfernen) und Einstellungen als Parameter. '
           'Prüft zuerst, dass Moodle noch den Stand vom Lesen zeigt, zeigt der Lehrkraft in der '
           'App eine Änderungsübersicht mit Zeilenvergleich und schreibt nur nach ihrer Freigabe. '
-          'Danach Rückleseprobe (verified). Sichtbarkeit: sichtbarkeit_setzen. '
+          'Danach Rückleseprobe (verified). Bei Ausgang unklar nicht wiederholen, sondern aendern_status '
+          'mit der Vorgangsnummer aufrufen. Sichtbarkeit: sichtbarkeit_setzen. '
+          'Gruppenwahl und Bildergalerie: nur Beschreibungstext und gemessene normale Optionen bestehender Aktivitäten; '
+          'keine Gruppenauswahl, individuellen Gruppenlimits, Bilder oder Dateien ändern, kein Anlegen. '
           '${MoodleZugang.nurGruppenModule.map(typName).join(", ")}: nur groupmode und groupingid '
           'bestehender Aktivitäten, keine Texte, Dateien, anderen Einstellungen oder unverändertes '
           'Neuspeichern; Optionen frisch aus dem Formular lesen. Gibt es die gewünschte Gruppierung '
@@ -743,6 +865,32 @@ class McpDienst implements AufrufKontext {
         arbeitsordner: ao,
         einstellungen: _einstellungen(a),
         neuSpeichern: a['neu_speichern'] == true,
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'aendern_status',
+      titel: 'Schreibausgang prüfen',
+      beschreibung: 'Prüft einen unklaren aendern-Vorgang lesend gegen Ausgangs- und Zielstand. '
+          'Wiederholt keinen POST. Ein unveränderter Ausgangsstand erlaubt keine Wiederholung. '
+          'Nur ein eindeutig bestätigter Zielstand schließt den Vorgang ab; danach frisch lesen und planen. '
+          'Mit sperre_aufheben fragt die App die Lehrkraft, ob die Sperre fällt (sie sieht in Moodle nach); '
+          'nur aufrufen, wenn die Lehrkraft es will.',
+      parameter: {
+        'vorgang': JsonSchema.string(description: 'Vorgangsnummer aus der Meldung Ausgang unklar'),
+        'sperre_aufheben': JsonSchema.boolean(
+          description: 'true = die Lehrkraft in der App fragen, ob die Sperre aufgehoben wird; auf jeder Stufe, '
+              'keine Freigabe zum Schreiben. Schreibt nichts nach Moodle.',
+        ),
+      },
+      pflicht: ['vorgang'],
+      ausfuehren: (a) => aendernStatus(
+        moodle,
+        vorgang: _text(a, 'vorgang'),
+        arbeitsordner: ao,
+        freigaben: freigaben,
+        aufheben: a['sperre_aufheben'] == true,
       ),
     );
 
@@ -914,7 +1062,7 @@ class McpDienst implements AufrufKontext {
           'bereiche/files/). Eine Fragensammlung (qbank) legt Moodle immer im allgemeinen '
           'Abschnitt an, einerlei welcher angegeben ist. Einstellungen wie Fristen als Parameter (Schlüssel: nach dem '
           'Anlegen in einstellungen.json; Pflichtangaben eines Typs meldet Moodle). Legt '
-          'verborgen an; sichtbar nur nach Freigabe in der App. Lernlandkarten werden aus dem nativen Formular angelegt. Ein Ordner kann dafür zusätzlich lernlandkarte.json mit orte (id p1–p64, x 0–1000, y 0–560, optional titel) und wege (von/nach) enthalten; SVG und placestore erzeugt die App, Ziele bleiben leer. Das Hintergrundbild liegt in bereiche/backgroundfile/. Ortsziele ändert lernlandkarte_verknuepfungen_setzen nach Freigabe. Liest danach Name, Kurs, Sichtbarkeit und Kartendaten zurück.',
+          'verborgen an; sichtbar nur nach Freigabe in der App. Mit einrueckung (0 oder 1) rückt es die neue Aktivität direkt danach ein (ohne eigene Freigabe). Lernlandkarten werden aus dem nativen Formular angelegt. Ein Ordner kann dafür zusätzlich lernlandkarte.json mit orte (id p1–p64, x 0–1000, y 0–560, optional titel) und wege (von/nach) enthalten; SVG und placestore erzeugt die App, Ziele bleiben leer. Das Hintergrundbild liegt in bereiche/backgroundfile/. Ortsziele ändert lernlandkarte_verknuepfungen_setzen nach Freigabe. Liest danach Name, Kurs, Sichtbarkeit und Kartendaten zurück.',
       parameter: {
         'kurs': _kurs,
         'abschnitt_id': JsonSchema.integer(
@@ -937,6 +1085,7 @@ class McpDienst implements AufrufKontext {
           description: 'true = sofort für Lernende sichtbar, nur nach Freigabe; Standard false',
         ),
         'einstellungen': _einstellungenSchema,
+        'einrueckung': _einrueckung,
       },
       pflicht: ['kurs', 'abschnitt_id', 'typ', 'name'],
       ausfuehren: (a) => aktivitaetAnlegen(
@@ -950,6 +1099,7 @@ class McpDienst implements AufrufKontext {
         arbeitsordner: ao,
         sichtbar: a['sichtbar'] == true,
         einstellungen: _einstellungen(a),
+        einrueckung: _zahlOder(a, 'einrueckung'),
       ),
     );
 
@@ -1039,7 +1189,9 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Verschiebt eine Aktivität (auch einen Unterabschnitt über seine cmid) in '
           'einen Abschnitt -- ans Ende oder vor eine andere Aktivität --, oder einen Abschnitt '
-          'hinter einen anderen. Nur nach Freigabe; prüft danach die Kursstruktur. Günstiger '
+          'hinter einen anderen. Mit einrueckung (0 oder 1) rückt es eine Aktivität ein oder aus '
+          '(Stufe für Stufe); ohne ziel_abschnitt_id nur die Einrückung, die Aktivität bleibt, wo sie ist. '
+          'Nur nach Freigabe; prüft danach die Kursstruktur und die Einrückung. Günstiger '
           'ist, gleich in der richtigen Reihenfolge anzulegen.',
       parameter: {
         'kurs': _kurs,
@@ -1056,6 +1208,7 @@ class McpDienst implements AufrufKontext {
         'nach_abschnitt_id': JsonSchema.integer(
           description: 'Abschnitt: hinter diesen Abschnitt (id)',
         ),
+        'einrueckung': _einrueckung,
       },
       pflicht: ['kurs', 'name'],
       zerstoerend: true,
@@ -1069,6 +1222,7 @@ class McpDienst implements AufrufKontext {
         zielAbschnittId: _zahlOder(a, 'ziel_abschnitt_id'),
         vorCmid: _zahlOder(a, 'vor_cmid'),
         nachAbschnittId: _zahlOder(a, 'nach_abschnitt_id'),
+        einrueckung: _zahlOder(a, 'einrueckung'),
       ),
     );
 
@@ -1121,7 +1275,9 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Löscht eine Aktivität (auch einen Unterabschnitt samt Inhalt über seine cmid, auch '
           'eine Fragensammlung samt Kategorien und Fragen) oder einen Abschnitt samt Inhalt -- nur nach '
-          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Nummer und Name müssen '
+          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Eine Fragensammlung '
+          '(auch in einem gelöschten Abschnitt) fragt auf jeder Stufe, jede Kategorie einzeln abgehakt, '
+          'und wird vorher als XML gesichert (verborgene Fragen, die in einem Test benutzt werden, sind nie darin, bleiben aber erhalten: Moodle verschiebt sie nach kurzer Zeit in eine geteilte Fragensammlung des Kurses, und die Tests benutzen sie weiter; diese Tests nennt die Freigabe; die Antwort nennt den Pfad). Nummer und Name müssen '
           'zusammenpassen, vor der Freigabe und noch einmal danach. Prüft danach die Kursstruktur.',
       parameter: {
         'kurs': _kurs,
@@ -1138,6 +1294,7 @@ class McpDienst implements AufrufKontext {
         cmid: _zahlOder(a, 'cmid'),
         abschnittId: _zahlOder(a, 'abschnitt_id'),
         name: _text(a, 'name'),
+        sicherungsOrdner: _fragenSicherungen,
       ),
     );
 
@@ -1207,6 +1364,30 @@ class McpDienst implements AufrufKontext {
         antwortfrist,
         () => laufText('Die Sicherung', a['id'] as String?, 'sicherung_status'),
       ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'sicherung_loeschen',
+      titel: 'Sicherungsdatei in Moodle löschen',
+      beschreibung:
+          'Löscht die eine Datei, die eine Sicherung der App (sichern_aktivitaet, sichern_auswahl) im '
+          'persönlichen Sicherungsbereich in Moodle zurückgelassen hat, nach Freigabe in der App. Die Kopie im '
+          'Sicherungsordner der App bleibt. Nummer und Dateiname in Moodle (wie die Antwort der Sicherung ihn nennt) '
+          'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
+          'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
+          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen noch unter ihrem Namen '
+          'da sind (Inhalte werden nicht verglichen). Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
+          'das nennt die Freigabe. Während einer Sicherung oder Wiederherstellung in der App wird nichts gelöscht.',
+      parameter: {
+        'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),
+        'name': JsonSchema.string(
+          description: 'Dateiname der Sicherung in Moodle, nicht der im Sicherungsordner (steht als „Name der Datei in Moodle“ in der Antwort der Sicherung und in sicherung_status)',
+        ),
+      },
+      pflicht: ['id', 'name'],
+      zerstoerend: true,
+      ausfuehren: (a) => sicherungLoeschen(moodle, freigaben, vorgaenge, id: _text(a, 'id'), name: _text(a, 'name')),
     );
 
     // ---- Wiederherstellen einer Sicherungsdatei in einen bestehenden Kurs (E29, moodle/wiederherstellung.dart)
@@ -1351,6 +1532,54 @@ class McpDienst implements AufrufKontext {
           _text(a, 'id'),
           'wiederherstellung_status',
         ),
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'anhaenge_reparieren',
+      titel: 'Anhänge nach Wiederherstellung reparieren',
+      beschreibung:
+          'Ergänzt oder ersetzt fehlende und abweichende Bilder und Anhänge einer wiederhergestellten '
+          'Aktivität aus Dateien im Arbeitsordner. wiederherstellung_status prüft nur und nennt, was fehlt oder '
+          'abweicht; dieses Werkzeug repariert, nur auf ausdrücklichen Auftrag und nach Freigabe. Ablauf: erst die '
+          'Aktivität mit aktivitaet_lesen in einen Ordner lesen und die Dateien, die die Prüfung nennt, mit '
+          'genau dem Inhalt der Quelle in diesen Ordner legen (im Text eingebundene Dateien nach dateien/<name>, '
+          'Dateien im Dateimanager nach bereiche/<feld>/<pfad>/<name>); dann dieses Werkzeug aufrufen. Es '
+          'vergleicht die Quellaufnahme der Wiederherstellung (Inhalt, SHA-1) mit dem Ziel, rührt nur eindeutig '
+          'zuordenbare Ziele an (fremde, mehrdeutige, unbekannte Ziele und leere Verzeichnisse bleiben als '
+          'Prüflücke stehen), bricht ab, wenn eine Reparaturdatei fehlt oder nicht der Quelle entspricht, zeigt der '
+          'Lehrkraft je Datei Name, Ort und Aktion, prüft nach der Freigabe Moodle und Ordner erneut und schreibt '
+          'nur, wenn nichts abweicht. Es ändert keinen Text, keine Einstellung und löscht nichts. Danach '
+          'Rückleseprobe (verified: nur wenn jede reparierte Datei im Ziel den Inhalt der Quelle hat). Nummer '
+          'und Name der Aktivität müssen zusammenpassen.',
+      parameter: {
+        'kurs': _kurs,
+        'cmid': _cmid,
+        'name': _name,
+        'ordner': JsonSchema.string(
+          description:
+              'Der gelesene Ordner der Aktivität im Arbeitsordner (aktivitaet_lesen), absolut oder relativ dazu, '
+              'etwa cm-815, mit den Reparaturdateien darin',
+        ),
+        'vorgang': JsonSchema.string(
+          description:
+              'Optional: Nummer der Wiederherstellung, deren Quellaufnahme gilt (wiederherstellung_status). '
+              'Ohne Angabe: der eine abgeschlossene Vorgang des Kurses, der diese Aktivität enthält.',
+        ),
+      },
+      pflicht: ['kurs', 'cmid', 'name', 'ordner'],
+      zerstoerend: true,
+      ausfuehren: (a) => anhaengeReparieren(
+        moodle,
+        freigaben,
+        vorgaenge,
+        kurs: _zahl(a, 'kurs'),
+        cmid: _zahl(a, 'cmid'),
+        name: _text(a, 'name'),
+        ordner: _text(a, 'ordner'),
+        arbeitsordner: ao,
+        vorgang: a['vorgang'] as String?,
       ),
     );
 
@@ -1861,7 +2090,105 @@ class McpDienst implements AufrufKontext {
           i.neu,
           (f) => stackTesten(moodle, sammlung: s, frage: f),
         );
-        return '${i.text}${n.text}';
+        // Die Probe urteilt; ohne Herkunftsnachweis bleibt das Objekt stehen.
+        final r = await importProben(moodle, ao, s, i, n.neueIds, i.xml,
+            beiBestanden: i.ok && n.ok ? _nachweis : null);
+        return '${i.text}${n.text}${r.text}'
+            'verified: ${i.ok && n.ok && r.verified}'
+            '${i.ok && n.ok && r.ok && !r.verified ? ' (ein Teil der Rundlaufprobe war nicht prüfbar, siehe oben)' : ''}\n';
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_version_importieren',
+      titel: 'Fragen als neue Version einspielen',
+      beschreibung:
+          'Spielt Fragen aus einer Moodle-XML-Datei im Arbeitsordner als NEUE VERSION der vorhandenen Fragen ein '
+          '(Verlauf, Sachnummer und Plätze in Tests bleiben; Tests mit „neueste Version" nehmen sie sofort). '
+          'Jede Frage der Datei wird über ihre Sachnummer (<idnumber>) EINER Frage der Kategorie zugeordnet; kein '
+          'Treffer, mehrdeutig oder anderer Typ bricht ab, bevor etwas geschieht. Die Datei geht von der Version '
+          'aus, die fragen_lesen geliefert hat (der Kommentar „question: <id>" bleibt vor jeder Frage stehen); ist '
+          'inzwischen eine neuere gespeichert, bricht das Werkzeug ab und nennt sie -- nur mit uebergehen: <genau '
+          'diese questionid> geht es trotzdem. Braucht das Moodle-Plugin „Import question as new version"; fehlt es, '
+          'kommt ein fester Satz mit den Wegen, die bleiben, und nichts wird geändert. Eine Freigabe für die ganze '
+          'Datei, mit Zeilenvergleich je Frage. Danach prüft das Werkzeug jede Frage (Rundlaufprobe: Export und '
+          'Vergleich, Formular, Vorschau, einmal unverändert als Entwurf speichern). Die Probeversion wird '
+          'aufgeräumt. Das Plugin meldet die importierte Versionsnummer nicht direkt; sie wird durch Rücklesen '
+          'ermittelt. Bei Fehlern bleibt diese Version zur manuellen Prüfung stehen und kann in Tests aktiv sein. '
+          'verified bestätigt den zurückgelesenen Inhalt und die bestandene Probe, nicht die Herkunft der Nummer; was sich nicht '
+          'prüfen ließ, steht als „nicht geprüft" da.',
+      parameter: {
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.string(
+          description: 'Kategorie-id oder Name, in der die Fragen stehen (aus fragen_lesen)',
+        ),
+        'datei': JsonSchema.string(
+          description: 'Pfad der XML-Datei im Arbeitsordner',
+        ),
+        'uebergehen': JsonSchema.integer(
+          description:
+              'Optional: die questionid der neueren Version, die der Aufruf ausdrücklich übergehen darf (so, wie die '
+              'Abbruchmeldung sie nennt). Nur nach Rückfrage bei der Lehrkraft setzen.',
+        ),
+      },
+      pflicht: ['sammlung', 'kategorie', 'datei'],
+      ausfuehren: (a) => fragenVersionImportieren(
+        moodle,
+        freigaben,
+        ao,
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: '${a['kategorie']}',
+        datei: _text(a, 'datei'),
+        uebergehen: a['uebergehen'] is num ? (a['uebergehen'] as num).toInt() : null,
+        beiBestanden: _nachweis,
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_lesen',
+      titel: 'Fragetyp-Notiz lesen',
+      beschreibung:
+          'Liest die Notiz zu einem Fragetyp, BEVOR du eine Frage dieses Typs baust: bewiesenes Minimalbeispiel, '
+          'Pflichtstruktur, Stolpersteine, Ausbaustufen. Eine Notiz dieser Instanz geht der mitgelieferten vor; die '
+          'Antwort nennt die Quelle und die Moodle-Version, für die sie bewiesen ist. Gibt es keine, sagt die Antwort, '
+          'wie du ohne vorgehst. Nur lesen.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle, etwa multichoice, ddwtos, gapselect'),
+      },
+      pflicht: ['typ'],
+      nurLesen: true,
+      ausfuehren: (a) => _notizen.lesen(_text(a, 'typ')),
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragetyp_notiz_schreiben',
+      titel: 'Fragetyp-Notiz festhalten',
+      beschreibung:
+          'Hält fest, was über einen Fragetyp auf dieser Instanz bewiesen ist -- nur nachdem eine Frage dieses Typs '
+          'in diesem Profil die Rundlaufprobe bestanden hat (fragen_importieren oder fragen_version_importieren '
+          'meldete verified: true), und nur nachdem die Lehrkraft im Chat zugestimmt hat: erst fragen, dann '
+          'aufrufen. Das Minimalbeispiel setzt die App aus der bestandenen Probe ein; du lieferst Pflichtstruktur, '
+          'Stolpersteine (Symptom, Ursache, Abhilfe) und Ausbaustufen als Text. Schreibt nur eine lokale Datei der '
+          'App, nichts in Moodle.',
+      parameter: {
+        'typ': JsonSchema.string(description: 'Fragetyp wie in Moodle'),
+        'pflichtstruktur': JsonSchema.string(description: 'Was die Frage dieses Typs mindestens enthalten muss'),
+        'stolpersteine': JsonSchema.string(description: 'Was schiefging oder schiefgehen kann: Symptom, Ursache, Abhilfe'),
+        'ausbaustufen': JsonSchema.string(description: 'Was über das Minimalbeispiel hinaus bewiesen ist (oder: noch nichts)'),
+      },
+      pflicht: ['typ', 'pflichtstruktur', 'stolpersteine', 'ausbaustufen'],
+      ausfuehren: (a) async {
+        final pfad = await _notizen.schreiben(
+          _text(a, 'typ'),
+          pflichtstruktur: _text(a, 'pflichtstruktur'),
+          stolpersteine: _text(a, 'stolpersteine'),
+          ausbaustufen: _text(a, 'ausbaustufen'),
+        );
+        return 'Notiz festgehalten (lokal, für dieses Instanzprofil): $pfad. Sie gilt vor der mitgelieferten Notiz. '
+            'Bewährte Notizen können über ein Issue oder einen Pull Request in den Skill kommen.';
       },
     );
 
@@ -1896,14 +2223,59 @@ class McpDienst implements AufrufKontext {
 
     _aufrufe.registrieren(
       server,
+      'kategorie_aendern',
+      titel: 'Kategorie umbenennen oder verschieben',
+      beschreibung:
+          'Benennt eine Fragenkategorie um und/oder verschiebt sie mit ihren Unterkategorien und Fragen unter eine '
+          'andere Kategorie desselben Kurses, auch in eine andere Fragensammlung. Nichts wird gelöscht. '
+          'Die Kategorie wird mit Sammlung, id und ihrem jetzigen Namen genannt (fragen_lesen); passt der Name nicht, '
+          'ist es die oberste Kategorie, soll sie unter sich selbst oder eine ihrer Unterkategorien, gibt es unter dem Ziel '
+          'schon eine gleich benannte Kategorie, ist sie das einzige Kind der obersten Ebene (verschieben geht dann nicht) '
+          'oder ist eine Sachnummer im Ziel vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Ohne ziel_eltern '
+          'kommt die Kategorie auf die oberste Ebene der Zielsammlung. Die App fragt in einem Dialog (Stufe „mittel“ und '
+          '„alle“). verified nur, wenn Name, Elternteil und Unterkategorien nach dem Zurücklesen stimmen; Zufallsplätze '
+          'und feste Fragen in Tests, Dateien der Fragen und die Reihenfolge sind „nicht geprüft“.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.integer(description: 'id der Kategorie (aus fragen_lesen)'),
+        'name': JsonSchema.string(description: 'Der jetzige Name der Kategorie, wie er in Moodle steht'),
+        'neuer_name': JsonSchema.string(description: 'Optional: neuer Name'),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'Optional: cmid der Sammlung, in die verschoben wird (gleicher Kurs; ohne Angabe die eigene)',
+        ),
+        'ziel_eltern': JsonSchema.string(
+          description: 'Optional: Kategorie-id oder Name in der Zielsammlung, unter die sie kommt; mit ziel_sammlung '
+              'ohne ziel_eltern kommt sie auf die oberste Ebene',
+        ),
+      },
+      pflicht: ['kurs', 'sammlung', 'kategorie', 'name'],
+      ausfuehren: (a) => kategorieAendern(
+        moodle,
+        freigaben,
+        kurs: _zahl(a, 'kurs'),
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: _zahl(a, 'kategorie'),
+        name: _text(a, 'name'),
+        neuerName: a['neuer_name'] as String?,
+        zielSammlung: a['ziel_sammlung'] == null ? null : _zahl(a, 'ziel_sammlung'),
+        zielEltern: a['ziel_eltern']?.toString(),
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
       'fragen_loeschen',
       titel: 'Fragen löschen',
       beschreibung:
           'Löscht Fragen einer Fragensammlung endgültig, jede mit allen Versionen. Je Frage die AKTUELLE '
           'questionid (fragen_lesen) und der Name, wie er jetzt in Moodle steht; passt ein Name nicht, bricht '
-          'das Werkzeug ab, bevor etwas geschieht. Nur nach Freigabe in der App. Steckt eine Frage in einem '
-          'Test, löscht Moodle sie nicht, sondern verbirgt sie nur -- das Zurücklesen meldet es. Nicht '
-          'rückgängig zu machen.',
+          'das Werkzeug ab, bevor etwas geschieht. Die App fragt IMMER in einem Dialog, auf jeder Stufe, '
+          'jede Frage einzeln zum Abhaken (höchstens 25 je Aufruf); rufe das Werkzeug erst auf, nachdem die '
+          'Lehrkraft im Chat ausdrücklich Ja gesagt hat. Vorher legt die App die aktuelle Version jeder Frage '
+          'als XML-Sicherung ab (der Pfad steht in der Antwort); lässt sich eine Frage nicht exportieren, '
+          'wird nichts gelöscht. Steckt eine Frage in einem Test, löscht Moodle sie nicht, sondern verbirgt '
+          'sie nur -- die Antwort nennt das je Frage. Nicht rückgängig zu machen.',
       parameter: {
         'sammlung': sammlung,
         'fragen': JsonSchema.array(
@@ -1919,6 +2291,7 @@ class McpDienst implements AufrufKontext {
           description: 'Die Fragen, je {id, name}',
         ),
       },
+      zerstoerend: true,
       pflicht: ['sammlung', 'fragen'],
       ausfuehren: (a) {
         final liste = a['fragen'];
@@ -1937,6 +2310,56 @@ class McpDienst implements AufrufKontext {
             for (final f in liste.cast<Map>())
               ((f['id'] as num).toInt(), f['name'] as String),
           ],
+          sicherungsOrdner: _fragenSicherungen,
+        );
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_verschieben',
+      titel: 'Fragen verschieben',
+      beschreibung:
+          'Verschiebt Fragen mit allen Versionen in eine andere Kategorie desselben Kurses, auch in eine andere '
+          'Fragensammlung. Tests behalten die Fragen. Je Frage die AKTUELLE questionid (fragen_lesen) und der Name, '
+          'wie er jetzt in Moodle steht; passt ein Name nicht, steht eine Frage nicht in der Quellsammlung oder ist '
+          'die Sachnummer im Ziel schon vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Die App fragt in '
+          'einem Dialog (Stufe „mittel“ und „alle“). Die Antwort sagt je Frage, wo sie jetzt steht, und meldet '
+          'verified nur, wenn jede im Ziel steht und ihre Sachnummer gleich blieb; ältere Versionen und Verweise '
+          'von Tests sind „nicht geprüft“. Zieht ein Zufallsplatz eines Tests aus der Quellkategorie, hat er danach '
+          'weniger Fragen zur Auswahl: vorher mit test_lesen nachsehen und der Lehrkraft sagen.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'fragen': JsonSchema.array(
+          items: JsonSchema.object(
+            properties: {
+              'id': JsonSchema.integer(description: 'questionid'),
+              'name': JsonSchema.string(description: 'Name der Frage, wie er jetzt in Moodle steht'),
+            },
+            required: ['id', 'name'],
+          ),
+          description: 'Die Fragen, je {id, name}',
+        ),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'cmid der Fragensammlung, in die verschoben wird (aus fragensammlungen, gleicher Kurs)',
+        ),
+        'ziel_kategorie': JsonSchema.string(description: 'Kategorie-id oder Name in der Zielsammlung (aus fragen_lesen)'),
+      },
+      pflicht: ['kurs', 'sammlung', 'fragen', 'ziel_sammlung', 'ziel_kategorie'],
+      ausfuehren: (a) {
+        final liste = a['fragen'];
+        if (liste is! List || liste.any((f) => f is! Map || f['id'] is! num || f['name'] is! String)) {
+          throw MoodleFehler('fragen: eine Liste aus {id, name}.');
+        }
+        return fragenVerschieben(
+          moodle,
+          freigaben,
+          kurs: _zahl(a, 'kurs'),
+          sammlung: _zahl(a, 'sammlung'),
+          fragen: [for (final f in liste.cast<Map>()) ((f['id'] as num).toInt(), f['name'] as String)],
+          zielSammlung: _zahl(a, 'ziel_sammlung'),
+          zielKategorie: '${a['ziel_kategorie']}',
         );
       },
     );
@@ -1951,7 +2374,8 @@ class McpDienst implements AufrufKontext {
           'fragen_importieren, setzt sie in jedem genannten Test auf den Platz der alten (dieselbe Seite und '
           'Stelle, dieselben Punkte, die Seitenaufteilung bleibt) und löscht danach auf Wunsch die alte mit '
           'allen Versionen. Trägt die neue die Sachnummer der alten, geht sie nach dem Löschen an die neue. '
-          'Für Umbauten, die aendern nicht kann (Aufbau, STACK-Testfälle); für reine Inhaltsänderungen '
+          'Nur für Typwechsel oder Instanzen ohne Versionsimport-Plugin; der gemeinsame Verlauf geht verloren. '
+          'Für Umbauten desselben Typs fragen_version_importieren, für kleine Inhaltsänderungen '
           'frage_lesen und aendern. Prüft vorher Namen, Plätze und XML und bricht sonst ab, bevor etwas '
           'geschieht; besteht ein Nachweis nicht, kommt die neue Frage in keinen Test.',
       parameter: {
@@ -2013,6 +2437,7 @@ class McpDienst implements AufrufKontext {
           ],
           loeschen: a['loeschen'] as bool,
           stackTesten: (f) => stackTesten(moodle, sammlung: s, frage: f),
+          sicherungsOrdner: _fragenSicherungen,
         );
       },
     );
@@ -2207,7 +2632,9 @@ class McpDienst implements AufrufKontext {
           'es verborgen an, mit einer festen Beschreibung, die Menschen erklärt, was darin liegt. '
           'Gibt es die Datei schon, prüft die App zuerst, dass Moodle noch den Stand vom Lesen '
           'zeigt, und schreibt erst nach Freigabe in der App, die den Zeilenvergleich zeigt. '
-          'Danach Rückleseprobe (verified). Weitere Dateien des Verzeichnisses (Vorlagen, '
+          'Danach Rückleseprobe (verified). Steht das Verzeichnis nicht am Anfang seines '
+          'Abschnitts, verschiebt es das Werkzeug mit regulärer Freigabe und prüft die Reihenfolge. '
+          'Weitere Dateien des Verzeichnisses (Vorlagen, '
           'Skripte, Zeichnungsquellen) mit aktivitaet_lesen und aendern; das ganze Verzeichnis '
           'mit loeschen.',
       parameter: {
@@ -2567,7 +2994,8 @@ class McpDienst implements AufrufKontext {
           'Liest die Zusammenstellung eines Tests (nie Ergebnisse): Plätze mit Seite, slotid, Typ, '
           'Name, Punkten und questionid, Summe der Punkte, Beste Bewertung, Fragen je Seite, ob die Fragen '
           'gemischt werden (je Testabschnitt), und Befunde '
-          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche). '
+          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche) '
+          'und die Herkunft der Fragen (ohne Abzeichen: Bank eines Tests, vermutlich der eigenen; sonst geteilte Fragensammlung, in der Bankliste des Kurses oder nicht). '
           'Einstellungen des Tests: aktivitaet_lesen. Nur lesen.',
       parameter: {
         'cmid': JsonSchema.integer(
@@ -2577,7 +3005,7 @@ class McpDienst implements AufrufKontext {
       pflicht: ['cmid'],
       nurLesen: true,
       ausfuehren: (a) async =>
-          (await testLesen(moodle, _zahl(a, 'cmid'))).text(),
+          (await testLesen(moodle, _zahl(a, 'cmid'), banken: true)).text(),
     );
 
     _aufrufe.registrieren(
@@ -2654,6 +3082,13 @@ class _KontextImAufruf implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst._datenschutzwarnung(warnung, abbruch, aufrufer);
 
   @override
   String? get testDialogantworten => _dienst.testDialogantworten;

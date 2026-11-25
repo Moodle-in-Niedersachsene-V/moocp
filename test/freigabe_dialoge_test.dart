@@ -14,13 +14,13 @@ import 'package:moocp/main.dart'
         FreigabeDialoge,
         PluginDialogAnzeige,
         PluginDialogFenster,
-        SperrHinweisAnzeige,
         Sperrzeit;
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
 import 'package:moocp/plugin/beschreibung.dart';
+import 'package:moocp/plugin/datenschutz.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart';
 import 'package:moocp/profil.dart';
@@ -183,7 +183,7 @@ void main() {
   });
 
   // Ein zweiter Dialog über einer offenen Freigabe (ein Dialog eines Plugins,
-  // die Warnung der letzten Sperre, die Freigabe eines anderen Profils): Ist
+  // die Warnung der Datenschutzprüfung, die Freigabe eines anderen Profils): Ist
   // er zu, liegt die Freigabe wieder oben, und ihre Wartezeit beginnt neu --
   // sonst träfe ein Doppelklick, dessen erster Klick dem oberen Dialog galt,
   // die Freigabe darunter.
@@ -399,6 +399,51 @@ void main() {
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, knopf)).onPressed, isNotNull);
       f.entscheiden(true);
       expect(await antwort, isTrue);
+    });
+  });
+
+  group('Freigabe mit vielen Haken: Inhalt scrollt über den Knöpfen', () {
+    testWidgets('25 Haken, langer Text, kleines Fenster: jeder Haken lässt sich anklicken, kein Knopf liegt darüber', (tester) async {
+      tester.view.physicalSize = const Size(700, 500);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final f = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
+      final antwort = f.anfragen(FreigabeAnfrage(
+        titel: '25 Fragen endgültig löschen?',
+        punkte: [
+          'Aus der Fragensammlung cmid 7, jeweils mit allen Versionen:',
+          for (var i = 0; i < 25; i++) '„ZZ Frage $i" (shortanswer, questionid ${2000 + i})',
+          'Moodle fragt: ${List.filled(40, 'Die folgende Fragen und alle ihre Versionen werden gelöscht.').join(' ')}',
+        ],
+        vergleich: const [],
+        knopf: 'Löschen',
+        ab: Bestaetigungen.keine,
+        abhaken: [for (var i = 0; i < 25; i++) 'Ich habe geprüft: „ZZ Frage $i" wird mit allen Versionen endgültig gelöscht.'],
+      ));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: FreigabeDialog(f.aktuell!, f))));
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(tester.takeException(), isNull);
+      final knoepfe = [find.widgetWithText(FilledButton, 'Löschen'), find.widgetWithText(OutlinedButton, 'Abbrechen')];
+      for (final k in knoepfe) {
+        expect(k, findsOneWidget);
+      }
+      final kisten = find.byType(CheckboxListTile);
+      expect(kisten, findsNWidgets(25));
+      for (var i = 0; i < 25; i++) {
+        final kiste = kisten.at(i);
+        await tester.ensureVisible(kiste);
+        await tester.pump();
+        final r = tester.getRect(kiste);
+        for (final k in knoepfe) {
+          expect(r.overlaps(tester.getRect(k)), isFalse, reason: 'Knopf liegt über Haken $i');
+        }
+        await tester.tap(find.descendant(of: kiste, matching: find.byType(Checkbox)));
+        await tester.pump();
+        expect(tester.widget<CheckboxListTile>(kisten.at(i)).value, isTrue, reason: 'Haken $i nicht angekommen');
+      }
+      expect(tester.widget<FilledButton>(knoepfe[0]).onPressed, isNotNull);
+      f.entscheiden(false);
+      expect(await antwort, isFalse);
     });
   });
 
@@ -750,90 +795,181 @@ void main() {
     });
   });
 
-  group('Warnung der letzten Sperre', () {
-    SperrTreffer treffer(String wort, {String? werkzeug = 'beispiel_namen', SperrStelle stelle = SperrStelle.ergebnis}) =>
-        SperrTreffer(plugin: 'Beispiel', werkzeug: werkzeug, stelle: stelle, wort: wort, zeit: DateTime(2026, 1, 2, 9, 5, 7));
+  group('Datenschutzwarnung', () {
+    const pfad = r'C:\Temp\moocp_plugin_downloads';
 
-    Widget fenster(SperrHinweise h) => MaterialApp(
-      home: SperrHinweisAnzeige(
-        hinweise: h,
-        nachVorn: () async {},
-        child: const Scaffold(body: Text('Hauptfenster')),
-      ),
+    Datenschutzwarnung warnung(String text, {bool mitPfad = false}) {
+      final p = Datenschutzpruefung()
+        ..namenHinzufuegen('beispiel', ['Erika Mustermann'], herkunft: const Herkunft.teilnehmende(12))
+        ..pfadSperren(pfad);
+      return Datenschutzwarnung(plugin: 'Beispiel', werkzeug: 'beispiel_echo', funde: p.pruefen('beispiel', [text]));
+    }
+
+    FreigabeAnfrage anfrage(Datenschutzwarnung w) => FreigabeAnfrage(
+      titel: 'Datenschutzwarnung',
+      punkte: const [],
+      vergleich: const [],
+      knopf: 'Kein Name – trotzdem an die KI geben',
+      ablehnen: 'Sperren',
+      ohneEntscheidung: 'wird die Antwort gesperrt',
+      ab: Bestaetigungen.keine,
+      datenschutz: w,
+      protokolltitel: 'Datenschutzwarnung',
     );
 
-    testWidgets('zeigt Plugin, Werkzeug, Stelle und Wort; der einzige Knopf schließt, keiner sendet', (tester) async {
-      final h = SperrHinweise();
-      await tester.pumpWidget(fenster(h));
-
-      h.melden(treffer('Erika'));
+    testWidgets('Namen: Titel, Text, Quelle und das Wort rot und fett in 80 Zeichen Umgebung', (tester) async {
+      final f = Freigaben(Protokoll());
+      final lang = '${'vorher ' * 20}Erika${' nachher' * 20}';
+      await tester.pumpWidget(_fenster(f));
+      unawaited(f.anfragen(anfrage(warnung(lang))));
       await tester.pumpAndSettle();
 
-      expect(find.text('Gesperrt: möglicher Name aus einem Plugin'), findsOneWidget);
-      expect(find.text('09:05:07  Plugin „Beispiel“, Werkzeug beispiel_namen, Antwort an die KI: Wort „Erika“'), findsOneWidget);
-      expect(find.textContaining('lässt sich nicht doch senden'), findsOneWidget);
-      expect(find.byWidgetPredicate((w) => w is ButtonStyleButton), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Schließen'), findsOneWidget);
-      for (final wort in ['Senden', 'Freigeben', 'Trotzdem', 'Übernehmen']) {
-        expect(find.textContaining(wort), findsNothing, reason: wort);
+      expect(find.text('Achtung: Möglicherweise personenbezogene Daten'), findsOneWidget);
+      expect(find.textContaining('Namen von Personen sein könnten'), findsOneWidget);
+      expect(find.textContaining('Plugin „Beispiel“, Werkzeug beispiel_echo'), findsOneWidget);
+      expect(find.text('Quelle: Teilnehmende des Kurses 12'), findsOneWidget);
+      // Das Wort als eigener Textabschnitt, rot und fett.
+      final rich = tester.widgetList<SelectableText>(find.byType(SelectableText)).single.textSpan!;
+      final spans = rich.children!.cast<TextSpan>();
+      expect(spans[1].text, 'Erika');
+      expect(spans[1].style?.fontWeight, FontWeight.bold);
+      expect(spans[1].style?.color, const Color(0xFFB71C1C));
+      // 80 Zeichen davor und danach, gekürzt mit „…“, nicht der ganze Text.
+      expect(spans[0].text, startsWith('…'));
+      expect(spans[0].text!.length, 81);
+      expect(spans[2].text, endsWith('…'));
+      expect(spans[2].text!.length, 81);
+      expect(find.text('Plugin „Beispiel“, Werkzeug beispiel_echo – 1 Treffer'), findsOneWidget);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Pfad: eigener Titel und Text; Name und Pfad zusammen: beide Texte in einem Fenster', (tester) async {
+      final f = Freigaben(Protokoll());
+      await tester.pumpWidget(_fenster(f));
+      unawaited(f.anfragen(anfrage(warnung('Datei in $pfad\\x.pdf'))));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Achtung: Möglicherweise Speicherort personenbezogener Daten'), findsOneWidget);
+      expect(find.textContaining('nennt einen Ordner, in dem Daten von Personen liegen können'), findsOneWidget);
+      expect(find.textContaining('an moocp vorbei'), findsOneWidget);
+      expect(find.textContaining('Namen von Personen sein könnten'), findsNothing);
+      expect(find.text('Quelle: Pfad: Ordner für Downloads von Plugins'), findsOneWidget);
+
+      unawaited(f.anfragen(anfrage(warnung('Erika und $pfad'))));
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Achtung: Möglicherweise personenbezogene Daten'), findsOneWidget);
+      expect(find.textContaining('Namen von Personen sein könnten'), findsOneWidget);
+      expect(find.textContaining('nennt einen Ordner'), findsOneWidget);
+      expect(find.byKey(const ValueKey('datenschutz-fund-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('datenschutz-fund-1')), findsOneWidget);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Knöpfe: Sperren ruhig, „trotzdem“ rot mit Warnzeichen, abgesetzt; nach der Wartezeit', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final f = Freigaben(Protokoll());
+      await tester.pumpWidget(_fenster(f));
+      unawaited(f.anfragen(anfrage(warnung('Erika'))));
+      await tester.pumpAndSettle();
+
+      final sperren = find.byKey(const ValueKey('datenschutz-sperren'));
+      final senden = find.byKey(const ValueKey('datenschutz-senden'));
+      expect(find.descendant(of: sperren, matching: find.text('Sperren')), findsOneWidget);
+      expect(find.descendant(of: senden, matching: find.text('Kein Name – trotzdem an die KI geben')), findsOneWidget);
+      expect(find.descendant(of: senden, matching: find.byIcon(Icons.warning_amber_rounded)), findsOneWidget);
+      expect(tester.widget<ButtonStyleButton>(sperren).onPressed, isNull, reason: 'Wartezeit');
+      expect(tester.widget<ButtonStyleButton>(senden).onPressed, isNull, reason: 'Wartezeit');
+      final rot = tester.widget<ButtonStyleButton>(senden).style!.backgroundColor!.resolve({});
+      expect(rot, const Color(0xFFB71C1C));
+      expect(tester.widget<ButtonStyleButton>(sperren).style?.backgroundColor, isNull, reason: 'Standardfarbe');
+      expect(tester.getTopLeft(senden).dx - tester.getTopRight(sperren).dx, greaterThan(100), reason: 'abgesetzt');
+
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(tester.widget<ButtonStyleButton>(sperren).onPressed, isNotNull);
+      expect(tester.widget<ButtonStyleButton>(senden).onPressed, isNotNull);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('„Sperren“ lehnt ab, „trotzdem“ gibt frei', (tester) async {
+      for (final (taste, erwartet) in [('datenschutz-sperren', false), ('datenschutz-senden', true)]) {
+        final f = Freigaben(Protokoll());
+        await tester.pumpWidget(_fenster(f));
+        final antwort = f.anfragen(anfrage(warnung('Erika')));
+        await tester.pumpAndSettle();
+        await tester.pump(Sperrzeit.dauerVorgabe);
+        await tester.tap(find.byKey(ValueKey(taste)));
+        await tester.pumpAndSettle();
+        expect(await antwort, erwartet, reason: taste);
+        expect(find.byType(AlertDialog), findsNothing);
+        await tester.pumpWidget(const SizedBox());
       }
     });
 
-    testWidgets('ein Treffer auf den Ordner für Downloads nennt den Ordner, nicht ein Wort', (tester) async {
-      final h = SperrHinweise();
-      await tester.pumpWidget(fenster(h));
-
-      h.melden(
-        SperrTreffer(
-          plugin: 'Beispiel',
-          werkzeug: 'beispiel_download',
-          stelle: SperrStelle.ergebnis,
-          wort: '/tmp/moocp_plugin_downloads',
-          pfad: true,
-          zeit: DateTime(2026, 1, 2, 9, 5, 7),
-        ),
-      );
+    testWidgets('nur mit der Maus: Tabulator, Return, Enter und Leertaste entscheiden nichts', (tester) async {
+      final f = Freigaben(Protokoll());
+      await tester.pumpWidget(_fenster(f));
+      final antwort = f.anfragen(anfrage(warnung('Erika')));
+      var fertig = false;
+      unawaited(antwort.then((_) => fertig = true));
       await tester.pumpAndSettle();
+      await tester.pump(Sperrzeit.dauerVorgabe);
 
-      expect(
-        find.text(
-          '09:05:07  Plugin „Beispiel“, Werkzeug beispiel_download, Antwort an die KI: '
-          'der Pfad des Ordners für Downloads',
-        ),
-        findsOneWidget,
-      );
-      expect(find.textContaining('Wort „'), findsNothing);
+      await tabUndTasten(tester, ['Sperren', 'Kein Name – trotzdem an die KI geben']);
+
+      expect(fertig, isFalse);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
     });
 
-    testWidgets('mehrere Treffer kurz hintereinander: ein Fenster, das mitwächst; danach ein neues', (tester) async {
-      final h = SperrHinweise(hoechstens: 3);
-      await tester.pumpWidget(fenster(h));
+    testWidgets('mehr als 20 Treffer: alle werden einzeln gezeigt, scrollbar', (tester) async {
+      final f = Freigaben(Protokoll());
+      await tester.pumpWidget(_fenster(f));
+      unawaited(f.anfragen(anfrage(warnung(List.filled(25, 'Erika').join(' ')))));
+      await tester.pumpAndSettle();
 
-      h.melden(treffer('Erika'));
+      final liste = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('datenschutz-fund-24')), 200, scrollable: liste);
+      expect(find.byKey(const ValueKey('datenschutz-fund-24')), findsOneWidget);
+      expect(find.textContaining('weitere Treffer'), findsNothing);
+      expect(find.text('Plugin „Beispiel“, Werkzeug beispiel_echo – 25 Treffer'), findsOneWidget);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('ohne Entscheidung bis zur Frist schließt sich das Fenster: nicht freigegeben', (tester) async {
+      final f = Freigaben(Protokoll(), frist: const Duration(milliseconds: 200));
+      await tester.pumpWidget(_fenster(f));
+      final antwort = f.anfragen(anfrage(warnung('Erika')));
       await tester.pump();
-      h.melden(treffer('Mustermann', werkzeug: null, stelle: SperrStelle.protokollzeile));
-      for (var i = 0; i < 4; i++) {
-        h.melden(treffer('Max$i'));
-      }
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('09:05:07  Plugin „Beispiel“, Protokollzeile: Wort „Mustermann“'), findsOneWidget);
-      expect(find.textContaining('Wort „Max0“'), findsOneWidget);
-      expect(find.textContaining('Wort „Max1“'), findsNothing);
-      expect(find.text('… und 3 weitere.'), findsOneWidget);
-
-      await tester.tap(find.text('Schließen'));
-      await tester.pumpAndSettle();
+      expect(await antwort, isFalse);
       expect(find.byType(AlertDialog), findsNothing);
-      expect(h.offen, isEmpty);
-      expect(h.weitere, 0);
+    });
 
-      h.melden(treffer('Jo'));
+    testWidgets('fragt auch auf der Stufe „keine“; eine zweite Warnung wartet hinter der ersten', (tester) async {
+      final f = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
+      await tester.pumpWidget(_fenster(f));
+      unawaited(f.anfragen(anfrage(warnung('Erika'))));
+      unawaited(f.anfragen(anfrage(warnung('Mustermann'))));
       await tester.pumpAndSettle();
+
       expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.textContaining('Wort „Jo“'), findsOneWidget);
-      expect(find.textContaining('Wort „Erika“'), findsNothing);
+      expect(find.text('1 weitere Anfrage wartet.'), findsOneWidget);
+      expect(f.ausgelassen, 0);
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
+      f.entscheiden(false);
+      await tester.pumpAndSettle();
     });
   });
 }

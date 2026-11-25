@@ -32,7 +32,7 @@ class _Kurs extends MoodleZugang {
   final _vorher = <int, _Cm>{};
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     switch (name) {
       case 'core_course_get_enrolled_courses_by_timeline_classification':
         return {'courses': <Object?>[]};

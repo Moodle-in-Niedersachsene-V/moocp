@@ -237,9 +237,9 @@ void main() {
     String q(String typ, String inhalt, {String name = 'ZZ Frage', String idn = ''}) =>
         '<question type="$typ"><name><text>$name</text></name><questiontext format="html"><text>x</text>'
         '</questiontext><idnumber>$idn</idnumber>$inhalt</question>';
-    expect(() => fragenXmlPruefen(quizXml([q('ddmarker', '')])),
-        throwsA(predicate((e) => '$e'.contains('Koordinaten'))));
-    expect(() => fragenXmlPruefen(quizXml([q('formulas', '')])), throwsA(predicate((e) => '$e'.contains('nicht anlegbar'))));
+    // Jeder Typ geht zur Rundlaufprobe (E38); es gibt keine Liste gemessener Typen mehr.
+    expect(fragenXmlPruefen(quizXml([q('ddmarker', '')])).$2.single.typ, 'ddmarker');
+    expect(fragenXmlPruefen(quizXml([q('formulas', '')])).$2.single.typ, 'formulas');
     expect(() => fragenXmlPruefen(quizXml([q('ordering', '<layouttype>1</layouttype>')])),
         throwsA(predicate((e) => '$e'.contains('shownumcorrect') && '$e'.contains('Namen'))));
     expect(() => fragenXmlPruefen(quizXml([q('truefalse', '', idn: 'A1'), q('truefalse', '', name: 'ZZ B', idn: 'A1')])),

@@ -126,6 +126,10 @@ const werkzeugGet = [
   '/question/type/stack/deploy.php?questionid=5005&cmid=5002&sesskey=abc&deploymany=5&deploymanybtn=1&deployhalt=on',
   '/question/type/stack/deploy.php?questionid=5005&cmid=5002&sesskey=abc&deploy=667371&deploysinglebtn=1',
   '/question/bank/deletequestion/delete.php?cmid=5002&deleteselected=1&deleteall=1&returnurl=%2Fquestion%2Fedit.php%3Fcmid%3D5002&q5006=1&q5009=1',
+  // Rundlaufprobe und neue Fragenversion (E38)
+  '/question/bank/previewquestion/preview.php?id=5006&cmid=5002',
+  '/question/bank/previewquestion/preview.php?id=5006&cmid=5002&previewid=77',
+  '/question/bank/importasversion/import.php?id=5006&cmid=5002',
 ];
 
 void main() {
@@ -157,6 +161,20 @@ void main() {
     },
   );
 
+  test('Die Fragenübersicht und der Verlauf einer Frage bleiben ungelesen (Namen, A1); das Plugin hat nur seine eine Seite', () {
+    final z = MoodleZugang(Protokoll());
+    for (final a in [
+      '/question/edit.php?cmid=5002',
+      '/question/bank/history/history.php?entryid=5&cmid=5002',
+      '/question/bank/importasversion/import.php?id=5006',
+      '/question/bank/importasversion/import.php?id=5006&cmid=5002&x=1',
+      '/question/bank/importasversion/andere.php?id=5006&cmid=5002',
+      '/question/bank/previewquestion/preview.php?id=5006&cmid=5002&x=1',
+    ]) {
+      expect(z.erlaubt('GET', Uri.parse('https://m.example$a')), isFalse, reason: a);
+    }
+  });
+
   test('STACK-Einsetzen: nur das Formular der Testseite, nicht jede Variante von deploy.php', () {
     final z = MoodleZugang(Protokoll());
     const basis = 'https://m.example/question/type/stack/deploy.php?questionid=5005&cmid=5002&sesskey=abc';
@@ -169,6 +187,36 @@ void main() {
     ]) {
       expect(z.erlaubt('GET', Uri.parse('$basis$a')), isFalse, reason: a);
     }
+  });
+
+  group('Neue Schreibwege: nur bestehende Aktivitäten, nur gemessene Aktionen (E3)', () {
+    final z = MoodleZugang(Protokoll());
+    final speichern = Uri.parse('https://m.example/course/modedit.php');
+    bool post(String modul, {String? update}) => z.erlaubt('POST', speichern, [
+      const MapEntry('course', '12'),
+      MapEntry('modulename', modul),
+      MapEntry('_qf__mod_${modul}_mod_form', '1'),
+      if (update != null) MapEntry('update', update),
+    ]);
+
+    for (final modul in ['choicegroup', 'lightboxgallery']) {
+      test('$modul: Speichern nur mit der Nummer einer bestehenden Aktivität', () {
+        expect(post(modul, update: '7'), isTrue);
+        expect(post(modul, update: '0'), isFalse, reason: 'update=0 ist kein Bearbeiten');
+        expect(post(modul), isFalse, reason: 'Anlegen ist für diesen Typ nicht erlaubt');
+        expect(post(modul, update: 'x'), isFalse);
+      });
+    }
+
+    test('Einrücken und Ausrücken: genau die beiden gemessenen Aktionen', () {
+      final dienst = z.dienste['core_courseformat_update_course']!;
+      for (final a in ['cm_moveright', 'cm_moveleft']) {
+        expect(dienst({'action': a, 'courseid': 5, 'ids': [11]}), isTrue, reason: a);
+      }
+      for (final a in ['cm_moveup', 'cm_moveright2', 'cm_duplicate_all']) {
+        expect(dienst({'action': a, 'courseid': 5, 'ids': [11]}), isFalse, reason: a);
+      }
+    });
   });
 
   test('Die Positivliste allein ließe Abgaben unter pluginfile.php durch -- darum die Sperrliste', () {
@@ -236,12 +284,12 @@ void main() {
     );
   });
 
-  group('Ausnahme Teilnehmendenseite, nur für die letzte Sperre (E36)', () {
+  group('Ausnahme Teilnehmendenseite, nur für die Datenschutzprüfung (E36)', () {
     const basis = 'https://m.example';
     const genau = '/user/index.php?id=12&perpage=5000&tifirst=&tilast=';
     Uri u(String a) => Uri.parse('$basis$a');
 
-    test('genau diese Form: für die letzte Sperre erlaubt, für alle anderen gesperrt', () {
+    test('genau diese Form: für die Datenschutzprüfung erlaubt, für alle anderen gesperrt', () {
       final z = MoodleZugang(Protokoll());
       expect(sperrregelFuerNamenssperre(u(genau)), isNull);
       expect(z.erlaubtFuerNamenssperre(u(genau)), isTrue);
@@ -256,7 +304,7 @@ void main() {
       expect(weg, isNot(BrowserWeg.ueberApp));
     });
 
-    test('jede andere Form und jede andere Seite zu Personen bleibt auch für die letzte Sperre gesperrt', () {
+    test('jede andere Form und jede andere Seite zu Personen bleibt auch für die Datenschutzprüfung gesperrt', () {
       final z = MoodleZugang(Protokoll());
       for (final a in [
         '/user/index.php?id=12',
@@ -275,7 +323,7 @@ void main() {
       ]) {
         expect(sperrregelFuerNamenssperre(u(a)), isNotNull, reason: a);
       }
-      // Die Positivliste für die letzte Sperre ist ebenso eng.
+      // Die Positivliste für die Datenschutzprüfung ist ebenso eng.
       for (final a in [
         '/user/index.php?id=12&perpage=5000',
         '/user/index.php?id=12&perpage=5000&tifirst=&tilast=&x=1',
@@ -287,7 +335,7 @@ void main() {
       }
     });
 
-    test('genau eine Regel der Positivliste ist für die letzte Sperre, und sie gilt für sonst niemanden', () {
+    test('genau eine Regel der Positivliste ist für die Datenschutzprüfung, und sie gilt für sonst niemanden', () {
       final regeln = MoodleZugang(Protokoll()).positivliste.where((e) => e.nurNamenssperre).toList();
       expect(regeln, hasLength(1));
       expect(regeln.single.methode, 'GET');

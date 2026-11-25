@@ -23,9 +23,10 @@
 //    Start; spätere Änderungen beachtet es nicht.
 // 5. Als Antwort Text liefern. Bilder und andere Inhalte gibt moocp nicht
 //    an die KI weiter. Keine Namen von Personen in Antworten und
-//    Protokollzeilen: Was einen Namen trifft, den das Plugin zum Sperren
-//    genannt hat, hält moocp ganz an (`beispiel_namen`). Wo es treffen
-//    würde, sagt moocp vorher (`beispiel_namen_pruefen`).
+//    Protokollzeilen: Trifft eine Antwort einen Namen, den das Plugin
+//    genannt hat, fragt moocp die Lehrkraft, ob sie trotzdem an die KI
+//    geht; eine Protokollzeile mit Treffer erscheint nur als Platzhalter
+//    (`beispiel_namen`, `beispiel_pfade`).
 // 6. Sich beenden, wenn die Standardeingabe endet: Dann ist moocp fort, auch
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
@@ -75,9 +76,9 @@
 // Arbeitsordner laden), `beispiel_moodle_schreiben` (über eine Zusatzadresse schreiben, mit
 // Freigabe; in einem Lauf auch selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
 // Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
-// Zusatzadresse herunterladen), `beispiel_namen` (Namen zum Sperren
-// nennen; die letzte Sperre hält danach eine Antwort mit einem davon an) und
-// `beispiel_namen_pruefen` (eine Antwort vorher prüfen lassen und bereinigen).
+// Zusatzadresse herunterladen), `beispiel_namen` (Namen nennen; bei einem Treffer
+// in einer Antwort fragt moocp die Lehrkraft) und `beispiel_pfade` (Pfade
+// nennen, die nicht an die KI gehören; wirkt wie die Namen).
 //
 // Übersetzen für die Installation: bauen.ps1 (Windows) und bauen.sh (Mac)
 // übersetzen das Programm mit `dart compile exe` unter dem Namen, den
@@ -524,7 +525,7 @@ McpServer _server() {
   // höchstens 200 MB, Moodle muss die Größe nennen, eine Seite statt einer
   // Datei ist ein Fehler, nichts wird überschrieben (mit `dateiname` lässt
   // sich ein anderer Name wählen). Was dort liegt, kann die KI lesen; die
-  // letzte Sperre prüft Dateien nicht. Für Dateien hinter einer Zusatzadresse
+  // Datenschutzprüfung prüft Dateien nicht. Für Dateien hinter einer Zusatzadresse
   // gibt es den eigenen Weg in einem Lauf (`beispiel_download`). In
   // plugin.json steht dafür nichts: Die Beschreibungsdatei nennt keine
   // Werkzeuge, und was die Positivliste erlaubt, braucht keine Zusatzadresse.
@@ -670,7 +671,7 @@ McpServer _server() {
   // in einem Lauf, den es mit der Nummer der Aktivität beginnt, um die es
   // geht. Hinter einer solchen Adresse ist mit Namen zu rechnen. Deshalb
   // ermittelt moocp beim Beginn selbst den Kurs der Aktivität, lädt die Namen
-  // seiner Teilnehmenden in die letzte Sperre (das Plugin bekommt sie nicht)
+  // seiner Teilnehmenden in die Datenschutzprüfung (das Plugin bekommt sie nicht)
   // und lehnt jede Anfrage des Laufs ab, deren Adresse eine andere Kurs- oder
   // Aktivitätsnummer trägt oder gar keine. Alle Schritte mit dem Token des
   // Aufrufs:
@@ -775,28 +776,30 @@ McpServer _server() {
     },
   );
 
-  // Die letzte Sperre: Arbeitet ein Plugin mit Personen, nennt es moocp die
-  // Namen (`/v1/namen`, `{"namen": [...]}`). Von da an prüft moocp, bis es
+  // Die Datenschutzwarnung: Arbeitet ein Plugin mit Personen, nennt es moocp
+  // die Namen (`/v1/namen`, `{"namen": [...]}`). Von da an prüft moocp, bis es
   // endet, jede Antwort dieses Plugins an die KI und jede Protokollzeile
-  // gegen sie: Jeder Teil eines Namens sperrt für sich, als ganzes Wort, ohne
+  // gegen sie: Jeder Teil eines Namens trifft für sich, als ganzes Wort, ohne
   // Rücksicht auf Groß- und Kleinschreibung und auf die Schreibweise von
-  // Umlauten und Akzenten. Bei einem Treffer geht nichts hinaus; die KI
-  // erfährt nur, dass gesperrt wurde, die Lehrkraft sieht das Wort. Namen
-  // lassen sich nicht wieder entfernen und nicht abfragen.
+  // Umlauten und Akzenten. Bei einem Treffer in einer Antwort hält moocp sie
+  // an und fragt die Lehrkraft, einmal für diese Antwort: „Sperren“ gibt der
+  // KI nur den Hinweis, dass gesperrt wurde, „trotzdem an die KI geben“ lässt
+  // die Antwort unverändert hinaus. Eine Protokollzeile mit Treffer erscheint
+  // nur als Platzhalter. Namen lassen sich nicht wieder entfernen und nicht
+  // abfragen. Wo die Prüfung träfe, sagt moocp nicht vorher: Ein Plugin baut
+  // seine Antworten so, dass keine Namen darin stehen.
   //
   // Dieses Werkzeug tut absichtlich, was ein Plugin nie tun soll: Es nennt
   // den erfundenen Namen „Erika Mustermann“ und gibt ihn dann in einer
-  // Protokollzeile (moocp lehnt sie mit 422 ab) und in seiner Antwort
-  // zurück (moocp sperrt sie). Ein echtes Plugin baut seine Antworten so,
-  // dass keine Namen darin stehen, und nennt die Namen nur, damit moocp sie
-  // abfängt, falls doch einer durchrutscht.
+  // Protokollzeile (sie erscheint als Platzhalter) und in seiner Antwort
+  // zurück (die Lehrkraft entscheidet).
   server.registerTool(
     'beispiel_namen',
     description:
-        'Nennt moocp einen erfundenen Namen zum Sperren und gibt ihn dann zurück; moocp sperrt die Antwort. '
+        'Nennt moocp einen erfundenen Namen und gibt ihn dann zurück; moocp fragt die Lehrkraft, ob die Antwort an die KI geht. '
         '$nurSchnittstelle',
     inputSchema: JsonSchema.object(properties: {}),
-    annotations: hinweise('Letzte Sperre (Beispiel)'),
+    annotations: hinweise('Datenschutzwarnung (Beispiel)'),
     callback: (args, extra) async {
       const name = 'Erika Mustermann';
       try {
@@ -809,51 +812,42 @@ McpServer _server() {
       try {
         await anMoocp(adresse(), '/v1/protokoll', {'text': 'Bearbeitet: $name'}, aufruf: token(extra));
       } on MoocpFehler catch (f) {
-        // Erwartet: 422, die Zeile steht nicht im Protokoll.
-        if (f.status != 422) return text(f.text, fehler: true);
+        return text(f.text, fehler: true);
       }
       return text('Ergebnis für $name: 3 von 4 Punkten.');
     },
   );
 
-  // Vorher prüfen statt gesperrt werden: `/v1/namen/pruefen` mit
-  // `{"text": "…"}` sagt, wo die letzte Sperre in einem Text träfe, nach
-  // derselben Regel und gegen dieselben Namen, auch die, die moocp selbst
-  // geladen hat (Teilnehmende eines Laufs, die angemeldete Lehrkraft). Die
-  // Antwort nennt keine Namen, nur Stellen: `stellen` mit `anfang` und
-  // `ende` in UTF-16-Codeeinheiten (wie Dart-Strings zählen), `kodiert`, wenn
-  // ein Name erst nach dem Auflösen einer Kodierung (Prozentkodierung,
-  // `ü`, `&#252;`) dasteht, und `pfad`, wenn der Text den Ordner für
-  // Downloads nennt. Ersetzen tut das Plugin selbst. Was mehr finden soll
-  // als die Sperre (Tippfehler, Namen mitten in einem Wort), baut das Plugin
-  // selbst davor; die Prüfung von moocp sagt nur, was moocp sperren würde.
+  // Pfade, die nicht an die KI gehören: Legt ein Plugin einen Ordner an, in
+  // dem Daten von Personen liegen können (etwa Abgaben), nennt es moocp den
+  // Pfad (`/v1/pfade`, `{"pfade": [...]}`, mit Token, wie bei den Namen). Von
+  // da an behandelt moocp ihn wie die Namen: Eine Antwort, in der er steht
+  // (auch eine Datei darin, in jeder Schreibweise), hält moocp an und fragt
+  // die Lehrkraft, zusammen mit Namen und dem Ordner für Downloads in einer
+  // Warnung; eine Protokollzeile damit erscheint nur als Platzhalter. Pfade
+  // lassen sich nur hinzufügen, nicht entfernen oder abfragen. Ein Pfad hat
+  // mindestens zwei Teile; ein Laufwerk oder die Wurzel lehnt moocp ab.
+  //
+  // Dieses Werkzeug tut wieder absichtlich, was ein Plugin nie tun soll: Es
+  // nennt einen erfundenen Pfad und gibt ihn dann in der Antwort zurück.
   server.registerTool(
-    'beispiel_namen_pruefen',
+    'beispiel_pfade',
     description:
-        'Nennt moocp einen erfundenen Namen zum Sperren, lässt seine Antwort vorher prüfen und ersetzt den Namen; '
-        'die Antwort geht durch. $nurSchnittstelle',
+        'Nennt moocp einen erfundenen Ordner mit Abgaben und gibt ihn dann zurück; moocp fragt die Lehrkraft, ob die Antwort an die KI geht. '
+        '$nurSchnittstelle',
     inputSchema: JsonSchema.object(properties: {}),
-    annotations: hinweise('Namen prüfen (Beispiel)'),
+    annotations: hinweise('Datenschutzwarnung bei Pfaden (Beispiel)'),
     callback: (args, extra) async {
-      const name = 'Erika Mustermann';
-      var antwort = 'Ergebnis für $name: 3 von 4 Punkten.';
+      const ordner = '/home/e.mustermann/Klasse 9b/Abgaben';
       try {
-        await anMoocp(adresse(), '/v1/namen', {
-          'namen': [name],
+        await anMoocp(adresse(), '/v1/pfade', {
+          'pfade': [ordner],
         }, aufruf: token(extra));
-        final pruefung = await anMoocp(adresse(), '/v1/namen/pruefen', {'text': antwort}, aufruf: token(extra));
-        // Von hinten ersetzen, damit die vorderen Stellen gültig bleiben.
-        for (final s in (pruefung['stellen'] as List).reversed) {
-          final stelle = s as Map;
-          antwort = antwort.replaceRange(stelle['anfang'] as int, stelle['ende'] as int, '[Name]');
-        }
-        if (pruefung['kodiert'] == true || pruefung['pfad'] == true) {
-          return text('Die Antwort enthält noch einen Namen in kodierter Form oder einen Pfad; nicht gesendet.', fehler: true);
-        }
+        await anMoocp(adresse(), '/v1/protokoll', {'text': 'Abgaben liegen in $ordner'}, aufruf: token(extra));
       } on MoocpFehler catch (f) {
         return text(f.text, fehler: true);
       }
-      return text(antwort);
+      return text('Die Abgaben liegen in $ordner/Aufgabe 3.pdf.');
     },
   );
   return server;

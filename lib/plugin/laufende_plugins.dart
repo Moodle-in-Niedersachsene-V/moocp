@@ -36,28 +36,29 @@
 // wie sie sind. Neustart und Ausfall unten gelten für ein angehängtes Plugin
 // nicht.
 //
-// Letzte Sperre (namenssperre.dart, E36): Was aus einem Aufruf eines
+// Datenschutzwarnung (datenschutz.dart, E36): Was aus einem Aufruf eines
 // Werkzeugs eines Plugins an die KI zurückgeht -- jeder Text der Antwort und
 // der Text eines Werkzeugfehlers des Plugins --, prüft [aufrufen] gegen alle
-// Namen, die die App seit ihrem Start für dieses Plugin geladen hat, bevor es
-// die Hülle erreicht, die die erste Zeile ins Protokoll schreibt. Bei einem
-// Treffer geht nichts davon hinaus, auch nicht in Teilen: Die KI bekommt
-// [gesperrtText], das Protokoll eine Zeile mit Plugin und Werkzeug, die
-// Lehrkraft die Warnung mit dem Wort. Andere Inhalte als Text gibt die
-// Verbindung ohnehin nicht weiter (verbindung.dart). Die Namen gelten je
-// Plugin für alle Profile; sie liegen in [sperre], die so lange lebt wie die
-// App, und überstehen so das Ende eines Aufrufs, einen Neustart nach einem
-// Absturz und das Wiederverbinden eines Entwicklungs-Plugins. Auch die
-// Werkzeugliste geht bei jedem Start, auch nach einem Absturz, erst durch die
-// Sperre, mit den Namen der Werkzeuge (verbindung.dart, werkzeuglisteTexte):
-// Sie geht an die KI und in die Einstellungen.
-// Für jedes Plugin sperrt sie außerdem den Pfad des Ordners für Downloads
+// Namen und Pfade, die die App seit ihrem Start für dieses Plugin geladen hat,
+// bevor es die Hülle erreicht, die die erste Zeile ins Protokoll schreibt. Bei
+// einem Treffer hält die App die Antwort an und fragt die Lehrkraft einmal für
+// diese Antwort ([AufrufKontext.datenschutzwarnung]): „Sperren“ gibt der KI
+// nur [gesperrtText] (Datenschutzsperre), „trotzdem an die KI geben“ lässt die
+// Antwort unverändert hinaus. Ohne Entscheidung, nach der Frist und wenn der
+// Client abbricht, ist es die Datenschutzsperre. Nichts wird gemerkt. Das
+// Protokoll nennt Plugin, Werkzeug, Zahl der Treffer und die Entscheidung,
+// nie ein Wort. Andere Inhalte als Text gibt die Verbindung ohnehin nicht
+// weiter (verbindung.dart). Die Namen gelten je Plugin für alle Profile; sie
+// liegen in [pruefung], die so lange lebt wie die App, und überstehen so das
+// Ende eines Aufrufs, einen Neustart nach einem Absturz und das Wiederverbinden
+// eines Entwicklungs-Plugins. Die Werkzeugliste prüft die App nicht auf Namen.
+// Für jedes Plugin gilt außerdem der Pfad des Ordners für Downloads
 // ([downloads]), den [beenden] auch leert.
 //
 // Hat das Plugin während des Aufrufs über eine Zusatzadresse an Moodle
 // geschrieben (moodle_schreiben.dart), setzt [aufrufen] einen festen Satz vor
 // alles, was die KI daraus bekommt: geprüft vom Plugin, nicht von moocp. Die
-// letzte Sperre prüft dabei weiter den ganzen Text des Plugins.
+// Datenschutzprüfung prüft dabei weiter den ganzen Text des Plugins.
 //
 // Ausfall: Antwortet ein Plugin beim Start nicht binnen der Startfrist oder
 // endet es dabei, bekommt es einen zweiten Versuch. Endet sein Programm
@@ -95,8 +96,8 @@ import 'beschreibung.dart';
 import 'dialoge.dart';
 import 'downloads.dart';
 import 'entwicklung.dart';
-import 'moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
-import 'namenssperre.dart';
+import 'moodle_schreiben.dart' show datenschutzAutomatischKennzeichnung, testantwortenKennzeichnung, zusatzKennzeichnung;
+import 'datenschutz.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
 import 'schnittstelle.dart';
@@ -150,13 +151,13 @@ String _ausfallText(PluginEintrag e) =>
     'Das Plugin „${e.anzeigename}“ ist ausgefallen. Seine Werkzeuge stehen erst '
     'wieder zur Verfügung, wenn moocp neu gestartet wird.';
 
-/// Was die KI bekommt, wenn die letzte Sperre die Antwort eines Plugins
+/// Was die KI bekommt, wenn die Datenschutzsperre die Antwort eines Plugins
 /// angehalten hat: ein fester Text mit Plugin und Werkzeug, nie das Wort und
 /// nie ein Auszug.
 String gesperrtText(String plugin, String werkzeug) =>
-    'Gesperrt: Die Antwort des Werkzeugs „$werkzeug“ (Plugin „$plugin“) könnte einen Namen enthalten '
-    'und geht deshalb nicht an die KI, auch nicht in Teilen. Die Lehrkraft sieht in moocp, welches Wort '
-    'getroffen hat. Hol das Ergebnis nicht auf anderem Weg, sondern sag der Lehrkraft, dass es gesperrt wurde.';
+    'Gesperrt: Die Antwort des Werkzeugs „$werkzeug“ (Plugin „$plugin“) enthält möglicherweise personenbezogene '
+    'Daten und geht deshalb nicht an die KI, auch nicht in Teilen. Hol das Ergebnis nicht auf anderem Weg, '
+    'sondern sag der Lehrkraft, dass es gesperrt wurde.';
 
 class _Laufend {
   _Laufend(this.eintrag, this.prozess, this.verbindung, this.beendet, this.schluessel);
@@ -188,11 +189,10 @@ class LaufendePlugins implements WerkzeugQuelle {
     this.entwicklungsIntervall = const Duration(seconds: 3),
     this.entwicklungsFrist = const Duration(seconds: 2),
     this.dialoge,
-    this.sperrHinweise,
     this.downloads,
-  }) : sperre = LetzteSperre(melden: sperrHinweise?.melden) {
+  }) {
     for (final f in downloads?.pfadformen ?? const <String>{}) {
-      sperre.pfadSperren(f);
+      pruefung.pfadSperren(f);
     }
   }
 
@@ -200,18 +200,14 @@ class LaufendePlugins implements WerkzeugQuelle {
 
   /// Der Ordner für Downloads über Zusatzadressen (downloads.dart), beim
   /// Start der App eingerichtet und geleert; [beenden] leert ihn wieder. Sein
-  /// Pfad steht in der letzten Sperre, von Anfang an. Null ohne Oberfläche
+  /// Pfad steht in der [pruefung], von Anfang an. Null ohne Oberfläche
   /// (Tests): Dann gibt es keinen solchen Download.
   final PluginDownloads? downloads;
 
-  /// Die Warnungen der letzten Sperre, die die Oberfläche zeigt; null, wenn
-  /// niemand sie zeigt (Tests). Gesperrt wird auch ohne.
-  final SperrHinweise? sperrHinweise;
-
-  /// Die Namen der letzten Sperre, je Plugin, für die ganze App: geteilt mit
-  /// der Adresse der App, an der ein Plugin Namen nennt, und mit einem
-  /// angehängten Entwicklungs-Plugin. Nur im Arbeitsspeicher.
-  final LetzteSperre sperre;
+  /// Die Namen und Pfade der Datenschutzprüfung, je Plugin, für die ganze App:
+  /// geteilt mit der Adresse der App, an der ein Plugin Namen nennt, und mit
+  /// einem angehängten Entwicklungs-Plugin. Nur im Arbeitsspeicher.
+  final pruefung = Datenschutzpruefung();
 
   /// Die Dialoge der Plugins, die die Oberfläche zeigt (dialoge.dart); null,
   /// wenn niemand sie zeigt (Tests): Dann lehnt die Adresse der App jeden
@@ -282,7 +278,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       _adresse ??= AppAdresse.starten(
         _protokoll,
         dialoge: dialoge,
-        sperre: sperre,
+        pruefung: pruefung,
         downloads: downloads,
       ).then((a) => _offen = a);
 
@@ -339,7 +335,6 @@ class LaufendePlugins implements WerkzeugQuelle {
       intervall: entwicklungsIntervall,
       versuchsfrist: entwicklungsFrist,
       adresse: adresse,
-      sperre: sperre,
     );
     _angehaengt = a;
     await a.starten();
@@ -477,22 +472,6 @@ class LaufendePlugins implements WerkzeugQuelle {
         await verbindung.schliessen();
         throw const PluginFehler('moocp wurde während des Starts beendet.');
       }
-      // Nach einem Neustart kann es schon Namen geben: Namen und
-      // Beschreibungen gingen an die KI und in die Einstellungen.
-      if (sperre.gesperrt(
-        b.kurzname,
-        werkzeuglisteTexte(verbindung.werkzeuge, b.kurzname),
-        plugin: e.anzeigename,
-        werkzeug: null,
-        stelle: SperrStelle.werkzeugliste,
-      )) {
-        await verbindung.schliessen();
-        _protokoll.eintrag(
-          Art.gesperrt,
-          'Plugin „${e.anzeigename}“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)',
-        );
-        throw const PluginFehler(werkzeuglisteGesperrt);
-      }
       return _Laufend(e, prozess, verbindung, beendet, schluessel);
     } catch (_) {
       adresse.pluginAbmelden(b.kurzname, schluessel);
@@ -572,7 +551,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       // der Startfrist oder endet es dabei, gibt es einen zweiten Versuch; ein
       // Plugin, das nach einem Absturz einmal langsam hochkommt, soll nicht bis
       // zum Neustart der App ausfallen. Regelverstöße (Prüfsumme,
-      // Werkzeugnamen, letzte Sperre) bekommen keinen.
+      // Werkzeugnamen) bekommen keinen.
       for (var versuche = 1; gestartet == null; versuche++) {
         try {
           gestartet = await _starten(e);
@@ -708,8 +687,8 @@ class LaufendePlugins implements WerkzeugQuelle {
   }
 
   /// Der Aufruf mit seinem Token an der Adresse der App, und was zurückkommt,
-  /// durch die letzte Sperre: die Antwort und der Text eines Werkzeugfehlers
-  /// des Plugins. Fehler, die moocp selbst meldet, tragen keinen Text des
+  /// durch die Datenschutzprüfung: die Antwort und der Text eines
+  /// Werkzeugfehlers des Plugins. Fehler, die moocp selbst meldet, tragen keinen Text des
   /// Plugins und gehen ungeprüft weiter.
   Future<String> _mitToken(
     String kurzname,
@@ -721,17 +700,24 @@ class LaufendePlugins implements WerkzeugQuelle {
     // Hat das Plugin in diesem Aufruf über eine Zusatzadresse geschrieben,
     // steht das vor allem, was die KI daraus bekommt, auch vor einem Fehler
     // und einer gesperrten Antwort (moodle_schreiben.dart). Der Satz kommt
-    // von moocp, nach der letzten Sperre, die nur den Text des Plugins prüft.
+    // von moocp, nach der Datenschutzprüfung, die nur den Text des Plugins prüft.
     // Ebenso, wenn der Testbetrieb Dialoge des Plugins aus vorbereiteten
     // Antworten beantwortet hat (testantworten.dart).
+    // Ebenso, wenn nicht die Lehrkraft die Datenschutzwarnung zu dieser
+    // Antwort beantwortet hat ([DatenschutzAusgang.automatisch]).
+    bool? warnungGesendet;
     bool kennzeichnen() =>
-        (angemeldet?.zusatzSchreibvorgaenge ?? 0) > 0 || (angemeldet?.testDialogantworten ?? 0) > 0;
+        (angemeldet?.zusatzSchreibvorgaenge ?? 0) > 0 ||
+        (angemeldet?.testDialogantworten ?? 0) > 0 ||
+        warnungGesendet != null;
     String gekennzeichnet(String text) {
       final n = angemeldet?.zusatzSchreibvorgaenge ?? 0;
       final d = angemeldet?.testDialogantworten ?? 0;
+      final w = warnungGesendet;
       return [
         if (n > 0) zusatzKennzeichnung(plugin, n, automatisch: angemeldet!.zusatzTestSchreibvorgaenge),
         if (d > 0) testantwortenKennzeichnung(plugin, d),
+        if (w != null) datenschutzAutomatischKennzeichnung(plugin, gesendet: w),
         text,
       ].join('\n\n');
     }
@@ -741,7 +727,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       try {
         text = await f();
       } on PluginErgebnisFehler catch (x) {
-        _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet);
+        await _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet, (g) => warnungGesendet = g);
         if (!kennzeichnen()) rethrow;
         throw PluginErgebnisFehler(gekennzeichnet(x.meldung));
       } on MoodleFehler catch (x) {
@@ -750,36 +736,55 @@ class LaufendePlugins implements WerkzeugQuelle {
         if (!kennzeichnen()) rethrow;
         throw MoodleFehler(gekennzeichnet(x.meldung));
       }
-      _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet);
+      await _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet, (g) => warnungGesendet = g);
       return gekennzeichnet(text);
     } finally {
       angemeldet?.ende();
     }
   }
 
-  /// Wirft den Fehler mit [gesperrtText], wenn [text] einen Namen des Plugins
-  /// trifft; vorher eine Zeile ins Protokoll des Profils, ohne das Wort.
-  /// [kennzeichnen] setzt den Hinweis auf einen Schreibvorgang über eine
+  /// Prüft [text] auf Namen und Pfade des Plugins. Ohne Treffer geschieht
+  /// nichts. Bei einem Treffer wartet der Aufruf auf die Entscheidung der
+  /// Lehrkraft (Datenschutzwarnung, eine für alle Treffer der Antwort): Nur
+  /// bei „trotzdem an die KI geben“ geht [text] weiter, sonst wirft die
+  /// Methode den Fehler mit [gesperrtText] (Datenschutzsperre). Ohne
+  /// Entscheidung, nach der Frist, bei Abbruch des Clients und wo niemand
+  /// fragen kann (kein [AufrufKontext]) ist es die Sperre. Das Protokoll
+  /// nennt Plugin, Werkzeug, Zahl der Treffer und die Entscheidung, nie ein
+  /// Wort. [kennzeichnen] setzt den Hinweis auf einen Schreibvorgang über eine
   /// Zusatzadresse davor.
-  void _pruefen(
+  Future<void> _pruefen(
     String kurzname,
     String plugin,
     WerkzeugAufruf aufruf,
     String text,
     String Function(String) kennzeichnen,
-  ) {
-    // Der Name der angemeldeten Lehrkraft des Profils sperrt für jedes
-    // Plugin, das in diesem Profil arbeitet (E36); die App kennt ihn, sobald
-    // sie eine Seite mit der Anmeldezeile gelesen hat.
+    void Function(bool gesendet) automatisch,
+  ) async {
+    // Der Name der angemeldeten Lehrkraft des Profils zählt für jedes Plugin,
+    // das in diesem Profil arbeitet (E36); die App kennt ihn, sobald sie eine
+    // Seite mit der Anmeldezeile gelesen hat.
     final lehrkraft = aufruf.kontext?.moodle.lehrkraftNamen ?? const <String>[];
-    if (lehrkraft.isNotEmpty) sperre.namenHinzufuegen(kurzname, lehrkraft);
-    if (!sperre.gesperrt(kurzname, [text], plugin: plugin, werkzeug: aufruf.name, stelle: SperrStelle.ergebnis)) {
-      return;
-    }
-    (aufruf.kontext?.protokoll ?? _protokoll).eintrag(
-      Art.gesperrt,
-      'Plugin „$plugin“, Werkzeug ${aufruf.name}: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+    if (lehrkraft.isNotEmpty) pruefung.namenHinzufuegen(kurzname, lehrkraft, herkunft: Herkunft.lehrkraft);
+    final funde = pruefung.pruefen(kurzname, [text]);
+    if (funde.isEmpty) return;
+    final kontext = aufruf.kontext;
+    final protokoll = kontext?.protokoll ?? _protokoll;
+    final ausgang = kontext == null
+        ? DatenschutzAusgang.sperren
+        : await kontext.datenschutzwarnung(
+            warnung: Datenschutzwarnung(plugin: plugin, werkzeug: aufruf.name, funde: funde, kurzname: kurzname),
+            abbruch: aufruf.abbruch,
+            aufrufer: 'Plugin „$plugin“',
+          );
+    final gesendet = ausgang.gesendet;
+    if (ausgang.automatisch) automatisch(gesendet);
+    protokoll.eintrag(
+      gesendet ? Art.info : Art.gesperrt,
+      'Plugin „$plugin“, Werkzeug ${aufruf.name}: Datenschutzwarnung, ${funde.length} Treffer, '
+      '${gesendet ? 'trotzdem gesendet' : 'gesperrt'}${ausgang.automatisch ? ' (automatisch, ohne Lehrkraft)' : ''}',
     );
+    if (gesendet) return;
     throw MoodleFehler(kennzeichnen(gesperrtText(plugin, aufruf.name)));
   }
 

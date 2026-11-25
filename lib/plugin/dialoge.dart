@@ -29,9 +29,6 @@ import 'package:path/path.dart' as p;
 
 import '../freigabe.dart' show Freigaben;
 import 'klartext.dart';
-import 'namenssperre.dart';
-
-export 'namenssperre.dart' show SperrStelle, SperrTreffer;
 
 /// Höchstlänge des Titels eines Dialogs oder einer Freigabe in Zeichen.
 const dialogTitelHoechstens = 120;
@@ -291,47 +288,6 @@ final class HinweisDialog extends PluginDialog {
   /// Nur „OK“: ein leeres Objekt.
   @override
   Map<String, Object?>? antwortPruefen(Map<String, Object?> roh) => roh.isEmpty ? const {} : null;
-}
-
-/// Die Warnungen der letzten Sperre (namenssperre.dart), die die Lehrkraft
-/// noch nicht gesehen hat. Eine Warnung ist ein Hinweis: Sie hält keinen
-/// Aufruf auf und verlangt keine Entscheidung, und es gibt keinen Weg, das
-/// Gesperrte doch zu senden. Die Oberfläche zeigt alle offenen Treffer in
-/// einem Fenster; kommen weitere, solange es offen ist, erscheinen sie darin,
-/// statt ein neues zu öffnen. Mehr als [hoechstens] behält sie nicht einzeln,
-/// sondern zählt sie nur ([weitere]). Nur im Arbeitsspeicher.
-class SperrHinweise extends ChangeNotifier {
-  SperrHinweise({this.hoechstens = 50});
-
-  /// So viele Treffer zeigt das Fenster einzeln.
-  final int hoechstens;
-
-  final _offen = <SperrTreffer>[];
-  int _weitere = 0;
-
-  /// Die Treffer seit dem letzten Schließen, der älteste zuerst.
-  List<SperrTreffer> get offen => List.unmodifiable(_offen);
-
-  /// Wie viele Treffer darüber hinaus kamen.
-  int get weitere => _weitere;
-
-  /// Nimmt einen Treffer auf; für [LetzteSperre.melden].
-  void melden(SperrTreffer t) {
-    if (_offen.length < hoechstens) {
-      _offen.add(t);
-    } else {
-      _weitere++;
-    }
-    notifyListeners();
-  }
-
-  /// Die Lehrkraft hat das Fenster geschlossen: Was sie gesehen hat, ist weg.
-  void gesehen() {
-    if (_offen.isEmpty && _weitere == 0) return;
-    _offen.clear();
-    _weitere = 0;
-    notifyListeners();
-  }
 }
 
 /// Die Dialoge der Plugins, die gerade zu zeigen sind: immer einer offen, die

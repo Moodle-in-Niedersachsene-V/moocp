@@ -28,7 +28,7 @@ void main() {
       expect(fingerabdruck([1, 2, 3], instanz: 'profil-a', kurs: 42, weg: Zielweg.anderKursVerschmelzen), isNot(basis));
     });
 
-    test('dieselbe Datei auf zwei Profilen ergibt verschiedene Schlüssel (Befund 3)', () {
+    test('dieselbe Datei auf zwei Profilen ergibt verschiedene Schlüssel', () {
       expect(
         fingerabdruck([1, 2, 3], instanz: 'profil-a', kurs: 42, weg: Zielweg.anderKursErsetzen),
         isNot(fingerabdruck([1, 2, 3], instanz: 'profil-b', kurs: 42, weg: Zielweg.anderKursErsetzen)),

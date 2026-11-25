@@ -7,6 +7,7 @@
 - Kurskonventionen: Das CLAUDE-Verzeichnis steht beim Schreiben am Anfang seines Abschnitts.
 - Sicherungen: Die Datei, die eine Sicherung in Moodle zurücklässt, lässt sich nach Ihrer Freigabe löschen.
 - Einstellungen: Beim Wechsel zwischen Versionen gehen unbekannte Einstellungen nicht mehr verloren.
+- Entwicklerbau mit Testbetrieb: Das Fenster trägt oben einen roten Balken „DEBUG – TESTBETRIEB“ und einen roten Rahmen, damit er nicht mit der normalen App verwechselt wird.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
 - Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.

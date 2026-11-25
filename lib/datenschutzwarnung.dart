@@ -103,10 +103,14 @@ class Fund {
 /// und alle Treffer in dieser einen Antwort. Eine Entscheidung gilt für die
 /// ganze Antwort.
 class Datenschutzwarnung {
-  Datenschutzwarnung({required this.plugin, required this.werkzeug, required this.funde});
+  Datenschutzwarnung({required this.plugin, required this.werkzeug, required this.funde, this.kurzname});
 
   /// Der Anzeigename des Plugins.
   final String plugin;
+
+  /// Der Kurzname des Plugins; der Testbetrieb sucht darüber die vorbereitete
+  /// Antwort (E20). Die Lehrkraft sieht ihn nicht.
+  final String? kurzname;
 
   /// Das Werkzeug, dessen Antwort angehalten ist; null, wenn es keinen Aufruf
   /// gab.
@@ -131,4 +135,18 @@ enum DatenschutzAusgang {
   /// „Sperren“, oder keine Entscheidung: Die KI erfährt nur, dass gesperrt
   /// wurde.
   sperren,
+
+  /// Wie [senden], aber ohne die Lehrkraft: aus einer vorbereiteten Antwort im
+  /// Debug-Testbetrieb (E20). Protokoll und Antwort an die KI sagen es.
+  sendenAutomatisch,
+
+  /// Wie [sperren], aber ohne die Lehrkraft: aus einer vorbereiteten Antwort
+  /// im Debug-Testbetrieb, auch wenn keine vorbereitet war.
+  sperrenAutomatisch;
+
+  /// Ob die Antwort unverändert hinausgeht.
+  bool get gesendet => this == senden || this == sendenAutomatisch;
+
+  /// Ob nicht die Lehrkraft entschieden hat.
+  bool get automatisch => this == sendenAutomatisch || this == sperrenAutomatisch;
 }

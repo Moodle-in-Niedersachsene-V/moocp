@@ -96,7 +96,7 @@ import 'beschreibung.dart';
 import 'dialoge.dart';
 import 'downloads.dart';
 import 'entwicklung.dart';
-import 'moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
+import 'moodle_schreiben.dart' show datenschutzAutomatischKennzeichnung, testantwortenKennzeichnung, zusatzKennzeichnung;
 import 'datenschutz.dart';
 import 'plugins.dart';
 import 'pruefsumme.dart';
@@ -703,14 +703,21 @@ class LaufendePlugins implements WerkzeugQuelle {
     // von moocp, nach der Datenschutzprüfung, die nur den Text des Plugins prüft.
     // Ebenso, wenn der Testbetrieb Dialoge des Plugins aus vorbereiteten
     // Antworten beantwortet hat (testantworten.dart).
+    // Ebenso, wenn nicht die Lehrkraft die Datenschutzwarnung zu dieser
+    // Antwort beantwortet hat ([DatenschutzAusgang.automatisch]).
+    bool? warnungGesendet;
     bool kennzeichnen() =>
-        (angemeldet?.zusatzSchreibvorgaenge ?? 0) > 0 || (angemeldet?.testDialogantworten ?? 0) > 0;
+        (angemeldet?.zusatzSchreibvorgaenge ?? 0) > 0 ||
+        (angemeldet?.testDialogantworten ?? 0) > 0 ||
+        warnungGesendet != null;
     String gekennzeichnet(String text) {
       final n = angemeldet?.zusatzSchreibvorgaenge ?? 0;
       final d = angemeldet?.testDialogantworten ?? 0;
+      final w = warnungGesendet;
       return [
         if (n > 0) zusatzKennzeichnung(plugin, n, automatisch: angemeldet!.zusatzTestSchreibvorgaenge),
         if (d > 0) testantwortenKennzeichnung(plugin, d),
+        if (w != null) datenschutzAutomatischKennzeichnung(plugin, gesendet: w),
         text,
       ].join('\n\n');
     }
@@ -720,7 +727,7 @@ class LaufendePlugins implements WerkzeugQuelle {
       try {
         text = await f();
       } on PluginErgebnisFehler catch (x) {
-        await _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet);
+        await _pruefen(kurzname, plugin, aufruf, x.meldung, gekennzeichnet, (g) => warnungGesendet = g);
         if (!kennzeichnen()) rethrow;
         throw PluginErgebnisFehler(gekennzeichnet(x.meldung));
       } on MoodleFehler catch (x) {
@@ -729,7 +736,7 @@ class LaufendePlugins implements WerkzeugQuelle {
         if (!kennzeichnen()) rethrow;
         throw MoodleFehler(gekennzeichnet(x.meldung));
       }
-      await _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet);
+      await _pruefen(kurzname, plugin, aufruf, text, gekennzeichnet, (g) => warnungGesendet = g);
       return gekennzeichnet(text);
     } finally {
       angemeldet?.ende();
@@ -752,6 +759,7 @@ class LaufendePlugins implements WerkzeugQuelle {
     WerkzeugAufruf aufruf,
     String text,
     String Function(String) kennzeichnen,
+    void Function(bool gesendet) automatisch,
   ) async {
     // Der Name der angemeldeten Lehrkraft des Profils zählt für jedes Plugin,
     // das in diesem Profil arbeitet (E36); die App kennt ihn, sobald sie eine
@@ -765,15 +773,16 @@ class LaufendePlugins implements WerkzeugQuelle {
     final ausgang = kontext == null
         ? DatenschutzAusgang.sperren
         : await kontext.datenschutzwarnung(
-            warnung: Datenschutzwarnung(plugin: plugin, werkzeug: aufruf.name, funde: funde),
+            warnung: Datenschutzwarnung(plugin: plugin, werkzeug: aufruf.name, funde: funde, kurzname: kurzname),
             abbruch: aufruf.abbruch,
             aufrufer: 'Plugin „$plugin“',
           );
-    final gesendet = ausgang == DatenschutzAusgang.senden;
+    final gesendet = ausgang.gesendet;
+    if (ausgang.automatisch) automatisch(gesendet);
     protokoll.eintrag(
       gesendet ? Art.info : Art.gesperrt,
       'Plugin „$plugin“, Werkzeug ${aufruf.name}: Datenschutzwarnung, ${funde.length} Treffer, '
-      '${gesendet ? 'trotzdem gesendet' : 'gesperrt'}',
+      '${gesendet ? 'trotzdem gesendet' : 'gesperrt'}${ausgang.automatisch ? ' (automatisch, ohne Lehrkraft)' : ''}',
     );
     if (gesendet) return;
     throw MoodleFehler(kennzeichnen(gesperrtText(plugin, aufruf.name)));

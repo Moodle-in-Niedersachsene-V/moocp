@@ -64,6 +64,8 @@
 // Antwort. Darum hat keine Klasse hier ein toString, das sie nennt, und es gibt
 // keinen Weg, sie auszulesen oder zu entfernen.
 
+import '../datenschutzwarnung.dart' show Herkunft;
+
 /// Ein Wort im Sinn der Sperre (siehe oben).
 final _wort = RegExp(r'[\p{L}\p{N}\p{M}\p{Cf}]+', unicode: true);
 
@@ -227,56 +229,6 @@ final Map<int, (String, String)> _tabelle = () {
     letzte = -1;
   }
   return (mitE.toString(), ohne.toString());
-}
-
-/// Woher ein Name oder Pfad stammt, den die App prüft; die Datenschutzwarnung
-/// nennt es der Lehrkraft (datenschutz.dart) und der Testbetrieb entscheidet
-/// danach, ob das Wort ins Protokoll darf (E20).
-enum HerkunftArt {
-  /// Vor- und Nachname der Teilnehmenden eines Kurses, geladen beim Beginn
-  /// eines Laufs ([Herkunft.kurs]).
-  teilnehmende('Teilnehmende des Kurses'),
-
-  /// Die angemeldete Lehrkraft des Instanzprofils.
-  lehrkraft('angemeldete Lehrkraft'),
-
-  /// Ein Name, den das Plugin selbst gemeldet hat.
-  pluginName('vom Plugin gemeldeter Name'),
-
-  /// Der Ordner, in dem die App die Downloads der Plugins ablegt.
-  downloadOrdner('Ordner für Downloads von Plugins'),
-
-  /// Ein Pfad, den das Plugin selbst gemeldet hat.
-  pluginPfad('vom Plugin gemeldeter Pfad');
-
-  const HerkunftArt(this.text);
-  final String text;
-}
-
-/// Die Herkunft eines Namens oder Pfads: Art und, bei Teilnehmenden, der Kurs.
-class Herkunft {
-  const Herkunft(this.art, {this.kurs});
-
-  static const lehrkraft = Herkunft(HerkunftArt.lehrkraft);
-  static const pluginName = Herkunft(HerkunftArt.pluginName);
-  static const downloadOrdner = Herkunft(HerkunftArt.downloadOrdner);
-  static const pluginPfad = Herkunft(HerkunftArt.pluginPfad);
-  const Herkunft.teilnehmende(int this.kurs) : art = HerkunftArt.teilnehmende;
-
-  final HerkunftArt art;
-  final int? kurs;
-
-  /// So steht es in der Warnung.
-  String get text => kurs == null ? art.text : '${art.text} $kurs';
-
-  @override
-  bool operator ==(Object other) => other is Herkunft && other.art == art && other.kurs == kurs;
-
-  @override
-  int get hashCode => Object.hash(art, kurs);
-
-  @override
-  String toString() => 'Herkunft(${art.name})';
 }
 
 /// Ein Wort in einer Form eines Texts, das einen Namensteil trifft, mit Anfang

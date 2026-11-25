@@ -16,7 +16,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'freigabe.dart';
 import 'nur_maus.dart';
-import 'plugin/datenschutz.dart';
+import 'datenschutzwarnung.dart';
 
 /// So viele Treffer zeigt das Fenster einzeln; die übrigen zählt es nur.
 const datenschutzTrefferHoechstens = 20;

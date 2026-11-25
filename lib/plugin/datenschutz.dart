@@ -23,83 +23,10 @@
 // Ausgabe: Keine Klasse hier hat ein `toString`, das ein Wort, eine Umgebung
 // oder einen Pfad nennt.
 
+import '../datenschutzwarnung.dart';
 import 'namenssperre.dart';
 
-export 'namenssperre.dart' show Herkunft, HerkunftArt;
-
-/// Wie viele Zeichen Umgebung die Warnung vor und nach dem Treffer zeigt.
-const umgebungZeichen = 80;
-
-/// Ein Treffer in einem Text: ein Wort, das einen Namen trifft, oder ein
-/// Pfad, den ein Plugin nicht an die KI geben soll.
-class Fund {
-  const Fund({
-    required this.wort,
-    required this.pfad,
-    required this.herkunft,
-    required this.davor,
-    required this.danach,
-    this.davorGekuerzt = false,
-    this.danachGekuerzt = false,
-  });
-
-  /// Das Wort, so wie es im Text stand (bei einem kodierten Text in
-  /// aufgelöster Form), oder der genannte Pfad, wie er dort stand.
-  final String wort;
-
-  /// Ob nicht ein Name getroffen hat, sondern ein Pfad.
-  final bool pfad;
-
-  /// Woher der Name oder Pfad stammt, ohne Doppelte.
-  final List<Herkunft> herkunft;
-
-  /// Bis zu [umgebungZeichen] Zeichen vor und nach dem Treffer, einzeilig.
-  final String davor;
-  final String danach;
-
-  /// Ob die Umgebung dort gekürzt ist (die Warnung setzt dann „…“).
-  final bool davorGekuerzt;
-  final bool danachGekuerzt;
-
-  /// Ohne das Wort: Ein Treffer, der versehentlich in einer Ausgabe landet,
-  /// trägt nichts Konkretes mit.
-  @override
-  String toString() => 'Fund(${pfad ? 'pfad' : 'name'})';
-}
-
-/// Was die Lehrkraft vor einer Antwort eines Plugins sieht: Plugin, Werkzeug
-/// und alle Treffer in dieser einen Antwort. Eine Entscheidung gilt für die
-/// ganze Antwort.
-class Datenschutzwarnung {
-  Datenschutzwarnung({required this.plugin, required this.werkzeug, required this.funde});
-
-  /// Der Anzeigename des Plugins.
-  final String plugin;
-
-  /// Das Werkzeug, dessen Antwort angehalten ist; null, wenn es keinen Aufruf
-  /// gab.
-  final String? werkzeug;
-  final List<Fund> funde;
-
-  int get anzahl => funde.length;
-  bool get hatNamen => funde.any((f) => !f.pfad);
-  bool get hatPfade => funde.any((f) => f.pfad);
-
-  @override
-  String toString() => 'Datenschutzwarnung($anzahl)';
-}
-
-/// Wie die Lehrkraft über eine Datenschutzwarnung entschieden hat. Ohne
-/// Entscheidung (Frist, Abbruch des Clients) gilt [sperren].
-enum DatenschutzAusgang {
-  /// „Kein Name – trotzdem an die KI geben“: Die Antwort geht unverändert
-  /// hinaus.
-  senden,
-
-  /// „Sperren“, oder keine Entscheidung: Die KI erfährt nur, dass gesperrt
-  /// wurde.
-  sperren,
-}
+export '../datenschutzwarnung.dart';
 
 /// Ein gesperrter Pfad als Muster, das Trenner gleich behandelt.
 class _Pfad {

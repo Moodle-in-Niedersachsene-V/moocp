@@ -12,7 +12,7 @@ import 'dart:math';
 
 import '../freigabe.dart' show Bestaetigungen;
 import '../moodle/moodle_zugang.dart' show MoodleZugang;
-import '../plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import '../profil.dart';
 import '../protokoll.dart';
 

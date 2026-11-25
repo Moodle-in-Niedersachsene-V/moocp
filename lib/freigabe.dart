@@ -27,7 +27,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'moodle/zeilenvergleich.dart';
-import 'plugin/datenschutz.dart' show Datenschutzwarnung;
+import 'datenschutzwarnung.dart' show Datenschutzwarnung;
 import 'protokoll.dart';
 import 'testschalter.dart';
 

@@ -20,7 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
-import '../plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';

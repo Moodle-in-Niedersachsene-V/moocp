@@ -1365,6 +1365,7 @@ String _was(Formularziel z, Formular f) => switch (z.art) {
   Zielart.abschnitt => 'Abschnitt',
   Zielart.buchkapitel => 'Buchkapitel',
   Zielart.frage => 'Frage (${f.modul ?? "?"})',
+  Zielart.kategorie => 'Kategorie',
 };
 
 /// Eine vorbereitete Änderung an einem gelesenen Ordner: gegen den Stand in
@@ -1429,7 +1430,7 @@ class Aenderung {
   int? get cmid => switch (ziel.art) {
     Zielart.aktivitaet => ziel.id,
     Zielart.buchkapitel => ziel.cmid,
-    Zielart.abschnitt || Zielart.frage => null,
+    Zielart.abschnitt || Zielart.frage || Zielart.kategorie => null,
   };
 
   String kopf({bool mitKurs = true}) =>
@@ -2202,6 +2203,10 @@ Future<String> aendernStatus(
         return 'Vorgang $vorgang abgeschlossen (verified: true).';
       }
       if (j.status == Schreibstatus.nichtGespeichert) return 'Vorgang $vorgang: ausdrücklich nicht gespeichert (verified: false).';
+      if (j.status == Schreibstatus.aufgehoben) {
+        return 'Vorgang $vorgang: Die Lehrkraft hat die Sperre in der App aufgehoben (verified: false). Neu lesen, '
+            'bevor etwas geändert wird.';
+      }
       if (j.status == Schreibstatus.rueckgelesen) {
         return 'Vorgang $vorgang: Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab (verified: false). '
             'Keine Sperre; frisch lesen und neu planen.';
@@ -2436,7 +2441,7 @@ Future<String> aendernMehrere(
     Zielart.aktivitaet => oben(k.nachCmid[a.ziel.id]?.abschnittId),
     Zielart.abschnitt => oben(a.ziel.id),
     Zielart.buchkapitel => oben(k.nachCmid[a.ziel.cmid]?.abschnittId),
-    Zielart.frage => null,
+    Zielart.frage || Zielart.kategorie => null,
   };
   final abschnitte = {for (final a in alle) abschnittVon(a)};
   if (abschnitte.length != 1 || abschnitte.single == null) {

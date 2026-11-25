@@ -12,6 +12,8 @@ Nicht jeder Fehler ist ein unklarer Ausgang. Lehnt Moodle das Formular mit einer
 
 Ein Ausweg aus einer echten Sperre ist die Entscheidung der Lehrkraft, nie der KI: `aendern_status` mit `sperre_aufheben` fragt sie in der App, auf jeder Stufe (`ab: keine`), mit dem Befund des lesenden Vergleichs, mit ausdrücklichem Abhaken, dass sie in Moodle nachgesehen hat. Das ist der Weg, wenn die Anfrage nie ankam, die Lehrkraft das Objekt von Hand in Ordnung gebracht hat oder der Stand nicht prüfbar ist (Fragen). Die Frage räumt ein, dass eine noch laufende Anfrage später oder doppelt wirken kann; das Aufheben bestätigt nichts und meldet `verified: false`. Abgeschlossene Vorgänge löscht die App nach 30 Tagen und beim Löschen des Profils ihrer Instanz; offene bleiben, weil sie sperren.
 
+Alternativ öffnet die Lehrkraft in den Einstellungen „Offene Sperren ansehen …“. Auch dort verlangt das Aufheben einen Mausklick nach Wartezeit und das ausdrückliche Abhaken, dass sie in Moodle nachgesehen hat. Das Aufheben steht im Protokoll, bestätigt keinen Speichererfolg und verlangt danach frisches Lesen. Eine Chat-Antwort allein hebt keine Sperre auf.
+
 ## Verworfen
 
 Ein höheres Zeitlimit oder eine automatische Wiederholung ersetzt keinen Zustandsnachweis und könnte einen bereits ausgeführten Vorgang doppelt ausführen. Eine Sperre nur im Arbeitsordner ginge beim erneuten Lesen oder Neustarten verloren. Eine Sperre ohne Ausweg (jeder Fehler nach dem Beginn des Vorgangs) sperrte Objekte nach gewöhnlichen Prüffehlern auf Dauer. Ein Zeitablauf, der die Sperre von selbst löst, wäre ein Nachweis ohne Nachweis: Moodle könnte den Auftrag danach noch ausführen.

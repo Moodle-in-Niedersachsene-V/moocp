@@ -8,10 +8,14 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../protokoll.dart';
 import 'formular_lesen.dart';
 import 'moodle_zugang.dart';
 
-enum Schreibstatus { offen, bestaetigt, nichtGespeichert, rueckgelesen }
+/// [aufgehoben]: Die Lehrkraft hat die Sperre nach einem unklaren Ausgang in der
+/// App selbst gelöst ([sperreAufheben]). Das heißt nicht „gespeichert" oder
+/// „nicht gespeichert", sondern: Der nächste Vorgang beginnt mit frischem Lesen.
+enum Schreibstatus { offen, bestaetigt, nichtGespeichert, rueckgelesen, aufgehoben }
 
 class Schreibstand {
   Schreibstand(this.vorher, this.nachher, this.status);
@@ -258,3 +262,46 @@ Map<String, String> schreibStand(String stand) {
 
 bool schreibStandGleich(Map a, Map b) =>
     a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
+
+/// Eine offene Sperre: ein Objekt, an dem ein Schreibvorgang mit unklarem
+/// Ausgang steht.
+class OffeneSperre {
+  OffeneSperre(this.vorgang, this.ziel);
+  final String vorgang;
+
+  /// Nur Pfad und Nummern des Objekts, nie ein Name (A1).
+  final String ziel;
+}
+
+/// Die offenen Sperren dieser Instanz, für die Anzeige in der App (E37). Kein
+/// MCP-Werkzeug ruft das auf.
+List<OffeneSperre> offeneSperren(MoodleZugang moodle) {
+  final ordner = Directory(moodle.schreibvorgaengeOrdner);
+  if (!ordner.existsSync()) return const [];
+  final aus = <OffeneSperre>[];
+  for (final f in ordner.listSync().whereType<File>()) {
+    if (!p.basename(f.path).startsWith('ziel-') || !f.path.endsWith('.json')) continue;
+    try {
+      final nummer = (jsonDecode(f.readAsStringSync()) as Map)['id'];
+      if (nummer is! String || !Schreibvorgang._nummerGueltig(nummer)) continue;
+      final v = Schreibvorgang.laden(moodle, nummer);
+      if (v.offen) aus.add(OffeneSperre(nummer, v.ziel.adresse));
+    } on MoodleFehler {
+      continue; // Gehört zu einer anderen Instanz oder ist beschädigt: nicht anzeigen, nicht anfassen.
+    } on FormatException {
+      continue;
+    }
+  }
+  return aus;
+}
+
+/// Löst die Sperre eines Vorgangs. Nur die App ruft das, auf einen Mausklick der
+/// Lehrkraft (sperren_dialog.dart); über MCP ist es nicht erreichbar und nie auf
+/// ein Ja im Chat. Der Vorgang bleibt als Nachweis liegen. Danach liest der
+/// nächste Vorgang frisch.
+void sperreAufheben(MoodleZugang moodle, String nummer) {
+  final v = Schreibvorgang.laden(moodle, nummer);
+  if (!v.offen) return;
+  v._statusSetzen(Schreibstatus.aufgehoben);
+  moodle.protokoll.eintrag(Art.schreiben, 'Sperre aufgehoben (Vorgang ${nummer.substring(0, 8)}), von der Lehrkraft in der App');
+}

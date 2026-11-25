@@ -402,6 +402,51 @@ void main() {
     });
   });
 
+  group('Freigabe mit vielen Haken: Inhalt scrollt über den Knöpfen', () {
+    testWidgets('25 Haken, langer Text, kleines Fenster: jeder Haken lässt sich anklicken, kein Knopf liegt darüber', (tester) async {
+      tester.view.physicalSize = const Size(700, 500);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final f = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
+      final antwort = f.anfragen(FreigabeAnfrage(
+        titel: '25 Fragen endgültig löschen?',
+        punkte: [
+          'Aus der Fragensammlung cmid 7, jeweils mit allen Versionen:',
+          for (var i = 0; i < 25; i++) '„ZZ Frage $i" (shortanswer, questionid ${2000 + i})',
+          'Moodle fragt: ${List.filled(40, 'Die folgende Fragen und alle ihre Versionen werden gelöscht.').join(' ')}',
+        ],
+        vergleich: const [],
+        knopf: 'Löschen',
+        ab: Bestaetigungen.keine,
+        abhaken: [for (var i = 0; i < 25; i++) 'Ich habe geprüft: „ZZ Frage $i" wird mit allen Versionen endgültig gelöscht.'],
+      ));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: FreigabeDialog(f.aktuell!, f))));
+      await tester.pump(Sperrzeit.dauerVorgabe);
+      expect(tester.takeException(), isNull);
+      final knoepfe = [find.widgetWithText(FilledButton, 'Löschen'), find.widgetWithText(OutlinedButton, 'Abbrechen')];
+      for (final k in knoepfe) {
+        expect(k, findsOneWidget);
+      }
+      final kisten = find.byType(CheckboxListTile);
+      expect(kisten, findsNWidgets(25));
+      for (var i = 0; i < 25; i++) {
+        final kiste = kisten.at(i);
+        await tester.ensureVisible(kiste);
+        await tester.pump();
+        final r = tester.getRect(kiste);
+        for (final k in knoepfe) {
+          expect(r.overlaps(tester.getRect(k)), isFalse, reason: 'Knopf liegt über Haken $i');
+        }
+        await tester.tap(find.descendant(of: kiste, matching: find.byType(Checkbox)));
+        await tester.pump();
+        expect(tester.widget<CheckboxListTile>(kisten.at(i)).value, isTrue, reason: 'Haken $i nicht angekommen');
+      }
+      expect(tester.widget<FilledButton>(knoepfe[0]).onPressed, isNotNull);
+      f.entscheiden(false);
+      expect(await antwort, isFalse);
+    });
+  });
+
   group('Dialoge eines Plugins', () {
     late PluginDialoge dialoge;
     setUp(() => dialoge = PluginDialoge());

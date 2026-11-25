@@ -497,6 +497,8 @@ class MoodleZugang {
   static const Set<String> schreibendeDienste = {
     'core_courseformat_update_course',
     'mod_quiz_add_random_questions',
+    'core_question_move_questions',
+    'qbank_managecategories_move_category',
     'core_form_dynamic_form', //
     'mod_board_delete_column',
     'mod_board_move_column',
@@ -688,6 +690,30 @@ class MoodleZugang {
     // Zufallsfragen in einen Test.
     'mod_quiz_add_random_questions': (a) =>
         _nur(a, {'cmid', 'addonpage', 'randomcount', 'filtercondition'}),
+    // Fragen verschieben (fragen_verschieben, einziger Aufrufer): genau eine
+    // Frage je Aufruf (bei mehreren Versionen desselben Eintrags hängt Moodle
+    // der Sachnummer einen Suffix an) und die lokale Platzhalteradresse, die
+    // Moodle 5.1 verlangt und die nie abgerufen wird.
+    'core_question_move_questions': (a) =>
+        _nur(a, {'newcontextid', 'newcategoryid', 'questionids', 'returnurl'}) &&
+        a['newcontextid'] is int &&
+        a['newcategoryid'] is int &&
+        a['questionids'] is String &&
+        _zahl(a['questionids'] as String) &&
+        a['returnurl'] is String &&
+        RegExp(r'^/question/edit\.php\?cmid=\d+$').hasMatch(a['returnurl'] as String),
+    // Fragenkategorie verschieben (kategorie_aendern, einziger Aufrufer), mit
+    // ihren Unterkategorien und Fragen, auch in eine andere Fragensammlung:
+    // genau diese vier Schlüssel, Nummern als Zahlen, der Vorgänger ohne Wert
+    // oder Zahl (ganz oben). Moodle schützt weder vor Zyklen noch vor gleichen
+    // Namen; das prüft die App vorher.
+    'qbank_managecategories_move_category': (a) =>
+        _nur(a, {'pagecontextid', 'categoryid', 'targetparentid', 'precedingsiblingid'}) &&
+        a['pagecontextid'] is int &&
+        a['categoryid'] is int &&
+        a['targetparentid'] is int &&
+        a.containsKey('precedingsiblingid') &&
+        (a['precedingsiblingid'] == null || a['precedingsiblingid'] is int),
     // Board: lesen (Notizen anderer gibt die App nicht heraus), Spalten
     // löschen, verschieben, sperren, eigene Notizen löschen.
     'mod_board_get_board': (a) =>
@@ -1168,6 +1194,52 @@ class MoodleZugang {
             (e) => RegExp(r'^_qf__qtype_[a-z]+_edit_form$').hasMatch(e.key),
           ) &&
           (wertIn(f, 'makecopy') ?? '0') == '0',
+    ),
+    // Vorschau einer Frage (Rundlaufprobe, rundlaufprobe.dart): lädt sie ohne
+    // Moodle-Fehler? Der erste Aufruf legt einen Vorschauversuch an und leitet
+    // mit previewid um (wie beim Bildschirmfoto, browserliste.dart); die Seite
+    // zeigt die Frage, keine Personendaten.
+    Erlaubt(
+      'GET',
+      r'^/question/bank/previewquestion/preview\.php$',
+      'Vorschau einer Frage (Rundlaufprobe)',
+      parameter: (q) =>
+          _nurSchluessel(q, {'id', 'cmid', 'courseid', 'previewid', 'restartversion'}) &&
+          _zahl(q['id']) &&
+          _zahl(q['cmid']) &&
+          q.values.every(_zahl),
+    ),
+    // Neue Version aus XML (fragen_version_importieren, fragen_version.dart):
+    // die Seite des Plugins qbank_importasversion. Einziger Aufrufer; die
+    // Seiten zum Verlauf einer Frage und die Fragenübersicht bleiben ungelesen,
+    // sie zeigen Namen (A1). Aufbau der Seite: Quelltext des Plugins, import.php.
+    // Ob es die Seite auf der Instanz gibt, zeigt der Aufruf selbst (404 oder
+    // Fehlerseite statt Formular, fragen_version.dart).
+    Erlaubt(
+      'GET',
+      r'^/question/bank/importasversion/import\.php$',
+      'Plugin „Frage als neue Version importieren": Formular',
+      parameter: (q) =>
+          _nurSchluessel(q, {'id', 'cmid', 'courseid', 'returnurl'}) && _zahl(q['id']) && _zahl(q['cmid']),
+    ),
+    // Nie force (ließe Warnungen des Plugins durch) und nie die Schaltfläche
+    // „Schlagwörter zusammenführen": Es soll genau das in Moodle stehen, was
+    // die Datei sagt, und die Rundlaufprobe prüft es.
+    Erlaubt(
+      'POST',
+      r'^/question/bank/importasversion/import\.php$',
+      'Plugin „Frage als neue Version importieren": Datei absenden',
+      // Moodle-Formulare senden an die Adresse ohne Query; id und cmid stehen
+      // als versteckte Felder im Formular.
+      parameter: (q) => _nurSchluessel(q, {'id', 'cmid', 'courseid', 'returnurl'}),
+      formular: (f) =>
+          _zahl(wertIn(f, 'cmid')) &&
+          _marke(f, RegExp(r'^_qf__qbank_importasversion_form_import_form$')) &&
+          _zahl(wertIn(f, 'newfile')) &&
+          _zahl(wertIn(f, 'id')) &&
+          const {'0', ''}.contains(wertIn(f, 'force') ?? '0') &&
+          wertIn(f, 'mergetagsbutton') == null &&
+          _gesetzt(wertIn(f, 'sesskey')),
     ),
     // Fragen löschen (fragen.dart, fragenLoeschen). Ohne confirm zeigt
     // delete.php nur die Rückfrage und ändert nichts; bestätigt wird mit

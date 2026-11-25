@@ -1,6 +1,16 @@
 # Changelog
 
 ## 0.13.0
+- Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
+- Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.
+- Fragen: Fragen lassen sich in eine andere Kategorie des Kurses verschieben.
+- Fragen löschen: moocp fragt auf jeder Stufe, jede Frage einzeln, und sichert sie vorher als XML.
+- Fragensammlungen löschen: moocp fragt auf jeder Stufe und sichert die Fragen vorher als XML.
+- Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
+- Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
+- Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.
+- Fragen: Jeder Fragetyp, den Ihr Moodle kennt, lässt sich anlegen, wenn er die Prüfung besteht; die KI liest und schreibt dazu Fragetyp-Notizen.
+- Speichern: Eine Sperre nach unklarem Ausgang heben Sie jetzt selbst in den Einstellungen auf.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
 - Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.

@@ -9,6 +9,7 @@ Mit diesen Werkzeugen sicherst du Teile eines Kurses oder den ganzen Kurs als Si
 | eine Sicherungsdatei zurückspielen | `wiederherstellen_datei` |
 | eine Auswahl in mehrere Kurse derselben Instanz bringen | `uebertragen` |
 | den Stand eines laufenden Vorgangs abfragen | `sicherung_status`, `wiederherstellung_status` |
+| die Datei einer eigenen Sicherung in Moodle wieder löschen | `sicherung_loeschen` |
 
 ## Der Plan kommt zuerst
 
@@ -21,6 +22,14 @@ Jeder Schreibschritt, also das Sichern und je Ziel das Wiederherstellen, fragt d
 Eine Sicherung (`sichern_aktivitaet`) umfasst eine einzelne Aktivität, ohne Daten von Lernenden, und liegt als Datei im Sicherungsordner der App, nicht im Arbeitsordner. Sie ändert im Kurs nichts. Die Lehrkraft gibt sie vorher frei; nenne ihr Name und Nummer genau wie in `aktivitaet_lesen`.
 
 Mehrere Teile in einer Datei sichert `sichern_auswahl`: ausgewählte Aktivitäten, ganze Abschnitte oder den ganzen Kurs, auch nur mit den genannten Teilen, ebenfalls ohne Daten von Lernenden. Die Freigabe zeigt, was genau mitgeht; die Lehrkraft sieht dort auch, welche Inhalte fehlen, weil Lernende sie füllen. Das sag ihr auch selbst, bevor sie zustimmt. Eine Aktivität kommt nur mit, wenn ihr Abschnitt mitgeht; dieser Abschnitt ist dann ein Rahmen, und die Freigabe nennt ihn. Ob Moodle den Rahmen ohne seine übrigen Aktivitäten hält und wie Moodle den Kurs bei einer Auswahl benennt, prüft die Lehrkraft vor dem Einsatz.
+
+## Die Datei in Moodle wieder löschen
+
+Jede Sicherung lässt eine Datei im persönlichen Sicherungsbereich der Lehrkraft in Moodle zurück; die Kopie im Sicherungsordner der App ist davon unabhängig. Willst du die Datei in Moodle entfernen, weil die Lehrkraft es möchte, nimm `sicherung_loeschen` mit der Nummer der Sicherung und dem Dateinamen, den die Antwort der Sicherung nennt. Das geht nur für Sicherungen der App, nie für Dateien, die jemand anders dort abgelegt hat.
+
+- **Bevor du es anbietest, sag der Lehrkraft das Risiko.** Moodle schreibt beim Speichern den ganzen Bereich neu und hat keinen Papierkorb. Die App vergleicht den Bereich noch einmal unmittelbar vor dem Speichern und bricht bei einer Abweichung ab, aber eine Datei, die in diesem Augenblick aus einer anderen Sitzung (etwa einer Sicherung im Browser) dazukommt, kann trotzdem verloren gehen. Rate zu einem Zeitpunkt, an dem die Lehrkraft nirgends sonst sichert.
+- Läuft gerade eine Sicherung oder Wiederherstellung, lehnt das Werkzeug ab: erst mit `sicherung_status` abwarten.
+- Nach `verified: true` stimmt der Bereich: genau diese Datei fehlt und alle übrigen stehen noch unter ihrem Namen im Bereich (Inhalte werden nicht verglichen); lies nicht selbst nach. War es die einzige Datei, meldet die App „nicht geprüft“: Lass die Lehrkraft die Seite Wiederherstellen in Moodle ansehen. Meldet die Antwort `verified: false` oder eine Abweichung, gib sie der Lehrkraft unverändert weiter, nenne die fehlenden Dateien und wiederhole den Aufruf nicht von selbst.
 
 ## Die Antwortfrist: „läuft weiter“ ist kein Fehler
 

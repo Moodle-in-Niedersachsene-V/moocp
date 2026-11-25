@@ -23,7 +23,7 @@ Moodle-Instanz hat einen eigenen Server mit eigenem Präfix (etwa
 | Anlegen | `aktivitaet_anlegen`, `abschnitt_anlegen`, `buchkapitel_anlegen`, `wikiseite_schreiben` |
 | Ändern | `aendern`, `aendern_mehrere`, `links_setzen`, `claude_schreiben`, `fortschrittsliste_aendern`, `board_aendern`, `kanban_aendern`, `bewertungsschema_setzen`, `buch_ordnen`, `buchkapitel_verschieben` |
 | Kursrahmen | `sichtbarkeit_setzen`, `verschieben`, `duplizieren`, `loeschen`, `buchkapitel_loeschen`, `wikiseite_loeschen` |
-| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status` |
+| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status`, `sicherung_loeschen` |
 | Wiederherstellen | `wiederherstellen_datei`, `wiederherstellung_status` |
 | Übertragung | `uebertragen` |
 | Ansehen | `bildschirmfoto` |

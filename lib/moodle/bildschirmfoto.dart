@@ -4,8 +4,16 @@
 //
 // Gerendert wird mit einem Browser ohne Fenster, gesteuert über das
 // DevTools-Protokoll (CDP) -- kein Paket: Edge, sonst Chrome (im EWR lässt
-// sich Edge deinstallieren; beide sprechen dasselbe Protokoll). Das Profil
-// ist ein Wegwerf-Ordner im Arbeitsordner; nach jedem Bild wird der Browser
+// sich Edge deinstallieren; beide sprechen dasselbe Protokoll). Das Protokoll
+// läuft über eine Pipe, die nur die App und der Browser kennen
+// (--remote-debugging-pipe, plattform/browser_start.dart), nie über einen
+// Port: Ein Port auf 127.0.0.1 erreicht jedes Konto des Rechners, und die
+// Seite, die der Browser gerade zeigt, gehört zu Moodle. Die Verbindung steht
+// samt Anhalten der Anfragen, bevor eine Seite von Moodle geladen wird; der
+// Browser startet mit about:blank. Spricht er die Pipe nicht, scheitert die
+// Aufnahme davor, ohne Ausweichen auf einen Port. Das Profil ist ein
+// Wegwerf-Ordner im Arbeitsordner; nach jedem Bild -- gleich ob es gelang,
+// verworfen wurde, scheiterte oder der Client abbrach -- wird der Browser
 // beendet und der Ordner gelöscht (sonst beim nächsten Leeren des
 // Arbeitsordners). Verbietet eine Richtlinie die Fernsteuerung
 // (RemoteDebuggingAllowed), gibt es keine Bildschirmfotos; die App umgeht
@@ -54,11 +62,12 @@ import '../freigabe.dart';
 import '../protokoll.dart';
 import 'auswertung.dart' show kurz;
 import 'browserliste.dart';
+import 'cdp_pipe.dart';
 import 'formular_schreiben.dart';
 import 'kurs.dart';
 import 'moodle_zugang.dart';
 import 'sperrliste.dart';
-import '../plattform/kindprozess.dart';
+import '../plattform/browser_start.dart';
 import '../plattform/plattform.dart';
 import 'wiki.dart';
 
@@ -129,79 +138,6 @@ List<Teil> teilen(
   }
   teile.add((oben: oben, hoehe: hoehe - oben, zerschnitten: false));
   return teile;
-}
-
-class _Cdp {
-  _Cdp(this._ws) {
-    _ws.listen(
-      _empfangen,
-      onDone: () {
-        _zu = true;
-        for (final c in _offen.values) {
-          if (!c.isCompleted) {
-            c.completeError(MoodleFehler('Browser: Verbindung beendet.'));
-          }
-        }
-        _offen.clear();
-      },
-    );
-  }
-
-  final WebSocket _ws;
-  var _id = 0;
-  final _offen = <int, Completer<Map<String, dynamic>>>{};
-  final _ereignisse = StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get ereignisse => _ereignisse.stream;
-
-  /// Geschlossen: Was danach noch gesendet wird, scheitert als MoodleFehler
-  /// statt als StateError des WebSockets -- Anfragen des Browsers, die beim
-  /// Beenden noch unterwegs sind, kommen so in die gewöhnliche Fehlerbehandlung.
-  var _zu = false;
-
-  Future<Map<String, dynamic>> senden(
-    String methode, [
-    Map<String, Object?> params = const {},
-  ]) {
-    if (_zu) return Future.error(MoodleFehler('Browser: Verbindung beendet.'));
-    final id = ++_id;
-    final c = Completer<Map<String, dynamic>>();
-    _offen[id] = c;
-    try {
-      _ws.add(jsonEncode({'id': id, 'method': methode, 'params': params}));
-    } on StateError {
-      _offen.remove(id);
-      _zu = true;
-      return Future.error(MoodleFehler('Browser: Verbindung beendet.'));
-    }
-    return c.future.timeout(
-      const Duration(seconds: 90),
-      onTimeout: () =>
-          throw MoodleFehler('Browser antwortet nicht ($methode).'),
-    );
-  }
-
-  void _empfangen(dynamic d) {
-    final m = jsonDecode(d as String) as Map<String, dynamic>;
-    final id = m['id'];
-    if (id is int) {
-      final c = _offen.remove(id);
-      if (c == null || c.isCompleted) return;
-      final fehler = m['error'];
-      if (fehler is Map) {
-        c.completeError(MoodleFehler('Browser: ${fehler['message']}'));
-      } else {
-        c.complete((m['result'] as Map?)?.cast<String, dynamic>() ?? const {});
-      }
-    } else if (m['method'] is String && !_ereignisse.isClosed) {
-      _ereignisse.add(m);
-    }
-  }
-
-  Future<void> schliessen() async {
-    _zu = true;
-    await _ws.close();
-    await _ereignisse.close();
-  }
 }
 
 /// Name und Pfad des ersten Browsers in der Suchreihenfolge der Plattform,
@@ -392,7 +328,8 @@ addEventListener('message', function (e) {
 });
 ''';
 
-class _Aufnahme {
+/// Was eine Aufnahme liefert: die Bilder und was dabei geschah.
+class Aufnahme {
   final bilder = <Uint8List>[];
   int ueberApp = 0, direkt = 0;
   final gesperrt = <String>[];
@@ -402,84 +339,77 @@ class _Aufnahme {
   String formeln = '';
 }
 
-Future<_Aufnahme> _aufnehmen(
-  MoodleZugang moodle,
-  Protokoll protokoll,
-  Uri adresse,
-  (String, String?) inhalt,
-  String arbeitsordner, {
-  bool druck = false,
-}) async {
-  final basis = moodle.basis!;
-  final (browser, programm) = await _browser();
-  final profil = Directory(
-    p.join(arbeitsordner, '.browser-${DateTime.now().millisecondsSinceEpoch}'),
-  );
-  await profil.create(recursive: true);
-  final proz = await prozessStarten(programm, [
-    '--headless=new',
-    '--remote-debugging-port=0',
-    '--user-data-dir=${profil.path}',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-extensions',
-    '--disable-sync',
-    '--disable-background-networking',
-    '--disable-component-update',
-    '--disable-default-apps',
-    '--mute-audio',
-    '--hide-scrollbars',
-    '--window-size=$_breite,900',
-    'about:blank',
-  ]);
-  // Keine Ausgabe, nirgends (E11): Was der Browser schreibt, wird verworfen.
-  unawaited(proz.stdout.drain<void>());
-  unawaited(proz.stderr.drain<void>());
-  _Cdp? cdp, netz;
-  String? port, browserPfad;
-  try {
-    // Der Browser schreibt in DevToolsActivePort im Profil den gewählten Port
-    // und den Pfad des Browser-Endpunkts (Anfragen anhalten, Beenden). Dass der gestartete
-    // Prozess sich beendet, heißt nichts: Edge startet sich neu und läuft in
-    // einem anderen Prozess weiter (gemessen; siehe _beenden).
-    final portDatei = File(p.join(profil.path, 'DevToolsActivePort'));
-    final bis = DateTime.now().add(const Duration(seconds: 30));
-    while (port == null) {
-      if (DateTime.now().isAfter(bis)) {
-        throw MoodleFehler(
-          '$browser startet nicht (kein DevTools-Port nach 30 s). Möglich: Eine Richtlinie oder '
-          'der Virenschutz verbietet die Fernsteuerung des Browsers.',
-        );
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      if (await portDatei.exists()) {
-        final z = await portDatei.readAsLines();
-        if (z.length >= 2 && RegExp(r'^\d+$').hasMatch(z[0].trim())) {
-          (port, browserPfad) = (z[0].trim(), z[1].trim());
-        }
-      }
-    }
-    final http = HttpClient();
-    final List ziele;
-    try {
-      final req = await http.getUrl(
-        Uri.parse('http://127.0.0.1:$port/json/list'),
-      );
-      ziele = jsonDecode(
-        await (await req.close()).transform(utf8.decoder).join(),
-      ) as List;
-    } finally {
-      http.close(force: true);
-    }
-    final seite = ziele.cast<Map>().firstWhere(
-      (z) => z['type'] == 'page',
-      orElse: () => throw MoodleFehler('$browser zeigt keine Seite.'),
-    );
-    cdp = _Cdp(await WebSocket.connect('${seite['webSocketDebuggerUrl']}'));
-    // Die Anfragen hält die App auf der Ebene des Browsers an (siehe oben).
-    netz = _Cdp(await WebSocket.connect('ws://127.0.0.1:$port$browserPfad'));
+/// Die Anfrage des Browsers an Moodle über die App ([MoodleZugang.fuerBrowser]).
+typedef BrowserHolen = Future<Antwort> Function(
+  String methode,
+  Uri uri, {
+  required Set<String> seiten,
+  String? rumpf,
+  bool dokument,
+});
 
-    final a = _Aufnahme()..browser = browser;
+/// Nimmt [adresse] auf. [starter] und [browserWahl] sind für Tests
+/// austauschbar (ein nachgebauter Browser statt des echten); [abbruch]
+/// erfüllt sich, wenn der Client nicht mehr wartet: Dann endet der Browser
+/// sofort. [anlaufgrenze] ist die Zeit, in der der Browser auf seine Pipe
+/// antworten muss.
+Future<Aufnahme> aufnehmen({
+  required Uri basis,
+  required BrowserHolen holen,
+  required Protokoll protokoll,
+  required Uri adresse,
+  required (String, String?) inhalt,
+  required String arbeitsordner,
+  bool druck = false,
+  BrowserStarter? starter,
+  (String, String)? browserWahl,
+  Future<void>? abbruch,
+  Duration anlaufgrenze = const Duration(seconds: 30),
+  Future<int> Function(Directory profil, String programm)? hartBeenden,
+}) async {
+  final (browser, programm) = browserWahl ?? await _browser();
+  final st = starter ?? browserStarter;
+  final profil = await _profilAnlegen(st, arbeitsordner);
+  BrowserProzess? proz;
+  CdpPipe? pipe;
+  var abgebrochen = false;
+  try {
+    try {
+      proz = await st.starten(programm, browserArgumente(profil: profil, breite: _breite), profil);
+    } on BrowserStartFehler catch (x) {
+      throw MoodleFehler('$browser startet nicht: ${x.meldung}');
+    }
+    final laufend0 = proz;
+    pipe = CdpPipe(laufend0.eingang, laufend0.senden);
+    if (abbruch != null) {
+      unawaited(
+        abbruch.then((_) {
+          abgebrochen = true;
+          return laufend0.beenden();
+        }),
+      );
+    }
+    // Die Pipe steht, bevor irgendetwas von Moodle geladen wird: Antwortet der
+    // Browser nicht auf sie, gibt es keinen zweiten Weg (kein Port).
+    try {
+      await pipe.senden('Browser.getVersion').timeout(anlaufgrenze);
+    } on TimeoutException {
+      throw MoodleFehler(
+        '$browser antwortet nicht auf die Pipe-Steuerung (--remote-debugging-pipe) -- vermutlich ist er zu alt '
+        'oder eine Richtlinie verbietet die Fernsteuerung. Es wurde nichts von Moodle geladen; bitte den '
+        'Browser aktualisieren.',
+      );
+    } on MoodleFehler {
+      if (abgebrochen) rethrow;
+      throw MoodleFehler(
+        '$browser hat die Pipe-Steuerung sofort geschlossen -- er startet nicht oder kennt '
+        '--remote-debugging-pipe nicht. Es wurde nichts von Moodle geladen.',
+      );
+    }
+    final netz = pipe;
+    final cdp = await _seiteAnhaengen(pipe, browser, anlaufgrenze);
+
+    final a = Aufnahme()..browser = browser;
     // Als Seite nur die aufgenommene und ihre Umleitungen (browserliste.dart).
     final seiten = {adresse.toString()};
     String? mathjax;
@@ -487,6 +417,7 @@ Future<_Aufnahme> _aufnehmen(
     var zuletzt = DateTime.now();
     var fertig = false;
     final geladen = Completer<void>();
+    geladen.future.ignore();
 
     Future<void> anfrage(Map<String, dynamic> e) async {
       laufend++;
@@ -516,7 +447,7 @@ Future<_Aufnahme> _aufnehmen(
                 'Browser direkt: $methode ${uri.host}${uri.path} ($grund)',
               );
             }
-            await netz!.senden('Fetch.continueRequest', {'requestId': id});
+            await netz.senden('Fetch.continueRequest', {'requestId': id});
           case BrowserWeg.gesperrt:
             final wo = uri.host == basis.host
                 ? adresseOhneWerte(uri)
@@ -537,12 +468,12 @@ Future<_Aufnahme> _aufnehmen(
                 'Browser: nicht geladen${zaehlt ? '' : ' (fürs Bild nicht nötig)'}: $methode $wo ($grund)',
               );
             }
-            await netz!.senden('Fetch.failRequest', {
+            await netz.senden('Fetch.failRequest', {
               'requestId': id,
               'errorReason': 'BlockedByClient',
             });
           case BrowserWeg.ueberApp:
-            final r = await moodle.fuerBrowser(
+            final r = await holen(
               methode,
               uri,
               seiten: seiten,
@@ -560,7 +491,7 @@ Future<_Aufnahme> _aufnehmen(
                 typ.startsWith('text/') ||
                 typ.contains('javascript') ||
                 typ.contains('json');
-            await netz!.senden('Fetch.fulfillRequest', {
+            await netz.senden('Fetch.fulfillRequest', {
               'requestId': id,
               'responseCode': r.status,
               'responseHeaders': [
@@ -588,7 +519,7 @@ Future<_Aufnahme> _aufnehmen(
           a.gesperrt.add('$methode ${adresseOhneWerte(uri)} ($grund)');
         }
         try {
-          await netz!.senden('Fetch.failRequest', {
+          await netz.senden('Fetch.failRequest', {
             'requestId': id,
             'errorReason': 'Failed',
           });
@@ -606,6 +537,11 @@ Future<_Aufnahme> _aufnehmen(
         geladen.complete();
       }
     });
+    unawaited(
+      pipe.ende.then((_) {
+        if (!geladen.isCompleted) geladen.completeError(MoodleFehler('Browser: Verbindung beendet.'));
+      }),
+    );
     final aboNetz = netz.ereignisse.listen((e) {
       if (e['method'] == 'Fetch.requestPaused') {
         unawaited(
@@ -738,17 +674,39 @@ Future<_Aufnahme> _aufnehmen(
       await abo.cancel();
       await aboNetz.cancel();
     }
+  } on MoodleFehler {
+    // Der Client wartet nicht mehr: nicht der Fehler der gekappten Verbindung.
+    if (abgebrochen) throw MoodleAbgebrochen();
+    rethrow;
   } finally {
-    await _beenden(
-      cdp,
-      netz,
-      port,
-      browserPfad,
-      proz,
-      profil,
-      programm,
-      protokoll,
-    );
+    await _beenden(pipe, proz, profil, programm, protokoll, hartBeenden ?? plattformBrowser.prozesseBeenden);
+  }
+}
+
+/// Legt das Profil an; scheitert das, steht es als Fehler da (ein Profil
+/// ohne private Rechte wird nie benutzt).
+Future<Directory> _profilAnlegen(BrowserStarter st, String arbeitsordner) async {
+  try {
+    return await st.profilAnlegen(arbeitsordner);
+  } on BrowserStartFehler catch (x) {
+    throw MoodleFehler('Das Profil des Browsers ließ sich nicht anlegen: ${x.meldung}');
+  }
+}
+
+/// Hängt sich an die Seite des Browsers an (Target.attachToTarget, flatten):
+/// Befehle an die Seite laufen über dieselbe Pipe, mit der Nummer der Sitzung.
+/// Die Seite kommt beim Start mit about:blank, aber nicht im selben Augenblick.
+Future<CdpSitzung> _seiteAnhaengen(CdpPipe pipe, String browser, Duration grenze) async {
+  final bis = DateTime.now().add(grenze);
+  while (true) {
+    final r = await pipe.senden('Target.getTargets');
+    final seite = ((r['targetInfos'] as List?) ?? const []).cast<Map>().where((t) => t['type'] == 'page').firstOrNull;
+    if (seite != null) {
+      final a = await pipe.senden('Target.attachToTarget', {'targetId': seite['targetId'], 'flatten': true});
+      return pipe.sitzung('${a['sessionId']}');
+    }
+    if (DateTime.now().isAfter(bis)) throw MoodleFehler('$browser zeigt keine Seite.');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
   }
 }
 
@@ -769,62 +727,51 @@ Future<bool> _profilLoeschen(Directory profil, int versuche) async {
 }
 
 /// Beendet den Browser samt Hilfsprozessen und löscht das Profil. Regulär
-/// über den Browser-Endpunkt (Browser.close): Das beendet alle Prozesse und
-/// gibt das Profil frei. Ging das nicht -- der Port erschien nie, der
-/// Browser hängt --, hält noch ein Prozess das Profil fest; dann hart über
-/// das Profil ([PlattformBrowser.prozesseBeenden]). Was dabei misslingt, steht im
-/// Protokoll; ein Rest im Arbeitsordner verschwindet spätestens beim
-/// nächsten Leeren.
+/// über die Pipe (Browser.close): Das beendet alle Prozesse und gibt das
+/// Profil frei. Ging das nicht -- der Browser antwortet nicht, hängt --,
+/// endet der gestartete Prozess hart ([BrowserProzess.beenden]) und, falls das
+/// Profil dann noch festgehalten wird, jeder Prozess mit diesem Profil im
+/// Aufruf ([hartBeenden], [PlattformBrowser.prozesseBeenden]): Edge startet
+/// sich bisweilen neu und läuft in einem anderen Prozess weiter (gemessen),
+/// die Nummer des gestarteten sagt dann nichts. Was dabei misslingt, steht im
+/// Protokoll; ein Rest im Arbeitsordner verschwindet spätestens beim nächsten
+/// Leeren.
 Future<void> _beenden(
-  _Cdp? cdp,
-  _Cdp? netz,
-  String? port,
-  String? browserPfad,
-  Process proz,
+  CdpPipe? pipe,
+  BrowserProzess? proz,
   Directory profil,
   String programm,
   Protokoll protokoll,
+  Future<int> Function(Directory, String) hartBeenden,
 ) async {
-  for (final v in [cdp, netz]) {
+  if (pipe != null && !pipe.geschlossen) {
     try {
-      await v?.schliessen().timeout(const Duration(seconds: 5));
-    } catch (_) {
-      // Die Seite ist ohnehin gleich weg.
-    }
-  }
-  if (port != null && browserPfad != null) {
-    try {
-      final b = _Cdp(
-        await WebSocket.connect('ws://127.0.0.1:$port$browserPfad')
-            .timeout(const Duration(seconds: 5)),
-      );
-      await b
-          .senden('Browser.close')
-          .timeout(const Duration(seconds: 5))
-          .catchError((_) => <String, dynamic>{});
-      await b
-          .schliessen()
-          .timeout(const Duration(seconds: 5))
-          .catchError((_) {});
+      await pipe.senden('Browser.close').timeout(const Duration(seconds: 5));
     } catch (_) {
       // Dann eben hart, unten.
     }
   }
+  try {
+    await pipe?.schliessen().timeout(const Duration(seconds: 5));
+  } catch (_) {
+    // Die Pipe ist ohnehin gleich weg.
+  }
+  if (proz != null) {
+    // Gibt der Browser sich selbst auf, spart das den harten Weg.
+    await proz.beendet.timeout(const Duration(seconds: 3), onTimeout: () => -1);
+    try {
+      await proz.beenden();
+    } catch (_) {
+      // Unten kommt das Profil dran.
+    }
+  }
   if (await _profilLoeschen(profil, 10)) return;
-  final n = await plattformBrowser.prozesseBeenden(profil, programm);
+  final n = await hartBeenden(profil, programm);
   if (n != 0) {
     protokoll.eintrag(
       Art.info,
       'Browser hart beendet: ${n < 0 ? 'Zahl unbekannt' : '$n Prozess(e)'}',
     );
-  }
-  // Der gestartete Prozess selbst, falls er noch läuft.
-  if (await proz.exitCode.timeout(
-        const Duration(seconds: 2),
-        onTimeout: () => -1,
-      ) ==
-      -1) {
-    proz.kill();
   }
   if (await _profilLoeschen(profil, 20)) return;
   protokoll.eintrag(
@@ -833,7 +780,7 @@ Future<void> _beenden(
   );
 }
 
-Future<String> _auswerten(_Cdp cdp, String js) async {
+Future<String> _auswerten(CdpKanal cdp, String js) async {
   final r = await cdp.senden('Runtime.evaluate', {
     'expression': js,
     'awaitPromise': true,
@@ -911,13 +858,15 @@ Future<String> bildschirmfoto(
   }
   protokoll.eintrag(Art.info, 'Bildschirmfoto: $seite -- Grund: $wozu');
   final adresse = moodle.basis!.resolve(pfad);
-  final a = await _aufnehmen(
-    moodle,
-    protokoll,
-    adresse,
-    _inhalt[ansicht]!,
-    arbeitsordner,
+  final a = await aufnehmen(
+    basis: moodle.basis!,
+    holen: moodle.fuerBrowser,
+    protokoll: protokoll,
+    adresse: adresse,
+    inhalt: _inhalt[ansicht]!,
+    arbeitsordner: arbeitsordner,
     druck: druck,
+    abbruch: Freigaben.abbruchImAufruf,
   );
   final wo = [
     if (kurs != null) 'Kurs: ${await kursBezeichnung(moodle, kurs)}',

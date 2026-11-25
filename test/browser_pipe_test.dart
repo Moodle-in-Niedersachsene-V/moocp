@@ -1,0 +1,465 @@
+// Die Pipe zum Browser der Bildschirmfotos (GHSA-x3m7): Rahmen und Zuordnung
+// ohne Betriebssystem, der Ablauf der Aufnahme gegen einen nachgebauten
+// Browser, die private Pipe unter Linux und Mac gegen echte FIFO. Mit
+// Synthetikdaten; nie gegen eine echte Moodle-Instanz.
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/moodle/bildschirmfoto.dart';
+import 'package:moocp/moodle/cdp_pipe.dart';
+import 'package:moocp/moodle/moodle_zugang.dart';
+import 'package:moocp/plattform/browser_start.dart';
+import 'package:moocp/plattform/browser_unix.dart';
+import 'package:moocp/protokoll.dart';
+import 'package:path/path.dart' as p;
+
+List<int> rahmen(Map<String, Object?> m) => [...utf8.encode(jsonEncode(m)), 0];
+
+void main() {
+  group('Rahmen und Zuordnung (CdpPipe)', () {
+    late StreamController<List<int>> ein;
+    late List<List<int>> aus;
+    late CdpPipe pipe;
+    setUp(() {
+      ein = StreamController<List<int>>();
+      aus = [];
+      pipe = CdpPipe(ein.stream, aus.add, zeitgrenze: const Duration(milliseconds: 300));
+    });
+    tearDown(() => pipe.schliessen());
+
+    Map<String, dynamic> gesendet(int i) {
+      final b = aus[i];
+      expect(b.last, 0, reason: 'Jede Nachricht endet mit NUL');
+      expect(b.sublist(0, b.length - 1), isNot(contains(0)));
+      return jsonDecode(utf8.decode(b.sublist(0, b.length - 1))) as Map<String, dynamic>;
+    }
+
+    test('sendet NUL-begrenztes JSON und ordnet die Antwort dem Befehl zu', () async {
+      final f = pipe.senden('Page.navigate', {'url': 'about:blank'});
+      final m = gesendet(0);
+      expect(m['method'], 'Page.navigate');
+      expect(m.containsKey('sessionId'), isFalse);
+      ein.add(rahmen({'id': m['id'], 'result': {'ok': 1}}));
+      expect(await f, {'ok': 1});
+    });
+
+    test('Antworten in anderer Reihenfolge gehen an den richtigen Befehl', () async {
+      final a = pipe.senden('A'), b = pipe.senden('B');
+      final ia = gesendet(0)['id'], ib = gesendet(1)['id'];
+      ein.add([...rahmen({'id': ib, 'result': {'wer': 'b'}}), ...rahmen({'id': ia, 'result': {'wer': 'a'}})]);
+      expect((await a)['wer'], 'a');
+      expect((await b)['wer'], 'b');
+    });
+
+    test('Nachricht in beliebig kleinen Stücken (auch mitten im UTF-8-Zeichen)', () async {
+      final f = pipe.senden('X');
+      final id = gesendet(0)['id'];
+      final bytes = rahmen({'id': id, 'result': {'text': 'Grüße ✓'}});
+      for (final b in bytes) {
+        ein.add([b]);
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect((await f)['text'], 'Grüße ✓');
+    });
+
+    test('mehrere Nachrichten in einem Stück, die letzte angebrochen', () async {
+      final ereignisse = <String>[];
+      pipe.ereignisse.listen((e) => ereignisse.add('${e['method']}'));
+      final r = [...rahmen({'method': 'E1'}), ...rahmen({'method': 'E2'}), ...rahmen({'method': 'E3'})];
+      ein.add(r.sublist(0, r.length - 5));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(ereignisse, ['E1', 'E2']);
+      ein.add(r.sublist(r.length - 5));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(ereignisse, ['E1', 'E2', 'E3']);
+    });
+
+    test('ein NUL im Text steht nie roh im Rahmen', () {
+      pipe.senden('X', {'t': 'a\u0000b'}).ignore();
+      final b = aus[0];
+      expect(b.where((x) => x == 0).length, 1);
+    });
+
+    test('Fehlerantwort des Browsers wird ein MoodleFehler', () async {
+      final f = pipe.senden('X');
+      ein.add(rahmen({'id': gesendet(0)['id'], 'error': {'message': 'nein'}}));
+      await expectLater(f, throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('nein'))));
+    });
+
+    test('Müll zwischen den Nachrichten stört nicht', () async {
+      final f = pipe.senden('X');
+      ein.add([...utf8.encode('kein json'), 0, 0, ...rahmen({'id': gesendet(0)['id'], 'result': {}})]);
+      expect(await f, isEmpty);
+    });
+
+    test('Sitzungen: Befehle tragen sessionId, Ereignisse gehen an die richtige Sicht', () async {
+      final s1 = pipe.sitzung('S1'), s2 = pipe.sitzung('S2');
+      final bei1 = <String>[], bei2 = <String>[], wurzel = <String>[];
+      s1.ereignisse.listen((e) => bei1.add('${e['method']}'));
+      s2.ereignisse.listen((e) => bei2.add('${e['method']}'));
+      pipe.ereignisse.listen((e) => wurzel.add('${e['method']}'));
+      final f = s1.senden('Runtime.evaluate');
+      expect(gesendet(0)['sessionId'], 'S1');
+      ein.add([
+        ...rahmen({'method': 'A', 'sessionId': 'S1'}),
+        ...rahmen({'method': 'B', 'sessionId': 'S2'}),
+        ...rahmen({'method': 'C'}),
+        ...rahmen({'id': gesendet(0)['id'], 'sessionId': 'S1', 'result': {'v': 1}}),
+      ]);
+      expect((await f)['v'], 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(bei1, ['A']);
+      expect(bei2, ['B']);
+      expect(wurzel, ['C']);
+    });
+
+    test('keine Antwort: MoodleFehler nach der Zeitgrenze', () async {
+      await expectLater(
+        pipe.senden('Browser.getVersion'),
+        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('antwortet nicht'))),
+      );
+    });
+
+    test('Ende des Kanals beendet offene Befehle und spätere scheitern als MoodleFehler', () async {
+      final f = pipe.senden('X');
+      await ein.close();
+      await expectLater(f, throwsA(isA<MoodleFehler>()));
+      await pipe.ende;
+      await expectLater(pipe.senden('Y'), throwsA(isA<MoodleFehler>()));
+    });
+  });
+
+  test('keine Schalterliste kennt einen Port, alle die Pipe', () {
+    final a = browserArgumente(profil: Directory('/x/profil'), breite: 1280);
+    expect(a.where((x) => x.contains('remote-debugging-port')), isEmpty);
+    expect(a, contains('--remote-debugging-pipe'));
+    expect(a.last, 'about:blank');
+  });
+
+  test('der Quelltext der Aufnahme kennt keinen Port und keine Port-Datei', () {
+    for (final d in [
+      'lib/moodle/bildschirmfoto.dart',
+      'lib/plattform/browser_start.dart',
+      'lib/plattform/browser_unix.dart',
+      'lib/plattform/browser_windows.dart',
+    ]) {
+      final t = File(d).readAsStringSync();
+      // Der Schalter darf in Kommentaren genannt werden, nie als Zeichenkette.
+      expect(RegExp(r"'[^'\n]*remote-debugging-port").hasMatch(t), isFalse, reason: d);
+      expect(t.contains('DevToolsActivePort'), isFalse, reason: d);
+      expect(t.contains('WebSocket.connect'), isFalse, reason: d);
+    }
+  });
+
+  group('Ablauf der Aufnahme gegen einen nachgebauten Browser', () {
+    late Directory ordner;
+    setUp(() => ordner = Directory.systemTemp.createTempSync('moocp_pipe_'));
+    tearDown(() => ordner.deleteSync(recursive: true));
+
+    final adresse = Uri.parse('https://moodle.schule.example/mod/page/view.php?id=7');
+    final basis = Uri.parse('https://moodle.schule.example/');
+
+    Future<Aufnahme> lauf(FakeStarter st, {List<String>? geholt, Future<void>? abbruch, Duration? anlauf}) =>
+        aufnehmen(
+          basis: basis,
+          holen: (methode, uri, {required seiten, rumpf, dokument = false}) async {
+            geholt?.add('$methode $uri');
+            return Antwort(200, uri, Uint8List.fromList(utf8.encode('<html></html>')), 'text/html');
+          },
+          protokoll: Protokoll(),
+          adresse: adresse,
+          inhalt: ('#region-main .generalbox.center', null),
+          arbeitsordner: ordner.path,
+          starter: st,
+          browserWahl: ('Fake', '/fake/browser'),
+          abbruch: abbruch,
+          anlaufgrenze: anlauf ?? const Duration(seconds: 5),
+          hartBeenden: (_, _) async => 0,
+        );
+
+    void aufgeraeumt(FakeStarter st) {
+      expect(ordner.listSync(), isEmpty, reason: 'Profil gelöscht');
+      expect(st.prozess!.beendet_, isTrue, reason: 'Browser beendet');
+    }
+
+    test('Erfolg: Pipe vor jeder Seite, Anfragen über die App, Fremdes gesperrt, danach aufgeräumt', () async {
+      final st = FakeStarter(ordner);
+      final geholt = <String>[];
+      final a = await lauf(st, geholt: geholt);
+      expect(a.bilder, hasLength(1));
+      expect(st.argumente.where((x) => x.contains('remote-debugging-port')), isEmpty);
+      expect(st.argumente, contains('--remote-debugging-pipe'));
+      // Reihenfolge: Anhalten der Anfragen steht, bevor navigiert wird.
+      final l = st.prozess!.log;
+      expect(l.indexOf('Fetch.enable'), greaterThanOrEqualTo(0));
+      expect(l.indexOf('Fetch.enable'), lessThan(l.indexOf('Page.navigate')));
+      expect(l.indexOf('Browser.getVersion'), lessThan(l.indexOf('Fetch.enable')));
+      // Befehle an die Seite tragen die Sitzung, Fetch geht an den Browser.
+      expect(st.prozess!.sitzungVon['Page.navigate'], 'S1');
+      expect(st.prozess!.sitzungVon['Fetch.enable'], isNull);
+      // Das Dokument kommt über die App, die fremde Adresse nie.
+      expect(geholt, ['GET $adresse']);
+      expect(st.prozess!.log, contains('Fetch.failRequest'));
+      expect(a.gesperrt.single, contains('fremder Rechner'));
+      aufgeraeumt(st);
+    });
+
+    test('Browser antwortet nicht auf die Pipe: Fehler vor jeder Seite, nichts von Moodle geladen', () async {
+      final st = FakeStarter(ordner, stumm: true);
+      final geholt = <String>[];
+      await expectLater(
+        lauf(st, geholt: geholt, anlauf: const Duration(milliseconds: 300)),
+        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', allOf(contains('antwortet nicht auf die Pipe'), contains('nichts von Moodle geladen')))),
+      );
+      expect(geholt, isEmpty);
+      expect(st.prozess!.log, isNot(contains('Page.navigate')));
+      expect(st.prozess!.log, isNot(contains('Fetch.enable')));
+      aufgeraeumt(st);
+    });
+
+    test('Browser startet nicht: Fehler mit Meldung, Profil gelöscht', () async {
+      final st = FakeStarter(ordner, startFehler: 'kaputt');
+      await expectLater(lauf(st), throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('startet nicht'))));
+      expect(ordner.listSync(), isEmpty);
+    });
+
+    test('Fehler auf der Seite: Browser beendet, Profil gelöscht', () async {
+      final st = FakeStarter(ordner, auswertenFehler: true);
+      await expectLater(lauf(st), throwsA(isA<MoodleFehler>()));
+      aufgeraeumt(st);
+    });
+
+    test('Abbruch des Clients mitten in der Aufnahme: Browser beendet, Profil gelöscht', () async {
+      final st = FakeStarter(ordner, haengtBeimLaden: true);
+      final abbruch = Completer<void>();
+      final f = lauf(st, abbruch: abbruch.future);
+      f.ignore();
+      while (st.prozess == null || !st.prozess!.log.contains('Page.navigate')) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      abbruch.complete();
+      await expectLater(f, throwsA(isA<MoodleAbgebrochen>()));
+      aufgeraeumt(st);
+    });
+
+    test('Browser reagiert auf Browser.close nicht: er wird hart beendet', () async {
+      final st = FakeStarter(ordner, schliesstNicht: true);
+      await lauf(st);
+      aufgeraeumt(st);
+    });
+  });
+
+  group('private Pipe unter Linux und Mac', () {
+    late Directory ordner;
+    setUp(() => ordner = Directory.systemTemp.createTempSync('moocp_unix_'));
+    tearDown(() async {
+      await Process.run('chmod', ['-R', 'u+rwx', ordner.path]);
+      ordner.deleteSync(recursive: true);
+    });
+    final unix = Platform.isLinux || Platform.isMacOS;
+
+    test('Profil: Ordner mit Rechten 700, dem aktuellen Benutzer', () async {
+      final d = await UnixBrowserStarter().profilAnlegen(ordner.path);
+      expect(FileStat.statSync(d.path).mode & 511, 448);
+      expect(FileSystemEntity.typeSync(d.path, followLinks: false), FileSystemEntityType.directory);
+      await privatPruefen(d.path, benutzer: (await aktuelleBenutzerNummer())!);
+    }, skip: !unix);
+
+    test('Prüfung lehnt Verknüpfung, falsche Rechte und fremden Besitzer ab', () async {
+      final uid = (await aktuelleBenutzerNummer())!;
+      final echt = Directory(p.join(ordner.path, 'echt'))..createSync();
+      await Process.run('chmod', ['700', echt.path]);
+      Link(p.join(ordner.path, 'link')).createSync(echt.path);
+      await expectLater(privatPruefen(p.join(ordner.path, 'link'), benutzer: uid), throwsA(isA<BrowserStartFehler>()));
+      await Process.run('chmod', ['755', echt.path]);
+      await expectLater(privatPruefen(echt.path, benutzer: uid), throwsA(isA<BrowserStartFehler>()));
+      await Process.run('chmod', ['700', echt.path]);
+      await expectLater(privatPruefen(echt.path, benutzer: uid + 1), throwsA(isA<BrowserStartFehler>()));
+      await expectLater(privatPruefen(echt.path, benutzer: uid, besitzer: (_) async => uid + 1), throwsA(isA<BrowserStartFehler>()));
+      // Eine Datei statt einer FIFO oder eines Ordners
+      final datei = File(p.join(ordner.path, 'f'))..writeAsStringSync('x');
+      await expectLater(privatPruefen(datei.path, benutzer: uid, fifo: true), throwsA(isA<BrowserStartFehler>()));
+    }, skip: !unix);
+
+    // Ein „Browser“, der an fd 3 liest und an fd 4 zurückschreibt: Er prüft
+    // den Weg über die Shell und die FIFO.
+    File echo() {
+      final f = File(p.join(ordner.path, 'echo.sh'))..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
+      Process.runSync('chmod', ['700', f.path]);
+      return f;
+    }
+
+    test('Bytes laufen über fd 3 und fd 4; FIFO mit Rechten 600 im privaten Ordner', () async {
+      final st = UnixBrowserStarter();
+      final profil = await st.profilAnlegen(ordner.path);
+      final proz = await st.starten(echo().path, const [], profil);
+      final empfangen = <int>[];
+      final fertig = Completer<void>();
+      proz.eingang.listen(empfangen.addAll);
+      for (final n in ['cdp-ein', 'cdp-aus']) {
+        final f = p.join(profil.path, n);
+        expect(FileSystemEntity.typeSync(f, followLinks: false), FileSystemEntityType.pipe);
+        expect(FileStat.statSync(f).mode & 511, 384);
+      }
+      proz.senden([...utf8.encode('{"id":1}'), 0]);
+      for (var i = 0; i < 100 && empfangen.length < 9; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(utf8.decode(empfangen.sublist(0, 8)), '{"id":1}');
+      expect(empfangen[8], 0);
+      await proz.beenden();
+      fertig.complete();
+    }, skip: !unix);
+
+    test('Browser, der nicht startet: der Kanal endet sofort, nichts hängt', () async {
+      final st = UnixBrowserStarter(oeffnenGrenze: const Duration(seconds: 5));
+      final profil = await st.profilAnlegen(ordner.path);
+      final proz = await st.starten(p.join(ordner.path, 'gibt-es-nicht'), const [], profil).timeout(const Duration(seconds: 10));
+      await proz.eingang.drain<void>().timeout(const Duration(seconds: 5));
+      expect(await proz.beendet.timeout(const Duration(seconds: 5)), isNonZero);
+      await proz.beenden();
+    }, skip: !unix);
+
+    test('Pfade mit Sonderzeichen gelangen unverändert zum Browser (nie in Shell-Text)', () async {
+      final f = File(p.join(ordner.path, r'a b$(touch pwn)`x`.sh'))..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
+      Process.runSync('chmod', ['700', f.path]);
+      final st = UnixBrowserStarter();
+      final profil = await st.profilAnlegen(ordner.path);
+      final proz = await st.starten(f.path, const [r'--x=$(touch pwn2)'], profil);
+      await proz.beenden();
+      expect(File(p.join(ordner.path, 'pwn')).existsSync(), isFalse);
+      expect(File('pwn2').existsSync(), isFalse);
+    }, skip: !unix);
+  });
+}
+
+/// Ein nachgebauter Browser: spricht CDP über die Schnittstelle der Pipe.
+class FakeStarter implements BrowserStarter {
+  FakeStarter(
+    this.ordner, {
+    this.stumm = false,
+    this.startFehler,
+    this.auswertenFehler = false,
+    this.haengtBeimLaden = false,
+    this.schliesstNicht = false,
+  });
+
+  final Directory ordner;
+  final bool stumm, auswertenFehler, haengtBeimLaden, schliesstNicht;
+  final String? startFehler;
+  FakeProzess? prozess;
+  List<String> argumente = const [];
+
+  @override
+  Future<Directory> profilAnlegen(String arbeitsordner) async =>
+      Directory(p.join(arbeitsordner, '.browser-test')).create();
+
+  @override
+  Future<BrowserProzess> starten(String programm, List<String> argumente, Directory profil) async {
+    this.argumente = argumente;
+    if (startFehler != null) throw BrowserStartFehler(startFehler!);
+    return prozess = FakeProzess(this);
+  }
+}
+
+class FakeProzess implements BrowserProzess {
+  FakeProzess(this.v);
+  final FakeStarter v;
+  final _ein = StreamController<List<int>>();
+  final _exit = Completer<int>();
+  final log = <String>[];
+  final sitzungVon = <String, String?>{};
+  var beendet_ = false;
+  var _puffer = <int>[];
+
+  @override
+  int get pid => 4242;
+  @override
+  Stream<List<int>> get eingang => _ein.stream;
+  @override
+  Future<int> get beendet => _exit.future;
+
+  void _an(Map<String, Object?> m) {
+    if (!_ein.isClosed) _ein.add(rahmen(m));
+  }
+
+  @override
+  void senden(List<int> bytes) {
+    _puffer = [..._puffer, ...bytes];
+    while (_puffer.contains(0)) {
+      final i = _puffer.indexOf(0);
+      final m = jsonDecode(utf8.decode(_puffer.sublist(0, i))) as Map<String, dynamic>;
+      _puffer = _puffer.sublist(i + 1);
+      scheduleMicrotask(() => _behandeln(m));
+    }
+  }
+
+  void _behandeln(Map<String, dynamic> m) {
+    final id = m['id'], methode = '${m['method']}';
+    final s = m['sessionId'] as String?;
+    log.add(methode);
+    sitzungVon[methode] = s;
+    if (v.stumm) return;
+    void ok([Map<String, Object?> r = const {}]) => _an({'id': id, 'result': r, 'sessionId': ?s});
+    final p = (m['params'] as Map?)?.cast<String, dynamic>() ?? const {};
+    switch (methode) {
+      case 'Target.getTargets':
+        ok({'targetInfos': [{'type': 'page', 'targetId': 'T1'}]});
+      case 'Target.attachToTarget':
+        ok({'sessionId': 'S1'});
+      case 'Page.navigate':
+        ok();
+        if (v.haengtBeimLaden) return;
+        _an({
+          'method': 'Fetch.requestPaused',
+          'params': {
+            'requestId': 'R1',
+            'request': {'method': 'GET', 'url': 'https://moodle.schule.example/mod/page/view.php?id=7'},
+            'resourceType': 'Document',
+          },
+        });
+        _an({
+          'method': 'Fetch.requestPaused',
+          'params': {
+            'requestId': 'R2',
+            'request': {'method': 'GET', 'url': 'https://fremd.example/x.js'},
+            'resourceType': 'Script',
+          },
+        });
+      case 'Fetch.fulfillRequest':
+        ok();
+        _an({'method': 'Page.loadEventFired', 'sessionId': 'S1', 'params': {}});
+      case 'Runtime.evaluate':
+        if (v.auswertenFehler) {
+          ok({'exceptionDetails': {'text': 'x'}});
+          return;
+        }
+        final e = '${p['expression']}';
+        final wert = e.contains('__moocpFehler || []')
+            ? '[]'
+            : e.contains('filter_mathjaxloader_equation')
+            ? '{"huellen":0,"gesetzt":0,"text":0}'
+            : '{"x":0,"y":0,"w":100,"h":50,"sperren":[]}';
+        ok({'result': {'value': wert}});
+      case 'Page.captureScreenshot':
+        ok({'data': base64Encode([137, 80, 78, 71])});
+      case 'Browser.close':
+        ok();
+        if (!v.schliesstNicht) _beenden();
+      default:
+        ok();
+    }
+  }
+
+  void _beenden() {
+    beendet_ = true;
+    if (!_ein.isClosed) unawaited(_ein.close());
+    if (!_exit.isCompleted) _exit.complete(0);
+  }
+
+  @override
+  Future<void> beenden() async => _beenden();
+}

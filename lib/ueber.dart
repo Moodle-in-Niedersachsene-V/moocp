@@ -37,7 +37,7 @@ void lizenzAnmelden() {
 /// Flutter macht dort aus „0.13.0-nightly.20261124.2" schon beim Bauen
 /// „0.13.0.20261124.2". Erkennbar ist die Nightly am Datum dahinter (E39).
 /// Für den Vergleich mit einem Release ist das gleich: [versionVergleich]
-/// liest in beiden Formen dieselben Zahlen.
+/// erkennt die Nightly in beiden Formen.
 String versionText(PackageInfo info) {
   final version = versionOhneBuild(info);
   return info.buildNumber.isEmpty ? version : '$version+${info.buildNumber}';

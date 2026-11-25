@@ -201,9 +201,26 @@ String? versionAusTag(String tag) =>
 /// Vergleicht zwei Versionen Zahl für Zahl: -1, 0 oder 1. Die Buildnummer
 /// hinter „+" zählt nicht mit, fehlende Stellen gelten als 0 („1.0" ist
 /// „1.0.0").
+///
+/// Eine Nightly (`0.13.0-nightly.20261124.2`, in der App `0.13.0.20261124.2`,
+/// E39) ist älter als die stabile Version mit denselben drei Zahlen: Wer die
+/// Nightly einer Version hat, bekommt die stabile Version derselben Nummer
+/// als Update. Nach Zahlen allein wäre sie neuer. Erkannt wird sie an der
+/// Form, drei Zahlen, ein Datum mit acht Ziffern und eine laufende Nummer;
+/// das gilt auch für Plugins mit so geformten Versionen.
 int versionVergleich(String a, String b) {
   final x = _zahlen(a);
   final y = _zahlen(b);
+  final na = _istNightly(a);
+  final nb = _istNightly(b);
+  if (na != nb) {
+    for (var i = 0; i < 3; i++) {
+      final links = i < x.length ? x[i] : 0;
+      final rechts = i < y.length ? y[i] : 0;
+      if (links != rechts) return links < rechts ? -1 : 1;
+    }
+    return na ? -1 : 1;
+  }
   for (var i = 0; i < (x.length > y.length ? x.length : y.length); i++) {
     final links = i < x.length ? x[i] : 0;
     final rechts = i < y.length ? y[i] : 0;
@@ -211,6 +228,10 @@ int versionVergleich(String a, String b) {
   }
   return 0;
 }
+
+final _nightlyForm = RegExp(r'^\d+\.\d+\.\d+(?:-nightly)?\.\d{8}\.\d+$');
+
+bool _istNightly(String version) => _nightlyForm.hasMatch(version.split('+').first.trim());
 
 List<int> _zahlen(String version) => version
     .split('+')

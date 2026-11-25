@@ -39,6 +39,7 @@ const _kursArchiv = {
 class _Moodle {
   late HttpServer server;
   int requests = 0;
+  String? seitenText;
   int starts = 0;
   int backupStarts = 0;
   String modul = 'page';
@@ -273,6 +274,8 @@ class _Moodle {
         answer = page(
           '<script>var quiz = {"quizid": 8};</script><li class="slot qtype_multichoice" id="slot-1"><span class="questionname">ZZ Frage</span></li>',
         );
+      } else if (path == '/question/banks.php') {
+        answer = page('<div id="region-main"><a href="/mod/qbank/view.php?id=31">ZZ Bank</a></div>');
       } else if (path == '/question/bank/importquestions/import.php') {
         answer = page('<select name="category"><option value="1,55">ZZ Sammlung (1)</option></select>');
       } else if (path == '/question/bank/exportquestions/export.php') {
@@ -284,7 +287,7 @@ class _Moodle {
       } else if (path == '/pluginfile.php/55/question/export/1/export.xml') {
         answer = '<?xml version="1.0"?><quiz><question type="multichoice"><name><text>ZZ Frage</text></name><idnumber>ZZ-1</idnumber></question></quiz>';
       } else if (path == '/course/modedit.php') {
-        answer = page('<form class="mform"></form>');
+        answer = page('<form class="mform">${seitenText == null ? '' : '<textarea name="page[text]">${htmlEscape.convert(seitenText!)}</textarea>'}</form>');
       } else {
         throw StateError('Unerwartete Adresse: $path');
       }
@@ -332,7 +335,9 @@ void main() {
     await client.initialize();
   }
 
-  void writeArchive({bool quiz = false, bool image = false, bool lokal = false, bool geteilt = false}) {
+  void writeArchive({bool quiz = false, bool image = false, bool lokal = false, bool geteilt = false,
+    String inhalt = '',
+  }) {
     external.modul = quiz ? 'quiz' : 'page';
     external.title = quiz ? 'ZZ Quiz' : 'ZZ Blatt';
     final archive = Archive();
@@ -343,6 +348,7 @@ void main() {
       'files.xml': image
           ? '<files><file id="1"><component>mod_page</component><filename>bild.png</filename><contenthash>0000000000000000000000000000000000000000</contenthash></file></files>'
           : '<files/>',
+      if (!quiz) 'activities/page_7/page.xml': '<activity><page><intro></intro><content>${htmlEscape.convert(inhalt)}</content></page></activity>',
       if (quiz) 'activities/quiz_7/quiz.xml': '<activity contextid="5"><quiz><question_instance><question_reference><questionbankentryid>1</questionbankentryid><version>1</version></question_reference></question_instance></quiz></activity>',
       if (quiz) 'questions.xml': '<questions>${lokal || geteilt ? '<question_category id="1"><contextid>${geteilt ? 6 : 5}</contextid></question_category>' : ''}<question_bank_entry id="1">${lokal || geteilt ? '<questioncategoryid>1</questioncategoryid>' : ''}<idnumber>ZZ-1</idnumber><question_version><question_versions><version>1</version><questions><question><name>ZZ Frage</name></question></questions></question_versions></question_version></question_bank_entry></questions>',
     }.entries) {
@@ -426,6 +432,44 @@ void main() {
     final tool = (list['tools'] as List).cast<Map>().singleWhere((t) => t['name'] == 'wiederherstellen_datei');
     expect(tool['annotations']['readOnlyHint'], false);
     expect(tool['annotations']['destructiveHint'], true);
+  });
+
+  for (final links in [
+    ('/course/view.php?id=12', '/course/view.php?id=99'),
+    ('/mod/page/view.php?id=7', '/mod/page/view.php?id=99'),
+    (
+      'https://fremd.example/mod/page/view.php?id=7',
+      'https://fremd.example/mod/page/view.php?id=99',
+    ),
+  ]) {
+    test('MCP erhält echte Linkunterschiede: ${links.$1}', () async {
+      writeArchive(inhalt: '<a href="${links.$1}">Blatt</a>');
+      external.seitenText = '<a href="${links.$2}">Blatt</a>';
+      external.completeOnStart = true;
+      external.progress = {'progress': 1, 'status': 1000};
+      final result = await client.tool('wiederherstellen_datei', arguments);
+      final v = (await Vorgaenge(folder.path, profilKennung: profile.kennung).alle()).single;
+      expect(v.importierteAktivitaeten, [(cmid: 70, modul: 'page', titel: 'ZZ Blatt')]);
+      expect(result, contains('Seiteninhalt'));
+      expect(result, contains('weicht von der Quelle ab'));
+      expect(result, contains('verified: false'));
+      expect(
+        await client.tool('wiederherstellung_status', {
+          'id': RegExp(r'Nummer ([a-z0-9]+)').firstMatch(result)!.group(1)!,
+        }),
+        contains('weicht von der Quelle ab'),
+      );
+    });
+  }
+
+  test('MCP speichert bei konkurrierender Aktivität keine Importzuordnung', () async {
+    external.weitereQuizze = ['ZZ Fremd'];
+    external.completeOnStart = true;
+    external.progress = {'progress': 1, 'status': 1000};
+    final result = await client.tool('wiederherstellen_datei', arguments);
+    expect(result, contains('verified: false'));
+    final v = (await Vorgaenge(folder.path, profilKennung: profile.kennung).alle()).single;
+    expect(v.importierteAktivitaeten, isNull);
   });
 
   test('Startfehler mit weiterer Unterseite wird unklar statt endlos gepollt; bleibt gesperrt', () async {
@@ -834,6 +878,7 @@ void main() {
     external.completed = true;
     final status = await client.tool('wiederherstellung_status', {'id': number});
     expect('stimmen mit der Quelle überein'.allMatches(status).length, 2, reason: status);
+    expect('Herkunft der Fragen im Quiz'.allMatches(status).length, 2, reason: status);
     expect(status, contains('„ZZ Quiz B"'));
     expect(status, isNot(contains('nicht eindeutig')));
     expect(status, isNot(contains('Fragenherkunft nicht bestätigt')));

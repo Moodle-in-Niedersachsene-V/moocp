@@ -218,7 +218,7 @@ void main() {
       expect(b.quizFragen, isEmpty);
     });
 
-    test('kaputtes quiz.xml: das Archiv bleibt gültig, das Quiz ist unlesbar (Prüflücke, Befund 7)', () async {
+    test('kaputtes quiz.xml: das Archiv bleibt gültig, das Quiz gilt als unlesbar', () async {
       final b = await archivPruefen(_mbz([
         _eintrag('moodle_backup.xml', _xml(_sicherungXml)),
         _eintrag('activities/quiz_21/quiz.xml', _xml('<activity><quiz>')),

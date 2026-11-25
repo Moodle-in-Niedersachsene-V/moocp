@@ -55,7 +55,7 @@ import 'moodle_zugang.dart';
 import 'sperrliste.dart';
 
 /// Welche Art Formular.
-enum Zielart { aktivitaet, abschnitt, buchkapitel, frage }
+enum Zielart { aktivitaet, abschnitt, buchkapitel, frage, kategorie }
 
 /// Ein Moodle-Formular, das die App lesen und zurückschreiben kann.
 class Formularziel {
@@ -78,6 +78,10 @@ class Formularziel {
   factory Formularziel.frage(int sammlung, int frage) =>
       Formularziel(Zielart.frage, frage, cmid: sammlung);
 
+  /// Eine Fragenkategorie der Sammlung [sammlung] (kategorie_aendern, E37).
+  factory Formularziel.kategorie(int sammlung, int kategorie) =>
+      Formularziel(Zielart.kategorie, kategorie, cmid: sammlung);
+
   /// Wo das Formular abgerufen wird.
   String get adresse => switch (art) {
     Zielart.aktivitaet => '/course/modedit.php?update=$id',
@@ -85,6 +89,10 @@ class Formularziel {
     Zielart.buchkapitel => '/mod/book/edit.php?cmid=$cmid&id=$id',
     Zielart.frage =>
       '/question/bank/editquestion/question.php?cmid=$cmid&id=$id',
+    // Nur eine Kennung für den Schreibvorgang (E37): Die Kategorie wird über
+    // ein dynamisches Formular gelesen, nicht über eine Adresse abgerufen.
+    Zielart.kategorie =>
+      '/question/bank/managecategories/category.php?cmid=$cmid&categoryid=$id',
   };
 
   /// Unterordner im Arbeitsordner.
@@ -93,6 +101,7 @@ class Formularziel {
     Zielart.abschnitt => 'abschnitt-$id',
     Zielart.buchkapitel => p.join('buch-$cmid', 'kapitel-$id'),
     Zielart.frage => 'frage-$id',
+    Zielart.kategorie => 'kategorie-$id',
   };
 
   String get bezeichnung => switch (art) {
@@ -100,6 +109,7 @@ class Formularziel {
     Zielart.abschnitt => 'Abschnitt (id $id)',
     Zielart.buchkapitel => 'Kapitel $id im Buch cmid $cmid',
     Zielart.frage => 'Frage $id (Sammlung cmid $cmid)',
+    Zielart.kategorie => 'Kategorie $id (Sammlung cmid $cmid)',
   };
 
   Map<String, Object?> toJson() => {
@@ -204,6 +214,7 @@ class FormularGelesen {
     this.lernlandkarteTitel = const {},
     this.lernlandkarteZielstatus = const {},
     this.editorFormate = const {},
+    this.mehrdeutigeAuswahl = const [],
   });
   final Formularziel ziel;
   final List<Einstellung> einstellungen;
@@ -225,8 +236,11 @@ class FormularGelesen {
   final List<String> hinweise;
   final Map<String, Object?>? lernlandkarte;
   final Map<int, (String, String)> lernlandkarteTitel;
-  final Map<int, String> lernlandkarteZielstatus;
+  final Map<int, OrtVerknuepfung> lernlandkarteZielstatus;
   final Map<String, String> editorFormate;
+
+  /// Auswahlfelder, deren Anzeigetext auf mehrere Optionen passt (Befund).
+  final List<String> mehrdeutigeAuswahl;
 
   String zusammenfassung() {
     final b = StringBuffer()
@@ -242,12 +256,22 @@ class FormularGelesen {
         modul != 'learningmap' &&
         !MoodleZugang.schreibbareModule.contains(modul)) {
       b.writeln(
-        MoodleZugang.nurGruppenModule.contains(modul)
+        MoodleZugang.optionsModule.containsKey(modul)
+            ? 'Prüflücke: Beschreibung und normale Optionen bestehender Aktivitäten sind änderbar. '
+                  'Gruppenauswahl, individuelle Gruppenlimits, Bilder und Dateien ändern sowie Anlegen werden nicht unterstützt.'
+            : MoodleZugang.nurGruppenModule.contains(modul)
             ? 'Prüflücke: Typ „$modul" ändert aendern nur in Gruppenmodus (groupmode) und Gruppierung '
                   '(groupingid); alles andere ist gelesen, nicht änderbar. '
                   'Die Verweisprüfung erfasst nur Textfelder; Auswahlfelder werden nicht geprüft.'
             : 'Prüflücke: Typ „$modul" ist nicht schreibbar -- gelesen, nicht geändert (aendern lehnt ab). '
                   'Die Verweisprüfung erfasst nur Textfelder; Auswahlfelder werden nicht geprüft.',
+      );
+    }
+    if (mehrdeutigeAuswahl.isNotEmpty) {
+      b.writeln(
+        'Befund: Auswahlfeld mit mehrdeutigem Anzeigetext (mehrere Optionen mit '
+        'gleichem Namen, einstellungen.json zeigt nur den Text; aendern bricht ab): '
+        '${mehrdeutigeAuswahl.join(", ")}',
       );
     }
     if (fehlend.isNotEmpty) {
@@ -264,25 +288,34 @@ class FormularGelesen {
         final id = '${ort['id'] ?? '(ohne Kennung)'}';
         final rolle = lernlandkarteRolle(store, id);
         final ziel = ortsziel(ort['linkedActivity']);
+        final status = ortVerknuepfung(
+          ort['linkedActivity'],
+          lernlandkarteZielstatus,
+        );
         final titel = ziel == null ? null : lernlandkarteTitel[ziel];
-        final status = ziel == null ? null : lernlandkarteZielstatus[ziel];
         final anzahl = orte
             .whereType<Map>()
             .where((x) => x['id'] == ort['id'])
             .length;
         final zielText = switch (status) {
-          'im Kurs' when titel != null =>
+          OrtVerknuepfung.fehlend => null,
+          OrtVerknuepfung.verknuepft when titel != null =>
             'Aktivität $ziel „${titel.$1}" (${titel.$2})',
-          'außerhalb des Kurses' when titel != null =>
+          OrtVerknuepfung.fremd when titel != null =>
             'Ziel außerhalb des Kurses: cm $ziel „${titel.$1}"',
-          'Kurszugehörigkeit nicht prüfbar' when titel != null =>
+          OrtVerknuepfung.nichtPruefbar when titel != null =>
             'Aktivität $ziel „${titel.$1}" (Kurszugehörigkeit nicht prüfbar)',
-          _ => 'Ziel nicht gefunden oder nicht prüfbar: cm $ziel',
+          OrtVerknuepfung.fremd =>
+            'Ziel nicht im Kurs (anderer Kurs oder unbekannte cmid): cm $ziel',
+          _ => ziel == null
+              ? 'Ziel nicht lesbar: ${ort['linkedActivity']}'
+              : 'Ziel nicht prüfbar: cm $ziel',
         };
         b.writeln(
           '  Ort $id${rolle == null ? '' : ' · $rolle'}'
           '${anzahl > 1 ? ' · mehrdeutige Ortskennung' : ''}'
-          '${ziel == null ? ' · ohne Verknüpfung' : ' · $zielText'}',
+          ' · Verknüpfung: ${status.bezeichnung}'
+          '${zielText == null ? '' : ' · $zielText'}',
         );
       }
     }
@@ -328,6 +361,29 @@ class FormularGelesen {
   }
 }
 
+/// Wie viele Dateien nacheinander ohne Antwort das Lesen verträgt. Eine einzelne
+/// Datei, die zu langsam kommt oder hinter einer Prüfung des Schutzdienstes liegt,
+/// ist ein Befund an dieser Datei: Sonst ließe sich eine Aktivität mit einem solchen
+/// Bild nie mehr ändern, denn Ändern beginnt mit frischem Lesen (E17). Die zweite
+/// Datei in Folge zeigt, dass Moodle selbst nicht antwortet; dann hört das Lesen auf,
+/// statt jede weitere bis zur Zeitgrenze zu versuchen. Ein Abbruch des Clients
+/// beendet es sofort.
+class _Wartegrenze {
+  int _folge = 0;
+
+  void gelesen() => _folge = 0;
+
+  /// Ob nach [x] die nächste Datei versucht wird.
+  bool weiter(MoodleFehler x) {
+    if (x is MoodleAbgebrochen) return false;
+    if (!moodleAntwortetNicht(x)) {
+      _folge = 0;
+      return true;
+    }
+    return ++_folge < 2;
+  }
+}
+
 /// Größere Dateien eines Dateibereichs werden nicht geladen, nur genannt.
 const int bereichGrenze = 25 * 1024 * 1024;
 
@@ -340,6 +396,8 @@ Future<List<Dateibereich>> _bereicheLesen(
   List<Map<String, Object?>> roh,
   String ziel,
   String? sesskey,
+  Future<void>? abbruch,
+  _Wartegrenze wartegrenze,
 ) async {
   final aus = <Dateibereich>[];
   for (final b in roh) {
@@ -394,7 +452,7 @@ Future<List<Dateibereich>> _bereicheLesen(
           continue;
         }
         try {
-          final d = await moodle.lesen(url);
+          final d = await moodle.lesen(url, abbruch: abbruch);
           if (d.status != 200) {
             bereich.nichtGelesen.add('$pfad$name (HTTP ${d.status})');
             continue;
@@ -413,7 +471,11 @@ Future<List<Dateibereich>> _bereicheLesen(
             await f.writeAsBytes(d.bytes);
           }
           bereich.dateien['$pfad$name'] = dateiAuswerten(name, d.bytes);
+          wartegrenze.gelesen();
         } on MoodleFehler catch (x) {
+          // Nur diese Datei fehlt -- nicht: Moodle antwortet nicht (dann
+          // wartete jede weitere Datei wieder bis zur Zeitgrenze).
+          if (!wartegrenze.weiter(x)) rethrow;
           bereich.nichtGelesen.add('$pfad$name (${x.meldung})');
         }
       }
@@ -431,23 +493,35 @@ Future<Map<int, (String, String)>> _zielTitel(
   Set<int> cmids,
   List<String> hinweise, {
   int grenze = 10,
+  Future<void>? abbruch,
 }) async {
   final titel = <int, (String, String)>{};
   if (cmids.isEmpty) return titel;
+  // Antwortet Moodle nicht, bleibt es bei dieser einen Wartezeit: Die Titel
+  // sind ein Befund am Rand des Lesens, kein Grund, jede weitere Seite
+  // einzeln bis zur Zeitgrenze zu versuchen.
+  bool moodleHaengt(MoodleFehler x) {
+    if (x is MoodleAbgebrochen) throw x;
+    if (!moodleAntwortetNicht(x)) return false;
+    hinweise.add('Titel der Verweise nicht geprüft: Moodle antwortet nicht (${x.meldung}).');
+    return true;
+  }
+
   if (kurs != null) {
     try {
-      final k = await kursLesen(moodle, kurs);
+      final k = await kursLesen(moodle, kurs, abbruch: abbruch);
       for (final c in k.nachCmid.values) {
         if (cmids.contains(c.cmid)) titel[c.cmid] = (c.name, c.modul);
       }
     } on MoodleFehler catch (x) {
+      if (moodleHaengt(x)) return titel;
       hinweise.add('Kursstruktur nicht abrufbar (${x.meldung}).');
     }
   }
   final rest = cmids.where((c) => !titel.containsKey(c)).take(grenze).toList();
   for (final c in rest) {
     try {
-      final r = await moodle.lesen('/course/modedit.php?update=$c');
+      final r = await moodle.lesen('/course/modedit.php?update=$c', abbruch: abbruch);
       final form = hauptformular(html_parser.parse(r.text));
       String? wert(String n) => form
           ?.querySelectorAll('input')
@@ -456,8 +530,9 @@ Future<Map<int, (String, String)>> _zielTitel(
           ?.attributes['value'];
       final name = wert('name');
       if (name != null) titel[c] = (name, wert('modulename') ?? '?');
-    } on MoodleFehler {
-      // nicht prüfbar, etwa ohne Bearbeitungsrecht im anderen Kurs
+    } on MoodleFehler catch (x) {
+      if (moodleHaengt(x)) return titel;
+      // sonst nicht prüfbar, etwa ohne Bearbeitungsrecht im anderen Kurs
     }
   }
   final offen = cmids.where((c) => !titel.containsKey(c)).toList();
@@ -570,14 +645,20 @@ Future<T> ordnerSperre<T>(String pfad, Future<T> Function() tu) {
   });
 }
 
+///
+/// [abbruch] erfüllt sich, wenn der Client nicht mehr auf das Werkzeug wartet:
+/// Die Anfrage an Moodle wird dann geschlossen und die Sperre des Ordners
+/// frei, sonst stünde ein erneuter Aufruf hinter dem abgebrochenen, bis der
+/// dessen Zeitgrenze erreicht.
 Future<FormularGelesen> formularLesen(
   MoodleZugang moodle,
   Formularziel ziel,
-  String arbeitsordner,
-) {
+  String arbeitsordner, {
+  Future<void>? abbruch,
+}) {
   return ordnerSperre(
     ordnerSchluessel(ziel, arbeitsordner),
-    () => formularLesenOhneSperre(moodle, ziel, arbeitsordner),
+    () => formularLesenOhneSperre(moodle, ziel, arbeitsordner, abbruch: abbruch),
   );
 }
 
@@ -585,9 +666,10 @@ Future<FormularGelesen> formularLesen(
 Future<FormularGelesen> formularLesenOhneSperre(
   MoodleZugang moodle,
   Formularziel ziel,
-  String arbeitsordner,
-) async {
-  final r = await moodle.lesen(ziel.adresse);
+  String arbeitsordner, {
+  Future<void>? abbruch,
+}) async {
+  final r = await moodle.lesen(ziel.adresse, abbruch: abbruch);
   if (r.status != 200) {
     throw MoodleFehler(
       'Das Bearbeitungsformular von ${ziel.bezeichnung} ist nicht abrufbar (HTTP ${r.status}).',
@@ -662,12 +744,28 @@ Future<FormularGelesen> formularLesenOhneSperre(
   await File(p.join(ziel0.path, '.stand', 'einstellungen.json'))
       .writeAsString(einstellungenJson, encoding: utf8);
   final sesskey = wert('sesskey');
-  final bereiche = await _bereicheLesen(
-    moodle,
-    form,
-    bereicheRoh,
-    ziel0.path,
-    sesskey,
+  // Antwortet Moodle nicht mehr, bleibt kein halb gelesener Ordner zurück:
+  // Er sähe wie ein Stand aus, hat aber nicht einmal den Quelltext.
+  Future<void> halbGelesenVerwerfen() async {
+    try {
+      await ziel0.delete(recursive: true);
+    } on FileSystemException {
+      // Der Fehler von Moodle ist die Meldung; ein Rest bleibt dann liegen.
+    }
+  }
+
+  Future<T> ganzOderGarNicht<T>(Future<T> Function() lesen) async {
+    try {
+      return await lesen();
+    } on MoodleFehler catch (x) {
+      if (moodleAntwortetNicht(x)) await halbGelesenVerwerfen();
+      rethrow;
+    }
+  }
+
+  final wartegrenze = _Wartegrenze();
+  final bereiche = await ganzOderGarNicht(
+    () => _bereicheLesen(moodle, form, bereicheRoh, ziel0.path, sesskey, abbruch, wartegrenze),
   );
 
   // Referenzierte Dateien einsammeln: src und href, die auf Datei-Adressen
@@ -704,7 +802,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
       name = '${p.basenameWithoutExtension(name)}-$i$ext';
     }
     try {
-      final d = await moodle.lesen(e.key);
+      final d = await moodle.lesen(e.key, abbruch: abbruch);
       if (d.status != 200) {
         fehlend.add('$name (HTTP ${d.status})');
         continue;
@@ -716,7 +814,15 @@ Future<FormularGelesen> formularLesenOhneSperre(
       namenFuer[e.key] = name;
       dateien.add(GeleseneDatei(name, d.bytes.length, d.inhaltstyp, e.value));
       dateiinfo[name] = dateiAuswerten(name, d.bytes);
+      wartegrenze.gelesen();
     } on MoodleFehler catch (x) {
+      // Nur dieses Bild fehlt (HTTP-Status, gesperrt, zu groß, einmal keine
+      // Antwort) -- nicht: Moodle antwortet nicht. Dann nicht jedes weitere
+      // Bild versuchen, und kein halb gelesener Ordner bleibt zurück.
+      if (!wartegrenze.weiter(x)) {
+        await halbGelesenVerwerfen();
+        rethrow;
+      }
       fehlend.add('$name (${x.meldung})');
     }
   }
@@ -751,26 +857,21 @@ Future<FormularGelesen> formularLesenOhneSperre(
           .whereType<int>(),
     );
   }
-  final titel = await _zielTitel(moodle, kurs, verlinkt, hinweise);
-  final lernlandkarteZielstatus = <int, String>{};
+  final titel = await ganzOderGarNicht(() => _zielTitel(moodle, kurs, verlinkt, hinweise, abbruch: abbruch));
+  // Verknüpft oder fremd nur bei lesbarer Kursstruktur; sonst nicht prüfbar.
+  Set<int>? lokaleCmids;
   if (karte != null && kurs != null) {
     try {
-      final lokaleCmids = (await kursLesen(moodle, kurs)).nachCmid.keys.toSet();
-      for (final cmid in verlinkt) {
-        lernlandkarteZielstatus[cmid] = lokaleCmids.contains(cmid)
-            ? 'im Kurs'
-            : titel.containsKey(cmid)
-            ? 'außerhalb des Kurses'
-            : 'nicht gefunden oder nicht prüfbar';
-      }
+      lokaleCmids = (await kursLesen(moodle, kurs, abbruch: abbruch)).nachCmid.keys.toSet();
+    } on MoodleAbgebrochen {
+      rethrow;
     } on MoodleFehler {
-      for (final cmid in verlinkt) {
-        lernlandkarteZielstatus[cmid] = titel.containsKey(cmid)
-            ? 'Kurszugehörigkeit nicht prüfbar'
-            : 'nicht gefunden oder nicht prüfbar';
-      }
+      lokaleCmids = null;
     }
   }
+  final lernlandkarteZielstatus = karte == null
+      ? <int, OrtVerknuepfung>{}
+      : zielStatusVon(verlinkt, lokaleCmids);
   for (final a in auswertungen) {
     verweiseAbgleichen(a, titel);
   }
@@ -800,6 +901,7 @@ Future<FormularGelesen> formularLesenOhneSperre(
     lernlandkarteTitel: titel,
     lernlandkarteZielstatus: lernlandkarteZielstatus,
     editorFormate: editorFormate,
+    mehrdeutigeAuswahl: mehrdeutigeAuswahlfelder(form),
   );
   await File(p.join(ziel0.path, 'uebersicht.json')).writeAsString(
     const JsonEncoder.withIndent('  ').convert({

@@ -122,6 +122,9 @@ flutter:
   assets:
     - skills/dist/
     - LICENSE.md
+    # Die Fragetyp-Notizen des Skills moodle-fragen (lib/moodle/fragetyp_notizen.dart,
+    # E38); der Skill ist ihre einzige Quelle.
+    - skills/moodle-fragen/fragetypen/
     # Die CD-Vorlagen der SchuCu-Tabelle für das Werkzeug lernsituation_pruefen
     # (lib/moodle/lernsituation_pruefung.dart); der Skill ist ihre einzige Quelle.
     - skills/lernsituation/references/schucu-berufsschule.html

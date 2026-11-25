@@ -217,6 +217,21 @@ _Englisch_: privacy block
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.
 _Englisch_: question bank
 
+**Fragenversion**
+Ein Stand einer Frage. Wer eine Frage ändert, legt eine neue Version an; die alten bleiben erhalten, und ein Test zieht die neueste, die bereit ist. Die Sachnummer bleibt über alle Versionen dieselbe.
+_Englisch_: question version
+_Vermeiden_: Kopie (eine Kopie ist eine neue Frage ohne gemeinsamen Verlauf)
+
+**Rundlaufprobe**
+Der Nachweis nach dem Import einer Frage, dass Moodle sie so gespeichert hat, wie sie eingegeben wurde, und dass sie sich bearbeiten und anzeigen lässt. Sie fällt im Werkzeug, nicht in der KI.
+_Englisch_: round-trip check
+_Nicht zu verwechseln mit_: Lauf (die Zeit, in der ein Plugin liest)
+
+**Fragetyp-Notiz**
+Das Wissen über einen Fragetyp: ein geprüftes Minimalbeispiel, was die Frage braucht und welche Stolpersteine es gibt. Notizen kommen mit dem Skill; eine Lehrkraft kann für ihre Instanz eigene haben, die dann gelten.
+_Englisch_: question type note
+_Vermeiden_: Lerndatei (klingt nach Lernenden)
+
 **Fortschrittsliste**
 Eine Moodle-Aktivität mit Einträgen, die man abhaken kann. Die App liest nur die Einträge, nie, wer sie abgehakt hat.
 _Englisch_: checklist

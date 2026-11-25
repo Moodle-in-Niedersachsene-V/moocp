@@ -3,7 +3,7 @@
 // Arbeitsordners, mit einem Dateinamen, den moocp vergibt. Der Ordner wird
 // beim Start und beim Beenden der App geleert, und am Ende eines Laufs löscht
 // moocp, was der Lauf geladen hat. Sein Pfad steht in keinem Protokoll, und
-// die letzte Sperre hält jeden Text eines Plugins an, der ihn nennt. Auf der
+// die Datenschutzprüfung hält jeden Text eines Plugins an, der ihn nennt. Auf der
 // einen Seite steht ein HTTP-Client im Test an Stelle eines Plugins, auf der
 // anderen das Moodle-Doppel aus test/plugin_moodle_test.dart; das echte
 // Beispiel-Plugin prüft test/plugin_start_test.dart. Alles in Temp-Ordnern,
@@ -15,13 +15,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzpruefung, Datenschutzwarnung;
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
 import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
-import 'package:moocp/plugin/namenssperre.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
@@ -74,6 +74,15 @@ class _Kontext implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) async => PluginFreigabeAusgang.freigegeben;
+
+  /// Die Adresse der App fragt nie die Lehrkraft; nur die laufenden Plugins
+  /// tun es (test/plugin_start_test.dart, test/plugin_datenschutz_test.dart).
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async => DatenschutzAusgang.sperren;
 
   @override
   String? get testDialogantworten => null;
@@ -448,17 +457,16 @@ void main() {
       jsonEncode({'datei': p.join(pfad, 'beispiel', 'A', '3.bin')}),
       'file:///${pfad.replaceAll(r'\', '/')}/beispiel/A/3.bin',
       'Gelesen: ${p.join(pfad, 'beispiel', 'A', '3.bin')} (1234 Bytes)',
-      // Einfach kodiert (namenssperre.dart, kodierungenAufgeloest).
-      Uri.encodeComponent(pfad),
-      Uri.encodeComponent(Uri.encodeComponent(pfad)),
+      // Einfach kodiert (namenssperre.dart, kodierungenAufgeloest); Prozent
+      // gehört nicht dazu.
       // Unicode-Escapes wie in JSON, zusammengesetzt, damit kein Werkzeug sie
       // im Quelltext auflöst.
       pfad.replaceAll(r'\', '${r'\'}u005c').replaceAll('/', '${r'\'}u002f'),
       pfad.replaceAll(r'\', '&#92;').replaceAll('/', '&#x2F;'),
     ];
 
-    test('die letzte Sperre hält jeden Text mit dem Pfad an, für jedes Plugin, auch ohne Namen', () {
-      final sperre = LetzteSperre();
+    test('die Datenschutzprüfung hält jeden Text mit dem Pfad an, für jedes Plugin, auch ohne Namen', () {
+      final sperre = Datenschutzpruefung();
       sperre.pfadSperren(downloads.wurzel);
       for (final t in schreibweisen(downloads.wurzel)) {
         expect(sperre.treffer('beispiel', [t]), isNotNull, reason: t);
@@ -471,19 +479,20 @@ void main() {
       }
     });
 
-    test('ein Treffer auf den Pfad geht an die Lehrkraft als Pfad, nicht als Wort', () {
-      final gemeldet = <SperrTreffer>[];
-      final sperre = LetzteSperre(melden: gemeldet.add)..pfadSperren(downloads.wurzel);
-      expect(
-        sperre.gesperrt('beispiel', ['Datei: ${downloads.wurzel}'], plugin: 'Beispiel', werkzeug: 'beispiel_x', stelle: SperrStelle.ergebnis),
-        isTrue,
-      );
-      expect(gemeldet.single.pfad, isTrue);
-      expect(gemeldet.single.stelle, SperrStelle.ergebnis);
-      expect('${gemeldet.single}', isNot(contains(PluginDownloads.ordnername)));
+    test('ein Treffer auf den Pfad ist ein Pfad-Fund mit der Herkunft Ordner für Downloads, ohne ihn in der Ausgabe', () {
+      final sperre = Datenschutzpruefung()..pfadSperren(downloads.wurzel);
+      final f = sperre.pruefen('beispiel', ['Datei: ${downloads.wurzel}']).single;
+      expect(f.pfad, isTrue);
+      expect(f.herkunft.single.text, 'Ordner für Downloads von Plugins');
+      expect('$f', isNot(contains(PluginDownloads.ordnername)));
     });
 
-    test('Protokollzeile, Aufruf eines eingebauten Werkzeugs und Pfad an Moodle mit dem Pfad: 422, nichts im Protokoll', () async {
+    test('Prozentkodiert wird der Pfad nicht mehr erkannt', () {
+      final sperre = Datenschutzpruefung()..pfadSperren(downloads.wurzel);
+      expect(sperre.treffer('beispiel', [Uri.encodeComponent(downloads.wurzel)]), isNull);
+    });
+
+    test('Protokollzeile mit dem Pfad: Platzhalter; Aufruf eines eingebauten Werkzeugs mit dem Pfad: 422; nichts im Protokoll', () async {
       var aufgerufen = false;
       final a = aufruf(
         eingebaut: (_, _) async {
@@ -493,7 +502,7 @@ void main() {
       );
       for (final t in schreibweisen(downloads.wurzel)) {
         final r = await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Datei liegt in $t'}, token: a.token);
-        expect(r.status, 422, reason: t);
+        expect(r.status, 200, reason: t);
       }
       final w = await anAdresse(adresse.adresse, pfadWerkzeug, {
         'name': 'status',
@@ -502,11 +511,12 @@ void main() {
       expect(w.status, 422);
       expect(aufgerufen, isFalse);
       // Ohne Token ebenso, und für ein anderes Plugin.
-      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel})).status, 422);
+      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel})).status, 200);
       expect(
         (await anAdresse(adresse.adresse, pfadProtokoll, {'text': downloads.wurzel}, schluessel: _zweiterSchluessel)).status,
-        422,
+        200,
       );
+      expect(zeilen().where((z) => z.endsWith(protokollPlatzhalterPfad)), isNotEmpty);
       expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Aufgabe 3 fertig'}, token: a.token)).status, 200);
       ohnePfad(zeilen().join('\n'));
       expect(zeilen(), contains('info: Plugin „Beispiel“: Aufgabe 3 fertig'));
@@ -515,7 +525,7 @@ void main() {
     test('eine Antwort des Plugins an die KI mit dem Pfad wird gesperrt', () async {
       final l = LaufendePlugins(protokoll, downloads: downloads);
       addTearDown(l.beenden);
-      final sperre = l.sperre;
+      final sperre = l.pruefung;
       expect(sperre.treffer('beispiel', ['Gespeichert unter ${downloads.wurzel}']), isNotNull);
     });
   });

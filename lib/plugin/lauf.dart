@@ -9,7 +9,7 @@
 // Ein Lauf gehört zu einem Plugin, einem Instanzprofil und einem Aufruf; je
 // Aufruf läuft höchstens einer zugleich. Er endet, wenn das Plugin ihn beendet
 // oder der Aufruf endet oder abgebrochen wird, auch weil das Plugin abstürzt.
-// Die Namen bleiben danach für die letzte Sperre geladen, bis die App endet;
+// Die Namen bleiben danach für die Datenschutzprüfung geladen, bis die App endet;
 // was der Lauf über Zusatzadressen heruntergeladen hat (downloads.dart),
 // löscht sein Ende. Die Funktionen der Adresse der App stehen in
 // app_adresse.dart, das Lesen selbst in moodle_schreiben.dart (ZusatzLeser);
@@ -103,7 +103,7 @@ class Lauf {
 }
 
 /// Was der Beginn eines Laufs ermittelt hat: der Lauf und die Namen der
-/// Teilnehmenden für die letzte Sperre. Die Namen gehen nur an die letzte
+/// Teilnehmenden für die Datenschutzprüfung. Die Namen gehen nur an die letzte
 /// Sperre, nie an das Plugin, in ein Protokoll oder eine Datei.
 typedef LaufBeginn = ({Lauf lauf, List<String> namen});
 
@@ -389,7 +389,7 @@ String _parametername(String roh) => prozentAufgeloest(
 /// `/mod/`, das `id` anders liest als Moodle üblich (etwa als Nummer einer
 /// Instanz oder eines Kurses). Damit kann ein Plugin über eine seiner
 /// Zusatzadressen an Daten eines anderen Kurses kommen, wenn das Skript dahinter
-/// es zulässt; die letzte Sperre kennt dann nur die Namen dieses Kurses. Dafür
+/// es zulässt; die Datenschutzprüfung kennt dann nur die Namen dieses Kurses. Dafür
 /// steht das Plugin ein, das die Zusatzadresse angemeldet hat (E35).
 ///
 /// [felder] sind die Formularfelder eines POST. Moodle liest ein Feld vor dem

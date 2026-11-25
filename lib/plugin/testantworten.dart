@@ -36,7 +36,7 @@
 // Nur die Dialoge, die ein Plugin über die Adresse der App zeigen lässt,
 // lassen sich so beantworten. Die Zustimmung zu einem Plugin, der Dialog
 // eines Entwicklungs-Plugins, die Dialoge zu Schnittstelle und Update eines
-// Plugins, die Freigaben und die Warnung der letzten Sperre lesen diese Datei
+// Plugins, die Freigaben und die Warnung der Datenschutzprüfung lesen diese Datei
 // nie.
 
 import 'dart:convert';

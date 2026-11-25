@@ -5,7 +5,7 @@
 // Lauf im gebundenen Testkurs frei; Dialoge eines Plugins beantwortet er aus
 // einer Datei neben der Zugangsdatei des Testprofils. Nie automatisch: die
 // Zustimmung, der Dialog eines Entwicklungs-Plugins, Schnittstelle und Update,
-// alles, was auf jeder Stufe fragt, und die letzte Sperre.
+// alles, was auf jeder Stufe fragt, und die Datenschutzprüfung.
 //
 // Auf der einen Seite steht ein HTTP-Client im Test an Stelle eines Plugins,
 // auf der anderen ein Moodle-Doppel; die Testzugänge sind von Hand gebunden,
@@ -27,7 +27,7 @@ import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart';
-import 'package:moocp/plugin/namenssperre.dart';
+import 'package:moocp/plugin/datenschutz.dart' show Datenschutzpruefung;
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:moocp/testschalter.dart';
@@ -93,7 +93,6 @@ void main() {
   late Protokoll protokoll;
   late Freigaben freigaben;
   late PluginDialoge dialoge;
-  late SperrHinweise hinweise;
   late AppAdresse adresse;
 
   /// Die Freigaben und Dialoge, die die Lehrkraft zu sehen bekam; beantwortet
@@ -123,8 +122,7 @@ void main() {
         scheduleMicrotask(() => dialoge.beantworten(d, null));
       }
     });
-    hinweise = SperrHinweise();
-    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, sperre: LetzteSperre(melden: hinweise.melden));
+    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, pruefung: Datenschutzpruefung());
     adresse.pluginAnmelden('beispiel', 'Beispiel', _schluessel, zusatzadressen: _zusatzadressen);
   });
 
@@ -798,7 +796,7 @@ void main() {
       expect(zeilen(), contains(contains('Ein Eintrag der Datei mit vorbereiteten Dialogantworten ist ungültig')));
     });
 
-    test('die letzte Sperre bleibt: Gesperrtes geht nicht hinaus, die Warnung beantwortet niemand', () async {
+    test('die Datenschutzprüfung bleibt: Eine Protokollzeile mit Namen erscheint nur als Platzhalter, ohne Dialog', () async {
       antwortenSchreiben([
         for (final art in ['auswahl', 'eingabe', 'pfad', 'hinweis'])
           {'plugin': 'beispiel', 'art': art, 'titel': 'Gesperrt: möglicher Name', 'antwort': <String, Object?>{}},
@@ -810,9 +808,11 @@ void main() {
 
       final r = await _post(adresse.adresse, pfadProtokoll, {'text': 'Bearbeitet: Erika'}, token: a.token);
 
-      expect(r.status, 422);
+      expect(r.status, 200);
       expect(zeilen().join('\n'), isNot(contains('Erika')));
-      expect(hinweise.offen, hasLength(1));
+      expect(zeilen(), contains(contains('[gesperrt: möglicher Name]')));
+      expect(dialogeGezeigt, isEmpty);
+      expect(gezeigt, isEmpty);
     });
   });
 
@@ -836,8 +836,8 @@ void main() {
       }
     });
 
-    test('die letzte Sperre kennt den Testbetrieb nicht', () {
-      for (final datei in ['lib/plugin/namenssperre.dart', 'lib/plugin/laufende_plugins.dart']) {
+    test('die Datenschutzprüfung kennt den Testbetrieb nicht', () {
+      for (final datei in ['lib/plugin/namenssperre.dart', 'lib/plugin/datenschutz.dart', 'lib/plugin/laufende_plugins.dart']) {
         final text = File(datei).readAsStringSync();
         expect(text, isNot(contains(RegExp(r'testbetriebAktiv|Testzugang|imTest\('))), reason: datei);
       }

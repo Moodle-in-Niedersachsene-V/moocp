@@ -20,6 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
+import '../plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
@@ -483,6 +484,39 @@ class McpDienst implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, null, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _datenschutzwarnung(warnung, abbruch, aufrufer);
+
+  /// Die Datenschutzwarnung (E36) durch die Freigaben dieses Profils: auf
+  /// jeder Stufe (`ab: keine`), im Testbetrieb ohne automatische Freigabe.
+  /// Das Protokoll nennt nur Plugin und Werkzeug, nie ein Wort (Freigaben
+  /// schreibt den Titel mit).
+  Future<DatenschutzAusgang> _datenschutzwarnung(
+    Datenschutzwarnung warnung,
+    Future<void> abbruch,
+    String aufrufer,
+  ) async {
+    final a = FreigabeAnfrage(
+      titel: 'Datenschutzwarnung',
+      punkte: const [],
+      vergleich: const [],
+      knopf: 'Kein Name – trotzdem an die KI geben',
+      ablehnen: 'Sperren',
+      ohneEntscheidung: 'wird die Antwort gesperrt',
+      ab: Bestaetigungen.keine,
+      datenschutz: warnung,
+      protokolltitel: 'Datenschutzwarnung',
+    );
+    final ja = await Freigaben.ohneTestfreigabe(
+      () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), aufrufer: aufrufer),
+    );
+    return ja ? DatenschutzAusgang.senden : DatenschutzAusgang.sperren;
+  }
 
   @override
   String? get testDialogantworten => _testbetrieb.dialogantworten(profil, testzugang ?? Testzugang.fuer(profil));
@@ -2654,6 +2688,13 @@ class _KontextImAufruf implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) => _dienst._pluginFreigabe(titel, zusammenfassung, ab, abbruch, aufrufer, _zaehler, punkte, protokolltitel, laufKurs);
+
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) => _dienst._datenschutzwarnung(warnung, abbruch, aufrufer);
 
   @override
   String? get testDialogantworten => _dienst.testDialogantworten;

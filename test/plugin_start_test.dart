@@ -93,7 +93,7 @@ void main() {
     File(p.join(beispielOrdner, 'plugin.json')).copySync(p.join(vorlage.path, 'plugin.json'));
     eingebaut = await eingebauteWerkzeuge();
   });
-  tearDownAll(() => vorlage.deleteSync(recursive: true));
+  tearDownAll(() => ordnerLoeschen(vorlage));
 
   late Directory wurzel;
   late Protokoll protokoll;
@@ -144,7 +144,7 @@ void main() {
       await l.beenden();
     }
     laufende.clear();
-    wurzel.deleteSync(recursive: true);
+    await ordnerLoeschen(wurzel);
   });
 
   /// Legt das übersetzte Beispiel-Plugin unter `plugins/beispiel` an und

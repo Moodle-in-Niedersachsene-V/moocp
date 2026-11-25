@@ -1321,6 +1321,144 @@ void main() {
     });
   });
 
+  group('Datenschutzprüfung: Pfade melden', () {
+    // Erfundene Pfade (A8, A11).
+    const ordner = '/home/e.mustermann/Klasse 9b/Abgaben';
+
+    Future<({int status, Map json})> melden(String token, Object? pfade) =>
+        _post(adresse.adresse, pfadPfade, daten: {'pfade': pfade}, token: token);
+
+    test('Pfade melden braucht das Token eines laufenden Aufrufs; Antwort und Protokoll nennen nur die Zahl', () async {
+      expect((await _post(adresse.adresse, pfadPfade, daten: {'pfade': [ordner]})).status, 403);
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final r = await melden(a.token, [ordner, r'D:\Schule\Klassenarbeiten']);
+
+      expect(r.status, 200);
+      expect(r.json, isEmpty);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: 2 Pfade zum Sperren genannt'));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), 2);
+      expect(zeilen().join('\n'), isNot(contains('Klasse')));
+      expect(zeilen().join('\n'), isNot(contains('Klassenarbeiten')));
+    });
+
+    test('eine Protokollzeile mit dem Pfad erscheint nur als Pfad-Platzhalter, ohne Rückfrage und ohne Fehler', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      await melden(a.token, [ordner]);
+
+      final mit = await _post(
+        adresse.adresse,
+        pfadProtokoll,
+        daten: {'text': r'Lese \HOME\e.mustermann\klasse 9b\Abgaben\x.pdf'},
+        token: a.token,
+      );
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Lese /home/e.mustermann/andere'}, token: a.token);
+
+      expect(mit.status, 200);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: $protokollPlatzhalterPfad'));
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Lese /home/e.mustermann/andere'));
+      expect(zeilen().join('\n').toLowerCase(), isNot(contains('klasse 9b')));
+      expect(protokoll.eintraege.where((e) => e.art == Art.gesperrt), isEmpty);
+      expect(dialoge.aktuell, isNull);
+    });
+
+    test('die Pfade gelten nach dem Ende des Aufrufs und in jedem Profil, aber nur für dieses Plugin', () async {
+      protokoll.profilnamenZeigen = true;
+      adresse.pluginAnmelden('anderes', 'Anderes', _fremderSchluessel);
+      final a = _aufruf(kontext('A'));
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
+      await melden(a.token, [ordner]);
+      ende();
+      final b = _aufruf(kontext('B'));
+      adresse.aufrufAnmelden('beispiel', b);
+      final fremd = _aufruf(kontext('C'));
+      adresse.aufrufAnmelden('anderes', fremd);
+
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'in $ordner'}, token: b.token);
+      await _post(
+        adresse.adresse,
+        pfadProtokoll,
+        daten: {'text': 'in $ordner'},
+        schluessel: _fremderSchluessel,
+        token: fremd.token,
+      );
+
+      expect(zeilen(), contains('[B] Plugin „Beispiel“: $protokollPlatzhalterPfad'));
+      expect(zeilen(), contains('[C] Plugin „Anderes“: in $ordner'));
+      expect(adresse.pruefung.pfadAnzahl('anderes'), 0);
+    });
+
+    test('ein Werkzeugaufruf mit dem Pfad wird abgelehnt, ohne Dialog und ohne den Pfad im Protokoll', () async {
+      final k = kontext('A');
+      final a = _aufruf(k);
+      adresse.aufrufAnmelden('beispiel', a);
+      await melden(a.token, [ordner]);
+
+      final r = await _post(
+        adresse.adresse,
+        pfadWerkzeug,
+        daten: {'name': 'status', 'argumente': {'x': 'siehe $ordner'}},
+        token: a.token,
+      );
+
+      expect(r.status, 422);
+      expect(k.aufgerufen, isEmpty);
+      expect(zeilen().join('\n'), isNot(contains('Abgaben')));
+      expect(dialoge.aktuell, isNull);
+    });
+
+    test('Grenzen: leer, zu viele, zu lang, kein Text, Wurzel und Laufwerk: abgelehnt, nichts aufgenommen, kein Pfad in der Meldung', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final antworten = {
+        'fehlt': await _post(adresse.adresse, pfadPfade, daten: <String, Object?>{}, token: a.token),
+        'leer': await melden(a.token, <String>[]),
+        'keine Liste': await melden(a.token, ordner),
+        'zu viele': await melden(a.token, [for (var i = 0; i <= pfadeJeAnfrageHoechstens; i++) '/home/x/$i']),
+        'zu lang': await melden(a.token, [ordner, '/home/${'x' * gemeldeterPfadHoechstens}']),
+        'kein Text': await melden(a.token, [ordner, 3]),
+        'Wurzel': await melden(a.token, [ordner, '/']),
+        'Laufwerk': await melden(a.token, [ordner, r'C:\']),
+        'ein Teil': await melden(a.token, [ordner, 'Abgaben']),
+      };
+
+      expect({for (final e in antworten.entries) e.key: e.value.status}, {
+        'fehlt': 400,
+        'leer': 400,
+        'keine Liste': 400,
+        'zu viele': 413,
+        'zu lang': 400,
+        'kein Text': 400,
+        'Wurzel': 400,
+        'Laufwerk': 400,
+        'ein Teil': 400,
+      });
+      expect(antworten['Wurzel']!.json['fehler'], contains('Nr. 2'));
+      expect(antworten.values.map((r) => jsonEncode(r.json)).join(), isNot(contains('Abgaben')));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), 0, reason: 'nichts, auch nicht teilweise');
+    });
+
+    test('je Plugin höchstens $pfadeJePluginHoechstens verschiedene Pfade; gleiche zählen einmal', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      for (var i = 0; i < pfadeJePluginHoechstens - 1; i += pfadeJeAnfrageHoechstens) {
+        final bis = (i + pfadeJeAnfrageHoechstens).clamp(0, pfadeJePluginHoechstens - 1);
+        adresse.pruefung.pfadeHinzufuegen('beispiel', [for (var j = i; j < bis; j++) '/home/x/$j']);
+      }
+
+      final nochEiner = await melden(a.token, [ordner, ordner.toUpperCase(), ordner.replaceAll('/', r'\')]);
+      final zuViel = await melden(a.token, ['/home/y/zuviel']);
+
+      expect(nochEiner.status, 200);
+      expect(zuViel.status, 413);
+      expect(zuViel.json['fehler'], contains('höchstens $pfadeJePluginHoechstens'));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), pfadeJePluginHoechstens);
+    });
+  });
+
   group('Die Hülle direkt', () {
     test('direkt aufgerufen: dieselbe Hülle, der Aufrufer im Hinweis und im Protokoll; ein unbekannter Name gibt null', () async {
       final f = Freigaben(protokoll, stufe: Bestaetigungen.keine);

@@ -119,6 +119,7 @@ const pfadLaufBeenden = '/v1/moodle/lauf/beenden';
 const pfadZusatzLesen = '/v1/moodle/zusatz/lesen';
 const pfadZusatzDatei = '/v1/moodle/zusatz/datei';
 const pfadNamen = '/v1/namen';
+const pfadPfade = '/v1/pfade';
 
 /// Höchstens so viele Namen nimmt /v1/namen in einer Anfrage: genug für alle
 /// Teilnehmenden einer großen Schule auf einmal.
@@ -131,6 +132,16 @@ const nameHoechstens = 200;
 /// endet. Sie liegen im Arbeitsspeicher; die Grenze hält ein Plugin davon ab,
 /// ihn zu füllen, und reicht für viele Kurse.
 const namenJePluginHoechstens = 100000;
+
+/// Höchstens so viele Pfade nimmt /v1/pfade in einer Anfrage.
+const pfadeJeAnfrageHoechstens = 1000;
+
+/// Höchstlänge eines gemeldeten Pfads in Zeichen.
+const gemeldeterPfadHoechstens = 1000;
+
+/// Höchstens so viele verschiedene Pfade hält die App je Plugin, bis sie
+/// endet (Arbeitsspeicher, wie bei den Namen).
+const pfadeJePluginHoechstens = 10000;
 
 /// Was statt einer Protokollzeile eines Plugins mit einem möglichen Namen oder
 /// einem geschützten Pfad im Protokoll steht (E36). Immer derselbe Text: er
@@ -580,6 +591,7 @@ class AppAdresse {
     pfadZusatzLesen: const _Funktion(mitAufruf: true, ausfuehren: _zusatzLesen),
     pfadZusatzDatei: const _Funktion(mitAufruf: true, ausfuehren: _zusatzDatei),
     pfadNamen: const _Funktion(mitAufruf: true, ausfuehren: _namenSperren),
+    pfadPfade: const _Funktion(mitAufruf: true, ausfuehren: _pfadeSperren),
   };
 
   /// Die Antwort, wenn die Datenschutzsperre etwas abgelehnt hat, das gleich
@@ -646,6 +658,66 @@ class AppAdresse {
     aufruf!.kontext.protokoll.eintrag(
       Art.info,
       '${plugin.aufrufer}: ${namen.length} ${namen.length == 1 ? 'Name' : 'Namen'} zum Sperren genannt',
+    );
+    return (status: HttpStatus.ok, json: <String, Object?>{});
+  }
+
+  /// `POST /v1/pfade` `{"pfade": ["…", …]}`: Pfade von Ordnern oder Dateien,
+  /// die nicht an die KI gehören (etwa ein Ordner mit Abgaben, den das Plugin
+  /// selbst angelegt hat). Die App sperrt sie von nun an für dieses Plugin, bis
+  /// sie endet, wie die Namen (datenschutz.dart): in jeder Antwort an die KI
+  /// (mit Datenschutzwarnung, zusammen mit Namen und dem Ordner für Downloads)
+  /// und jeder Protokollzeile (Platzhalter). Nur hinzufügen, nie entfernen oder
+  /// abfragen. Grenzen: [pfadeJeAnfrageHoechstens] je Anfrage, [gemeldeterPfadHoechstens]
+  /// Zeichen je Pfad, [pfadeJePluginHoechstens] verschiedene je Plugin; ein
+  /// Pfad braucht mindestens zwei Teile. Verstößt etwas, nimmt die App keinen
+  /// auf. Antwort `{}`; ins Protokoll geht nur die Zahl, keine Meldung nennt
+  /// einen Pfad.
+  static Future<_Antwort> _pfadeSperren(
+    AppAdresse a,
+    _Plugin plugin,
+    _Aufruf? aufruf,
+    Map<String, Object?> daten,
+  ) async {
+    final liste = daten['pfade'];
+    if (liste is! List || liste.isEmpty) {
+      return _fehler(HttpStatus.badRequest, 'pfade fehlt: eine Liste mit mindestens einem Pfad als Text.');
+    }
+    if (liste.length > pfadeJeAnfrageHoechstens) {
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        'Zu viele Pfade: höchstens $pfadeJeAnfrageHoechstens je Anfrage; nichts aufgenommen.',
+      );
+    }
+    final pfade = <String>[];
+    for (final (i, x) in liste.indexed) {
+      final nr = i + 1;
+      if (x is! String) return _fehler(HttpStatus.badRequest, 'Pfad Nr. $nr ist kein Text; nichts aufgenommen.');
+      if (x.length > gemeldeterPfadHoechstens) {
+        return _fehler(
+          HttpStatus.badRequest,
+          'Pfad Nr. $nr ist länger als $gemeldeterPfadHoechstens Zeichen; nichts aufgenommen.',
+        );
+      }
+      if (!Datenschutzpruefung.pfadTaugt(x)) {
+        return _fehler(
+          HttpStatus.badRequest,
+          'Pfad Nr. $nr hat weniger als zwei Teile (ein Laufwerk, die Wurzel oder ein einzelner Name sperrte zu viel); '
+          'nichts aufgenommen.',
+        );
+      }
+      pfade.add(x);
+    }
+    if (a.pruefung.pfadAnzahl(plugin.kurzname) + a.pruefung.pfadeNeu(plugin.kurzname, pfade) > pfadeJePluginHoechstens) {
+      return _fehler(
+        HttpStatus.requestEntityTooLarge,
+        'Zu viele Pfade: Je Plugin hält moocp höchstens $pfadeJePluginHoechstens verschiedene; nichts aufgenommen.',
+      );
+    }
+    a.pruefung.pfadeHinzufuegen(plugin.kurzname, pfade);
+    aufruf!.kontext.protokoll.eintrag(
+      Art.info,
+      '${plugin.aufrufer}: ${pfade.length} ${pfade.length == 1 ? 'Pfad' : 'Pfade'} zum Sperren genannt',
     );
     return (status: HttpStatus.ok, json: <String, Object?>{});
   }

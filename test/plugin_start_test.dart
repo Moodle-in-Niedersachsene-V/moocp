@@ -23,7 +23,7 @@ import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
-import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung, Herkunft;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
 import 'package:moocp/plugin/werkzeugliste.dart';
@@ -213,7 +213,7 @@ void main() {
 
       expect(text, 'Echo: Hallo\nProfil: moodle\nAufruf-Token: erhalten\nSchnittstelle: 1');
       final zeilen = [for (final e in protokoll.eintraege) e.text];
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 gestartet (18 Werkzeuge)'));
       expect(zeilen, contains('beispiel_echo({"text":"Hallo"})'));
       expect(zeilen, contains('beispiel_echo: Echo: Hallo'));
     });
@@ -787,6 +787,56 @@ void main() {
       expect(freigaben.ausgelassen, 0, reason: 'diese Freigabe lässt keine Stufe aus');
     });
 
+    test('Datenschutzwarnung: Das Beispiel nennt einen Pfad; seine Protokollzeile wird zum Platzhalter, seine Antwort fragt, Sperren hält sie an', () async {
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
+      final a = await verbinden(eins, l);
+
+      final r = await a.call('tools/call', {'name': 'beispiel_pfade', 'arguments': <String, Object?>{}});
+
+      expect(r['isError'], true);
+      expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_pfade'));
+      expect(jsonEncode(r), isNot(contains('Abgaben')));
+      expect(warnungen, hasLength(1));
+      expect([warnungen.single.hatPfade, warnungen.single.hatNamen], [true, false]);
+      expect(warnungen.single.funde.single.herkunft, [Herkunft.pluginPfad]);
+      expect(warnungen.single.funde.single.wort, '/home/e.mustermann/Klasse 9b/Abgaben');
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“: 1 Pfad zum Sperren genannt'));
+      expect(zeilen, contains('Plugin „Beispiel“: [gesperrt: Pfad]'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_pfade: Datenschutzwarnung, 1 Treffer, gesperrt'));
+      expect(zeilen.join('\n'), isNot(contains('Abgaben')));
+    });
+
+    test('Datenschutzwarnung: Name, Pfad des Plugins und Ordner für Downloads in einer Antwort sind eine Warnung; „trotzdem senden“ gilt nur für diese Antwort', () async {
+      final (downloads, _) = PluginDownloads.einrichten(basis: p.join(wurzel.path, 'temp'));
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]), mit: LaufendePlugins(protokoll, downloads: downloads));
+      final a = await verbinden(eins, l);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      await a.call('tools/call', {'name': 'beispiel_pfade', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      final text = 'Erika: /home/e.mustermann/Klasse 9b/Abgaben/x.pdf und ${downloads.wurzel}';
+
+      final gesperrt = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
+      warnantwort = () => true;
+      final gesendet = await a.tool('beispiel_echo', {'text': text});
+      warnantwort = () => false;
+      final wieder = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': text}});
+
+      expect(gesperrt['isError'], true);
+      expect(gesendet, startsWith('Echo: $text'), reason: 'unverändert, erst nach ausdrücklichem Senden');
+      expect(wieder['isError'], true, reason: 'nichts wird gemerkt');
+      expect(warnungen, hasLength(3));
+      final w = warnungen.first;
+      expect([w.hatNamen, w.hatPfade], [true, true]);
+      expect(w.funde.expand((f) => f.herkunft).toSet(), {
+        Herkunft.pluginName,
+        Herkunft.pluginPfad,
+        Herkunft.downloadOrdner,
+      });
+    });
+
     test('es läuft einmal je App, auch mit zwei Profilen; jeder Aufruf trägt sein Profil', () async {
       final eins = beispielProfil('standard', 'moodle', await freierPort());
       final zwei = beispielProfil('k2', 'moodle-test', await freierPort());
@@ -1123,7 +1173,7 @@ void main() {
       expect(await prozessLaeuft(g.prozesse.first.pid), isFalse);
       final zeilen = [for (final z in protokoll.eintraege) z.text];
       expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 unerwartet beendet (Exit-Code 3)'));
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'));
       for (final s in g.starts) {
         expect(zeilen.join('\n'), isNot(contains(s.split(' ').last)), reason: 'kein Schlüssel im Protokoll');
       }
@@ -1197,7 +1247,7 @@ void main() {
       expect(g.laufende.ausgefalleneNamen, isEmpty);
       expect(g.starts, hasLength(4), reason: 'der Start und drei Neustarts');
       final zeilen = [for (final z in protokoll.eintraege) z.text];
-      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'), hasLength(3));
+      expect(zeilen.where((z) => z == 'Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'), hasLength(3));
     });
 
     test('stürzt es binnen der Frist nach einem Neustart wieder ab: ausgefallen, jedes Werkzeug nennt das Plugin und bleibt gelistet', () async {
@@ -1271,7 +1321,7 @@ void main() {
         zeilen,
         contains(allOf(startsWith('Plugin „Beispiel“ nicht neu gestartet: '), endsWith('moocp versucht es noch einmal.'))),
       );
-      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (17 Werkzeuge)'));
+      expect(zeilen, contains('Plugin „Beispiel“ 1.0.0 neu gestartet (18 Werkzeuge)'));
     });
 
     test('scheitert auch der zweite Versuch des Neustarts, ist es ausgefallen', () async {

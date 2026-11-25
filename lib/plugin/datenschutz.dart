@@ -30,8 +30,10 @@ export '../datenschutzwarnung.dart';
 
 /// Ein gesperrter Pfad als Muster, das Trenner gleich behandelt.
 class _Pfad {
-  _Pfad(this.muster, this.letzter, this.herkunft);
+  _Pfad(this.schluessel, this.muster, this.letzter, this.herkunft);
 
+  /// Der Pfad klein und mit `/` als Trenner: gleiche Pfade haben denselben.
+  final String schluessel;
   final RegExp muster;
 
   /// Der letzte Teil in Kleinbuchstaben für die schnelle Vorprüfung.
@@ -72,10 +74,38 @@ class Datenschutzpruefung {
 
   /// Wie [pfadSperren], aber nur für Texte des Plugins [kurzname]: ein Pfad,
   /// den das Plugin selbst gemeldet hat. Pfade lassen sich nur hinzufügen.
-  void pfadHinzufuegen(String kurzname, String pfad, {Herkunft herkunft = Herkunft.pluginPfad}) {
-    final p = _pfadAus(pfad, herkunft);
-    if (p != null) (_pfadeJe[kurzname] ??= []).add(p);
+  void pfadHinzufuegen(String kurzname, String pfad, {Herkunft herkunft = Herkunft.pluginPfad}) =>
+      pfadeHinzufuegen(kurzname, [pfad], herkunft: herkunft);
+
+  /// Wie [pfadHinzufuegen] für mehrere Pfade. Ein Pfad, der in anderer
+  /// Schreibweise (Groß-/Kleinschreibung, Trenner) schon da ist, kommt nicht
+  /// noch einmal hinein.
+  void pfadeHinzufuegen(String kurzname, Iterable<String> pfade, {Herkunft herkunft = Herkunft.pluginPfad}) {
+    final liste = _pfadeJe[kurzname] ??= [];
+    for (final pfad in pfade) {
+      final p = _pfadAus(pfad, herkunft);
+      if (p != null && !liste.any((q) => q.schluessel == p.schluessel)) liste.add(p);
+    }
   }
+
+  /// Wie viele verschiedene Pfade das Plugin [kurzname] gemeldet hat.
+  int pfadAnzahl(String kurzname) => _pfadeJe[kurzname]?.length ?? 0;
+
+  /// Wie viele der [pfade] das Plugin [kurzname] noch nicht gemeldet hat
+  /// (gleiche in [pfade] zählen einmal); für die Grenze je Plugin.
+  int pfadeNeu(String kurzname, Iterable<String> pfade) {
+    final da = {for (final p in _pfadeJe[kurzname] ?? const <_Pfad>[]) p.schluessel};
+    final neu = <String>{};
+    for (final pfad in pfade) {
+      final p = _pfadAus(pfad, Herkunft.pluginPfad);
+      if (p != null && !da.contains(p.schluessel)) neu.add(p.schluessel);
+    }
+    return neu.length;
+  }
+
+  /// Ob [pfad] sich sperren lässt: mindestens zwei Teile, sonst träfe ein
+  /// Laufwerk, die Wurzel oder ein einzelner Name fast jeden Pfad.
+  static bool pfadTaugt(String pfad) => _pfadAus(pfad, Herkunft.pluginPfad) != null;
 
   static _Pfad? _pfadAus(String pfad, Herkunft herkunft) {
     var f = pfad.toLowerCase().replaceAll(RegExp(r'[\\/]+'), '/');
@@ -87,7 +117,7 @@ class Datenschutzpruefung {
     // Ein Laufwerk oder die Wurzel allein träfe jeden Pfad.
     if (letzter.isEmpty || teile.length < 2) return null;
     final muster = RegExp(teile.map(RegExp.escape).join(r'[\\/]+'), caseSensitive: false);
-    return _Pfad(muster, letzter, herkunft);
+    return _Pfad(f, muster, letzter, herkunft);
   }
 
   List<_Pfad> _pfadeFuer(String kurzname) => [..._pfade, ...?_pfadeJe[kurzname]];

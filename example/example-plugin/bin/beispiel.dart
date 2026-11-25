@@ -26,7 +26,7 @@
 //    Protokollzeilen: Trifft eine Antwort einen Namen, den das Plugin
 //    genannt hat, fragt moocp die Lehrkraft, ob sie trotzdem an die KI
 //    geht; eine Protokollzeile mit Treffer erscheint nur als Platzhalter
-//    (`beispiel_namen`).
+//    (`beispiel_namen`, `beispiel_pfade`).
 // 6. Sich beenden, wenn die Standardeingabe endet: Dann ist moocp fort, auch
 //    wenn es sich nicht ordentlich beenden konnte. So bleibt kein Plugin
 //    zurück.
@@ -77,7 +77,8 @@
 // Freigabe; in einem Lauf auch selbst prüfen), `beispiel_lauf` (in einem Lauf über eine
 // Zusatzadresse lesen), `beispiel_download` (in einem Lauf über eine
 // Zusatzadresse herunterladen), `beispiel_namen` (Namen nennen; bei einem Treffer
-// in einer Antwort fragt moocp die Lehrkraft).
+// in einer Antwort fragt moocp die Lehrkraft) und `beispiel_pfade` (Pfade
+// nennen, die nicht an die KI gehören; wirkt wie die Namen).
 //
 // Übersetzen für die Installation: bauen.ps1 (Windows) und bauen.sh (Mac)
 // übersetzen das Programm mit `dart compile exe` unter dem Namen, den
@@ -814,6 +815,39 @@ McpServer _server() {
         return text(f.text, fehler: true);
       }
       return text('Ergebnis für $name: 3 von 4 Punkten.');
+    },
+  );
+
+  // Pfade, die nicht an die KI gehören: Legt ein Plugin einen Ordner an, in
+  // dem Daten von Personen liegen können (etwa Abgaben), nennt es moocp den
+  // Pfad (`/v1/pfade`, `{"pfade": [...]}`, mit Token, wie bei den Namen). Von
+  // da an behandelt moocp ihn wie die Namen: Eine Antwort, in der er steht
+  // (auch eine Datei darin, in jeder Schreibweise), hält moocp an und fragt
+  // die Lehrkraft, zusammen mit Namen und dem Ordner für Downloads in einer
+  // Warnung; eine Protokollzeile damit erscheint nur als Platzhalter. Pfade
+  // lassen sich nur hinzufügen, nicht entfernen oder abfragen. Ein Pfad hat
+  // mindestens zwei Teile; ein Laufwerk oder die Wurzel lehnt moocp ab.
+  //
+  // Dieses Werkzeug tut wieder absichtlich, was ein Plugin nie tun soll: Es
+  // nennt einen erfundenen Pfad und gibt ihn dann in der Antwort zurück.
+  server.registerTool(
+    'beispiel_pfade',
+    description:
+        'Nennt moocp einen erfundenen Ordner mit Abgaben und gibt ihn dann zurück; moocp fragt die Lehrkraft, ob die Antwort an die KI geht. '
+        '$nurSchnittstelle',
+    inputSchema: JsonSchema.object(properties: {}),
+    annotations: hinweise('Datenschutzwarnung bei Pfaden (Beispiel)'),
+    callback: (args, extra) async {
+      const ordner = '/home/e.mustermann/Klasse 9b/Abgaben';
+      try {
+        await anMoocp(adresse(), '/v1/pfade', {
+          'pfade': [ordner],
+        }, aufruf: token(extra));
+        await anMoocp(adresse(), '/v1/protokoll', {'text': 'Abgaben liegen in $ordner'}, aufruf: token(extra));
+      } on MoocpFehler catch (f) {
+        return text(f.text, fehler: true);
+      }
+      return text('Die Abgaben liegen in $ordner/Aufgabe 3.pdf.');
     },
   );
   return server;

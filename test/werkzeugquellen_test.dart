@@ -40,6 +40,7 @@ const _eingebaut = [
   'loeschen',
   'sichern_aktivitaet',
   'sicherung_status',
+  'sicherung_loeschen',
   'wiederherstellen_datei',
   'wiederherstellung_status',
   'sichern_auswahl',

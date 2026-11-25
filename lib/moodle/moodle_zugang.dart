@@ -926,6 +926,61 @@ class MoodleZugang {
       parameter: (q) =>
           _nurSchluessel(q, {'contextid'}) && _zahl(q['contextid']),
     ),
+    // Dateimanager des persönlichen Sicherungsbereichs (sicherung_loeschen,
+    // sicherung_loeschen.dart). Nur dieser Bereich (component=user, filearea=backup),
+    // und die Rücksprungadresse ist die Seite Wiederherstellen desselben Kontexts.
+    // Das Speichern schreibt den GANZEN Bereich neu; die Regel kann den Stand nicht
+    // vergleichen, das tut der Aufrufer vor und nach dem Speichern. Dass `contextid` der
+    // eigene Benutzerkontext ist, prüft die Regel nicht (nur eine Zahl): Der Aufrufer liest sie
+    // von der eigenen Seite Wiederherstellen, und Moodles Rechteprüfung bleibt maßgeblich.
+    Erlaubt(
+      'GET',
+      r'^/backup/backupfilesedit\.php$',
+      'Sicherungsbereich: Dateimanager öffnen',
+      parameter: (q) =>
+          _nurSchluessel(q, {'currentcontext', 'contextid', 'filearea', 'component', 'returnurl'}) &&
+          _zahl(q['currentcontext']) &&
+          _zahl(q['contextid']) &&
+          q['filearea'] == 'backup' &&
+          q['component'] == 'user' &&
+          q['returnurl'] == '/backup/restorefile.php?contextid=${q['currentcontext']}',
+    ),
+    Erlaubt(
+      'POST',
+      r'^/backup/backupfilesedit\.php$',
+      'Sicherungsbereich: Dateimanager speichern',
+      // Gemessen (Spike, Moodle 4.5): Das Formular sendet ohne Query (moodleform schneidet
+      // sie von der Adresse ab); Kontext, Bereich und Rücksprung stehen nur in den Feldern.
+      // Mit Query gelten dieselben Werte wie beim Öffnen.
+      parameter: (q) =>
+          q.isEmpty ||
+          (_nurSchluessel(q, {'currentcontext', 'contextid', 'filearea', 'component', 'returnurl'}) &&
+              _zahl(q['currentcontext']) &&
+              _zahl(q['contextid']) &&
+              q['filearea'] == 'backup' &&
+              q['component'] == 'user'),
+      formular: (f) =>
+          f.every(
+            (e) => const {
+              'sesskey',
+              '_qf__backup_files_edit_form',
+              'files_filemanager',
+              'contextid',
+              'currentcontext',
+              'filearea',
+              'component',
+              'returnurl',
+              'submitbutton',
+            }.contains(e.key),
+          ) &&
+          _gesetzt(wertIn(f, 'sesskey')) &&
+          _zahl(wertIn(f, 'files_filemanager')) &&
+          wertIn(f, 'filearea') == 'backup' &&
+          wertIn(f, 'component') == 'user' &&
+          _zahl(wertIn(f, 'contextid')) &&
+          _zahl(wertIn(f, 'currentcontext')) &&
+          wertIn(f, 'returnurl') == '/backup/restorefile.php?contextid=${wertIn(f, 'currentcontext')}',
+    ),
     Erlaubt(
       'GET',
       r'^/pluginfile\.php/\d+/user/backup/(?:\d+/)?[^/?#]+\.mbz$',

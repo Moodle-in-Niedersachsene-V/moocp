@@ -1,144 +1,209 @@
-// Ein Ordner, der dem angemeldeten Konto allein gehört (Linux und macOS).
+// Ein Ordner, den nur der angemeldete Benutzer betreten kann (Linux und Mac):
+// Grundlage für alles, was die App im Temp-Bereich ablegt und was nicht an
+// andere Konten auf demselben Rechner gehen darf -- der Arbeitsordner (E5),
+// der Ordner für Downloads der Plugins (E36).
 //
-// Darin liegen die Kanäle zwischen KI-Werkzeug und App (mcp/kanal.dart): ein
-// Unix-Socket ist nur so privat wie der Ordner, in dem er liegt. Geprüft wird
-// mit lstat-Angaben, nie über eine Verknüpfung hinweg: Besitzer ist das
-// laufende Konto, die Rechte sind genau 0700, und der Eintrag selbst ist ein
-// Ordner, keine Verknüpfung. Jede Abweichung ist ein Fehler, den die Aufrufer
-// nicht übergehen -- ein Ordner, den ein anderes Konto anlegen oder vertauschen
-// kann, lässt dieses Konto an die Stelle des Empfängers treten.
+// Wo: unter Linux in `$XDG_RUNTIME_DIR/moocp`, wenn die Sitzung dieses
+// Verzeichnis hat (absolut, ihr gehörend, Rechte 700, keine Verknüpfung);
+// sonst im Temp-Verzeichnis unter einem Namen mit der Benutzernummer
+// (`moocp-<uid>`). Die Nummer kommt vom Betriebssystem, nicht aus $USER: Wer
+// die Umgebung setzt, bestimmt sonst, welchen Ordner die App benutzt.
 //
-// Die App stellt den Ordner her ([privatHerstellen]: anlegen, eigene zu weite
-// Rechte zusammenziehen, dann prüfen); die Brücke prüft nur
-// ([privatPruefen]) und ändert nichts. Die Meldungen nennen nie den Pfad (E11).
+// Angelegt wird mit Rechten 700 im selben Systemaufruf (`mkdir`, über
+// dart:ffi), nie erst mit den Rechten der umask und dann per chmod: Es gibt
+// keinen Moment, in dem ein anderes Konto hineinsehen könnte. Vor jeder
+// Benutzung und jedem Leeren wird mit `lstat` (ohne Verknüpfungen
+// aufzulösen) geprüft: ein echter Ordner, dem Benutzer gehörend, Rechte
+// genau 700. Besteht ein vorhandener Ordner die Prüfung nicht, benutzt ihn
+// die App nicht, übernimmt ihn nicht (kein chmod auf fremde Ordner) und
+// räumt ihn nicht auf; sie bricht mit einer klaren Meldung ab
+// ([PrivaterOrdnerFehler]), bevor etwas geschrieben oder gelöscht wird.
 //
-// Ohne Flutter: Die Brücke (mcp/bruecke.dart) bindet diese Datei ein.
+// Die Prüfung gilt dem Ordner, nicht dem Pfad davor: Ein fremdes Konto kann
+// im klebrigen /tmp keinen Ordner eines anderen umbenennen oder ersetzen.
+// Unter Windows gibt es das Problem nicht (das Temp-Verzeichnis gehört dem
+// Konto), dort wird diese Datei nicht benutzt.
 
 import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:path/path.dart' as p;
 
 import 'kindprozess.dart';
 
-/// Was lstat über einen Eintrag sagt.
-class PosixEintrag {
-  const PosixEintrag({required this.uid, required this.modus, required this.art});
+/// Rechte, die ein privater Ordner genau haben muss: rwx für den Besitzer,
+/// nichts für Gruppe und andere, keine Sonderbits.
+const privaterModus = 448; // 0700
 
-  /// Besitzer.
+/// Der Ordner ist nicht privat oder ließ sich nicht anlegen. [meldung] ist
+/// für die Lehrkraft gedacht (Deutsch, ohne Inhalte aus Moodle).
+class PrivaterOrdnerFehler implements Exception {
+  PrivaterOrdnerFehler(this.meldung);
+
+  final String meldung;
+
+  @override
+  String toString() => meldung;
+}
+
+/// Was `lstat` über einen Eintrag sagt.
+class DateiAngabe {
+  const DateiAngabe({required this.ordner, required this.verknuepfung, required this.uid, required this.modus});
+
+  /// Ein echter Ordner (keine Verknüpfung darauf).
+  final bool ordner;
+  final bool verknuepfung;
   final int uid;
 
-  /// Die Rechtebits (nur die unteren neun, ohne Dateityp).
+  /// Die Rechtebits (ohne Dateityp), dezimal; 0700 ist [privaterModus].
   final int modus;
-
-  /// Ohne Verknüpfungen zu folgen: [FileSystemEntityType.link] für eine
-  /// Verknüpfung, [FileSystemEntityType.directory] nur für einen echten Ordner.
-  final FileSystemEntityType art;
 }
 
-/// Der Zugriff auf das Dateisystem, den die Prüfung braucht; austauschbar,
-/// damit sich Besitzer anderer Konten ohne ein zweites Konto prüfen lassen.
-abstract interface class PosixDatei {
-  /// Die Kennung des laufenden Kontos (effektiv).
+/// Die Naht zum Dateisystem: Tests setzen sie ein, um fremde Besitzer und
+/// Rechte nachzustellen, ohne ein zweites Konto zu brauchen.
+abstract interface class PrivatSystem {
+  /// Die Benutzernummer des Prozesses.
   int get uid;
 
-  /// Null, wenn es [pfad] nicht gibt.
-  PosixEintrag? lstat(String pfad);
+  /// `lstat` auf [pfad]; null, wenn es ihn nicht gibt.
+  DateiAngabe? angabe(String pfad);
 
-  void ordnerAnlegen(String pfad);
-
-  void chmod(String pfad, int modus);
+  /// Legt genau einen Ordner mit Rechten 700 an (kein `-p`, kein Übernehmen
+  /// eines vorhandenen); wirft [FileSystemException], wenn das nicht geht.
+  void anlegen(String pfad);
 }
 
-/// Das echte Dateisystem. Die Kennung und chmod kommen aus der C-Bibliothek
-/// (Linux und macOS), den Besitzer gibt `stat` an: Dart kennt ihn nicht, und
-/// die Struktur von lstat unterscheidet sich je System und Architektur.
-class EchtesPosix implements PosixDatei {
-  const EchtesPosix();
+typedef _MkdirC = Int32 Function(Pointer<Utf8>, Uint32);
+typedef _MkdirDart = int Function(Pointer<Utf8>, int);
+typedef _GetuidC = Uint32 Function();
+typedef _GetuidDart = int Function();
+
+/// Die Umsetzung für Linux und Mac über libc (dart:ffi) und `stat`.
+class UnixPrivatSystem implements PrivatSystem {
+  UnixPrivatSystem();
+
+  late final int _uid = DynamicLibrary.process().lookupFunction<_GetuidC, _GetuidDart>('getuid')();
 
   @override
-  int get uid => DynamicLibrary.process().lookupFunction<Uint32 Function(), int Function()>('geteuid')();
+  int get uid => _uid;
 
   @override
-  PosixEintrag? lstat(String pfad) {
+  DateiAngabe? angabe(String pfad) {
     final art = FileSystemEntity.typeSync(pfad, followLinks: false);
     if (art == FileSystemEntityType.notFound) return null;
+    if (art == FileSystemEntityType.link) {
+      return const DateiAngabe(ordner: false, verknuepfung: true, uid: -1, modus: 0);
+    }
     if (art != FileSystemEntityType.directory) {
-      return PosixEintrag(uid: -1, modus: 0, art: art);
+      return const DateiAngabe(ordner: false, verknuepfung: false, uid: -1, modus: 0);
     }
-    final r = prozessAusfuehrenSync(
-      '/usr/bin/stat',
-      Platform.isMacOS ? ['-f', '%u', pfad] : ['-c', '%u', '--', pfad],
-    );
-    final besitzer = r.exitCode == 0 ? int.tryParse('${r.stdout}'.trim()) : null;
-    return PosixEintrag(
-      uid: besitzer ?? -1, // nicht feststellbar: gilt als fremd
-      modus: FileStat.statSync(pfad).mode & 0x1ff,
-      art: art,
+    // `stat` statt der Struktur `struct stat` über ffi: deren Aufbau ist je
+    // Plattform und Architektur verschieden. Ohne -L folgt `stat` keiner
+    // Verknüpfung; das Format ist unter GNU (-c) und BSD/Mac (-f) verschieden.
+    final r = Platform.isMacOS
+        ? prozessAusfuehrenSync('stat', ['-f', '%u:%Lp', pfad])
+        : prozessAusfuehrenSync('stat', ['-c', '%u:%a', '--', pfad]);
+    final m = RegExp(r'^(\d+):(\d+)\s*$').firstMatch('${r.stdout}');
+    if (r.exitCode != 0 || m == null) {
+      throw PrivaterOrdnerFehler('Die Rechte eines Ordners ließen sich nicht lesen.');
+    }
+    return DateiAngabe(
+      ordner: true,
+      verknuepfung: false,
+      uid: int.parse(m.group(1)!),
+      modus: int.parse(m.group(2)!, radix: 8),
     );
   }
 
   @override
-  void ordnerAnlegen(String pfad) => Directory(pfad).createSync(recursive: true);
-
-  @override
-  void chmod(String pfad, int modus) {
-    final f = DynamicLibrary.process()
-        .lookupFunction<Int32 Function(Pointer<Utf8>, Uint32), int Function(Pointer<Utf8>, int)>('chmod');
-    final zeiger = pfad.toNativeUtf8();
+  void anlegen(String pfad) {
+    final c = pfad.toNativeUtf8();
     try {
-      if (f(zeiger, modus) != 0) throw const FileSystemException('chmod fehlgeschlagen');
+      final f = DynamicLibrary.process().lookupFunction<_MkdirC, _MkdirDart>('mkdir');
+      if (f(c, privaterModus) != 0) {
+        throw FileSystemException('Ordner ließ sich nicht anlegen', pfad);
+      }
     } finally {
-      malloc.free(zeiger);
+      malloc.free(c);
     }
   }
 }
 
-const _nurBesitzer = 0x1c0; // 0700
+bool _privat(DateiAngabe? a, int uid) =>
+    a != null && a.ordner && !a.verknuepfung && a.uid == uid && a.modus == privaterModus;
 
-/// Null, wenn [pfad] ein Ordner des laufenden Kontos mit genau den Rechten
-/// 0700 ist und keine Verknüpfung; sonst der Grund in einem Satz. Ändert
-/// nichts.
-String? privatPruefen(String pfad, {PosixDatei posix = const EchtesPosix()}) {
-  final e = posix.lstat(pfad);
-  if (e == null) return 'Der Ordner für den Kanal fehlt.';
-  if (e.art == FileSystemEntityType.link) return 'Der Ordner für den Kanal ist eine Verknüpfung.';
-  if (e.art != FileSystemEntityType.directory) return 'Der Kanal liegt nicht in einem Ordner.';
-  if (e.uid != posix.uid) return 'Der Ordner für den Kanal gehört einem anderen Konto.';
-  if (e.modus != _nurBesitzer) return 'Der Ordner für den Kanal ist nicht allein dem Konto zugänglich.';
-  return null;
+/// Prüft, dass [pfad] ein echter Ordner des Benutzers mit Rechten genau 700
+/// ist, sonst wirft es [PrivaterOrdnerFehler]. [bezeichnung] steht in der
+/// Meldung; der Pfad nur, wenn [pfadNennen] gilt (der Ordner für Downloads
+/// der Plugins gehört in keine Meldung, E36).
+void privaterOrdnerPruefen(String pfad, {PrivatSystem? system, String bezeichnung = 'Der Ordner', bool pfadNennen = true}) {
+  final s = system ?? UnixPrivatSystem();
+  final a = s.angabe(pfad);
+  if (a == null) throw PrivaterOrdnerFehler('$bezeichnung fehlt.');
+  if (_privat(a, s.uid)) return;
+  final grund = a.verknuepfung
+      ? 'er ist eine Verknüpfung'
+      : !a.ordner
+      ? 'dort liegt kein Ordner'
+      : a.uid != s.uid
+      ? 'er gehört einem anderen Benutzer'
+      : 'andere Benutzer dürfen darauf zugreifen oder er hat unerwartete Rechte';
+  final wo = pfadNennen ? ' („$pfad“)' : '';
+  throw PrivaterOrdnerFehler(
+    '$bezeichnung$wo ist nicht privat: $grund. moocp benutzt ihn nicht und schreibt und löscht dort nichts, '
+    'damit nichts aus Moodle für andere Benutzer dieses Rechners sichtbar wird. '
+    'Bitte den Ordner entfernen oder umbenennen und moocp neu starten.',
+  );
 }
 
-/// Legt [pfad] mit 0700 an, wenn er fehlt, zieht die Rechte eines eigenen
-/// Ordners auf 0700 zusammen und prüft dann ([privatPruefen]). Einen fremden
-/// Ordner und eine Verknüpfung fasst es nicht an. Null bei Erfolg.
-String? privatHerstellen(String pfad, {PosixDatei posix = const EchtesPosix()}) {
-  var e = posix.lstat(pfad);
-  if (e == null) {
+/// Legt [pfad] mit Rechten 700 an, wenn es ihn nicht gibt (das Elternverzeichnis
+/// muss da sein), und prüft ihn dann wie [privaterOrdnerPruefen]. Ein
+/// vorhandener Ordner wird nur geprüft, nie angepasst. Liefert [pfad].
+String privaterOrdnerAnlegen(
+  String pfad, {
+  PrivatSystem? system,
+  String bezeichnung = 'Der Ordner',
+  bool pfadNennen = true,
+}) {
+  final s = system ?? UnixPrivatSystem();
+  if (s.angabe(pfad) == null) {
     try {
-      posix.ordnerAnlegen(pfad);
-      posix.chmod(pfad, _nurBesitzer);
+      s.anlegen(pfad);
     } on FileSystemException {
-      return 'Der Ordner für den Kanal ließ sich nicht anlegen.';
-    }
-  } else if (e.art == FileSystemEntityType.directory && e.uid == posix.uid && e.modus != _nurBesitzer) {
-    try {
-      posix.chmod(pfad, _nurBesitzer);
-    } on FileSystemException {
-      return 'Der Ordner für den Kanal ließ sich nicht absichern.';
+      // Ein anderer Prozess kann ihn eben angelegt haben; die Prüfung unten
+      // entscheidet, ob er benutzbar ist.
+      if (s.angabe(pfad) == null) {
+        throw PrivaterOrdnerFehler(
+          '$bezeichnung${pfadNennen ? ' („$pfad“)' : ''} ließ sich nicht anlegen. moocp schreibt dort nichts.',
+        );
+      }
     }
   }
-  return privatPruefen(pfad, posix: posix);
+  privaterOrdnerPruefen(pfad, system: s, bezeichnung: bezeichnung, pfadNennen: pfadNennen);
+  return pfad;
 }
 
-/// Setzt eine Datei des Kontos auf 0600 (Einstellungen und was sonst
-/// Zugangsdaten tragen könnte). Auf Windows ohne Wirkung: Dort liegt alles im
-/// Benutzerprofil. Wirft nicht; ein Fehler lässt die Datei, wie sie ist.
-void dateiPrivat(String pfad, {PosixDatei posix = const EchtesPosix()}) {
-  if (Platform.isWindows) return;
-  try {
-    posix.chmod(pfad, 0x180);
-  } catch (_) {
-    // Bleibt lesbar, wie sie war; der Aufrufer hat nichts davon zu melden.
-  }
+/// Der Pfad des privaten Grundordners der App unter Linux und Mac, ohne ihn
+/// anzulegen: `$XDG_RUNTIME_DIR/moocp`, wenn dieses Verzeichnis absolut, privat
+/// und ein Ordner des Benutzers ist, sonst `<temp>/moocp-<uid>`. Der Ort ist
+/// über Neustarts der App stabil (E5), solange die Sitzung dieselbe bleibt.
+String privatesBasisPfad({Map<String, String>? umgebung, String? temp, PrivatSystem? system}) {
+  final s = system ?? UnixPrivatSystem();
+  final x = (umgebung ?? Platform.environment)['XDG_RUNTIME_DIR'];
+  if (x != null && p.isAbsolute(x) && _privat(s.angabe(x), s.uid)) return p.join(x, 'moocp');
+  return p.join(temp ?? Directory.systemTemp.path, 'moocp-${s.uid}');
+}
+
+/// Legt den privaten Grundordner an und prüft ihn ([privatesBasisPfad]).
+/// Hier hängen die Ordner, die nur dem Benutzer gehören sollen; wer einen
+/// weiteren braucht (etwa eine Socket-Datei), legt ihn darunter mit
+/// [privaterOrdnerAnlegen] an.
+String privatesBasisverzeichnis({Map<String, String>? umgebung, String? temp, PrivatSystem? system}) {
+  final s = system ?? UnixPrivatSystem();
+  return privaterOrdnerAnlegen(
+    privatesBasisPfad(umgebung: umgebung, temp: temp, system: s),
+    system: s,
+    bezeichnung: 'Der private Ordner von moocp',
+  );
 }

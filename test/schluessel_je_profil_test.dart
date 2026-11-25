@@ -92,13 +92,12 @@ void main() {
         adresse: 'https://test.schule.example',
         port: port,
         mcpName: 'moodle-test',
-        schluessel: schluessel,
       );
 
   test('der Server des Standardprofils nimmt den globalen Schlüssel an, den eines anderen Profils nicht', () async {
     final p1 = standard(await _freierPort());
     final p2 = zweites(await _freierPort());
-    final e = Einstellungen(schluessel: 'schluessel-global', profile: [p1, p2]);
+    final e = Einstellungen(profile: [p1, p2]);
     await starten(e, e.profile[0]);
 
     expect(await _status(p1.port, 'Bearer schluessel-global'), HttpStatus.ok);
@@ -109,7 +108,7 @@ void main() {
   test('der Server eines weiteren Profils nimmt nur seinen eigenen Schlüssel an, nicht den globalen und nicht den des Standardprofils', () async {
     final p1 = standard(await _freierPort());
     final p2 = zweites(await _freierPort());
-    final e = Einstellungen(schluessel: 'schluessel-global', profile: [p1, p2]);
+    final e = Einstellungen(profile: [p1, p2]);
     await starten(e, e.profile[1]);
 
     expect(await _status(p2.port, 'Bearer schluessel-zwei'), HttpStatus.ok);
@@ -121,7 +120,7 @@ void main() {
   test('zwei Server nebeneinander: jeder lehnt den Schlüssel des anderen ab', () async {
     final p1 = standard(await _freierPort());
     final p2 = zweites(await _freierPort());
-    final e = Einstellungen(schluessel: 'schluessel-global', profile: [p1, p2]);
+    final e = Einstellungen(profile: [p1, p2]);
     await starten(e, e.profile[0]);
     await starten(e, e.profile[1]);
 
@@ -135,7 +134,7 @@ void main() {
     final p1 = standard(await _freierPort());
     // Direkt am Dienst, ohne Einstellungen.aus: Dort bekäme es einen Schlüssel.
     final ohne = zweites(await _freierPort(), schluessel: '');
-    final e = Einstellungen(schluessel: 'schluessel-global', profile: [p1]);
+    final e = Einstellungen(profile: [p1]);
     await starten(e, ohne);
 
     expect(await _status(ohne.port, 'Bearer '), HttpStatus.forbidden);

@@ -38,13 +38,12 @@ void main() {
       adresse: moodle.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
     final zugang = await MoodleZugang.fuerTest(Protokoll(), moodle.basis,
         benutzer: FragenbankDoppel.benutzer, passwort: FragenbankDoppel.passwort, schreibvorgaengeOrdner: ordner.path);
     dienst = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profil]),
+      Einstellungen(profile: [profil]),
       zugang,
       Protokoll(),
       freigaben,
@@ -59,7 +58,7 @@ void main() {
 
   tearDown(() async {
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await moodle.stoppen();
     for (final d in [ordner, sicherungen]) {
       if (d.existsSync()) d.deleteSync(recursive: true);

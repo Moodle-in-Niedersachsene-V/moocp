@@ -50,7 +50,7 @@ Future<void> alleAnmeldedatenLoeschen(InstallerOrte orte) async {
   final kennungen = <(String, String?)>{(Profil.standardKennung, null)};
   try {
     final j = jsonDecode(await File(p.join(orte.einstellungen, 'einstellungen.json')).readAsString()) as Map<String, dynamic>;
-    final standard = Einstellungen(moodleAdresse: '', schluessel: '');
+    final standard = Einstellungen(moodleAdresse: '');
     for (final pr in Einstellungen.aus(j, standard).profile) {
       kennungen.add((pr.kennung, pr.adresse));
     }

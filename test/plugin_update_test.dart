@@ -21,7 +21,7 @@ import 'package:moocp/update/update.dart';
 import 'package:path/path.dart' as p;
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei() : super(schluessel: 'schluessel', updatePruefen: true);
+  _EinstellungenOhneDatei() : super(updatePruefen: true);
   int gespeichert = 0;
 
   @override
@@ -273,7 +273,7 @@ void main() {
         'b': const PluginUpdateStand(zuletzt: '2026-11-13'),
       };
       final gelesen = Einstellungen.aus(jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>,
-          Einstellungen(schluessel: 'x'));
+          Einstellungen());
       expect(gelesen.pluginUpdates['a']?.aus, isTrue);
       expect(gelesen.pluginUpdates['b']?.aus, isFalse);
       expect(gelesen.pluginUpdates['b']?.zuletzt, '2026-11-13');
@@ -487,7 +487,7 @@ void main() {
 
       final gelesen = Einstellungen.aus(
         jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>,
-        Einstellungen(schluessel: 'x'),
+        Einstellungen(),
       );
       expect(gelesen.schnittstelleGesehen, einstellungen.schnittstelleGesehen);
     });

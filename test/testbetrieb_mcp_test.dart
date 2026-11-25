@@ -334,11 +334,10 @@ void main() {
       adresse: extern.basis.toString(),
       port: port.port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     await port.close();
     dienst = McpDienst(
-      Einstellungen(schluessel: 'test'),
+      Einstellungen(),
       moodle,
       Protokoll(),
       freigaben,
@@ -391,7 +390,7 @@ void main() {
     );
   });
   tearDown(() async {
-    client.http.close(force: true);
+    client.schliessen();
     await dienst.stoppen();
     moodle.abmelden();
     await extern.server.close(force: true);
@@ -1400,7 +1399,7 @@ void main() {
         isNot(contains('ZZ Probe')),
       );
       expect(freigaben.testfreigaben, 0);
-      client.http.close(force: true);
+      client.schliessen();
       await verworfen;
     },
   );

@@ -165,7 +165,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: '${kurzname}_schreiben',
       args: const {},
-      profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A', schluessel: 't'),
+      profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A'),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: kontext ?? k,
@@ -208,7 +208,7 @@ void main() {
     test('ohne Kennung oder mit einer ausgedachten: 403 auf jeder Stufe, auch „keine“; Moodle sieht nichts', () async {
       for (final stufe in Bestaetigungen.values) {
         final freigaben = Freigaben(protokoll)..stufe = stufe;
-        final dienst = McpDienst(Einstellungen(schluessel: 'test'), zugang, protokoll, freigaben, wurzel.path, profil: Profil.migriert(''));
+        final dienst = McpDienst(Einstellungen(), zugang, protokoll, freigaben, wurzel.path, profil: Profil.migriert(''));
         final a = aufruf(kontext: dienst);
         for (final kennung in [null, '', 'ausgedacht', 12]) {
           final r = await schreiben(a.token, {...anfrage('/mod/beispiel/speichern.php?id=7'), 'kennung': ?kennung});
@@ -339,7 +339,7 @@ void main() {
       late McpDienst dienst;
       setUp(() {
         freigaben = Freigaben(protokoll);
-        dienst = McpDienst(Einstellungen(schluessel: 'test'), zugang, protokoll, freigaben, wurzel.path, profil: Profil.migriert(''));
+        dienst = McpDienst(Einstellungen(), zugang, protokoll, freigaben, wurzel.path, profil: Profil.migriert(''));
       });
 
       List<FreigabeAnfrage> entscheiden(bool ja) {

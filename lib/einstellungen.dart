@@ -1,5 +1,7 @@
-// Einstellungen, die einen Neustart überleben: Moodle-Adresse, Port,
-// Zugangsschlüssel für Claude, die gewählten Skills und die Update-Prüfung.
+// Einstellungen, die einen Neustart überleben: Moodle-Adressen der Profile,
+// die gewählten Skills und die Update-Prüfung. Einen Zugangsschlüssel für die
+// KI-Werkzeuge gibt es nicht (E6); die Datei gehört dem Konto allein (0600 auf
+// Linux und Mac, [speichern]).
 // Die Freigabestufe liegt je Moodle-Instanz im Profil; `bestaetigungen` bleibt
 // für ältere Einstellungsdateien erhalten.
 //
@@ -11,16 +13,17 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
-
 import 'einrichtung.dart' show werkzeugSkillGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
 import 'plugin/entscheidung.dart';
+import 'plattform/datei_rechte.dart';
 import 'profil.dart';
 
 class Einstellungen {
   static const _bekannt = {
+    // `schluessel` steht hier nur, damit ein Wert aus früheren Versionen nicht
+    // als unbekanntes Feld erhalten bleibt (laden).
     'moodleAdresse', 'profile', 'port', 'schluessel', 'bestaetigungen',
     'wahlSkills', 'werkzeugeAbgewaehlt', 'updatePruefen', 'updateZuletzt',
     'updateErwartet', 'plugins', 'pluginUpdates', 'pluginSkillOrdner',
@@ -48,7 +51,6 @@ class Einstellungen {
   Einstellungen({
     String moodleAdresse = '',
     List<Profil>? profile,
-    required this.schluessel,
     this.bestaetigungen = Bestaetigungen.vorgabe,
     this.wahlSkills,
     this.werkzeugeAbgewaehlt = const {},
@@ -81,10 +83,11 @@ class Einstellungen {
   /// Vergibt fehlende Ports und Servernamen und macht beide eindeutig. Das
   /// erste Profil behält seinen Port; jedes weitere bekommt den nächsten freien
   /// Port ab [standardPort]. Doppelte Servernamen bekommen eine Zählnummer.
-  /// Jedes Profil außer dem Standardprofil bekommt, wenn es noch keinen hat,
-  /// einen eigenen Zugangsschlüssel (E6); [laden] schreibt ihn gleich in die
-  /// Datei, damit er einen Neustart überlebt. Vollständige, eindeutige Profile
-  /// bleiben unverändert.
+  /// Der Port dient dem MCP-Server nicht mehr (er hat einen Kanal nur für das
+  /// Konto, mcp/kanal.dart), bleibt aber in der Datei und je Profil
+  /// verschieden, damit auch die Version, zu der die Lehrkraft zurückkehrt
+  /// (E39), die Datei so liest, wie sie sie braucht. Vollständige, eindeutige
+  /// Profile bleiben unverändert.
   static List<Profil> _verteilt(List<Profil> liste) {
     final vergeben = <int>{for (final p in liste) if (p.port > 0) p.port};
     final namen = <String>{};
@@ -107,15 +110,7 @@ class Einstellungen {
         mcp = '$basis-${zaehler++}';
       }
       namen.add(mcp);
-      ergebnis.add(p.copyWith(
-        port: port,
-        mcpName: mcp,
-        schluessel: p.istStandard
-            ? ''
-            : p.schluessel.isNotEmpty
-            ? p.schluessel
-            : neuerSchluessel(),
-      ));
+      ergebnis.add(p.copyWith(port: port, mcpName: mcp));
     }
     return ergebnis;
   }
@@ -131,18 +126,6 @@ class Einstellungen {
     }
     profile[0] = profile[0].copyWith(adresse: a);
   }
-
-  /// Der globale Zugangsschlüssel (E6): der des Standardprofils und der Brücke
-  /// für LM Studio. Jedes weitere Profil hat seinen eigenen ([Profil.schluessel]);
-  /// welcher für ein Profil gilt, sagt [schluesselFuer].
-  String schluessel;
-
-  /// Der Zugangsschlüssel des MCP-Servers dieses Profils (E6). Das
-  /// Standardprofil behält den globalen Schlüssel, damit die vorhandenen
-  /// Einträge in Claude Code, Codex und Bionic weiter gelten; jedes andere hat
-  /// einen eigenen. Leer, solange ein Profil noch keinen hat -- der Server
-  /// lässt dann niemanden herein (mcp_dienst.dart).
-  String schluesselFuer(Profil p) => p.istStandard ? schluessel : p.schluessel;
 
   /// Alte globale Freigabestufe, nur zur Migration und für ältere Versionen.
   Bestaetigungen bestaetigungen;
@@ -217,31 +200,25 @@ class Einstellungen {
 
   static File get _datei => einstellungenDatei;
 
-  static String neuerSchluessel() {
-    final r = Random.secure();
-    return List.generate(32, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
-  }
-
   static Future<Einstellungen> laden({File? datei}) async {
     final quelle = datei ?? _datei;
-    final standard = Einstellungen(
-      moodleAdresse: '',
-      schluessel: neuerSchluessel(),
-    );
+    final standard = Einstellungen(moodleAdresse: '');
     try {
       if (await quelle.exists()) {
         final j = jsonDecode(await quelle.readAsString()) as Map<String, dynamic>;
         final e = Einstellungen.aus(j, standard);
-        // Frisch vergebene Schlüssel gleich festhalten: Sonst bekäme das
-        // Profil bei jedem Start einen neuen, und die Einträge in den
-        // KI-Werkzeugen wären jedes Mal veraltet.
-        if (schluesselFehlen(j)) {
+        // Zugangsschlüssel von früher (global und je Profil) stehen nicht mehr
+        // in der Datei: Sie wird ohne sie neu geschrieben, damit sie nirgends
+        // mehr gelten (E6). Auch eine Datei ohne sie bekommt die Rechte, die
+        // ihr zustehen.
+        if (schluesselVonFrueher(j)) {
           try {
             await e._speichern(quelle);
           } catch (_) {
-            // Nicht schreibbar: Die Schlüssel gelten für diesen Lauf; der
-            // Fall nach dem catch unten (Standardwerte schreiben) ist es nicht.
+            // Nicht schreibbar: Gelesen wird sie ohne die Schlüssel trotzdem.
           }
+        } else {
+          dateiRechteSetzen(quelle);
         }
         return e;
       }
@@ -252,18 +229,26 @@ class Einstellungen {
     return standard;
   }
 
-  /// Ob in der Datei ein Profil ohne eigenen Schlüssel steht, das einen
-  /// braucht (alle außer dem Standardprofil).
-  static bool schluesselFehlen(Map<String, dynamic> j) {
+  /// Ob in der Datei ein Zugangsschlüssel der früheren Versionen steht, im
+  /// Ganzen oder in einem Profil.
+  static bool schluesselVonFrueher(Map<String, dynamic> j) {
+    if (j.containsKey('schluessel')) return true;
     final liste = j['profile'];
-    if (liste is! List) return false;
-    return liste.any((e) {
-      if (e is! Map) return false;
-      final kennung = e['kennung'];
-      if (kennung is! String || kennung.isEmpty || kennung == Profil.standardKennung) return false;
-      final k = e['schluessel'];
-      return k is! String || k.isEmpty;
-    });
+    return liste is List && liste.any((e) => e is Map && e.containsKey('schluessel'));
+  }
+
+  /// Nur das Konto liest und schreibt die Datei und betritt ihren Ordner:
+  /// 0600 und 0700 auf Linux und Mac (unter Windows liegt alles im
+  /// Benutzerprofil). Ein Fehler lässt die Rechte, wie sie sind.
+  static void dateiRechteSetzen(File ziel, {DateiRechte? rechte}) {
+    if (Platform.isWindows) return;
+    final r = rechte ?? const UnixDateiRechte();
+    dateiPrivat(ziel.path, rechte: r);
+    try {
+      r.chmod(ziel.parent.path, 0x1c0);
+    } catch (_) {
+      // s. o.
+    }
   }
 
   /// Liest den Inhalt der Datei. Ohne `profile` (Stand vor den Profilen) wird die
@@ -290,7 +275,6 @@ class Einstellungen {
     final ergebnis = Einstellungen(
       moodleAdresse: altAdresse,
       profile: profile,
-      schluessel: j['schluessel'] as String? ?? standard.schluessel,
       bestaetigungen: alteStufe,
       wahlSkills: (j['wahlSkills'] as List?)?.whereType<String>().toSet(),
       werkzeugeAbgewaehlt: (j['werkzeugeAbgewaehlt'] as List?)?.whereType<String>().toSet() ?? const {},
@@ -317,7 +301,6 @@ class Einstellungen {
         'moodleAdresse': moodleAdresse,
         'profile': [for (final p in profile) p.toJson()],
         'port': port,
-        'schluessel': schluessel,
         'bestaetigungen': bestaetigungen.text,
         if (wahlSkills != null) 'wahlSkills': (wahlSkills!.toList()..sort()),
         if (werkzeugeAbgewaehlt.isNotEmpty) 'werkzeugeAbgewaehlt': (werkzeugeAbgewaehlt.toList()..sort()),
@@ -335,8 +318,12 @@ class Einstellungen {
 
   Future<void> speichern() => _speichern(_datei);
 
+  /// Wie [speichern], in eine andere Datei (für die Tests und [laden]).
+  Future<void> speichernNach(File ziel) => _speichern(ziel);
+
   Future<void> _speichern(File ziel) async {
     await ziel.parent.create(recursive: true);
     await ziel.writeAsString(const JsonEncoder.withIndent('  ').convert(zuJson()));
+    dateiRechteSetzen(ziel);
   }
 }

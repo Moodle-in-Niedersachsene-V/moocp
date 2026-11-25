@@ -23,7 +23,7 @@ import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei() : super(schluessel: 'schluessel');
+  _EinstellungenOhneDatei() : super();
   int gespeichert = 0;
   bool speichernScheitert = false;
 
@@ -148,7 +148,7 @@ void main() {
       await annehmen(plugins, 'beispiel', werkzeuge: [eins, zwei]);
 
       final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
-      final neu = Einstellungen.aus(json, Einstellungen(schluessel: 'x'));
+      final neu = Einstellungen.aus(json, Einstellungen());
 
       final liste = neu.plugins['beispiel']!.werkzeuge!;
       expect(liste, hasLength(2));
@@ -345,7 +345,6 @@ void main() {
   group('In der Einstellungsdatei', () {
     test('ohne gemerkte Liste steht kein Schlüssel `werkzeuge` in der Datei', () {
       final e = Einstellungen(
-        schluessel: 'x',
         plugins: {'eins': const PluginEntscheidung(version: '1', pruefsumme: 'aa', zugestimmt: true)},
       );
       expect((e.zuJson()['plugins'] as Map)['eins'], isNot(contains('werkzeuge')));
@@ -388,7 +387,7 @@ void main() {
         },
       };
 
-      final neu = Einstellungen.aus(j, Einstellungen(schluessel: 'x'));
+      final neu = Einstellungen.aus(j, Einstellungen());
 
       for (final k in ['text', 'keinName', 'leererName', 'schemaText', 'schemaKeinObjekt', 'titelKeinText', 'eineKaputte']) {
         expect(neu.plugins[k], isNotNull, reason: k);
@@ -408,7 +407,7 @@ void main() {
     void speichern() => datei.writeAsStringSync(jsonEncode(einstellungen.zuJson()));
 
     McpDienst dienst(List<WerkzeugQuelle> quellen) => McpDienst(
-      Einstellungen(schluessel: ''),
+      Einstellungen(),
       MoodleZugang(protokoll),
       protokoll,
       Freigaben(protokoll),
@@ -619,7 +618,6 @@ void main() {
       final zeile = jsonEncode(await liste());
 
       expect(zeile, isNot(contains('\n')));
-      expect(zeile, isNot(contains(einstellungen.schluessel)));
       expect(zeile, isNot(contains(einstellungen.plugins['beispiel']!.pruefsumme)));
     });
 

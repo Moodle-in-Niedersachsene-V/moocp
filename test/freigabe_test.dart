@@ -684,10 +684,10 @@ void main() {
 
   test('Die Stufe steht in den Einstellungen und kommt unverändert zurück', () {
     for (final x in Bestaetigungen.values) {
-      final e = Einstellungen(schluessel: 'x', bestaetigungen: x);
+      final e = Einstellungen(bestaetigungen: x);
       expect(e.bestaetigungen, x);
       expect(Bestaetigungen.ausText(e.bestaetigungen.text), x);
     }
-    expect(Einstellungen(schluessel: 'x').bestaetigungen, Bestaetigungen.mittel);
+    expect(Einstellungen().bestaetigungen, Bestaetigungen.mittel);
   });
 }

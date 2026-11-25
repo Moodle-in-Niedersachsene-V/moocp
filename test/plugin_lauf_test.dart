@@ -137,7 +137,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: '${kurzname}_lauf',
       args: const {},
-      profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A', schluessel: 't'),
+      profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A'),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: _Kontext(z ?? zugang, (Directory(p.join(wurzel.path, 'A'))..createSync(recursive: true)).path),

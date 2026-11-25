@@ -44,7 +44,7 @@ void main() {
     'behält Profil und Formulareingaben während einer verzögerten Anmeldung',
     () async {
       final protokoll = Protokoll();
-      final einstellungen = Einstellungen(schluessel: 'test');
+      final einstellungen = Einstellungen();
       final freigaben = Freigaben(protokoll);
       final moodle = MoodleZugang(protokoll);
       final profil = Profil(
@@ -112,7 +112,7 @@ void main() {
       return Instanz(
         moodle,
         freigaben,
-        McpDienst(Einstellungen(schluessel: 'test'), moodle, protokoll, freigaben, 'test-arbeitsordner', profil: profil),
+        McpDienst(Einstellungen(), moodle, protokoll, freigaben, 'test-arbeitsordner', profil: profil),
       );
     }
 

@@ -102,7 +102,7 @@ Future<void> ordnerLoeschen(Directory ordner) async {
 /// Einstellungen, die nie in eine Datei geschrieben werden; sie zählen, wie
 /// oft die App sie geschrieben hätte.
 class EinstellungenOhneDatei extends Einstellungen {
-  EinstellungenOhneDatei({super.profile}) : super(schluessel: 'test');
+  EinstellungenOhneDatei({super.profile}) : super();
 
   /// Wie oft die App ihre Einstellungen geschrieben hätte.
   int gespeichert = 0;
@@ -137,7 +137,6 @@ Profil beispielProfil(String kennung, String mcpName, int port) => Profil(
   adresse: 'https://$kennung.moodle.schule.example',
   port: port,
   mcpName: mcpName,
-  schluessel: 'test',
 );
 
 /// Ein Port, der gerade frei ist.
@@ -152,7 +151,7 @@ Future<int> freierPort() async {
 Future<Set<String>> eingebauteWerkzeuge() {
   final protokoll = Protokoll();
   return McpDienst(
-    Einstellungen(schluessel: ''),
+    Einstellungen(),
     MoodleZugang(protokoll),
     protokoll,
     Freigaben(protokoll),

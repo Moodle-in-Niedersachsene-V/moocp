@@ -344,7 +344,7 @@ void main() {
 
   Future<void> starten(Freigaben entscheidungen) async {
     dienst = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profil]),
+      Einstellungen(profile: [profil]),
       zugang,
       Protokoll(),
       entscheidungen,
@@ -374,7 +374,6 @@ void main() {
       adresse: moodle.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     vorgaenge = Vorgaenge(sicherung.path,
       profilKennung: profil.kennung,
@@ -413,7 +412,7 @@ void main() {
 
   tearDown(() async {
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await moodle.stoppen();
     for (final d in [arbeit, sicherung]) {
       if (d.existsSync()) d.deleteSync(recursive: true);
@@ -435,7 +434,7 @@ void main() {
           {int cmid = 2, String name = 'Infoblatt', int kurs = 12, String? vorgangId, Freigaben? mit}) async {
     if (mit != null) {
       await dienst.stoppen();
-      client.http.close(force: true);
+      client.schliessen();
       await starten(mit);
     }
     final r = await client.call('tools/call', {

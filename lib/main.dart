@@ -336,7 +336,7 @@ Future<Einstellungen?> _gespeicherteEinstellungen() async {
     ) as Map<String, dynamic>;
     return Einstellungen.aus(
       j,
-      Einstellungen(moodleAdresse: '', schluessel: ''),
+      Einstellungen(moodleAdresse: ''),
     );
   } catch (_) {
     return null;
@@ -1148,8 +1148,6 @@ class _HauptseiteState extends State<Hauptseite> {
         pruefen: _einrichtungsstand,
         einstellungen: widget.einstellungen,
         protokoll: widget.protokoll,
-        port: _dienst.profil.port,
-        schluessel: widget.einstellungen.schluesselFuer(_dienst.profil),
         servername: _dienst.profil.mcpName,
         profilname: _profilnameAnzeige,
       ),
@@ -1217,9 +1215,7 @@ class _HauptseiteState extends State<Hauptseite> {
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
-      port: _dienst.profil.port,
       name: _dienst.profil.mcpName,
-      schluessel: e.schluesselFuer(_dienst.profil),
       skills: [...app, ...plugins.pakete],
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
@@ -1769,7 +1765,7 @@ class _HauptseiteState extends State<Hauptseite> {
                   size: 18,
                 ),
                 _dienst.laeuft
-                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} auf 127.0.0.1:${_profil.port}'
+                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} läuft (nur dieses Konto)'
                     : _mcpVersucht
                     ? 'MCP-Server läuft nicht'
                     : 'MCP startet nach der Anmeldung',

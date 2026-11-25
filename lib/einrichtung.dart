@@ -1,12 +1,18 @@
 // Einrichtung der KI-Werkzeuge: die Verbindung zur App und die Skills.
 //
 // Damit ein KI-Werkzeug mit der App arbeitet, braucht es zweierlei: einen
-// MCP-Eintrag „moodle" mit Adresse und Schlüssel dieser App, und die Skills in
+// MCP-Eintrag je Instanzprofil (Name `moodle` beim Standardprofil) mit der
+// Brücke von moocp als Befehl -- kein Port, kein Schlüssel --, und die Skills in
 // genau der Version, die zu dieser App gehört -- ändert sich ein Werkzeug,
 // ändert sich der Skill mit. Beides prüft die App beim Start für jedes
 // gefundene KI-Werkzeug; geschrieben wird erst nach einem Klick im Dialog
 // „KI-Werkzeuge einrichten", wie bei den Freigaben. Beim Deinstallieren
 // entfernt die App beides wieder ([einrichtungEntfernen]).
+//
+// Alle drei Werkzeuge starten dieselbe Brücke (mcp/bruecke.dart) mit dem
+// Profil als Argument; sie spricht über einen Kanal mit der App, den nur das
+// eigene Konto erreicht (mcp/kanal.dart, E6). Einträge aus früheren Versionen
+// mit Adresse und Schlüssel gelten als veraltet und werden ersetzt.
 //
 // Eingerichtet werden Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio. Alle drei sind
 // MCP-Clients, die auf demselben Rechner laufen, Skills im Format
@@ -37,7 +43,7 @@ import 'plattform/signatur_windows.dart';
 /// unter diesem Asset-Pfad (pubspec.yaml).
 const skillAssets = 'skills/dist/';
 
-/// Der Name des MCP-Eintrags in jedem KI-Werkzeug.
+/// Der Name des MCP-Eintrags des Standardprofils in jedem KI-Werkzeug.
 const mcpName = 'moodle';
 
 /// Skills der App, die die Lehrkraft im Dialog „KI-Werkzeuge einrichten"
@@ -101,6 +107,10 @@ List<String> _linuxVerzeichnisse(String? heim) => [
 /// welchem sie den Zugangsschlüssel gibt (vgl. [claudeSigniert]).
 List<String>? festeProgrammOrdner;
 
+/// Ersetzt den Ort der Brücke (null: neben der laufenden App). Nur für die
+/// Tests, aus demselben Grund wie [festeProgrammOrdner].
+String? festeBruecke;
+
 /// Ersetzt die Ordner, in denen die App nach der ChatGPT-App sucht (null: unter
 /// macOS `/Applications` und `~/Applications`, sonst keine). Nur für die Tests,
 /// aus demselben Grund wie [festeProgrammOrdner].
@@ -115,10 +125,6 @@ List<String> _unixVerzeichnisse(String? heim) =>
 // ---------------------------------------------------------------------------
 
 enum Verbindung { aktuell, fehlt, veraltet, unlesbar }
-
-String mcpAdresse(int port) => 'http://127.0.0.1:$port/mcp';
-
-String mcpKopf(String schluessel) => 'Bearer $schluessel';
 
 /// Das Zeitlimit je Werkzeugaufruf, das die App in jedes KI-Werkzeug
 /// einträgt. Jedes hat ein eigenes, ab dem Aufruf gemessenes, und bricht
@@ -140,9 +146,19 @@ const clientZeitlimit = Duration(minutes: 35);
 /// seine Skills gehören. Alles Übrige -- Vergleich der Skills, Reihenfolge,
 /// Dialog -- ist für alle gleich.
 abstract class KiWerkzeug {
-  KiWerkzeug(this.umgebung);
+  KiWerkzeug(this.umgebung, {String? bruecke})
+      : bruecke = bruecke ?? festeBruecke ?? p.join(p.dirname(Platform.resolvedExecutable), brueckeExe);
 
   final Map<String, String> umgebung;
+
+  /// Die Brücke, die eingetragen wird: die neben der laufenden App.
+  final String bruecke;
+
+  /// Der Befehl und die Argumente, mit denen jedes KI-Werkzeug die Brücke für
+  /// das Profil [name] startet. Mehr steht nicht im Eintrag: kein Port und
+  /// kein Schlüssel, denn die Brücke findet den Kanal des Profils selbst und
+  /// prüft ihn (kanal.dart).
+  List<String> brueckenArgumente(String name) => ['--profil', name];
 
   /// Kurzname, unter dem die Wahl in den Einstellungen steht.
   String get id;
@@ -183,11 +199,11 @@ abstract class KiWerkzeug {
   String? get hinweis => null;
 
   /// Der Stand des MCP-Eintrags [name] (E31: je Instanzprofil einer) in diesem Werkzeug.
-  Verbindung verbindung(int port, String schluessel, {String name = mcpName});
+  Verbindung verbindung({String name = mcpName});
 
   /// Trägt die App ein. null bei Erfolg, sonst eine Beschreibung -- nie mit
-  /// der Ausgabe eines Programms, denn die kann den Schlüssel enthalten.
-  Future<String?> eintragen(int port, String schluessel, {String name = mcpName});
+  /// der Ausgabe eines Programms.
+  Future<String?> eintragen({String name = mcpName});
 
   /// Entfernt den Eintrag [name] wieder. null bei Erfolg.
   Future<String?> austragen({String name = mcpName});
@@ -197,7 +213,7 @@ abstract class KiWerkzeug {
   String verbindungText(Verbindung v) => switch (v) {
         Verbindung.aktuell => 'aktuell',
         Verbindung.fehlt => 'nicht eingetragen',
-        Verbindung.veraltet => 'Schlüssel muss aktualisiert werden',
+        Verbindung.veraltet => 'Eintrag muss auf den geschützten Kanal umgestellt werden',
         Verbindung.unlesbar => 'Konfiguration nicht lesbar, wird neu eingetragen',
       };
 }
@@ -420,7 +436,7 @@ String? _vsCode(String erweiterungen, bool Function(String) gut) {
 /// Skills; sonst liegen sie im Benutzerverzeichnis. MSIX leitet diese Orte
 /// nicht um -- Claude Desktop und VS Code lesen dieselben.
 class ClaudeCode extends KiWerkzeug {
-  ClaudeCode(super.umgebung)
+  ClaudeCode(super.umgebung, {super.bruecke})
       : _eigen = umgebung['CLAUDE_CONFIG_DIR'];
 
   final String? _eigen;
@@ -473,18 +489,19 @@ class ClaudeCode extends KiWerkzeug {
           '„Code" öffnen, danach „Nochmal prüfen".';
 
   @override
-  Verbindung verbindung(int port, String schluessel, {String name = mcpName}) {
+  Verbindung verbindung({String name = mcpName}) {
     if (!konfiguration.existsSync()) return Verbindung.fehlt;
     try {
       final d = jsonDecode(konfiguration.readAsStringSync());
       final server = (d is Map) ? d['mcpServers'] : null;
       final e = (server is Map) ? server[name] : null;
       if (e is! Map) return Verbindung.fehlt;
-      final kopf = e['headers'] is Map ? (e['headers'] as Map)['Authorization'] : null;
-      final passt = e['type'] == 'http' &&
-          e['url'] == mcpAdresse(port) &&
-          kopf == mcpKopf(schluessel) &&
-          e['timeout'] == clientZeitlimit.inMilliseconds;
+      final passt = e['type'] == 'stdio' &&
+          _brueckePasst(e['command']) &&
+          _gleichListe(e['args'], brueckenArgumente(name)) &&
+          e['timeout'] == clientZeitlimit.inMilliseconds &&
+          !e.containsKey('url') &&
+          !e.containsKey('headers');
       return passt ? Verbindung.aktuell : Verbindung.veraltet;
     } catch (_) {
       // Auch ein halb geschriebener Stand, wenn Claude Code gerade speichert.
@@ -492,37 +509,39 @@ class ClaudeCode extends KiWerkzeug {
     }
   }
 
-  /// Die Argumente für `claude mcp add-json`. Der Schlüssel steht darin --
-  /// sie gehen an die claude.exe, nie in Protokoll oder Anzeige.
+  /// Die Argumente für `claude mcp add-json`: die Brücke als lokaler Befehl.
+  /// Kein Schlüssel und keine Adresse, nichts, was ein anderes Konto erbeuten
+  /// könnte.
   ///
   /// add-json statt add, weil nur der JSON-Eintrag `timeout` kennt: Ohne
-  /// bricht Claude Code jede Anfrage an einen HTTP-Server ab, die nach 60
-  /// Sekunden noch keine Antwort hat, und die App antwortet erst, wenn das
-  /// Werkzeug fertig ist (enableJsonResponse, mcp_dienst.dart). `timeout`
-  /// gilt für den ganzen Werkzeugaufruf, Fortschrittsmeldungen verlängern ihn
-  /// nicht ([clientZeitlimit]).
-  List<String> addArgumente(int port, String schluessel, [String name = mcpName]) => [
+  /// bricht Claude Code jede Anfrage nach 60 Sekunden ab, und die App
+  /// antwortet erst, wenn das Werkzeug fertig ist. `timeout` gilt für den
+  /// ganzen Werkzeugaufruf, Fortschrittsmeldungen verlängern ihn nicht
+  /// ([clientZeitlimit]).
+  List<String> addArgumente([String name = mcpName]) => [
         'mcp', 'add-json', '--scope', 'user', name, //
         jsonEncode({
-          'type': 'http',
-          'url': mcpAdresse(port),
-          'headers': {'Authorization': mcpKopf(schluessel)},
+          'type': 'stdio',
+          'command': bruecke,
+          'args': brueckenArgumente(name),
+          'env': <String, String>{},
           'timeout': clientZeitlimit.inMilliseconds,
         }),
       ];
 
   @override
-  Future<String?> eintragen(int port, String schluessel, {String name = mcpName}) async {
+  Future<String?> eintragen({String name = mcpName}) async {
     if (exe == null) return '${_programm('claude')} nicht gefunden';
+    if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp: moocp neu installieren.';
     // Fehlt der Eintrag, endet remove mit Fehler; das ist hier der Normalfall.
     await ausfuehren(exe!, ['mcp', 'remove', name, '--scope', 'user']);
-    final code = await ausfuehren(exe!, addArgumente(port, schluessel, name));
+    final code = await ausfuehren(exe!, addArgumente(name));
     return code == 0 ? null : 'claude mcp add endete mit Code $code';
   }
 
   @override
   Future<String?> austragen({String name = mcpName}) async {
-    if (verbindung(0, '', name: name) == Verbindung.fehlt) return null;
+    if (verbindung(name: name) == Verbindung.fehlt) return null;
     if (exe == null) return '${_programm('claude')} nicht gefunden';
     final code = await ausfuehren(exe!, ['mcp', 'remove', name, '--scope', 'user']);
     return code == 0 ? null : 'claude mcp remove endete mit Code $code';
@@ -549,28 +568,20 @@ Future<int> _ausfuehren(String programm, List<String> argumente) async {
 // Codex (ChatGPT-App oder CLI)
 // ---------------------------------------------------------------------------
 
-/// Codex von OpenAI, als CLI oder in der ChatGPT-App. Der Eintrag wird in `~/.codex/config.toml`
-/// geschrieben, nicht über `codex mcp add`: Dessen Kommandozeile kennt nur
-/// `--bearer-token-env-var`, das den Schlüssel in eine dauerhafte
-/// Umgebungsvariable zwänge, die jedes Programm des Benutzers liest. Ein
-/// statischer Kopf (`http_headers`) steht dagegen nur in dieser Datei, die
-/// Codex nicht von selbst neu schreibt. Angefasst wird ausschließlich der
-/// Block `[mcp_servers.moodle]`; alles andere darin bleibt Zeichen für
-/// Zeichen stehen.
+/// Codex von OpenAI, als CLI oder in der ChatGPT-App. Der Eintrag wird in
+/// `~/.codex/config.toml` geschrieben, nicht über `codex mcp add`: Dessen
+/// Kommandozeile kennt kein Zeitlimit je Werkzeugaufruf (`tool_timeout_sec`).
+/// Angefasst wird ausschließlich der Block `[mcp_servers.<Profilname>]`; alles
+/// andere darin bleibt Zeichen für Zeichen stehen.
 class CodexCli extends KiWerkzeug {
-  CodexCli(super.umgebung);
+  CodexCli(super.umgebung, {super.bruecke});
 
   @override
   String get id => 'codex';
   @override
   String get name => 'Codex (ChatGPT-App oder CLI)';
   @override
-  // Der Schlüssel für Moodle steht bei Codex im Klartext in der Datei
-  // (ADR 0021, 0013): Das muss die Anzeige sagen, bevor die Lehrkraft
-  // „Installieren" klickt.
-  String get datenziel =>
-      'Inhalte gehen an das eingestellte Modell, in der Regel bei OpenAI. Der Moodle-Schlüssel steht im '
-      'Klartext in config.toml im Codex-Ordner (in der Regel ~/.codex)';
+  String get datenziel => 'Inhalte gehen an das eingestellte Modell, in der Regel bei OpenAI';
 
   // Codex-Sitzungen der ChatGPT-App teilen ~/.codex mit der Kommandozeile und
   // sehen die Einträge; der normale Chat der App ist kein Client.
@@ -633,7 +644,7 @@ class CodexCli extends KiWerkzeug {
   String? get hindernis => null;
 
   @override
-  Verbindung verbindung(int port, String schluessel, {String name = mcpName}) {
+  Verbindung verbindung({String name = mcpName}) {
     if (!konfiguration.existsSync()) return Verbindung.fehlt;
     final String text;
     try {
@@ -643,21 +654,23 @@ class CodexCli extends KiWerkzeug {
     }
     final block = tomlBlock(text, name);
     if (block == null) return Verbindung.fehlt;
-    final url = _tomlWert(block, 'url');
-    final kopf = _tomlWert(block, 'Authorization');
-    if (url == null || kopf == null) return Verbindung.veraltet;
-    return url == mcpAdresse(port) &&
-            kopf == mcpKopf(schluessel) &&
+    // Ein Eintrag mit Adresse oder Kopf (url, http_headers) ist einer von
+    // früher: Er schickt an eine Adresse, hinter der jedes Konto lauschen kann.
+    final alt = _tomlWert(block, 'url') != null || RegExp(r'(?<![\w-])http_headers\b').hasMatch(block);
+    return !alt &&
+            _brueckePasst(_tomlText(block, 'command')) &&
+            _gleichListe(_tomlListe(block, 'args'), brueckenArgumente(name)) &&
             _tomlZahl(block, 'tool_timeout_sec') == clientZeitlimit.inSeconds
         ? Verbindung.aktuell
         : Verbindung.veraltet;
   }
 
   @override
-  Future<String?> eintragen(int port, String schluessel, {String name = mcpName}) async {
+  Future<String?> eintragen({String name = mcpName}) async {
+    if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp: moocp neu installieren.';
     try {
       final alt = konfiguration.existsSync() ? konfiguration.readAsStringSync() : '';
-      final neu = tomlBlockSetzen(alt, name, mcpAdresse(port), mcpKopf(schluessel));
+      final neu = tomlBlockSetzen(alt, name, bruecke, brueckenArgumente(name));
       konfiguration.parent.createSync(recursive: true);
       konfiguration.writeAsStringSync(neu, flush: true);
       return null;
@@ -727,6 +740,36 @@ String? tomlBlock(String text, String name) {
 String? _tomlWert(String block, String schluessel) =>
     RegExp(r'(?<![\w-])' + RegExp.escape(schluessel) + r'[ \t]*=[ \t]*"([^"]*)"').firstMatch(block)?.group(1);
 
+/// Ein Text, wie TOML ihn schreibt: in einfachen Anführungszeichen (wörtlich,
+/// ohne Escapes: so stehen Windows-Pfade darin) oder in doppelten (mit `\\` und
+/// `\"`).
+String? _tomlText(String block, String schluessel) {
+  final m = RegExp(r'(?<![\w-])' + RegExp.escape(schluessel) + r"""[ \t]*=[ \t]*(?:'([^'\n]*)'|"((?:[^"\\\n]|\\.)*)")""")
+      .firstMatch(block);
+  if (m == null) return null;
+  return m.group(1) ?? _tomlEntschluesseln(m.group(2)!);
+}
+
+String _tomlEntschluesseln(String t) => t.replaceAllMapped(RegExp(r'\\(.)'), (m) => m.group(1)!);
+
+/// Eine Liste von Texten wie `args = ["--profil", "moodle"]`; null, wenn sie
+/// fehlt.
+List<String>? _tomlListe(String block, String schluessel) {
+  final m = RegExp(r'(?<![\w-])' + RegExp.escape(schluessel) + r'[ \t]*=[ \t]*\[([^\]]*)\]').firstMatch(block);
+  if (m == null) return null;
+  return [
+    for (final e in RegExp(r"""'([^'\n]*)'|"((?:[^"\\\n]|\\.)*)" """.trim()).allMatches(m.group(1)!))
+      e.group(1) ?? _tomlEntschluesseln(e.group(2)!),
+  ];
+}
+
+/// Ein Text für TOML: wörtlich in einfachen Anführungszeichen, wenn er das
+/// zulässt (so bleiben Windows-Pfade lesbar), sonst in doppelten mit Escapes.
+String _tomlSchreiben(String t) {
+  if (!t.contains("'") && !RegExp(r'[\x00-\x1f\x7f]').hasMatch(t)) return "'$t'";
+  return '"${t.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ')}"';
+}
+
 /// Eine Zahl aus einem Blocktext wie `tool_timeout_sec = 2100`, auch als
 /// `2100.0`; null, wenn sie fehlt oder keine ganze Zahl ist.
 num? _tomlZahl(String block, String schluessel) {
@@ -743,16 +786,16 @@ String _zeilenweise(String text, List<String> Function(List<String> zeilen) aend
   return crlf ? neu.replaceAll('\n', '\r\n') : neu;
 }
 
-/// Setzt den Block `[mcp_servers.<name>]` auf Adresse, Kopf und Zeitlimit
-/// dieser App und lässt alles andere unberührt. Einen vorhandenen Block
-/// ersetzt er samt Unterblöcken, sonst hängt er ihn an. Ohne
-/// `tool_timeout_sec` bricht Codex jeden Werkzeugaufruf nach 60 Sekunden ab
-/// ([clientZeitlimit]).
-String tomlBlockSetzen(String text, String name, String url, String kopf) {
+/// Setzt den Block `[mcp_servers.<name>]` auf die Brücke [befehl] mit
+/// [argumente] und das Zeitlimit dieser App und lässt alles andere
+/// unberührt. Einen vorhandenen Block ersetzt er samt Unterblöcken, sonst
+/// hängt er ihn an. Ohne `tool_timeout_sec` bricht Codex jeden Werkzeugaufruf
+/// nach 60 Sekunden ab ([clientZeitlimit]).
+String tomlBlockSetzen(String text, String name, String befehl, List<String> argumente) {
   final block = [
     '[mcp_servers.$name]',
-    'url = "$url"',
-    'http_headers = { Authorization = "$kopf" }',
+    'command = ${_tomlSchreiben(befehl)}',
+    'args = [${argumente.map(_tomlSchreiben).join(', ')}]',
     'tool_timeout_sec = ${clientZeitlimit.inSeconds}',
   ];
   return _zeilenweise(text, (zeilen) {
@@ -793,7 +836,7 @@ String tomlBlockEntfernen(String text, String name) => _zeilenweise(text, (zeile
 ///   `apps/bionic/.internal/ng-mcp.json`:
 ///   `{"servers": [{id, name, enabled, connection: {type: "stdio", command, args, env, timeoutMs}}]}`.
 /// - Sein Dialog kennt nur lokale Befehle (stdio). Darum kommt die Brücke
-///   hinein (mcp/bruecke.dart): `moocp-bruecke.exe`, ohne Schlüssel.
+///   hinein (mcp/bruecke.dart): `moocp-bruecke.exe --profil <Name>`, ohne Schlüssel.
 /// - Weder `lmstudio://add_mcp` (geht an das klassische LM Studio) noch
 ///   `bionic://add_mcp` legen dort etwas an. Von Hand eintragen wäre der
 ///   dokumentierte Weg, ist aber für Lehrkräfte zu viel.
@@ -815,18 +858,14 @@ String tomlBlockEntfernen(String text, String name) => _zeilenweise(text, (zeile
 ///
 /// Also schreibt die App selbst hinein, ohne dass Bionic beendet werden muss.
 /// Weil die Datei intern und nicht dokumentiert ist, so vorsichtig wie
-/// möglich: Angefasst werden nur Einträge namens „moodle", alles andere
-/// bleibt; geschrieben wird über eine Zwischendatei, damit Bionic nie eine
+/// möglich: Angefasst werden nur Einträge mit dem Namen des Profils, alles
+/// andere bleibt; geschrieben wird über eine Zwischendatei, damit Bionic nie eine
 /// halbe liest; eine Liste, die sich nicht lesen lässt, wird nicht
 /// überschrieben. Ob Bionic den Eintrag auch annimmt, sieht die App erst an
 /// der Verbindung („KI-Werkzeug verbunden" im Protokoll); der Dialog sagt
 /// deshalb „eingetragen", nicht mehr.
 class LmStudio extends KiWerkzeug {
-  LmStudio(super.umgebung, {String? bruecke})
-      : bruecke = bruecke ?? p.join(p.dirname(Platform.resolvedExecutable), brueckeExe);
-
-  /// Die Brücke, die eingetragen wird: die neben der laufenden moocp.exe.
-  final String bruecke;
+  LmStudio(super.umgebung, {super.bruecke});
 
   @override
   String get id => 'lmstudio';
@@ -861,7 +900,7 @@ class LmStudio extends KiWerkzeug {
   String verbindungText(Verbindung v) => switch (v) {
         Verbindung.aktuell => 'eingetragen',
         Verbindung.fehlt => 'nicht eingetragen',
-        Verbindung.veraltet => 'der Eintrag „moodle" weicht ab, wird ersetzt',
+        Verbindung.veraltet => 'der Eintrag weicht ab, wird ersetzt',
         Verbindung.unlesbar => 'Liste der MCP-Server von Bionic nicht lesbar',
       };
 
@@ -885,61 +924,54 @@ class LmStudio extends KiWerkzeug {
     zwischen.renameSync(liste.path);
   }
 
-  static bool _unser(Object? e) => e is Map && e['name'] == mcpName;
+  static bool _unser(Object? e, String name) => e is Map && e['name'] == name;
 
-  /// Ob ein Eintrag so dasteht, wie [eintragen] ihn schreibt: ein lokaler
-  /// Befehl, eine vorhandene [brueckeExe], [clientZeitlimit]. Welche Brücke,
-  /// ist gleich -- installierte App und eigener Bau teilen Einstellungen und
-  /// Port, die Brücke der einen erreicht auch die andere. Ob der Eintrag in
-  /// Bionic eingeschaltet ist, entscheidet die Lehrkraft dort; eingetragen
-  /// ist er so oder so.
-  bool _passt(Map e) {
+  /// Ob ein Eintrag so dasteht, wie [eintragen] ihn schreibt: die Brücke als
+  /// lokaler Befehl mit dem Profil als Argument, [clientZeitlimit]. Welche
+  /// Brücke, ist gleich -- installierte App und eigener Bau teilen
+  /// Einstellungen und Kanal, die Brücke der einen erreicht auch die andere.
+  /// Ob der Eintrag in Bionic eingeschaltet ist, entscheidet die Lehrkraft
+  /// dort; eingetragen ist er so oder so.
+  bool _passt(Map e, String name) {
     final c = e['connection'];
     if (c is! Map) return false;
-    final befehl = c['command'];
     return (c['type'] ?? 'stdio') == 'stdio' &&
-        befehl is String &&
-        p.basename(befehl).toLowerCase() == brueckeExe &&
-        File(befehl).existsSync() &&
+        _brueckePasst(c['command']) &&
+        _gleichListe(c['args'], brueckenArgumente(name)) &&
         c['timeoutMs'] == clientZeitlimit.inMilliseconds;
   }
 
   @override
-  Verbindung verbindung(int port, String schluessel, {String name = mcpName}) {
-    // Die Brücke kennt nur den Namen moodle.
-    if (name != mcpName) return Verbindung.fehlt;
+  Verbindung verbindung({String name = mcpName}) {
     try {
-      final e = [for (final x in _lesen()['servers'] as List) if (_unser(x)) x as Map];
+      final e = [for (final x in _lesen()['servers'] as List) if (_unser(x, name)) x as Map];
       if (e.isEmpty) return Verbindung.fehlt;
-      return e.any(_passt) ? Verbindung.aktuell : Verbindung.veraltet;
+      return e.any((x) => _passt(x, name)) ? Verbindung.aktuell : Verbindung.veraltet;
     } catch (_) {
       return Verbindung.unlesbar;
     }
   }
 
-  /// Ersetzt alle Einträge namens „moodle" durch die Brücke, wie `claude mcp
+  /// Ersetzt alle Einträge dieses Namens durch die Brücke, wie `claude mcp
   /// remove` und `add` es bei Claude Code tun. Die id eines vorhandenen
   /// bleibt, damit Bionic, was es daran hängt, nicht verliert.
   @override
-  Future<String?> eintragen(int port, String schluessel, {String name = mcpName}) async {
-    if (name != mcpName) {
-      return 'Die Brücke für Bionic kennt nur den Servernamen moodle; weitere Profile sind offen.';
-    }
+  Future<String?> eintragen({String name = mcpName}) async {
     if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp.exe: moocp neu installieren.';
     try {
       final d = _lesen();
       final server = d['servers'] as List;
-      final id = server.where(_unser).map((e) => (e as Map)['id']).whereType<String>().firstOrNull;
+      final id = server.where((e) => _unser(e, name)).map((e) => (e as Map)['id']).whereType<String>().firstOrNull;
       d['servers'] = [
-        ...server.where((e) => !_unser(e)),
+        ...server.where((e) => !_unser(e, name)),
         {
           'id': id ?? _neueId(),
-          'name': mcpName,
+          'name': name,
           'enabled': true,
           'connection': {
             'type': 'stdio',
             'command': bruecke,
-            'args': <String>[],
+            'args': brueckenArgumente(name),
             'env': <String, String>{},
             'timeoutMs': clientZeitlimit.inMilliseconds,
           },
@@ -956,12 +988,11 @@ class LmStudio extends KiWerkzeug {
 
   @override
   Future<String?> austragen({String name = mcpName}) async {
-    if (name != mcpName) return null;
     try {
       final d = _lesen();
       final server = d['servers'] as List;
-      if (!server.any(_unser)) return null;
-      d['servers'] = [...server.where((e) => !_unser(e))];
+      if (!server.any((e) => _unser(e, name))) return null;
+      d['servers'] = [...server.where((e) => !_unser(e, name))];
       _schreiben(d);
       return null;
     } on FormatException {
@@ -986,6 +1017,15 @@ String _neueId() {
 /// Alle Werkzeuge, in der Reihenfolge, in der sie im Dialog stehen.
 List<KiWerkzeug> alleWerkzeuge(Map<String, String> umgebung) =>
     [ClaudeCode(umgebung), CodexCli(umgebung), LmStudio(umgebung)];
+
+/// Ob [befehl] die Brücke von moocp ist: eine vorhandene Datei dieses Namens.
+/// Welche, ist gleich -- installierte App und eigener Bau teilen Einstellungen
+/// und Kanal, die Brücke der einen erreicht auch die andere.
+bool _brueckePasst(Object? befehl) =>
+    befehl is String && p.basename(befehl).toLowerCase() == brueckeExe && File(befehl).existsSync();
+
+bool _gleichListe(Object? a, List<String> b) =>
+    a is List && a.length == b.length && [for (var i = 0; i < b.length; i++) a[i] == b[i]].every((x) => x);
 
 /// Nur die, die auf diesem Rechner benutzt werden.
 List<KiWerkzeug> gefundeneWerkzeuge(Map<String, String> umgebung) =>
@@ -1238,9 +1278,9 @@ const werkzeuglisteSchalter = '--werkzeugliste';
 const versionSchalter = '--version';
 
 /// Die Brücke für KI-Werkzeuge, die MCP nur über stdio sprechen
-/// (mcp/bruecke.dart): ein eigenes Programm neben moocp.exe, gebaut von
-/// windows/bruecke.cmake.
-const brueckeExe = 'moocp-bruecke.exe';
+/// (mcp/bruecke.dart): ein eigenes Programm neben der App, gebaut von
+/// windows/bruecke.cmake, tool/linux_bau.sh und tool/mac_bau.sh.
+final brueckeExe = Platform.isWindows ? 'moocp-bruecke.exe' : 'moocp-bruecke';
 
 /// Was nach dem Entfernen noch da ist.
 class Entfernt {
@@ -1317,7 +1357,7 @@ Future<List<String>> profilEintragEntfernen({
 /// unlesbar, zählt der Eintrag als vorhanden.
 Future<bool> _eintragDa(KiWerkzeug w, [String name = mcpName]) async {
   for (var i = 0; i < 3; i++) {
-    final v = w.verbindung(0, '', name: name);
+    final v = w.verbindung(name: name);
     if (v != Verbindung.unlesbar) return v != Verbindung.fehlt;
     await Future<void>.delayed(const Duration(milliseconds: 500));
   }
@@ -1494,8 +1534,6 @@ List<SkillPaket> _gewollt(List<SkillPaket> skills, Map<String, String> wahlSkill
 /// Dialog wie ein neues unbrauchbares Paket.
 Future<Einrichtungsstand> einrichtungPruefen({
   required Map<String, String> umgebung,
-  required int port,
-  required String schluessel,
   String name = mcpName,
   required List<SkillPaket> skills,
   required Map<String, String> wahlSkills,
@@ -1552,7 +1590,7 @@ Future<Einrichtungsstand> einrichtungPruefen({
       Werkzeugstand(
         werkzeug: w,
         gewaehlt: gewaehlteWerkzeuge.contains(w.id),
-        verbindung: w.verbindung(port, schluessel, name: name),
+        verbindung: w.verbindung(name: name),
         skills: gewaehlteWerkzeuge.contains(w.id) ? [for (final s in gewollt) if (!fremdHier.contains(s.name)) s] : const [],
         stand: stand,
         entfernen: {

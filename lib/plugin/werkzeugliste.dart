@@ -15,8 +15,9 @@
 // Ausgegeben wird die Liste eines Plugins nur, wenn
 //   - ihm zugestimmt ist, für genau den Stand, den der Plugin-Ordner jetzt hat
 //     (Version und Prüfsumme, wie beim Start der App), und
-//   - es im Standardprofil eingeschaltet ist: Die Brücke kennt nur den Server
-//     `moodle` (E21), und das ist das Standardprofil (E31), und
+//   - es im Standardprofil eingeschaltet ist: `--werkzeugliste` gibt die Liste
+//     des Standardprofils (E31) aus, auch für die Brücke eines anderen
+//     Profils, und
 //   - seine Werkzeugnamen den Regeln genügen, wie beim Start der App (Kurzname
 //     davor, kein Name eines eingebauten Werkzeugs oder eines früheren
 //     Plugins). Ein einzelnes Werkzeug, dessen Name mit `mcp__<Profil>__`
@@ -60,7 +61,7 @@ Future<Map<String, dynamic>> werkzeuglisteFuerBruecke({
   final protokoll = Protokoll();
   final profil = Profil.migriert('');
   McpDienst dienst(List<WerkzeugQuelle> quellen) => McpDienst(
-    Einstellungen(schluessel: ''),
+    Einstellungen(),
     MoodleZugang(protokoll),
     protokoll,
     Freigaben(protokoll),
@@ -119,7 +120,7 @@ Future<List<WerkzeugBeschreibung>> gemerkteWerkzeuge({
   } on FileSystemException {
     return const [];
   }
-  final plugins = Plugins(Einstellungen(schluessel: '', plugins: entscheidungen), Protokoll(), eintraege);
+  final plugins = Plugins(Einstellungen(plugins: entscheidungen), Protokoll(), eintraege);
   final vergeben = {...eingebaut};
   final ergebnis = <WerkzeugBeschreibung>[];
   for (final stand in plugins.aktivIn(profilKennung)) {

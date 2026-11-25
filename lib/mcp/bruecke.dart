@@ -22,11 +22,15 @@
 // angemeldet ist. So geht moocp nicht bei jedem Start des Clients mit auf,
 // und wer vergessen hat, es zu starten, merkt davon nur eine kurze Pause.
 //
-// Den Schlüssel liest die Brücke selbst aus den Einstellungen; im
-// KI-Werkzeug steht deshalb nur der Pfad der Brücke und kein Geheimnis.
-// Sie fragt genau eine Adresse an, mit dem Port aus den Einstellungen, und
-// kann nichts, was der MCP-Server über HTTP nicht auch kann: Sperrliste,
-// Freigaben und Protokoll liegen dort (E6).
+// Die Brücke ist der Weg jedes KI-Werkzeugs zur App, auf jedem System (E21):
+// Im KI-Werkzeug steht nur ihr Pfad und der Name des Profils (`--profil`), kein
+// Geheimnis. Zur App geht sie über den Kanal des Profils (kanal.dart), einen
+// Endpunkt, den nur das eigene Konto erreicht. Bevor sie das Geringste sendet,
+// prüft sie, dass Ordner und Socket (oder die Pipe) dem eigenen Konto gehören
+// und dass auch die Gegenseite dieses Konto ist; fällt eine Prüfung durch,
+// bekommt die KI den Grund als Ergebnis und nichts geht hinaus. Sie kann nichts,
+// was der MCP-Server nicht auch kann: Sperrliste, Freigaben und Protokoll liegen
+// dort (E6).
 //
 // Kein Fenster und kein Protokolleintrag: Die laufende App protokolliert die
 // Verbindung selbst („KI-Werkzeug verbunden"), und zwei Prozesse, die in
@@ -42,35 +46,52 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../einrichtung.dart';
-import '../einstellungen_ort.dart';
 import '../plattform/kindprozess.dart';
+import 'kanal.dart';
+
+/// Der Servername, wenn der Aufruf keinen nennt: das Standardprofil (E31).
+const standardProfilName = 'moodle';
+
+/// Der Profilname aus den Argumenten der Brücke (`--profil <name>`); null, wenn
+/// der Name fehlt oder sich nicht für einen Endpunkt eignet. Ohne Angabe gilt
+/// [standardProfilName].
+String? profilAusArgumenten(List<String> argumente) {
+  final i = argumente.indexOf('--profil');
+  if (i < 0) return standardProfilName;
+  if (i + 1 >= argumente.length) return null;
+  final name = argumente[i + 1];
+  return kanalNameGueltig(name) ? name : null;
+}
 
 /// Aufruf aus bin/moocp_bruecke.dart.
-Future<int> brueckeStarten() async {
-  var port = standardPort;
-  String? schluessel;
-  try {
-    // Nur lesen: Einstellungen.laden() legte eine fehlende Datei an.
-    final j = jsonDecode(einstellungenDatei.readAsStringSync());
-    if (j is Map) {
-      port = j['port'] as int? ?? port;
-      schluessel = j['schluessel'] as String?;
-    }
-  } catch (_) {
-    // dann eben nicht eingerichtet; jede Anfrage bekommt das als Antwort
+Future<int> brueckeStarten(List<String> argumente) async {
+  final profil = profilAusArgumenten(argumente);
+  final exe = File(p.join(p.dirname(Platform.resolvedExecutable), _moocpDatei));
+  final Bruecke bruecke;
+  if (profil == null) {
+    // Ein falscher Aufruf des KI-Werkzeugs: Jede Anfrage bekommt den Grund.
+    bruecke = Bruecke(
+      verbinden: () async => throw KanalFehler('Der Profilname der Brücke (--profil) ist ungültig.'),
+      ausgabe: stdout.writeln,
+      listeHolen: () => werkzeuglisteHolen(exe),
+      appStarten: () async => false,
+    );
+  } else {
+    bruecke = Bruecke(
+      verbinden: () => standardKanalOrt.verbinden(profil),
+      ausgabe: stdout.writeln,
+      listeHolen: () => werkzeuglisteHolen(exe),
+      appStarten: () => moocpStarten(exe),
+    );
   }
-  final exe = File(p.join(p.dirname(Platform.resolvedExecutable), 'moocp.exe'));
-  final bruecke = Bruecke(
-    adresse: Uri.parse(mcpAdresse(port)),
-    schluessel: schluessel,
-    ausgabe: stdout.writeln,
-    listeHolen: () => werkzeuglisteHolen(exe),
-    appStarten: () => moocpStarten(exe),
-  );
   await bruecke.laufen(stdin);
   await stdout.flush();
   return 0;
 }
+
+/// Die Programmdatei der App neben der Brücke: `moocp.exe` unter Windows,
+/// `moocp` auf dem Mac und unter Linux.
+String get _moocpDatei => Platform.isWindows ? 'moocp.exe' : 'moocp';
 
 /// Startet moocp losgelöst von der Brücke: ohne ihre Rohre zum Client, und
 /// so, dass die App weiterläuft, wenn die Brücke endet. Läuft moocp schon,
@@ -141,30 +162,40 @@ class Werkzeugliste {
 
 const _keineListe = 'moocp gibt seine Werkzeuge nicht heraus: moocp neu installieren.';
 const _laeuftNicht = 'moocp läuft nicht: die App starten und bei Moodle anmelden.';
-const _schluesselFalsch =
-    'moocp lehnt den Schlüssel ab: die App einmal neu starten, dann im KI-Werkzeug neu verbinden.';
-const _abgerissen = 'Die Verbindung zu moocp ist abgerissen; im KI-Werkzeug neu verbinden.';
+const _abgerissen = 'Die Verbindung zu moocp ist abgerissen; den Aufruf noch einmal versuchen.';
+
+/// Die Nummer der Anfrage, mit der sich die Brücke bei der App anmeldet.
+const _anmeldeNummer = 'moocp-bruecke-anmeldung';
 
 /// Reicht Nachrichten zwischen einem stdio-Client und dem MCP-Server der App
 /// weiter. Ohne stdin und stdout, damit sie sich prüfen lässt
 /// (test/bruecke_test.dart).
+///
+/// Eine Verbindung zur App ist eine MCP-Sitzung: Die Brücke meldet sich mit
+/// dem initialize des Clients an, sobald sie eine braucht, und reicht danach
+/// jede Nachricht und jede Antwort Zeile für Zeile durch. Reißt die Verbindung
+/// ab (die App wurde beendet oder neu gestartet), bekommt jede Anfrage, die
+/// noch auf eine Antwort wartete, eine Fehlerantwort und wird nie
+/// wiederholt: Ob die App sie schon ausgeführt hat, ist nicht bekannt, und ein
+/// Werkzeug schreibt in Moodle. Die nächste Anfrage baut die Verbindung neu
+/// auf, notfalls startet sie die App.
 class Bruecke {
   Bruecke({
-    required this.adresse,
-    required this.schluessel,
+    required this.verbinden,
     required this.ausgabe,
     required this.listeHolen,
     required this.appStarten,
     // Kürzer als das Zeitlimit des Clients (einrichtung.dart): Die KI soll den Hinweis
     // „moocp ist noch nicht bereit" bekommen, nicht nur eine Zeitüberschreitung.
     this.aufAppWarten = const Duration(minutes: 5),
-    HttpClient? client,
-  }) : _client = client ?? (HttpClient()..connectionTimeout = const Duration(milliseconds: 500));
+    this.anmeldeFrist = const Duration(seconds: 30),
+  });
 
-  final Uri adresse;
-
-  /// null, wenn die App nicht eingerichtet ist.
-  final String? schluessel;
+  /// Baut die Verbindung zur App auf, nachdem Endpunkt und Gegenstelle geprüft
+  /// sind (kanal.dart): [KanalNichtDa], wenn die App nicht läuft,
+  /// [KanalUnsicher], wenn etwas nicht stimmt -- dann ist nichts gesendet
+  /// worden und wird auch nichts gesendet.
+  final Future<KanalVerbindung> Function() verbinden;
 
   /// Schreibt eine Zeile an den Client.
   final void Function(String zeile) ausgabe;
@@ -185,15 +216,11 @@ class Bruecke {
   /// dass moocp noch nicht bereit ist, statt nur einer Zeitüberschreitung.
   final Duration aufAppWarten;
 
-  /// Mit kurzer Frist für den Verbindungsaufbau: Lauscht die App, nimmt
-  /// Windows die Verbindung auf 127.0.0.1 sofort an, auch wenn sie gerade
-  /// beschäftigt ist. Lauscht sie nicht, wiederholt Windows den Versuch und
-  /// gibt erst nach rund 2 Sekunden auf -- so lange soll das Warten auf die
-  /// gerade gestartete App nicht zwischen zwei Versuchen hängen.
-  final HttpClient _client;
+  /// Wie lange die App für die Antwort auf die Anmeldung brauchen darf.
+  final Duration anmeldeFrist;
 
-  String? _sitzung;
-  String? _protokollVersion;
+  KanalVerbindung? _kanal;
+  Completer<void>? _angemeldet;
 
   /// Die initialize-Anfrage des Clients: Mit ihr meldet sich die Brücke bei
   /// der App an, sobald sie eine Sitzung braucht.
@@ -208,6 +235,9 @@ class Bruecke {
   final _offen = <Object>{};
   final _abgebrochen = <Object>{};
 
+  /// Anfragen, die bei der App sind und noch keine Antwort haben.
+  final _ausstehend = <Object>{};
+
   /// Liest, bis der Client stdin schließt, und beendet dann die Sitzung.
   /// Nachrichten laufen nebeneinander: Ein Werkzeug, das auf eine Freigabe
   /// wartet, kann eine halbe Stunde brauchen, und so lange darf weder ein ping
@@ -219,7 +249,6 @@ class Bruecke {
     }
     await Future.wait(offen);
     await _beenden();
-    _client.close(force: true);
   }
 
   Future<void> _nachricht(String zeile) async {
@@ -233,12 +262,6 @@ class Bruecke {
     if (n is! Map) return;
     final id = n['id'];
     final methode = n['method'];
-    if (schluessel == null) {
-      if (id != null) {
-        _fehler(id, -32000, 'moocp ist auf diesem Rechner nicht eingerichtet: die App einmal starten und einrichten.');
-      }
-      return;
-    }
     switch (methode) {
       case 'initialize':
         _anmeldung = n.cast<String, dynamic>();
@@ -262,11 +285,11 @@ class Bruecke {
         }
         // Andere Benachrichtigungen (auch der Abbruch einer Anfrage, die schon
         // bei der App ist) nur an eine verbundene App.
-        if (_sitzung != null) await _senden(zeile, null);
+        _senden(zeile);
         return;
     }
     // Sonst eine Antwort des Clients auf eine Anfrage des Servers: Die App
-    // stellt keine (enableJsonResponse in mcp_dienst.dart).
+    // stellt keine.
   }
 
   /// initialize und tools/list: die Antwort, die `moocp.exe --werkzeugliste`
@@ -304,20 +327,17 @@ class Bruecke {
 
   Future<void> _aufrufen(String zeile, Object id, {required bool werkzeug}) async {
     String? grund;
-    for (var versuch = 0; versuch < 2; versuch++) {
-      if (_sitzung == null) {
-        grund = await _verbinden(starten: werkzeug);
-        if (grund != null) break;
-      }
-      // Abgebrochen, während die Brücke auf die App wartete: nicht mehr
-      // senden und nicht antworten -- der Client will keine Antwort mehr.
-      if (_abgebrochen.contains(id)) return;
-      if (await _senden(zeile, id) == _Ergebnis.erledigt) return;
-      // Die App ist inzwischen weg: neu verbinden, notfalls starten.
-      _sitzung = null;
-      grund = _laeuftNicht;
+    if (_kanal == null) {
+      grund = await _verbinden(starten: werkzeug);
     }
+    // Abgebrochen, während die Brücke auf die App wartete: nicht mehr
+    // senden und nicht antworten -- der Client will keine Antwort mehr.
     if (_abgebrochen.contains(id)) return;
+    if (grund == null && _kanal != null) {
+      _ausstehend.add(id);
+      _senden(zeile);
+      return;
+    }
     final text = grund ?? _laeuftNicht;
     if (werkzeug) {
       ausgabe(
@@ -345,7 +365,7 @@ class Bruecke {
     final laufend = _verbindet;
     if (laufend != null) {
       final grund = await laufend;
-      if (_sitzung != null) return null;
+      if (_kanal != null) return null;
       if (!starten) return grund;
     }
     final f = _verbindet = _verbindenJetzt(starten: starten);
@@ -362,25 +382,10 @@ class Bruecke {
     var gestartet = false;
     final bis = DateTime.now().add(aufAppWarten);
     while (true) {
+      final KanalVerbindung v;
       try {
-        final antwort = await _post(jsonEncode({...anmeldung, 'id': 'moocp-bruecke-anmeldung'}), mitSitzung: false);
-        final sitzung = antwort.headers.value('mcp-session-id');
-        final status = antwort.statusCode;
-        final inhalt = _json(await utf8.decodeStream(antwort));
-        if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) return _schluesselFalsch;
-        if (status != HttpStatus.ok || sitzung == null) return _abgerissen;
-        _sitzung = sitzung;
-        final ergebnis = inhalt is Map ? inhalt['result'] : null;
-        if (ergebnis is Map && ergebnis['protocolVersion'] is String) {
-          _protokollVersion = ergebnis['protocolVersion'] as String;
-        }
-        final bestaetigt = await _post(
-          jsonEncode({'jsonrpc': '2.0', 'method': 'notifications/initialized'}),
-          mitSitzung: true,
-        );
-        await bestaetigt.drain<void>();
-        return null;
-      } on SocketException {
+        v = await verbinden();
+      } on KanalNichtDa {
         if (!starten) return _laeuftNicht;
         if (!gestartet) {
           gestartet = true;
@@ -393,127 +398,87 @@ class Bruecke {
               'Dialog dort abschließen), dann noch einmal versuchen.';
         }
         await Future<void>.delayed(const Duration(milliseconds: 500));
+        continue;
+      } on KanalUnsicher catch (x) {
+        return 'moocp wurde nicht angesprochen, weil der Kanal nicht sicher ist: ${x.text} '
+            'Es wurde nichts gesendet. moocp im eigenen Konto neu starten.';
+      } on KanalFehler catch (x) {
+        return 'moocp nicht erreichbar: ${x.text}';
       } catch (x) {
         return 'moocp nicht erreichbar (${x.runtimeType}).';
       }
+      return _anmelden(v, anmeldung);
     }
   }
 
-  Future<HttpClientResponse> _post(String text, {required bool mitSitzung}) async {
-    final anfrage = await _client.postUrl(adresse);
-    anfrage.headers
-      ..set(HttpHeaders.contentTypeHeader, 'application/json')
-      ..set(HttpHeaders.acceptHeader, 'application/json, text/event-stream')
-      ..set(HttpHeaders.authorizationHeader, mcpKopf(schluessel!));
-    if (mitSitzung && _sitzung != null) anfrage.headers.set('mcp-session-id', _sitzung!);
-    if (mitSitzung && _protokollVersion != null) anfrage.headers.set('mcp-protocol-version', _protokollVersion!);
-    anfrage.add(utf8.encode(text));
-    return anfrage.close();
-  }
-
-  /// Schickt eine Nachricht an die App und gibt ihre Antwort an den Client.
-  /// [_Ergebnis.nichtErreichbar], wenn die App nicht lauscht -- dann hat der
-  /// Client noch nichts bekommen, und der Aufrufer entscheidet.
-  Future<_Ergebnis> _senden(String text, Object? id, {bool nochmal = true}) async {
-    final HttpClientResponse antwort;
+  /// Meldet die Brücke auf der geprüften Verbindung [v] an: das initialize des
+  /// Clients, die Antwort abwarten, dann „initialisiert".
+  Future<String?> _anmelden(KanalVerbindung v, Map<String, dynamic> anmeldung) async {
+    final angemeldet = Completer<void>();
+    _angemeldet = angemeldet;
+    unawaited(_lesen(v));
+    v.senden(utf8.encode('${jsonEncode({...anmeldung, 'id': _anmeldeNummer})}\n'));
     try {
-      antwort = await _post(text, mitSitzung: true);
-    } on SocketException {
-      return _Ergebnis.nichtErreichbar;
-    } catch (x) {
-      if (id != null) _fehler(id, -32000, 'moocp nicht erreichbar (${x.runtimeType}).');
-      return _Ergebnis.erledigt;
-    }
-    final status = antwort.statusCode;
-    // Die App wurde neu gestartet und kennt die Sitzung nicht mehr: neu
-    // anmelden und einmal wiederholen. Der Client merkt davon nichts.
-    if (status == HttpStatus.notFound && nochmal && _anmeldung != null) {
-      await antwort.drain<void>();
-      _sitzung = null;
-      final grund = await _verbinden(starten: false);
-      if (grund == null) return _senden(text, id, nochmal: false);
-      if (grund == _laeuftNicht) return _Ergebnis.nichtErreichbar;
-      if (id != null) _fehler(id, -32000, grund);
-      return _Ergebnis.erledigt;
-    }
-    if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
-      await antwort.drain<void>();
-      if (id != null) _fehler(id, -32000, _schluesselFalsch);
-      return _Ergebnis.erledigt;
-    }
-    if (antwort.headers.contentType?.mimeType == 'text/event-stream') {
-      await _ereignisse(antwort);
-      return _Ergebnis.erledigt;
-    }
-    final inhalt = await utf8.decodeStream(antwort);
-    if (inhalt.trim().isNotEmpty) {
-      _weiter(inhalt);
-    } else if (status >= 400 && id != null) {
-      _fehler(id, -32000, 'moocp antwortet mit Status $status.');
-    }
-    return _Ergebnis.erledigt;
-  }
-
-  /// Ereignisse einer SSE-Antwort: jedes `data:` ist eine Nachricht. Die App
-  /// antwortet zwar mit JSON (enableJsonResponse in mcp_dienst.dart), aber
-  /// der Standard erlaubt beides.
-  Future<void> _ereignisse(HttpClientResponse antwort) async {
-    final daten = <String>[];
-    await for (final zeile in antwort.transform(utf8.decoder).transform(const LineSplitter())) {
-      if (zeile.isEmpty) {
-        if (daten.isNotEmpty) _weiter(daten.join('\n'));
-        daten.clear();
-      } else if (zeile.startsWith('data:')) {
-        daten.add(zeile.substring(5).trimLeft());
-      }
-    }
-    if (daten.isNotEmpty) _weiter(daten.join('\n'));
-  }
-
-  /// Eine Antwort als JSON, ob als JSON oder als SSE gekommen; null, wenn sie
-  /// sich nicht lesen lässt.
-  static Object? _json(String text) {
-    try {
-      return jsonDecode(text);
+      await angemeldet.future.timeout(anmeldeFrist);
     } catch (_) {
-      final daten = [
-        for (final z in const LineSplitter().convert(text))
-          if (z.startsWith('data:')) z.substring(5).trimLeft(),
-      ];
-      try {
-        return daten.isEmpty ? null : jsonDecode(daten.join('\n'));
-      } catch (_) {
-        return null;
+      _kanal = null;
+      await v.schliessen();
+      return _abgerissen;
+    }
+    _kanal = v;
+    v.senden(utf8.encode('${jsonEncode({'jsonrpc': '2.0', 'method': 'notifications/initialized'})}\n'));
+    return null;
+  }
+
+  /// Liest die Antworten der App und gibt sie dem Client. Das Ende der
+  /// Verbindung beantwortet jede Anfrage, die noch wartete.
+  Future<void> _lesen(KanalVerbindung v) async {
+    try {
+      await for (final zeile in v.eingang.transform(utf8.decoder).transform(const LineSplitter())) {
+        final Object? n;
+        try {
+          n = jsonDecode(zeile);
+        } catch (_) {
+          continue;
+        }
+        if (n is! Map) continue;
+        if (n['id'] == _anmeldeNummer) {
+          if (n['error'] != null) {
+            _angemeldet?.completeError(StateError('abgelehnt'));
+          } else {
+            _angemeldet?.complete();
+          }
+          continue;
+        }
+        final id = n['id'];
+        if (id != null && n['method'] == null) _ausstehend.remove(id);
+        // Neu kodiert: Über stdio darf eine Nachricht keinen Zeilenumbruch
+        // enthalten.
+        ausgabe(jsonEncode(n));
       }
+    } catch (_) {
+      // Wie ein Ende der Verbindung.
+    }
+    if (identical(_kanal, v)) _kanal = null;
+    final a = _angemeldet;
+    if (a != null && !a.isCompleted) a.completeError(StateError('abgerissen'));
+    final verwaist = [..._ausstehend];
+    _ausstehend.clear();
+    for (final id in verwaist) {
+      if (!_abgebrochen.contains(id)) _fehler(id, -32000, _abgerissen);
     }
   }
 
-  /// Gibt eine Antwort an den Client, neu kodiert: Über stdio darf eine
-  /// Nachricht keinen Zeilenumbruch enthalten.
-  void _weiter(String json) {
-    final Object? n;
-    try {
-      n = jsonDecode(json);
-    } catch (_) {
-      return;
-    }
-    ausgabe(jsonEncode(n));
+  void _senden(String zeile) {
+    final k = _kanal;
+    if (k != null) k.senden(utf8.encode('$zeile\n'));
   }
 
   /// Beendet die Sitzung, damit die App sie nicht bis zu ihrem Ende hält.
   Future<void> _beenden() async {
-    final sitzung = _sitzung;
-    if (sitzung == null || schluessel == null) return;
-    try {
-      final anfrage = await _client.deleteUrl(adresse).timeout(const Duration(seconds: 2));
-      anfrage.headers
-        ..set(HttpHeaders.authorizationHeader, mcpKopf(schluessel!))
-        ..set('mcp-session-id', sitzung);
-      final antwort = await anfrage.close().timeout(const Duration(seconds: 2));
-      await antwort.drain<void>();
-    } catch (_) {
-      // Die App ist schon zu oder antwortet nicht; dann gibt es nichts zu beenden.
-    }
+    final k = _kanal;
+    _kanal = null;
+    if (k != null) await k.schliessen();
   }
 
   void _fehler(Object? id, int code, String text) => ausgabe(
@@ -524,5 +489,3 @@ class Bruecke {
     }),
   );
 }
-
-enum _Ergebnis { erledigt, nichtErreichbar }

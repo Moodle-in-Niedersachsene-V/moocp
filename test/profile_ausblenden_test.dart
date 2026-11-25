@@ -47,7 +47,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'hilfen/nur_maus.dart';
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile, super.plugins, required super.schluessel});
+  _EinstellungenOhneDatei({super.profile, super.plugins});
   int gespeichert = 0;
 
   @override
@@ -78,7 +78,6 @@ Profil _profil(String kennung, String name, String mcp, int port, {Bestaetigunge
       port: port,
       mcpName: mcp,
       bestaetigungen: stufe,
-      schluessel: kennung == Profil.standardKennung ? '' : 'schluessel-$kennung',
     );
 
 Instanz _instanz(Einstellungen e, Protokoll protokoll, Profil profil, {bool ablehnen = false}) {
@@ -180,7 +179,11 @@ PluginEntscheidung _zugestimmt(Set<String> profile, {bool ja = true}) =>
     PluginEntscheidung(version: '1.0', pruefsumme: 'summe-1.0', zugestimmt: ja, profile: profile);
 
 void main() {
+  late Directory brueckenOrdner;
   setUp(() {
+    // Die Brücke, die die Einrichtung einträgt: eine Datei im Testordner.
+    brueckenOrdner = Directory.systemTemp.createTempSync('moocp_bruecke_');
+    festeBruecke = (File(p.join(brueckenOrdner.path, brueckeExe))..writeAsStringSync('x')).path;
     // ignore: invalid_use_of_visible_for_testing_member
     SharedPreferences.setMockInitialValues({});
     // ignore: invalid_use_of_visible_for_testing_member
@@ -188,6 +191,10 @@ void main() {
     // ignore: invalid_use_of_visible_for_testing_member
     PackageInfo.setMockInitialValues(
         appName: 'moocp', packageName: 'moocp', version: '0.9.4', buildNumber: '1', buildSignature: '');
+  });
+  tearDown(() {
+    festeBruecke = null;
+    brueckenOrdner.deleteSync(recursive: true);
   });
 
   /// Startet die App wie `main`: das erste Profil ist das Hauptprofil, die
@@ -206,7 +213,7 @@ void main() {
     tester.view.physicalSize = Size(breite, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen, schluessel: 'global');
+    final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen);
     final protokoll = Protokoll();
     final instanzen = [
       for (var i = 0; i < einstellungen.profile.length; i++)
@@ -309,8 +316,7 @@ void main() {
       expect(find.text('moocp — Moodle Test (moodle-test)'), findsOneWidget);
       expect(a.einstellungen.profile, hasLength(2));
       final neu = a.einstellungen.profile.last;
-      expect(neu.schluessel, hasLength(64), reason: 'jedes neue Profil bekommt einen eigenen Schlüssel');
-      expect(neu.schluessel, isNot(a.einstellungen.schluessel));
+      expect(jsonEncode(neu.toJson()), isNot(contains('schluessel')), reason: 'es gibt keinen Zugangsschlüssel mehr');
       expect(a.einstellungen.gespeichert, greaterThan(0));
     });
   });
@@ -482,22 +488,25 @@ void main() {
     });
   });
 
-  group('Der Dialog „KI-Werkzeuge einrichten" schreibt den Schlüssel des Profils', () {
+  group('Der Dialog „KI-Werkzeuge einrichten" stellt den Eintrag des Profils um', () {
     late Directory heim;
     setUp(() => heim = Directory.systemTemp.createTempSync('moocp_einrichtung_'));
     tearDown(() => heim.deleteSync(recursive: true));
 
-    testWidgets('ein Eintrag mit dem Schlüssel eines anderen Profils ist veraltet, „Installieren" erneuert ihn', (tester) async {
+    testWidgets('ein Eintrag mit Adresse und Schlüssel ist veraltet, „Installieren" ersetzt ihn durch die Brücke', (tester) async {
       // USERPROFILE gilt unter Windows, HOME auf dem Mac.
       final env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       final codex = CodexCli(env);
-      // Ein Eintrag aus der Zeit, als alle Profile den globalen Schlüssel teilten.
-      expect(await codex.eintragen(47812, 'global', name: 'moodle-test'), isNull);
+      // Ein Eintrag aus früheren Versionen, daneben ein fremder Server.
+      final konfig = File(p.join(heim.path, '.codex', 'config.toml'))..createSync(recursive: true);
+      const fremd = '[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
+      konfig.writeAsStringSync(
+        '$fremd\n[mcp_servers.moodle-test]\nurl = "http://127.0.0.1:47812/mcp"\n'
+        'http_headers = { Authorization = "Bearer alt" }\ntool_timeout_sec = 2100\n',
+      );
 
       Future<Einrichtungsstand> pruefen() => einrichtungPruefen(
             umgebung: env,
-            port: 47812,
-            schluessel: 'eigener',
             name: 'moodle-test',
             skills: const [],
             wahlSkills: const {},
@@ -510,10 +519,8 @@ void main() {
         home: EinrichtungDialog(
           stand: stand,
           pruefen: pruefen,
-          einstellungen: Einstellungen(schluessel: 'global'),
+          einstellungen: Einstellungen(),
           protokoll: Protokoll(),
-          port: 47812,
-          schluessel: 'eigener',
           servername: 'moodle-test',
           profilname: 'Moodle Test',
         ),
@@ -523,10 +530,12 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await tester.pumpAndSettle();
 
-      final toml = File(p.join(heim.path, '.codex', 'config.toml')).readAsStringSync();
+      final toml = konfig.readAsStringSync();
+      expect(toml, startsWith(fremd), reason: 'der fremde Server bleibt Zeichen für Zeichen');
       expect(toml, contains('[mcp_servers.moodle-test]'));
-      expect(toml, contains('Bearer eigener'));
-      expect(toml, isNot(contains('Bearer global')));
+      expect(toml, contains("args = ['--profil', 'moodle-test']"));
+      expect(toml, isNot(contains('Bearer')));
+      expect(toml, isNot(contains('127.0.0.1')));
       expect((await pruefen()).werkzeuge.single.verbindung, Verbindung.aktuell);
     });
   });
@@ -555,16 +564,14 @@ void main() {
       addTearDown(() => heim.deleteSync(recursive: true));
       env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       codex = CodexCli(env);
-      expect(await codex.eintragen(47811, 'abc'), isNull);
+      expect(await codex.eintragen(), isNull);
       expect(skillInstallieren(moodle, skillOrdner('moodle')), isEmpty);
-      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+      einstellungen = _EinstellungenOhneDatei();
     }
 
     // Wie die App prüft: die gespeicherte Wahl, solange es eine gibt.
     Future<Einrichtungsstand> pruefen() => einrichtungPruefen(
           umgebung: env,
-          port: 47811,
-          schluessel: 'abc',
           skills: [moodle, lernsituation],
           wahlSkills: appWahlSkills,
           gewaehlt: einstellungen.wahlSkills ?? const {},
@@ -578,8 +585,6 @@ void main() {
           pruefen: pruefen,
           einstellungen: einstellungen,
           protokoll: Protokoll(),
-          port: 47811,
-          schluessel: 'abc',
         ),
       ));
     }
@@ -625,7 +630,7 @@ void main() {
       addTearDown(() => heim.deleteSync(recursive: true));
       env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       codex = CodexCli(env);
-      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+      einstellungen = _EinstellungenOhneDatei();
       await zeigen(tester);
 
       expect(find.text('Installieren'), findsOneWidget);
@@ -677,8 +682,6 @@ void main() {
           'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
       Future<Einrichtungsstand> mitPlugin() => einrichtungPruefen(
             umgebung: env,
-            port: 47811,
-            schluessel: 'abc',
             skills: [moodle, lernsituation, pflicht, wahl],
             wahlSkills: {...appWahlSkills, 'beispiel-vorlage': 'Eine Vorlage zum Ausprobieren.'},
             gewaehlt: einstellungen.wahlSkills ?? const {},
@@ -694,8 +697,6 @@ void main() {
           pruefen: mitPlugin,
           einstellungen: einstellungen,
           protokoll: Protokoll(),
-          port: 47811,
-          schluessel: 'abc',
         ),
       ));
 
@@ -722,8 +723,6 @@ void main() {
           'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
       Future<Einrichtungsstand> mitFehler() => einrichtungPruefen(
             umgebung: env,
-            port: 47811,
-            schluessel: 'abc',
             skills: [moodle],
             wahlSkills: const {},
             skillFehler: const [fehler],
@@ -743,9 +742,7 @@ void main() {
                 pruefen: mitFehler,
                 einstellungen: einstellungen,
                 protokoll: Protokoll(),
-                port: 47811,
-                schluessel: 'abc',
-              ),
+                  ),
             ),
             child: const Text('öffnen'),
           ),

@@ -45,9 +45,12 @@ Every automatic step is in the log and in the answer. Details and the file forma
 | Triage | `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` |
 | Kind | `bug`, `enhancement`, `refactoring`, `documentation`, `question` |
 | Platform | `os:windows`, `os:macos`, `os:linux`, `os:all`, `os:unclear` |
+| Area | `skills` (mainly changes the text of the skills in `skills/`, no new tool) |
 | Release | `nightly` (found in or about a nightly), `post-reviewed` (PR reviewed after its merge) |
 
 A platform label is set by the person who knows. With `os:unclear` also set `needs-info`; whoever reproduces or fails to reproduce the problem on another system comments and corrects the label. For a given system, the person who tested on it has the last word.
+
+`skills` marks issues that bring knowledge into the skills rather than change the app: they are worked on in `skills/` (`skills/CLAUDE.md`), need no build and no platform test, and so carry no platform label. Kind and triage state are set as usual. If a new or changed tool is needed as well, it is an app issue, and the skill part is a sub-item of it.
 
 ## Branches
 

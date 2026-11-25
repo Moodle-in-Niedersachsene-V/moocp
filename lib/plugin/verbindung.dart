@@ -13,7 +13,6 @@ import 'package:mcp_dart/mcp_dart.dart';
 import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import 'beschreibung.dart';
-import 'namenssperre.dart';
 import 'schnittstelle.dart';
 
 export '../plattform/kindprozess.dart' show schluesselVariable;
@@ -47,39 +46,11 @@ Map<String, dynamic> vertragBeimInitialize({Uri? adresse}) => {
 
 /// Ein Werkzeugfehler, dessen Text das Plugin geschrieben hat (`isError`).
 /// Er geht an die KI wie eine Antwort und deshalb, wie sie, erst durch die
-/// letzte Sperre (laufende_plugins.dart); die Fehler, die moocp selbst
+/// Datenschutzprüfung (laufende_plugins.dart); die Fehler, die moocp selbst
 /// meldet, sind [MoodleFehler].
 class PluginErgebnisFehler extends MoodleFehler {
   PluginErgebnisFehler(super.meldung);
 }
-
-/// Alle Texte einer Werkzeugliste des Plugins [kurzname], die an die KI gehen,
-/// für die letzte Sperre (namenssperre.dart) beim Start, nach einem Neustart
-/// und beim Wiederverbinden: Name, Beschreibung, Titel und Eingabeschema
-/// jedes Werkzeugs. Was sie hier durchlässt, merkt sich die App auch für
-/// `--werkzeugliste` (plugins.dart, werkzeugeMerken).
-///
-/// Vom Namen geht nur der Teil nach `<kurzname>_` in die Prüfung: Den
-/// Kurznamen kennt die Lehrkraft vor dem Start aus der Beschreibungsdatei,
-/// und hieße ein Kind wie er, träfe sonst jeder Werkzeugname. Im Rest trennen
-/// „_“ und „-“ Wörter wie jedes Satzzeichen, `beispiel_Erika_Mustermann`
-/// trifft also „Erika“.
-Iterable<String> werkzeuglisteTexte(List<WerkzeugBeschreibung> werkzeuge, String kurzname) sync* {
-  final praefix = '${kurzname}_';
-  for (final w in werkzeuge) {
-    yield w.name.startsWith(praefix) ? w.name.substring(praefix.length) : w.name;
-    yield w.beschreibung;
-    if (w.titel case final t?) yield t;
-    yield* texteIn(w.eingabeSchema);
-  }
-}
-
-/// Warum ein Plugin nicht startet oder sich nicht verbindet, wenn seine
-/// Werkzeugliste (Namen und Texte, [werkzeuglisteTexte]) die letzte Sperre
-/// trifft; ohne das Wort.
-const werkzeuglisteGesperrt =
-    'Seine Werkzeugliste enthält ein Wort, das ein Name sein könnte, den das Plugin zum Sperren genannt hat; '
-    'moocp bietet sie der KI nicht an.';
 
 /// Das Plugin kam nicht hoch: keine Antwort binnen der Startfrist, oder sein
 /// Programm endete dabei. Anders als ein Verstoß gegen die Regeln kann hier
@@ -92,7 +63,7 @@ class PluginStartFehler extends PluginFehler {
 /// gegen [vergeben] (eingebaute Werkzeuge und die anderer Plugins). Wirft
 /// [PluginFehler] mit dem ersten Verstoß. Der Grund nennt die Art des
 /// Verstoßes, nie den Namen: Er kommt vom laufenden Plugin, steht gleich im
-/// Protokoll und ist noch nicht durch die letzte Sperre gegangen.
+/// Protokoll und ist noch nicht durch die Datenschutzprüfung gegangen.
 void werkzeugnamenPruefen(
   Iterable<String> namen,
   String kurzname,
@@ -271,7 +242,7 @@ class PluginVerbindung {
   /// Plugin einen Fehler (`isError`), wird daraus ein Werkzeugfehler mit
   /// seinem Text ([PluginErgebnisFehler]). Strukturierte Inhalte
   /// (`structuredContent`) und `_meta` der Antwort gehen nicht weiter. Was
-  /// zurückgeht, prüft die letzte Sperre, bevor es die KI erreicht
+  /// zurückgeht, prüft die Datenschutzprüfung, bevor es die KI erreicht
   /// (laufende_plugins.dart).
   Future<String> aufrufen(WerkzeugAufruf aufruf) async {
     final steuerung = BasicAbortController();

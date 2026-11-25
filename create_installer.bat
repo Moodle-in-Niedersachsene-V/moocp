@@ -5,6 +5,14 @@ rem
 rem Voraussetzungen: Flutter mit Windows-Desktop, Python 3, NSIS 3 (makensis
 rem im Suchpfad oder unter %ProgramFiles(x86)%\NSIS).
 rem
+rem Der Release-Workflow (.github/workflows/release.yml) setzt zwei Variablen:
+rem   MOOCP_OHNE_PRUEFUNG=1       lässt flutter analyze und flutter test aus;
+rem                               beide laufen vorher in den Prüfungen von main.
+rem   MOOCP_VERSION_ZUSATZ=-nightly.20261124.1
+rem                               Vorabkennung einer Nightly für den Namen und
+rem                               die Anzeige des Installers (installer\moocp.nsi).
+rem Ohne sie läuft alles wie von Hand.
+rem
 rem Die Datei ist UTF-8 mit CRLF; chcp 65001 lässt cmd die Umlaute der
 rem Meldungen richtig lesen. CRLF, weil cmd Sprungmarken in Dateien mit LF
 rem nicht zuverlässig findet.
@@ -34,6 +42,7 @@ echo [1/5] Skills bauen
 python skills\build.py
 if errorlevel 1 goto fehler
 
+if defined MOOCP_OHNE_PRUEFUNG goto ohne_pruefung
 echo.
 echo [2/5] flutter analyze
 call flutter analyze
@@ -43,6 +52,7 @@ echo.
 echo [3/5] flutter test
 call flutter test
 if errorlevel 1 goto fehler
+:ohne_pruefung
 
 echo.
 echo [4/5] App bauen
@@ -51,7 +61,9 @@ if errorlevel 1 goto fehler
 
 echo.
 echo [5/5] Installer bauen
-"%MAKENSIS%" /V2 installer\moocp.nsi
+set "NSIS_ZUSATZ="
+if defined MOOCP_VERSION_ZUSATZ set "NSIS_ZUSATZ=/DVERSION_ZUSATZ=%MOOCP_VERSION_ZUSATZ%"
+"%MAKENSIS%" /V2 %NSIS_ZUSATZ% installer\moocp.nsi
 if errorlevel 1 goto fehler
 
 for /f "delims=" %%f in ('dir /b /o-d installer\moocp_setup*.exe') do (

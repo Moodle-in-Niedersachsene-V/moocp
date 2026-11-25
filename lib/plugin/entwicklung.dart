@@ -40,10 +40,10 @@
 // die alte Sitzung nicht und weist ihn ab; so merkt die App auch einen
 // Neustart, der schneller ging als ein Intervall.
 //
-// Die letzte Sperre gegen Namen (namenssperre.dart) gilt hier wie bei einem
+// Die Datenschutzprüfung (datenschutz.dart) gilt hier wie bei einem
 // gestarteten Plugin: Die Namen, die das Plugin genannt hat, bleiben über das
-// Wiederverbinden hinaus; seine Antworten prüft laufende_plugins.dart, die
-// neu gelesene Werkzeugliste [AngehaengtesPlugin] beim Verbinden.
+// Wiederverbinden hinaus; seine Antworten prüft laufende_plugins.dart. Die
+// Werkzeugliste prüft die App nicht auf Namen.
 
 import 'dart:async';
 import 'dart:io';
@@ -55,7 +55,6 @@ import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import '../protokoll.dart';
 import 'app_adresse.dart';
 import 'beschreibung.dart';
-import 'namenssperre.dart';
 import 'plugins.dart';
 import 'schnittstelle.dart';
 import 'verbindung.dart';
@@ -149,7 +148,6 @@ class AngehaengtesPlugin {
     this.intervall = const Duration(seconds: 3),
     this.versuchsfrist = const Duration(seconds: 2),
     this.adresse,
-    this.sperre,
   }) {
     // Derselbe Schlüssel wie für die Verbindung, solange die App läuft: Auch
     // ein neu gestartetes Plugin bekommt ihn von seinem Entwickler wieder.
@@ -167,10 +165,6 @@ class AngehaengtesPlugin {
   /// Die Adresse der App für Plugins (app_adresse.dart); sie geht bei jeder
   /// Verbindung an das Plugin.
   final AppAdresse? adresse;
-
-  /// Die Namen der letzten Sperre, gegen die die Werkzeugliste jeder
-  /// Verbindung geprüft wird; null ohne Prüfung (Tests).
-  final LetzteSperre? sperre;
 
   /// Die Werkzeugnamen, die schon vergeben sind (eingebaute, andere Plugins);
   /// gefragt bei jeder Verbindung, denn die Namensregeln gelten jedes Mal neu.
@@ -281,27 +275,6 @@ class AngehaengtesPlugin {
     }
     if (_beendet) {
       await v.schliessen();
-      return;
-    }
-    // Die Beschreibungen gingen an die KI. Gewarnt und protokolliert wird
-    // einmal, nicht bei jedem Versuch im Takt des Intervalls.
-    final s = sperre;
-    if (s != null && s.treffer(plugin.kurzname, werkzeuglisteTexte(v.werkzeuge, plugin.kurzname)) != null) {
-      await v.schliessen();
-      if (_letzterFehler != werkzeuglisteGesperrt && !_beendet) {
-        s.gesperrt(
-          plugin.kurzname,
-          werkzeuglisteTexte(v.werkzeuge, plugin.kurzname),
-          plugin: plugin.name,
-          werkzeug: null,
-          stelle: SperrStelle.werkzeugliste,
-        );
-        _protokoll.eintrag(
-          Art.gesperrt,
-          'Entwicklungs-Plugin $_name: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)',
-        );
-      }
-      _letzterFehler = werkzeuglisteGesperrt;
       return;
     }
     _verbindung = v;

@@ -6,6 +6,7 @@
 // Entwickler es täte; wo eine andere Werkzeugliste gebraucht wird, ein kleiner
 // MCP-Server im Test. Den Dialog davor prüft test/profile_ausblenden_test.dart.
 // Alles in Temp-Ordnern, nie im Einstellungsordner der App.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,7 +16,6 @@ import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/beschreibung.dart';
-import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/entwicklung.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
 import 'package:moocp/plugin/plugins.dart';
@@ -237,12 +237,24 @@ void main() {
 
     EntwicklungsPlugin vorbereitet() => entwicklungVorbereiten(ordner, const {schluesselVariable: _schluessel});
 
-    Future<McpTestClient> verbinden(Profil profil, LaufendePlugins quelle) async {
+    /// Eine Freigabe, die jede Datenschutzwarnung wie die Lehrkraft beantwortet:
+    /// [senden] oder Sperren.
+    Freigaben antwortet({required bool senden}) {
+      final f = Freigaben(protokoll);
+      f.addListener(() {
+        final a = f.aktuell;
+        if (a == null || !a.offen) return;
+        scheduleMicrotask(() => f.entscheiden(a.datenschutz != null && senden));
+      });
+      return f;
+    }
+
+    Future<McpTestClient> verbinden(Profil profil, LaufendePlugins quelle, {Freigaben? freigaben}) async {
       final d = McpDienst(
         einstellungen,
         MoodleZugang(protokoll),
         protokoll,
-        Freigaben(protokoll),
+        freigaben ?? antwortet(senden: false),
         '',
         profil: profil,
         werkzeugquellen: [quelle],
@@ -380,18 +392,13 @@ void main() {
       expect(await client.tool('beispiel_neu', {}), 'ok');
     });
 
-    test('letzte Sperre: Antwort, Fehlertext und andere Inhalte eines angehängten Plugins gehen nur ohne Namen an die KI', () async {
+    test('Datenschutzprüfung: Antwort und Fehlertext eines angehängten Plugins gehen mit Treffer nur nach „trotzdem senden“ an die KI', () async {
       final server = await _sperrServer(port);
       stopps.add(server);
-      final hinweise = SperrHinweise();
-      final l = LaufendePlugins(
-        protokoll,
-        entwicklungsIntervall: const Duration(milliseconds: 200),
-        sperrHinweise: hinweise,
-      );
+      final l = LaufendePlugins(protokoll, entwicklungsIntervall: const Duration(milliseconds: 200));
       laufende.add(l);
       await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-      l.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      l.pruefung.namenHinzufuegen('beispiel', ['Erika Mustermann']);
       final client = await verbinden(einstellungen.profile.first, l);
 
       final mitName = await aufruf(client, 'beispiel_probe', {'fall': 'text', 'text': 'Abgabe von Erika'});
@@ -404,8 +411,6 @@ void main() {
         expect(r['isError'], true);
         expect(text(r), gesperrtText('Beispiel', 'beispiel_probe'));
       }
-      // Strukturierte Inhalte und alles außer Text gibt moocp ohnehin nicht
-      // weiter; der Text daneben geht durch, wenn er keinen Namen trägt.
       expect(struktur['isError'], isNot(true));
       expect(text(struktur), 'Ohne Namen.');
       expect(andere['isError'], isNot(true));
@@ -420,48 +425,30 @@ void main() {
       expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
       expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('mustermann')));
       expect(
-        zeilen().where(
-          (z) => z == 'Plugin „Beispiel“, Werkzeug beispiel_probe: Antwort an die KI gesperrt (letzte Sperre: könnte einen Namen enthalten)',
-        ),
+        zeilen().where((z) => z == 'Plugin „Beispiel“, Werkzeug beispiel_probe: Datenschutzwarnung, 1 Treffer, gesperrt'),
         hasLength(2),
       );
-      expect([for (final t in hinweise.offen) t.wort], ['Erika', 'Mustermann']);
     });
 
-    test('letzte Sperre beim Wiederverbinden: die Namen bleiben, eine Werkzeugliste mit einem Namen nimmt die App nicht', () async {
+    test('Datenschutzprüfung beim Wiederverbinden: die Namen bleiben, eine Werkzeugliste mit einem Namen lässt sich laden', () async {
       final erster = await _sperrServer(port);
-      final hinweise = SperrHinweise();
-      final l = LaufendePlugins(
-        protokoll,
-        entwicklungsIntervall: const Duration(milliseconds: 200),
-        sperrHinweise: hinweise,
-      );
+      final l = LaufendePlugins(protokoll, entwicklungsIntervall: const Duration(milliseconds: 200));
       laufende.add(l);
       await l.anhaengen(vorbereitet(), eingebaut: eingebaut);
-      l.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      l.pruefung.namenHinzufuegen('beispiel', ['Erika Mustermann']);
       await erster();
       await _bis(() => l.entwicklung?.verbunden == false);
 
       // Neu gebaut, jetzt mit dem Namen in der Beschreibung eines Werkzeugs.
       final mitName = await _sperrServer(port, beschreibung: 'Probe für Erika');
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-      expect(l.entwicklung?.verbunden, isFalse);
-      await mitName();
-      final gesperrt = zeilen().where((z) => z.contains('Werkzeugliste gesperrt')).toList();
-      expect(
-        gesperrt,
-        ['Entwicklungs-Plugin „Beispiel“: Werkzeugliste gesperrt (letzte Sperre: könnte einen Namen enthalten)'],
-        reason: 'einmal, nicht bei jedem Versuch',
-      );
-      expect([for (final t in hinweise.offen) (t.stelle, t.wort)], [(SperrStelle.werkzeugliste, 'Erika')]);
-
-      final ohneName = await _sperrServer(port);
-      stopps.add(ohneName);
+      stopps.add(mitName);
       await _bis(() => l.entwicklung?.verbunden == true);
+      expect(zeilen().where((z) => z.contains('Werkzeugliste gesperrt')), isEmpty);
+
       final client = await verbinden(einstellungen.profile.first, l);
       final r = await aufruf(client, 'beispiel_probe', {'fall': 'text', 'text': 'Erika'});
 
-      expect(r['isError'], true);
+      expect(r['isError'], true, reason: 'die Namen blieben, die Antwort fragt');
       expect(text(r), gesperrtText('Beispiel', 'beispiel_probe'));
       expect(zeilen().where((z) => !z.startsWith('beispiel_probe({')).join('\n'), isNot(contains('Erika')));
     });

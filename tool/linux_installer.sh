@@ -19,7 +19,7 @@ bash tool/linux_bau.sh "$MODUS"
 BUNDLE="build/linux/x64/$MODUS/bundle" # wie tool/linux_bau.sh: Debian amd64 (E24)
 # Die Version steht nur in pubspec.yaml (E15); die Dateiname trägt sie ohne
 # Buildnummer, wie moocp_setup_<Version>.exe unter Windows.
-VERSION="$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml | head -1)"
+VERSION="$(sed -nE 's/^version: *([0-9][0-9.]*(-[0-9A-Za-z.]+)?).*/\1/p' pubspec.yaml | head -1)"
 [[ -n "$VERSION" ]] || { echo 'Version in pubspec.yaml nicht gefunden' >&2; exit 1; }
 AUS="installer/moocp_setup_${VERSION}.run"
 T="$(mktemp -d)"

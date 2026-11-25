@@ -36,8 +36,10 @@
 // Nur die Dialoge, die ein Plugin über die Adresse der App zeigen lässt,
 // lassen sich so beantworten. Die Zustimmung zu einem Plugin, der Dialog
 // eines Entwicklungs-Plugins, die Dialoge zu Schnittstelle und Update eines
-// Plugins, die Freigaben und die Warnung der letzten Sperre lesen diese Datei
-// nie.
+// Plugins und die Freigaben lesen diese Datei nie. Die Datenschutzwarnung (E36)
+// beantwortet mit ihr nur der MCP-Dienst, über einen eigenen Eintrag der Art
+// `datenschutz` (mcp/testbetrieb.dart, datenschutzAntwort); diesen Dialogen
+// gilt er nicht.
 
 import 'dart:convert';
 import 'dart:io';

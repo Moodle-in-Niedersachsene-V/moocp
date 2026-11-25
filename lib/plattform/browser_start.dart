@@ -8,6 +8,7 @@
 // Umsetzungen stehen in browser_unix.dart (Linux, Mac) und
 // browser_windows.dart. Tests setzen einen nachgebauten Browser ein.
 
+import 'dart:async';
 import 'dart:io';
 
 /// Ein gestarteter Browser mit seinem Kanal: [eingang] liefert, was der
@@ -43,7 +44,11 @@ abstract interface class BrowserStarter {
   /// Umsetzung nicht, er steht schon in [argumente]) und dem Profil [profil]
   /// aus [profilAnlegen]. Scheitert mit [BrowserStartFehler], wenn der
   /// Browser nicht startet oder den Kanal nicht öffnet.
-  Future<BrowserProzess> starten(String programm, List<String> argumente, Directory profil);
+  Future<BrowserProzess> starten(
+    String programm,
+    List<String> argumente,
+    Directory profil,
+  );
 }
 
 /// Der Browser ließ sich nicht starten oder bekam seinen Kanal nicht.
@@ -56,7 +61,10 @@ class BrowserStartFehler implements Exception {
 
 /// Die Schalter des Browsers für ein Bildschirmfoto. Nie ein Port: Die
 /// Steuerung läuft über die Pipe (`--remote-debugging-pipe`, fd 3 und 4).
-List<String> browserArgumente({required Directory profil, required int breite}) => [
+List<String> browserArgumente({
+  required Directory profil,
+  required int breite,
+}) => [
   '--headless=new',
   '--remote-debugging-pipe',
   '--user-data-dir=${profil.path}',
@@ -72,3 +80,22 @@ List<String> browserArgumente({required Directory profil, required int breite}) 
   '--window-size=$breite,900',
   'about:blank',
 ];
+
+/// Führt [aufbau] aus; scheitert es, läuft [aufraeumen] (beendet, was schon
+/// läuft, und schließt Handles), und der Fehler geht weiter. Für den Aufbau
+/// nach dem Start des Browsers: Ohne das bliebe er ohne Besitzer zurück.
+Future<T> beiFehlerAufraeumen<T>(
+  Future<T> Function() aufbau,
+  FutureOr<void> Function() aufraeumen,
+) async {
+  try {
+    return await aufbau();
+  } catch (_) {
+    try {
+      await aufraeumen();
+    } catch (_) {
+      // Der ursprüngliche Fehler zählt, nicht der des Aufräumens.
+    }
+    rethrow;
+  }
+}

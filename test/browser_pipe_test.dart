@@ -8,11 +8,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/freigabe.dart';
 import 'package:moocp/moodle/bildschirmfoto.dart';
 import 'package:moocp/moodle/cdp_pipe.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plattform/browser_start.dart';
 import 'package:moocp/plattform/browser_unix.dart';
+import 'package:moocp/plattform/browser_windows.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
@@ -26,7 +28,11 @@ void main() {
     setUp(() {
       ein = StreamController<List<int>>();
       aus = [];
-      pipe = CdpPipe(ein.stream, aus.add, zeitgrenze: const Duration(milliseconds: 300));
+      pipe = CdpPipe(
+        ein.stream,
+        aus.add,
+        zeitgrenze: const Duration(milliseconds: 300),
+      );
     });
     tearDown(() => pipe.schliessen());
 
@@ -34,48 +40,82 @@ void main() {
       final b = aus[i];
       expect(b.last, 0, reason: 'Jede Nachricht endet mit NUL');
       expect(b.sublist(0, b.length - 1), isNot(contains(0)));
-      return jsonDecode(utf8.decode(b.sublist(0, b.length - 1))) as Map<String, dynamic>;
+      return jsonDecode(utf8.decode(b.sublist(0, b.length - 1)))
+          as Map<String, dynamic>;
     }
 
-    test('sendet NUL-begrenztes JSON und ordnet die Antwort dem Befehl zu', () async {
-      final f = pipe.senden('Page.navigate', {'url': 'about:blank'});
-      final m = gesendet(0);
-      expect(m['method'], 'Page.navigate');
-      expect(m.containsKey('sessionId'), isFalse);
-      ein.add(rahmen({'id': m['id'], 'result': {'ok': 1}}));
-      expect(await f, {'ok': 1});
-    });
+    test(
+      'sendet NUL-begrenztes JSON und ordnet die Antwort dem Befehl zu',
+      () async {
+        final f = pipe.senden('Page.navigate', {'url': 'about:blank'});
+        final m = gesendet(0);
+        expect(m['method'], 'Page.navigate');
+        expect(m.containsKey('sessionId'), isFalse);
+        ein.add(
+          rahmen({
+            'id': m['id'],
+            'result': {'ok': 1},
+          }),
+        );
+        expect(await f, {'ok': 1});
+      },
+    );
 
-    test('Antworten in anderer Reihenfolge gehen an den richtigen Befehl', () async {
-      final a = pipe.senden('A'), b = pipe.senden('B');
-      final ia = gesendet(0)['id'], ib = gesendet(1)['id'];
-      ein.add([...rahmen({'id': ib, 'result': {'wer': 'b'}}), ...rahmen({'id': ia, 'result': {'wer': 'a'}})]);
-      expect((await a)['wer'], 'a');
-      expect((await b)['wer'], 'b');
-    });
+    test(
+      'Antworten in anderer Reihenfolge gehen an den richtigen Befehl',
+      () async {
+        final a = pipe.senden('A'), b = pipe.senden('B');
+        final ia = gesendet(0)['id'], ib = gesendet(1)['id'];
+        ein.add([
+          ...rahmen({
+            'id': ib,
+            'result': {'wer': 'b'},
+          }),
+          ...rahmen({
+            'id': ia,
+            'result': {'wer': 'a'},
+          }),
+        ]);
+        expect((await a)['wer'], 'a');
+        expect((await b)['wer'], 'b');
+      },
+    );
 
-    test('Nachricht in beliebig kleinen Stücken (auch mitten im UTF-8-Zeichen)', () async {
-      final f = pipe.senden('X');
-      final id = gesendet(0)['id'];
-      final bytes = rahmen({'id': id, 'result': {'text': 'Grüße ✓'}});
-      for (final b in bytes) {
-        ein.add([b]);
-        await Future<void>.delayed(Duration.zero);
-      }
-      expect((await f)['text'], 'Grüße ✓');
-    });
+    test(
+      'Nachricht in beliebig kleinen Stücken (auch mitten im UTF-8-Zeichen)',
+      () async {
+        final f = pipe.senden('X');
+        final id = gesendet(0)['id'];
+        final bytes = rahmen({
+          'id': id,
+          'result': {'text': 'Grüße ✓'},
+        });
+        for (final b in bytes) {
+          ein.add([b]);
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect((await f)['text'], 'Grüße ✓');
+      },
+    );
 
-    test('mehrere Nachrichten in einem Stück, die letzte angebrochen', () async {
-      final ereignisse = <String>[];
-      pipe.ereignisse.listen((e) => ereignisse.add('${e['method']}'));
-      final r = [...rahmen({'method': 'E1'}), ...rahmen({'method': 'E2'}), ...rahmen({'method': 'E3'})];
-      ein.add(r.sublist(0, r.length - 5));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(ereignisse, ['E1', 'E2']);
-      ein.add(r.sublist(r.length - 5));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(ereignisse, ['E1', 'E2', 'E3']);
-    });
+    test(
+      'mehrere Nachrichten in einem Stück, die letzte angebrochen',
+      () async {
+        final ereignisse = <String>[];
+        pipe.ereignisse.listen((e) => ereignisse.add('${e['method']}'));
+        final r = [
+          ...rahmen({'method': 'E1'}),
+          ...rahmen({'method': 'E2'}),
+          ...rahmen({'method': 'E3'}),
+        ];
+        ein.add(r.sublist(0, r.length - 5));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(ereignisse, ['E1', 'E2']);
+        ein.add(r.sublist(r.length - 5));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(ereignisse, ['E1', 'E2', 'E3']);
+      },
+    );
 
     test('ein NUL im Text steht nie roh im Rahmen', () {
       pipe.senden('X', {'t': 'a\u0000b'}).ignore();
@@ -85,13 +125,28 @@ void main() {
 
     test('Fehlerantwort des Browsers wird ein MoodleFehler', () async {
       final f = pipe.senden('X');
-      ein.add(rahmen({'id': gesendet(0)['id'], 'error': {'message': 'nein'}}));
-      await expectLater(f, throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('nein'))));
+      ein.add(
+        rahmen({
+          'id': gesendet(0)['id'],
+          'error': {'message': 'nein'},
+        }),
+      );
+      await expectLater(
+        f,
+        throwsA(
+          isA<MoodleFehler>().having((e) => '$e', 'Text', contains('nein')),
+        ),
+      );
     });
 
     test('Müll zwischen den Nachrichten stört nicht', () async {
       final f = pipe.senden('X');
-      ein.add([...utf8.encode('kein json'), 0, 0, ...rahmen({'id': gesendet(0)['id'], 'result': {}})]);
+      ein.add([
+        ...utf8.encode('kein json'),
+        0,
+        0,
+        ...rahmen({'id': gesendet(0)['id'], 'result': {}}),
+      ]);
       expect(await f, isEmpty);
     });
 
@@ -107,7 +162,11 @@ void main() {
         ...rahmen({'method': 'A', 'sessionId': 'S1'}),
         ...rahmen({'method': 'B', 'sessionId': 'S2'}),
         ...rahmen({'method': 'C'}),
-        ...rahmen({'id': gesendet(0)['id'], 'sessionId': 'S1', 'result': {'v': 1}}),
+        ...rahmen({
+          'id': gesendet(0)['id'],
+          'sessionId': 'S1',
+          'result': {'v': 1},
+        }),
       ]);
       expect((await f)['v'], 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -119,7 +178,13 @@ void main() {
     test('keine Antwort: MoodleFehler nach der Zeitgrenze', () async {
       await expectLater(
         pipe.senden('Browser.getVersion'),
-        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('antwortet nicht'))),
+        throwsA(
+          isA<MoodleFehler>().having(
+            (e) => '$e',
+            'Text',
+            contains('antwortet nicht'),
+          ),
+        ),
       );
     });
 
@@ -148,7 +213,11 @@ void main() {
     ]) {
       final t = File(d).readAsStringSync();
       // Der Schalter darf in Kommentaren genannt werden, nie als Zeichenkette.
-      expect(RegExp(r"'[^'\n]*remote-debugging-port").hasMatch(t), isFalse, reason: d);
+      expect(
+        RegExp(r"'[^'\n]*remote-debugging-port").hasMatch(t),
+        isFalse,
+        reason: d,
+      );
       expect(t.contains('DevToolsActivePort'), isFalse, reason: d);
       expect(t.contains('WebSocket.connect'), isFalse, reason: d);
     }
@@ -159,26 +228,37 @@ void main() {
     setUp(() => ordner = Directory.systemTemp.createTempSync('moocp_pipe_'));
     tearDown(() => ordner.deleteSync(recursive: true));
 
-    final adresse = Uri.parse('https://moodle.schule.example/mod/page/view.php?id=7');
+    final adresse = Uri.parse(
+      'https://moodle.schule.example/mod/page/view.php?id=7',
+    );
     final basis = Uri.parse('https://moodle.schule.example/');
 
-    Future<Aufnahme> lauf(FakeStarter st, {List<String>? geholt, Future<void>? abbruch, Duration? anlauf}) =>
-        aufnehmen(
-          basis: basis,
-          holen: (methode, uri, {required seiten, rumpf, dokument = false}) async {
-            geholt?.add('$methode $uri');
-            return Antwort(200, uri, Uint8List.fromList(utf8.encode('<html></html>')), 'text/html');
-          },
-          protokoll: Protokoll(),
-          adresse: adresse,
-          inhalt: ('#region-main .generalbox.center', null),
-          arbeitsordner: ordner.path,
-          starter: st,
-          browserWahl: ('Fake', '/fake/browser'),
-          abbruch: abbruch,
-          anlaufgrenze: anlauf ?? const Duration(seconds: 5),
-          hartBeenden: (_, _) async => 0,
+    Future<Aufnahme> lauf(
+      FakeStarter st, {
+      List<String>? geholt,
+      Future<void>? abbruch,
+      Duration? anlauf,
+    }) => aufnehmen(
+      basis: basis,
+      holen: (methode, uri, {required seiten, rumpf, dokument = false}) async {
+        geholt?.add('$methode $uri');
+        return Antwort(
+          200,
+          uri,
+          Uint8List.fromList(utf8.encode('<html></html>')),
+          'text/html',
         );
+      },
+      protokoll: Protokoll(),
+      adresse: adresse,
+      inhalt: ('#region-main .generalbox.center', null),
+      arbeitsordner: ordner.path,
+      starter: st,
+      browserWahl: ('Fake', '/fake/browser'),
+      abbruch: abbruch,
+      anlaufgrenze: anlauf ?? const Duration(seconds: 5),
+      hartBeenden: (_, _) async => 0,
+    );
 
     void aufgeraeumt(FakeStarter st) {
       expect(ordner.listSync(), isEmpty, reason: 'Profil gelöscht');
@@ -190,13 +270,19 @@ void main() {
       final geholt = <String>[];
       final a = await lauf(st, geholt: geholt);
       expect(a.bilder, hasLength(1));
-      expect(st.argumente.where((x) => x.contains('remote-debugging-port')), isEmpty);
+      expect(
+        st.argumente.where((x) => x.contains('remote-debugging-port')),
+        isEmpty,
+      );
       expect(st.argumente, contains('--remote-debugging-pipe'));
       // Reihenfolge: Anhalten der Anfragen steht, bevor navigiert wird.
       final l = st.prozess!.log;
       expect(l.indexOf('Fetch.enable'), greaterThanOrEqualTo(0));
       expect(l.indexOf('Fetch.enable'), lessThan(l.indexOf('Page.navigate')));
-      expect(l.indexOf('Browser.getVersion'), lessThan(l.indexOf('Fetch.enable')));
+      expect(
+        l.indexOf('Browser.getVersion'),
+        lessThan(l.indexOf('Fetch.enable')),
+      );
       // Befehle an die Seite tragen die Sitzung, Fetch geht an den Browser.
       expect(st.prozess!.sitzungVon['Page.navigate'], 'S1');
       expect(st.prozess!.sitzungVon['Fetch.enable'], isNull);
@@ -212,7 +298,16 @@ void main() {
       final geholt = <String>[];
       await expectLater(
         lauf(st, geholt: geholt, anlauf: const Duration(milliseconds: 300)),
-        throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', allOf(contains('antwortet nicht auf die Pipe'), contains('nichts von Moodle geladen')))),
+        throwsA(
+          isA<MoodleFehler>().having(
+            (e) => '$e',
+            'Text',
+            allOf(
+              contains('antwortet nicht auf die Pipe'),
+              contains('nichts von Moodle geladen'),
+            ),
+          ),
+        ),
       );
       expect(geholt, isEmpty);
       expect(st.prozess!.log, isNot(contains('Page.navigate')));
@@ -220,11 +315,23 @@ void main() {
       aufgeraeumt(st);
     });
 
-    test('Browser startet nicht: Fehler mit Meldung, Profil gelöscht', () async {
-      final st = FakeStarter(ordner, startFehler: 'kaputt');
-      await expectLater(lauf(st), throwsA(isA<MoodleFehler>().having((e) => '$e', 'Text', contains('startet nicht'))));
-      expect(ordner.listSync(), isEmpty);
-    });
+    test(
+      'Browser startet nicht: Fehler mit Meldung, Profil gelöscht',
+      () async {
+        final st = FakeStarter(ordner, startFehler: 'kaputt');
+        await expectLater(
+          lauf(st),
+          throwsA(
+            isA<MoodleFehler>().having(
+              (e) => '$e',
+              'Text',
+              contains('startet nicht'),
+            ),
+          ),
+        );
+        expect(ordner.listSync(), isEmpty);
+      },
+    );
 
     test('Fehler auf der Seite: Browser beendet, Profil gelöscht', () async {
       final st = FakeStarter(ordner, auswertenFehler: true);
@@ -245,12 +352,193 @@ void main() {
       aufgeraeumt(st);
     });
 
-    test('Browser reagiert auf Browser.close nicht: er wird hart beendet', () async {
-      final st = FakeStarter(ordner, schliesstNicht: true);
-      await lauf(st);
-      aufgeraeumt(st);
+    test(
+      'Browser reagiert auf Browser.close nicht: er wird hart beendet',
+      () async {
+        final st = FakeStarter(ordner, schliesstNicht: true);
+        await lauf(st);
+        aufgeraeumt(st);
+      },
+    );
+  });
+
+  group('Freigabe und Abbruch über bildschirmfoto', () {
+    late Directory ordner;
+    setUp(() => ordner = Directory.systemTemp.createTempSync('moocp_frei_'));
+    tearDown(() => ordner.deleteSync(recursive: true));
+
+    final basis = Uri.parse('https://moodle.schule.example/');
+    final adresse = Uri.parse(
+      'https://moodle.schule.example/mod/page/view.php?id=7',
+    );
+
+    Future<Aufnahme> aufnahme(FakeStarter st, {Future<void>? abbruch}) =>
+        aufnehmen(
+          basis: basis,
+          holen: (m, uri, {required seiten, rumpf, dokument = false}) async =>
+              Antwort(
+                200,
+                uri,
+                Uint8List.fromList(utf8.encode('<html></html>')),
+                'text/html',
+              ),
+          protokoll: Protokoll(),
+          adresse: adresse,
+          inhalt: ('#region-main .generalbox.center', null),
+          arbeitsordner: ordner.path,
+          starter: st,
+          browserWahl: ('Fake', '/fake/browser'),
+          abbruch: abbruch,
+          anlaufgrenze: const Duration(seconds: 5),
+          hartBeenden: (_, _) async => 0,
+        );
+
+    Future<String> anbieten(
+      FakeStarter st,
+      Freigaben fg, {
+      Future<void>? abbruch,
+    }) => aufnahmeAnbieten(
+      aufnahme: () => aufnahme(st, abbruch: abbruch),
+      kursZeile: () async => null,
+      freigaben: fg,
+      wozu: 'Prüfen, ob die Formeln gesetzt werden',
+      seite: 'Textseite „Muster“ (cmid 7)',
+      adresse: adresse,
+      druck: false,
+      name: 'cm-7',
+      arbeitsordner: ordner.path,
+    );
+
+    List<String> pngs() => [
+      for (final f in ordner.listSync().whereType<File>())
+        if (f.path.endsWith('.png')) f.path,
+    ];
+
+    Future<void> aufDialog(Freigaben fg) async {
+      while (fg.aktuell == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+
+    test('Ablehnung: Browser und Profil sind schon vor der Entscheidung weg, kein PNG', () async {
+      final st = FakeStarter(ordner);
+      final fg = Freigaben(Protokoll());
+      final f = anbieten(st, fg);
+      await aufDialog(fg);
+      expect(st.prozess!.beendet_, isTrue);
+      expect(
+        ordner.listSync().whereType<Directory>(),
+        isEmpty,
+        reason: 'Profil gelöscht',
+      );
+      expect(
+        pngs(),
+        isEmpty,
+        reason: 'vor der Freigabe nichts im Arbeitsordner',
+      );
+      fg.entscheiden(false);
+      expect(await f, contains('Nicht freigegeben'));
+      expect(pngs(), isEmpty);
+    });
+
+    test('Freigabe: erst danach liegt das PNG im Arbeitsordner', () async {
+      final st = FakeStarter(ordner);
+      final fg = Freigaben(Protokoll());
+      final f = anbieten(st, fg);
+      await aufDialog(fg);
+      expect(pngs(), isEmpty);
+      fg.entscheiden(true);
+      expect(await f, contains('bildschirmfoto-cm-7.png'));
+      expect(pngs(), hasLength(1));
+    });
+
+    test('Abbruch des Clients über Freigaben.mitAbbruch beendet den Browser und löscht das Profil', () async {
+      final st = FakeStarter(ordner, haengtBeimLaden: true);
+      final fg = Freigaben(Protokoll());
+      final abbruch = Completer<void>();
+      final f = Freigaben.mitAbbruch(
+        abbruch.future,
+        () => aufnahmeAnbieten(
+          aufnahme: () => aufnahme(st, abbruch: Freigaben.abbruchImAufruf),
+          kursZeile: () async => null,
+          freigaben: fg,
+          wozu: 'Prüfen, ob die Formeln gesetzt werden',
+          seite: 'Seite',
+          adresse: adresse,
+          druck: false,
+          name: 'cm-7',
+          arbeitsordner: ordner.path,
+        ),
+      );
+      f.ignore();
+      while (st.prozess == null || !st.prozess!.log.contains('Page.navigate')) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      abbruch.complete();
+      await expectLater(f, throwsA(isA<MoodleAbgebrochen>()));
+      expect(st.prozess!.beendet_, isTrue);
+      expect(ordner.listSync(), isEmpty);
+      expect(fg.aktuell, isNull, reason: 'keine Freigabe angefragt');
     });
   });
+
+  group('Windows-Hilfen (plattformunabhängig prüfbar)', () {
+    test('windowsArgument: Anführungszeichen nur wo nötig, Schrägstriche vor " verdoppelt', () {
+      expect(windowsArgument('--a=b'), '--a=b');
+      expect(windowsArgument(''), '""');
+      expect(
+        windowsArgument(r'C:\Program Files\x.exe'),
+        r'"C:\Program Files\x.exe"',
+      );
+      expect(windowsArgument(r'a\"b'), r'"a\\\"b"');
+      expect(
+        windowsArgument(r'--user-data-dir=C:\mit leer\'),
+        r'"--user-data-dir=C:\mit leer\\"',
+      );
+    });
+
+    test('windowsUmgebungsblock: name=wert, NUL-beendet, sortiert, doppeltes NUL am Ende', () {
+      final b = windowsUmgebungsblock({'b': '2', 'A': '1'});
+      expect(String.fromCharCodes(b), 'A=1\u0000b=2\u0000\u0000\u0000');
+    });
+
+    test('windowsReserved2: Zahl, Flags, Handles (CRT-Layout)', () {
+      final b = windowsReserved2(nul: 10, lesen: 20, schreiben: 30);
+      final d = ByteData.sublistView(b);
+      expect(b.length, 4 + 5 + 5 * 8);
+      expect(d.getInt32(0, Endian.little), 5);
+      expect(b.sublist(4, 9), [0x41, 0x41, 0x41, 0x09, 0x09]);
+      expect(
+        [for (var i = 0; i < 5; i++) d.getInt64(9 + i * 8, Endian.little)],
+        [10, 10, 10, 20, 30],
+      );
+    });
+  });
+
+  test(
+    'beiFehlerAufraeumen räumt bei einem Fehler auf und reicht ihn weiter',
+    () async {
+      var aufgeraeumt = 0;
+      await expectLater(
+        beiFehlerAufraeumen<int>(
+          () async => throw StateError('x'),
+          () => aufgeraeumt++,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(aufgeraeumt, 1);
+      expect(await beiFehlerAufraeumen(() async => 5, () => aufgeraeumt++), 5);
+      expect(aufgeraeumt, 1, reason: 'bei Erfolg nicht');
+      // Scheitert das Aufräumen selbst, zählt der ursprüngliche Fehler.
+      await expectLater(
+        beiFehlerAufraeumen<int>(
+          () async => throw StateError('x'),
+          () => throw ArgumentError('y'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
 
   group('private Pipe unter Linux und Mac', () {
     late Directory ordner;
@@ -264,30 +552,57 @@ void main() {
     test('Profil: Ordner mit Rechten 700, dem aktuellen Benutzer', () async {
       final d = await UnixBrowserStarter().profilAnlegen(ordner.path);
       expect(FileStat.statSync(d.path).mode & 511, 448);
-      expect(FileSystemEntity.typeSync(d.path, followLinks: false), FileSystemEntityType.directory);
+      expect(
+        FileSystemEntity.typeSync(d.path, followLinks: false),
+        FileSystemEntityType.directory,
+      );
       await privatPruefen(d.path, benutzer: (await aktuelleBenutzerNummer())!);
     }, skip: !unix);
 
-    test('Prüfung lehnt Verknüpfung, falsche Rechte und fremden Besitzer ab', () async {
-      final uid = (await aktuelleBenutzerNummer())!;
-      final echt = Directory(p.join(ordner.path, 'echt'))..createSync();
-      await Process.run('chmod', ['700', echt.path]);
-      Link(p.join(ordner.path, 'link')).createSync(echt.path);
-      await expectLater(privatPruefen(p.join(ordner.path, 'link'), benutzer: uid), throwsA(isA<BrowserStartFehler>()));
-      await Process.run('chmod', ['755', echt.path]);
-      await expectLater(privatPruefen(echt.path, benutzer: uid), throwsA(isA<BrowserStartFehler>()));
-      await Process.run('chmod', ['700', echt.path]);
-      await expectLater(privatPruefen(echt.path, benutzer: uid + 1), throwsA(isA<BrowserStartFehler>()));
-      await expectLater(privatPruefen(echt.path, benutzer: uid, besitzer: (_) async => uid + 1), throwsA(isA<BrowserStartFehler>()));
-      // Eine Datei statt einer FIFO oder eines Ordners
-      final datei = File(p.join(ordner.path, 'f'))..writeAsStringSync('x');
-      await expectLater(privatPruefen(datei.path, benutzer: uid, fifo: true), throwsA(isA<BrowserStartFehler>()));
-    }, skip: !unix);
+    test(
+      'Prüfung lehnt Verknüpfung, falsche Rechte und fremden Besitzer ab',
+      () async {
+        final uid = (await aktuelleBenutzerNummer())!;
+        final echt = Directory(p.join(ordner.path, 'echt'))..createSync();
+        await Process.run('chmod', ['700', echt.path]);
+        Link(p.join(ordner.path, 'link')).createSync(echt.path);
+        await expectLater(
+          privatPruefen(p.join(ordner.path, 'link'), benutzer: uid),
+          throwsA(isA<BrowserStartFehler>()),
+        );
+        await Process.run('chmod', ['755', echt.path]);
+        await expectLater(
+          privatPruefen(echt.path, benutzer: uid),
+          throwsA(isA<BrowserStartFehler>()),
+        );
+        await Process.run('chmod', ['700', echt.path]);
+        await expectLater(
+          privatPruefen(echt.path, benutzer: uid + 1),
+          throwsA(isA<BrowserStartFehler>()),
+        );
+        await expectLater(
+          privatPruefen(
+            echt.path,
+            benutzer: uid,
+            besitzer: (_) async => uid + 1,
+          ),
+          throwsA(isA<BrowserStartFehler>()),
+        );
+        // Eine Datei statt einer FIFO oder eines Ordners
+        final datei = File(p.join(ordner.path, 'f'))..writeAsStringSync('x');
+        await expectLater(
+          privatPruefen(datei.path, benutzer: uid, fifo: true),
+          throwsA(isA<BrowserStartFehler>()),
+        );
+      },
+      skip: !unix,
+    );
 
     // Ein „Browser“, der an fd 3 liest und an fd 4 zurückschreibt: Er prüft
     // den Weg über die Shell und die FIFO.
     File echo() {
-      final f = File(p.join(ordner.path, 'echo.sh'))..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
+      final f = File(p.join(ordner.path, 'echo.sh'))
+        ..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
       Process.runSync('chmod', ['700', f.path]);
       return f;
     }
@@ -301,7 +616,10 @@ void main() {
       proz.eingang.listen(empfangen.addAll);
       for (final n in ['cdp-ein', 'cdp-aus']) {
         final f = p.join(profil.path, n);
-        expect(FileSystemEntity.typeSync(f, followLinks: false), FileSystemEntityType.pipe);
+        expect(
+          FileSystemEntity.typeSync(f, followLinks: false),
+          FileSystemEntityType.pipe,
+        );
         expect(FileStat.statSync(f).mode & 511, 384);
       }
       proz.senden([...utf8.encode('{"id":1}'), 0]);
@@ -314,21 +632,62 @@ void main() {
       fertig.complete();
     }, skip: !unix);
 
-    test('Browser, der nicht startet: der Kanal endet sofort, nichts hängt', () async {
-      final st = UnixBrowserStarter(oeffnenGrenze: const Duration(seconds: 5));
+    test(
+      'Browser, der nicht startet: der Kanal endet sofort, nichts hängt',
+      () async {
+        final st = UnixBrowserStarter(
+          oeffnenGrenze: const Duration(seconds: 5),
+        );
+        final profil = await st.profilAnlegen(ordner.path);
+        final proz = await st
+            .starten(p.join(ordner.path, 'gibt-es-nicht'), const [], profil)
+            .timeout(const Duration(seconds: 10));
+        await proz.eingang.drain<void>().timeout(const Duration(seconds: 5));
+        expect(
+          await proz.beendet.timeout(const Duration(seconds: 5)),
+          isNonZero,
+        );
+        await proz.beenden();
+      },
+      skip: !unix,
+    );
+
+    test('fehlende Shell oder fehlendes mkfifo: klarer Fehler', () async {
+      final st = UnixBrowserStarter(shell: p.join(ordner.path, 'keine-shell'));
       final profil = await st.profilAnlegen(ordner.path);
-      final proz = await st.starten(p.join(ordner.path, 'gibt-es-nicht'), const [], profil).timeout(const Duration(seconds: 10));
-      await proz.eingang.drain<void>().timeout(const Duration(seconds: 5));
-      expect(await proz.beendet.timeout(const Duration(seconds: 5)), isNonZero);
-      await proz.beenden();
+      await expectLater(
+        st.starten('/bin/true', const [], profil),
+        throwsA(
+          isA<BrowserStartFehler>().having(
+            (e) => e.meldung,
+            'Text',
+            contains('Shell'),
+          ),
+        ),
+      );
+      final st2 = UnixBrowserStarter(mkfifo: 'gibt-es-nicht-mkfifo');
+      final profil2 = await st2.profilAnlegen(ordner.path);
+      await expectLater(
+        st2.starten('/bin/true', const [], profil2),
+        throwsA(
+          isA<BrowserStartFehler>().having(
+            (e) => e.meldung,
+            'Text',
+            contains('mkfifo'),
+          ),
+        ),
+      );
     }, skip: !unix);
 
     test('Pfade mit Sonderzeichen gelangen unverändert zum Browser (nie in Shell-Text)', () async {
-      final f = File(p.join(ordner.path, r'a b$(touch pwn)`x`.sh'))..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
+      final f = File(p.join(ordner.path, r'a b$(touch pwn)`x`.sh'))
+        ..writeAsStringSync('#!/bin/sh\nexec cat <&3 >&4\n');
       Process.runSync('chmod', ['700', f.path]);
       final st = UnixBrowserStarter();
       final profil = await st.profilAnlegen(ordner.path);
-      final proz = await st.starten(f.path, const [r'--x=$(touch pwn2)'], profil);
+      final proz = await st.starten(f.path, const [
+        r'--x=$(touch pwn2)',
+      ], profil);
       await proz.beenden();
       expect(File(p.join(ordner.path, 'pwn')).existsSync(), isFalse);
       expect(File('pwn2').existsSync(), isFalse);
@@ -358,7 +717,11 @@ class FakeStarter implements BrowserStarter {
       Directory(p.join(arbeitsordner, '.browser-test')).create();
 
   @override
-  Future<BrowserProzess> starten(String programm, List<String> argumente, Directory profil) async {
+  Future<BrowserProzess> starten(
+    String programm,
+    List<String> argumente,
+    Directory profil,
+  ) async {
     this.argumente = argumente;
     if (startFehler != null) throw BrowserStartFehler(startFehler!);
     return prozess = FakeProzess(this);
@@ -391,7 +754,9 @@ class FakeProzess implements BrowserProzess {
     _puffer = [..._puffer, ...bytes];
     while (_puffer.contains(0)) {
       final i = _puffer.indexOf(0);
-      final m = jsonDecode(utf8.decode(_puffer.sublist(0, i))) as Map<String, dynamic>;
+      final m = jsonDecode(
+        utf8.decode(_puffer.sublist(0, i)),
+      ) as Map<String, dynamic>;
       _puffer = _puffer.sublist(i + 1);
       scheduleMicrotask(() => _behandeln(m));
     }
@@ -403,11 +768,16 @@ class FakeProzess implements BrowserProzess {
     log.add(methode);
     sitzungVon[methode] = s;
     if (v.stumm) return;
-    void ok([Map<String, Object?> r = const {}]) => _an({'id': id, 'result': r, 'sessionId': ?s});
+    void ok([Map<String, Object?> r = const {}]) =>
+        _an({'id': id, 'result': r, 'sessionId': ?s});
     final p = (m['params'] as Map?)?.cast<String, dynamic>() ?? const {};
     switch (methode) {
       case 'Target.getTargets':
-        ok({'targetInfos': [{'type': 'page', 'targetId': 'T1'}]});
+        ok({
+          'targetInfos': [
+            {'type': 'page', 'targetId': 'T1'},
+          ],
+        });
       case 'Target.attachToTarget':
         ok({'sessionId': 'S1'});
       case 'Page.navigate':
@@ -417,7 +787,10 @@ class FakeProzess implements BrowserProzess {
           'method': 'Fetch.requestPaused',
           'params': {
             'requestId': 'R1',
-            'request': {'method': 'GET', 'url': 'https://moodle.schule.example/mod/page/view.php?id=7'},
+            'request': {
+              'method': 'GET',
+              'url': 'https://moodle.schule.example/mod/page/view.php?id=7',
+            },
             'resourceType': 'Document',
           },
         });
@@ -434,7 +807,9 @@ class FakeProzess implements BrowserProzess {
         _an({'method': 'Page.loadEventFired', 'sessionId': 'S1', 'params': {}});
       case 'Runtime.evaluate':
         if (v.auswertenFehler) {
-          ok({'exceptionDetails': {'text': 'x'}});
+          ok({
+            'exceptionDetails': {'text': 'x'},
+          });
           return;
         }
         final e = '${p['expression']}';
@@ -443,9 +818,13 @@ class FakeProzess implements BrowserProzess {
             : e.contains('filter_mathjaxloader_equation')
             ? '{"huellen":0,"gesetzt":0,"text":0}'
             : '{"x":0,"y":0,"w":100,"h":50,"sperren":[]}';
-        ok({'result': {'value': wert}});
+        ok({
+          'result': {'value': wert},
+        });
       case 'Page.captureScreenshot':
-        ok({'data': base64Encode([137, 80, 78, 71])});
+        ok({
+          'data': base64Encode([137, 80, 78, 71]),
+        });
       case 'Browser.close':
         ok();
         if (!v.schliesstNicht) _beenden();

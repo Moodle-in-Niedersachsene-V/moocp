@@ -66,20 +66,34 @@ Future<void> privatPruefen(
   Future<int?> Function(String) besitzer = besitzerVon,
 }) async {
   final art = FileSystemEntity.typeSync(pfad, followLinks: false);
-  if (art != (fifo ? FileSystemEntityType.pipe : FileSystemEntityType.directory)) {
-    throw BrowserStartFehler('Das Profil des Browsers ist nicht privat angelegt (falsche Art: $art).');
+  if (art !=
+      (fifo ? FileSystemEntityType.pipe : FileSystemEntityType.directory)) {
+    throw BrowserStartFehler(
+      'Das Profil des Browsers ist nicht privat angelegt (falsche Art: $art).',
+    );
   }
   final rechte = FileStat.statSync(pfad).mode & 511;
   if (rechte != (fifo ? _rechteFifo : _rechteOrdner)) {
-    throw BrowserStartFehler('Das Profil des Browsers ist nicht privat angelegt (Rechte ${rechte.toRadixString(8)}).');
+    throw BrowserStartFehler(
+      'Das Profil des Browsers ist nicht privat angelegt (Rechte ${rechte.toRadixString(8)}).',
+    );
   }
   if (await besitzer(pfad) != benutzer) {
-    throw BrowserStartFehler('Das Profil des Browsers gehört nicht dem aktuellen Benutzer.');
+    throw BrowserStartFehler(
+      'Das Profil des Browsers gehört nicht dem aktuellen Benutzer.',
+    );
   }
 }
 
 class UnixBrowserStarter implements BrowserStarter {
-  UnixBrowserStarter({this.oeffnenGrenze = const Duration(seconds: 15)});
+  /// [shell] und [mkfifo] sind für Tests austauschbar.
+  UnixBrowserStarter({
+    this.oeffnenGrenze = const Duration(seconds: 15),
+    this.shell = '/bin/sh',
+    this.mkfifo = 'mkfifo',
+  });
+
+  final String shell, mkfifo;
 
   /// So lange darf es dauern, bis der Browser beide Enden seiner Pipe geöffnet hat.
   final Duration oeffnenGrenze;
@@ -88,14 +102,28 @@ class UnixBrowserStarter implements BrowserStarter {
   Future<Directory> profilAnlegen(String arbeitsordner) async {
     final benutzer = await aktuelleBenutzerNummer();
     if (benutzer == null) {
-      throw BrowserStartFehler('Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).');
+      throw BrowserStartFehler(
+        'Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).',
+      );
     }
     final zufall = math.Random.secure().nextInt(1 << 32).toRadixString(16);
-    final pfad = p.join(arbeitsordner, '.browser-${DateTime.now().millisecondsSinceEpoch}-$zufall');
+    final pfad = p.join(
+      arbeitsordner,
+      '.browser-${DateTime.now().millisecondsSinceEpoch}-$zufall',
+    );
     // Ohne -p: scheitert, wenn es den Pfad schon gibt, auch als Verknüpfung.
-    final r = await prozessAusfuehren('mkdir', ['-m', '700', '--', pfad]);
+    final ProcessResult r;
+    try {
+      r = await prozessAusfuehren('mkdir', ['-m', '700', '--', pfad]);
+    } on ProcessException {
+      throw BrowserStartFehler(
+        'Das Hilfsprogramm mkdir fehlt -- das Profil des Browsers ließ sich nicht privat anlegen.',
+      );
+    }
     if (r.exitCode != 0) {
-      throw BrowserStartFehler('Das Profil des Browsers ließ sich nicht privat anlegen.');
+      throw BrowserStartFehler(
+        'Das Profil des Browsers ließ sich nicht privat anlegen.',
+      );
     }
     final ordner = Directory(pfad);
     try {
@@ -108,30 +136,56 @@ class UnixBrowserStarter implements BrowserStarter {
   }
 
   @override
-  Future<BrowserProzess> starten(String programm, List<String> argumente, Directory profil) async {
+  Future<BrowserProzess> starten(
+    String programm,
+    List<String> argumente,
+    Directory profil,
+  ) async {
     final benutzer = await aktuelleBenutzerNummer();
     if (benutzer == null) {
-      throw BrowserStartFehler('Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).');
+      throw BrowserStartFehler(
+        'Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).',
+      );
     }
     await privatPruefen(profil.path, benutzer: benutzer);
-    final ein = p.join(profil.path, 'cdp-ein'), aus = p.join(profil.path, 'cdp-aus');
-    final fifo = await prozessAusfuehren('mkfifo', ['-m', '600', '--', ein, aus]);
+    final ein = p.join(profil.path, 'cdp-ein'),
+        aus = p.join(profil.path, 'cdp-aus');
+    final ProcessResult fifo;
+    try {
+      fifo = await prozessAusfuehren(mkfifo, ['-m', '600', '--', ein, aus]);
+    } on ProcessException {
+      throw BrowserStartFehler(
+        'Das Hilfsprogramm mkfifo fehlt -- die Pipe zum Browser ließ sich nicht anlegen.',
+      );
+    }
     if (fifo.exitCode != 0) {
-      throw BrowserStartFehler('Die Pipe zum Browser ließ sich nicht anlegen (mkfifo).');
+      throw BrowserStartFehler(
+        'Die Pipe zum Browser ließ sich nicht anlegen (mkfifo).',
+      );
     }
     await privatPruefen(ein, benutzer: benutzer, fifo: true);
     await privatPruefen(aus, benutzer: benutzer, fifo: true);
 
-    final proz = await prozessStarten(
-      '/bin/sh',
-      [
-        '-c',
-        r'exec "$0" "$@" 3<"$MOOCP_CDP_EIN" 4>"$MOOCP_CDP_AUS"',
-        programm,
-        ...argumente,
-      ],
-      dazu: {'MOOCP_CDP_EIN': ein, 'MOOCP_CDP_AUS': aus},
-    );
+    final Process proz;
+    try {
+      proz = await prozessStarten(
+        shell,
+        [
+          '-c',
+          r'exec "$0" "$@" 3<"$MOOCP_CDP_EIN" 4>"$MOOCP_CDP_AUS"',
+          programm,
+          ...argumente,
+        ],
+        // Kein eigenes TMPDIR im Profil: Chrome legt dort einen Socket an
+        // (com.google.Chrome.*/SingletonSocket), dessen Pfad höchstens 107
+        // Zeichen haben darf; im Profil läge er bei langen Pfaden darüber.
+        dazu: {'MOOCP_CDP_EIN': ein, 'MOOCP_CDP_AUS': aus},
+      );
+    } on ProcessException {
+      throw BrowserStartFehler(
+        'Die Shell ($shell) fehlt -- der Browser ließ sich nicht starten.',
+      );
+    }
     // Keine Ausgabe, nirgends (E11): Was der Browser schreibt, wird verworfen.
     unawaited(proz.stdout.drain<void>());
     unawaited(proz.stderr.drain<void>());
@@ -165,14 +219,19 @@ class UnixBrowserStarter implements BrowserStarter {
 Future<void> _entsperren(String ein, String aus) async {
   Future<void> gegenseite(String pfad, FileMode modus) async {
     try {
-      final f = await File(pfad).open(mode: modus).timeout(const Duration(seconds: 2));
+      final f = await File(pfad)
+          .open(mode: modus)
+          .timeout(const Duration(seconds: 2));
       await f.close();
     } catch (_) {
       // Nichts wartete mehr oder die Datei ist schon weg.
     }
   }
 
-  await Future.wait([gegenseite(ein, FileMode.read), gegenseite(aus, FileMode.writeOnly)]);
+  await Future.wait([
+    gegenseite(ein, FileMode.read),
+    gegenseite(aus, FileMode.writeOnly),
+  ]);
 }
 
 Future<void> _loeschen(Directory ordner) async {
@@ -210,7 +269,9 @@ class _UnixProzess implements BrowserProzess {
     try {
       while (!_zu) {
         final stueck = await _lesen.read(64 * 1024);
-        if (stueck.isEmpty) break; // EOF: Der Browser hat den Kanal geschlossen.
+        if (stueck.isEmpty) {
+          break; // EOF: Der Browser hat den Kanal geschlossen.
+        }
         _ein.add(stueck);
       }
     } on FileSystemException {

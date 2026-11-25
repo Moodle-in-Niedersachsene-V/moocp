@@ -56,6 +56,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 import '../freigabe.dart';
@@ -375,7 +376,11 @@ Future<Aufnahme> aufnehmen({
   var abgebrochen = false;
   try {
     try {
-      proz = await st.starten(programm, browserArgumente(profil: profil, breite: _breite), profil);
+      proz = await st.starten(
+        programm,
+        browserArgumente(profil: profil, breite: _breite),
+        profil,
+      );
     } on BrowserStartFehler catch (x) {
       throw MoodleFehler('$browser startet nicht: ${x.meldung}');
     }
@@ -539,7 +544,9 @@ Future<Aufnahme> aufnehmen({
     });
     unawaited(
       pipe.ende.then((_) {
-        if (!geladen.isCompleted) geladen.completeError(MoodleFehler('Browser: Verbindung beendet.'));
+        if (!geladen.isCompleted) {
+          geladen.completeError(MoodleFehler('Browser: Verbindung beendet.'));
+        }
       }),
     );
     final aboNetz = netz.ereignisse.listen((e) {
@@ -679,33 +686,57 @@ Future<Aufnahme> aufnehmen({
     if (abgebrochen) throw MoodleAbgebrochen();
     rethrow;
   } finally {
-    await _beenden(pipe, proz, profil, programm, protokoll, hartBeenden ?? plattformBrowser.prozesseBeenden);
+    await _beenden(
+      pipe,
+      proz,
+      profil,
+      programm,
+      protokoll,
+      hartBeenden ?? plattformBrowser.prozesseBeenden,
+    );
   }
 }
 
 /// Legt das Profil an; scheitert das, steht es als Fehler da (ein Profil
 /// ohne private Rechte wird nie benutzt).
-Future<Directory> _profilAnlegen(BrowserStarter st, String arbeitsordner) async {
+Future<Directory> _profilAnlegen(
+  BrowserStarter st,
+  String arbeitsordner,
+) async {
   try {
     return await st.profilAnlegen(arbeitsordner);
   } on BrowserStartFehler catch (x) {
-    throw MoodleFehler('Das Profil des Browsers ließ sich nicht anlegen: ${x.meldung}');
+    throw MoodleFehler(
+      'Das Profil des Browsers ließ sich nicht anlegen: ${x.meldung}',
+    );
   }
 }
 
 /// Hängt sich an die Seite des Browsers an (Target.attachToTarget, flatten):
 /// Befehle an die Seite laufen über dieselbe Pipe, mit der Nummer der Sitzung.
 /// Die Seite kommt beim Start mit about:blank, aber nicht im selben Augenblick.
-Future<CdpSitzung> _seiteAnhaengen(CdpPipe pipe, String browser, Duration grenze) async {
+Future<CdpSitzung> _seiteAnhaengen(
+  CdpPipe pipe,
+  String browser,
+  Duration grenze,
+) async {
   final bis = DateTime.now().add(grenze);
   while (true) {
     final r = await pipe.senden('Target.getTargets');
-    final seite = ((r['targetInfos'] as List?) ?? const []).cast<Map>().where((t) => t['type'] == 'page').firstOrNull;
+    final seite = ((r['targetInfos'] as List?) ?? const [])
+        .cast<Map>()
+        .where((t) => t['type'] == 'page')
+        .firstOrNull;
     if (seite != null) {
-      final a = await pipe.senden('Target.attachToTarget', {'targetId': seite['targetId'], 'flatten': true});
+      final a = await pipe.senden('Target.attachToTarget', {
+        'targetId': seite['targetId'],
+        'flatten': true,
+      });
       return pipe.sitzung('${a['sessionId']}');
     }
-    if (DateTime.now().isAfter(bis)) throw MoodleFehler('$browser zeigt keine Seite.');
+    if (DateTime.now().isAfter(bis)) {
+      throw MoodleFehler('$browser zeigt keine Seite.');
+    }
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
 }
@@ -858,18 +889,52 @@ Future<String> bildschirmfoto(
   }
   protokoll.eintrag(Art.info, 'Bildschirmfoto: $seite -- Grund: $wozu');
   final adresse = moodle.basis!.resolve(pfad);
-  final a = await aufnehmen(
-    basis: moodle.basis!,
-    holen: moodle.fuerBrowser,
-    protokoll: protokoll,
+  final name =
+      '${frage != null ? 'frage-$frage' : 'cm-$cmid'}${kapitel == null ? '' : '-kapitel-$kapitel'}'
+      '${wikiseite == null ? '' : '-seite-$wikiseite'}${druck ? '-druck' : ''}';
+  return aufnahmeAnbieten(
+    aufnahme: () => aufnehmen(
+      basis: moodle.basis!,
+      holen: moodle.fuerBrowser,
+      protokoll: protokoll,
+      adresse: adresse,
+      inhalt: _inhalt[ansicht]!,
+      arbeitsordner: arbeitsordner,
+      druck: druck,
+      abbruch: Freigaben.abbruchImAufruf,
+    ),
+    kursZeile: () async =>
+        kurs == null ? null : 'Kurs: ${await kursBezeichnung(moodle, kurs)}',
+    freigaben: freigaben,
+    wozu: wozu,
+    seite: seite,
     adresse: adresse,
-    inhalt: _inhalt[ansicht]!,
-    arbeitsordner: arbeitsordner,
     druck: druck,
-    abbruch: Freigaben.abbruchImAufruf,
+    name: name,
+    arbeitsordner: arbeitsordner,
   );
+}
+
+/// Zeigt die Aufnahme der Lehrkraft und legt die Bilder nur nach ihrer
+/// Freigabe in den Arbeitsordner. Der Browser ist dann längst beendet und
+/// sein Profil gelöscht ([aufnahme] kehrt erst danach zurück); eine
+/// Ablehnung, ein Verfall der Anfrage und der Abbruch des Clients schreiben
+/// nichts. [name] benennt die Dateien (`bildschirmfoto-<name>[-n].png`).
+@visibleForTesting
+Future<String> aufnahmeAnbieten({
+  required Future<Aufnahme> Function() aufnahme,
+  required Future<String?> Function() kursZeile,
+  required Freigaben freigaben,
+  required String wozu,
+  required String seite,
+  required Uri adresse,
+  required bool druck,
+  required String name,
+  required String arbeitsordner,
+}) async {
+  final a = await aufnahme();
   final wo = [
-    if (kurs != null) 'Kurs: ${await kursBezeichnung(moodle, kurs)}',
+    ?await kursZeile(),
     'Seite: $seite',
     'Adresse: $adresse',
     'Ausschnitt: ${a.ausschnitt}',
@@ -903,9 +968,6 @@ Future<String> bildschirmfoto(
   if (!ja) {
     return 'Nicht freigegeben: Die Lehrkraft hat das Bildschirmfoto verworfen. Nichts weitergegeben.';
   }
-  final name =
-      '${frage != null ? 'frage-$frage' : 'cm-$cmid'}${kapitel == null ? '' : '-kapitel-$kapitel'}'
-      '${wikiseite == null ? '' : '-seite-$wikiseite'}${druck ? '-druck' : ''}';
   // Ältere Bilder derselben Ansicht weg: Ein Bild zeigt den Stand beim
   // Aufnehmen, und von einer Aufnahme mit mehr Teilen bliebe sonst ein alter
   // Teil neben den neuen liegen.

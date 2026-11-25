@@ -1,5 +1,6 @@
 // Offline prüfbar: Instanzprofile (E31). Altbestand-Migration der
 // Einstellungen, Port und Servername je Profil, und die Registry der Zugänge.
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,23 @@ final _b = Profil(
 
 void main() {
   group('Altbestand und Einstellungen', () {
+    test('beschädigte Einstellungsdatei fällt auf Vorgaben zurück und wird ersetzt', () async {
+      final ordner = await Directory.systemTemp.createTemp('moocp_einstellungen_test_');
+      addTearDown(() => ordner.delete(recursive: true));
+      final datei = File('${ordner.path}/einstellungen.json');
+      await datei.writeAsString('{ ungültiges JSON');
+
+      final geladen = await Einstellungen.laden(datei: datei);
+
+      expect(geladen.profile, isEmpty);
+      expect(geladen.port, standardPort);
+      expect(geladen.bestaetigungen, Bestaetigungen.vorgabe);
+      expect(geladen.updatePruefen, isNull);
+      expect(geladen.schluessel, matches(RegExp(r'^[0-9a-f]{64}$')));
+      final erneut = await Einstellungen.laden(datei: datei);
+      expect(erneut.zuJson(), geladen.zuJson());
+    });
+
     test('nur moodleAdresse wird zum Standardprofil mit Port 47811 und Servername moodle', () {
       final e = Einstellungen.aus({'moodleAdresse': 'https://moodle.schule.example'}, _standard());
       expect(e.profile, hasLength(1));
@@ -64,7 +82,7 @@ void main() {
       expect(e.profile.map((p) => p.kennung), ['e5f6a7b8']);
     });
 
-    test('Schlüssel früherer Versionen (Rolle, Projektkontext) werden ignoriert und nicht mehr geschrieben', () {
+    test('unbekannte Einstellungen und Profilfelder überstehen das Speichern', () {
       final e = Einstellungen.aus({
         'profile': [
           {..._a.toJson(), 'rolle': 'quelle'},
@@ -79,10 +97,41 @@ void main() {
       }, _standard());
       expect(e.profile.map((p) => p.kennung), ['a1b2c3d4', 'e5f6a7b8']);
       final neu = e.zuJson();
-      expect(neu.containsKey('projektkontext'), isFalse);
-      for (final p in neu['profile']! as List) {
-        expect((p as Map).containsKey('rolle'), isFalse);
-      }
+      expect(neu['projektkontext'], {
+        'quelle': {'profil': 'a1b2c3d4', 'kurs': 12},
+        'durchfuehrung': [{'profil': 'e5f6a7b8', 'kurs': 34}],
+      });
+      expect((neu['profile']! as List).map((p) => (p as Map)['rolle']), ['quelle', 'ziel']);
+    });
+
+    test('unbekannte Pluginfelder bleiben bei Änderungen erhalten, bekannte Werte werden validiert', () {
+      final e = Einstellungen.aus({
+        'plugins': {
+          'beispiel': {'version': '1', 'pruefsumme': 'abc', 'zugestimmt': true, 'neu': [1, null]},
+          'ungueltig': {'version': '1', 'pruefsumme': 'abc', 'zugestimmt': 'ja'},
+        },
+        'pluginUpdates': {'beispiel': {'aus': 'ungültig', 'neu': {'x': true}}},
+      }, _standard());
+      expect(e.pluginUpdates['beispiel']!.aus, isFalse);
+      expect(e.plugins.containsKey('ungueltig'), isFalse);
+      e.plugins['beispiel'] = e.plugins['beispiel']!.mitProfilen({'standard'});
+      e.pluginUpdates['beispiel'] = e.pluginUpdates['beispiel']!.mit(aus: true);
+      final j = e.zuJson();
+      expect((j['plugins'] as Map)['beispiel']['neu'], [1, null]);
+      expect((j['pluginUpdates'] as Map)['beispiel'], {'aus': true, 'neu': {'x': true}});
+    });
+
+    test('unbekannte Profilfelder bleiben auch bei gleichen Kennungen beim jeweiligen Profil', () {
+      final e = Einstellungen.aus({
+        'profile': [
+          {..._a.toJson(), 'neu': 'erstes'},
+          {..._a.toJson(), 'neu': 'zweites'},
+        ],
+      }, _standard());
+      e.profile = [e.profile.last.copyWith(name: 'Neu'), e.profile.first];
+      final profile = e.zuJson()['profile'] as List;
+      expect(profile.map((p) => (p as Map)['neu']), ['zweites', 'erstes']);
+      expect((profile.first as Map)['name'], 'Neu');
     });
 
     test('fehlender Port und Servername werden vergeben, Namen bleiben eindeutig', () {

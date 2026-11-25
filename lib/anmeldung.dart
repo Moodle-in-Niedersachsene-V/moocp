@@ -181,9 +181,11 @@ Future<void> weitereProfileAnmelden(
     if (d.passwort == null) {
       protokoll.eintrag(
         Art.anmeldung,
-        d.speicherProblem == null
-            ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
-            : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
+        d.herkunftHinweis != null
+            ? 'Gespeichertes Passwort nicht verwendet: Adresse passt nicht zur gespeicherten Herkunft -- bitte in der App anmelden'
+            : d.speicherProblem == null
+                ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
+                : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
       );
       continue;
     }

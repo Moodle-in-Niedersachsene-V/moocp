@@ -17,6 +17,15 @@
 // Gespeichert wird nur nach einer ERFOLGREICHEN Anmeldung, damit sich kein
 // Tippfehler festsetzt. Nimmt die Lehrkraft den Haken weg, werden
 // Benutzername und Passwort sofort entfernt.
+//
+// Bindung an die Herkunft (E7): Mit den Zugangsdaten steht je Profil die
+// normalisierte https-Herkunft der Instanz (Schema, Host, Port), bei der die
+// Anmeldung gelungen ist. Das gespeicherte Passwort wird nur gelesen, wenn die
+// Adresse des Profils heute zu genau dieser Herkunft gehört; sonst bleibt es
+// im Speicher, geht an niemanden, und die Lehrkraft meldet sich von Hand an.
+// Gesetzt oder ersetzt wird die Bindung nur nach einer erfolgreichen
+// Anmeldung (speichern); eine fehlgeschlagene verschiebt sie nie. Sie hängt an
+// der Profilkennung, ein Umbenennen ändert sie nicht.
 
 import 'dart:io';
 
@@ -32,6 +41,43 @@ class Anmeldedaten {
   static const _merken = 'anmeldung.merken';
   static const _benutzer = 'anmeldung.benutzer';
   static const _passwort = 'moodle.passwort';
+  static const _herkunft = 'anmeldung.herkunft';
+
+  /// Die Herkunft einer Moodle-Adresse, wie sie für die Bindung der
+  /// gespeicherten Zugangsdaten verglichen wird: `https://<host>:<port>`.
+  /// Das Schema muss https sein, der Host steht in Kleinbuchstaben und ohne
+  /// abschließenden Punkt, der Port ist immer ausgeschrieben (443, wenn die
+  /// Adresse keinen nennt, so sind `https://x` und `https://x:443` gleich);
+  /// Pfad, Query, Fragment und Benutzerkennung gehören nicht dazu. Ein Host in
+  /// Unicode-Schreibweise wird nicht in Punycode umgerechnet: Dieselbe
+  /// Instanz in beiden Schreibweisen gilt als verschieden und verlangt eine
+  /// Anmeldung von Hand – das ist die sichere Richtung. Null: kein https,
+  /// kein Host, ungültiger Port oder nicht lesbar; dann gibt es keine
+  /// Bindung und kein gespeichertes Passwort wird verwendet.
+  static String? herkunftVon(String adresse) {
+    final Uri u;
+    try {
+      u = Uri.parse(adresse.trim());
+    } on FormatException {
+      return null;
+    }
+    if (u.scheme != 'https') return null;
+    var host = u.host.toLowerCase();
+    while (host.endsWith('.')) {
+      host = host.substring(0, host.length - 1);
+    }
+    if (host.isEmpty) return null;
+    final port = u.port; // 443, wenn die Adresse keinen nennt
+    if (port <= 0 || port > 65535) return null;
+    return 'https://${host.contains(':') ? '[$host]' : host}:$port';
+  }
+
+  /// Fester Text für die Lehrkraft, wenn gespeicherte Zugangsdaten nicht zur
+  /// Adresse des Profils gehören (ohne Inhalte, E11).
+  static const herkunftsHinweis =
+      'Die gespeicherten Anmeldedaten lassen sich dieser Moodle-Adresse nicht zuordnen '
+      '(Adresse geändert oder Zuordnung unbekannt). Das gespeicherte Passwort wird nicht '
+      'verwendet; bitte neu anmelden.';
 
   /// Schlüssel je Instanzprofil (profil.dart). Das Standardprofil behält die
   /// alten Schlüssel, damit gespeicherte Zugangsdaten nach dem Umstieg gelten;
@@ -104,9 +150,13 @@ class Anmeldedaten {
   /// [speicherProblem]: Warum das gespeicherte Passwort nicht gelesen wurde,
   /// wenn es an einem unbenutzbaren Schlüsselbund liegt (nur Linux); fester
   /// Text für die Lehrkraft, ohne Inhalte (E11).
-  const Anmeldedaten(this.merken, this.benutzer, this.passwort, {this.speicherProblem});
+  const Anmeldedaten(this.merken, this.benutzer, this.passwort, {this.speicherProblem, this.herkunftHinweis});
 
   final String? speicherProblem;
+
+  /// Gesetzt, wenn das gespeicherte Passwort absichtlich nicht gelesen wurde,
+  /// weil die Adresse des Profils nicht zur gespeicherten Herkunft passt.
+  final String? herkunftHinweis;
 
   /// Nur für Tests: ersetzt die Testzugänge aus der Umgebung (die ein Test
   /// nicht setzen kann). Ohne Wert gilt die Umgebung (Testzugang.ausUmgebung).
@@ -169,6 +219,12 @@ class Anmeldedaten {
     final prefs = await SharedPreferences.getInstance();
     final merken = prefs.getBool(_schluessel(_merken, kennung)) ?? false;
     if (!merken) return const Anmeldedaten(false, null, null);
+    // Vor jedem Lesen des Passworts: nur für die bestätigte Herkunft.
+    final gebunden = prefs.getString(_schluessel(_herkunft, kennung));
+    final jetzt = adresse == null ? null : herkunftVon(adresse);
+    if (jetzt == null || gebunden == null || herkunftVon(gebunden) != jetzt) {
+      return Anmeldedaten(true, prefs.getString(_schluessel(_benutzer, kennung)), null, herkunftHinweis: herkunftsHinweis);
+    }
     String? passwort;
     String? problem;
     try {
@@ -205,7 +261,13 @@ class Anmeldedaten {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_schluessel(_merken, kennung), true);
     await prefs.setString(_schluessel(_benutzer, kennung), benutzer);
+    // Reihenfolge: erst die alte Bindung weg, dann das Passwort, dann die neue
+    // Bindung. Bricht es dazwischen ab, steht ein Passwort ohne Bindung da und
+    // wird nicht verwendet – nie eins mit der Bindung einer anderen Instanz.
+    await prefs.remove(_schluessel(_herkunft, kennung));
     await _zugriff(() => _sicher.write(key: _schluessel(_passwort, kennung), value: passwort));
+    final herkunft = adresse == null ? null : herkunftVon(adresse);
+    if (herkunft != null) await prefs.setString(_schluessel(_herkunft, kennung), herkunft);
   }
 
   /// Entfernt Benutzername und Passwort ausdrücklich -- shared_preferences
@@ -215,6 +277,7 @@ class Anmeldedaten {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_schluessel(_merken, kennung), false);
     await prefs.remove(_schluessel(_benutzer, kennung));
+    await prefs.remove(_schluessel(_herkunft, kennung));
     await _zugriff(() => _sicher.delete(key: _schluessel(_passwort, kennung)), fehltIstEgal: true);
   }
 

@@ -432,6 +432,9 @@ void main() {
       SharedPreferences.setMockInitialValues({
         'anmeldung.merken$suffix': true,
         'anmeldung.benutzer$suffix': 'e.mustermann',
+        // Die Herkunft, mit der die Anmeldedaten gespeichert wurden (E7).
+        'anmeldung.herkunft$suffix':
+            'https://${kennung == Profil.standardKennung ? 'moodle' : 'moodle-test'}.schule.example:443',
       });
       // ignore: invalid_use_of_visible_for_testing_member
       FlutterSecureStorage.setMockInitialValues({'moodle.passwort$suffix': passwort});

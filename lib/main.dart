@@ -1073,13 +1073,16 @@ class _HauptseiteState extends State<Hauptseite> {
       // App still abgemeldet.
       instanz.dienst.protokoll.eintrag(
         Art.anmeldung,
-        d.speicherProblem == null
-            ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
-            : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
+        d.herkunftHinweis != null
+            ? 'Gespeichertes Passwort nicht verwendet: Adresse passt nicht zur gespeicherten Herkunft -- bitte in der App anmelden'
+            : d.speicherProblem == null
+                ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
+                : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
       );
       // Sichtbar, nicht nur im Protokoll: Sonst stünde die Lehrkraft vor einem
       // leeren Passwortfeld und wüsste nicht, warum die App nicht anmeldet.
-      if (d.speicherProblem != null && mounted) setState(() => _meldung = d.speicherProblem);
+      final hinweis = d.herkunftHinweis ?? d.speicherProblem;
+      if (hinweis != null && mounted) setState(() => _meldung = hinweis);
       return;
     }
     instanz.dienst.protokoll.eintrag(
@@ -1435,7 +1438,13 @@ class _HauptseiteState extends State<Hauptseite> {
       }
       return;
     }
-    if (d.merken && d.passwort == null && d.speicherProblem != null) {
+    if (d.merken && d.passwort == null && d.herkunftHinweis != null) {
+      instanz.dienst.protokoll.eintrag(
+        Art.anmeldung,
+        'Gespeichertes Passwort nicht verwendet: Adresse passt nicht zur gespeicherten Herkunft -- bitte in der App anmelden',
+      );
+      if (mounted) setState(() => _meldung = d.herkunftHinweis);
+    } else if (d.merken && d.passwort == null && d.speicherProblem != null) {
       instanz.dienst.protokoll.eintrag(
         Art.anmeldung,
         'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
@@ -1576,7 +1585,10 @@ class _HauptseiteState extends State<Hauptseite> {
     final auftrag = AnmeldeAuftrag(
       instanz: _aktiv,
       profil: _profil,
-      adresse: _adresse.text.trim(),
+      // Eine automatische Anmeldung nimmt die Adresse des Profils, nicht das
+      // Feld: Geprüft wurde die Herkunft dieser Adresse (anmeldedaten.dart),
+      // und das Feld könnte sich seither geändert haben.
+      adresse: gespeichert ? _profil.adresse : _adresse.text.trim(),
       benutzer: _benutzer.text.trim(),
       passwort: _passwort.text,
       merken: _merken,

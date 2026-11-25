@@ -1110,14 +1110,28 @@ Der Testbetrieb (siehe „Bildschirmfotos“ und die [Testanleitung](docs/agents
 
 ### Veröffentlichen
 
-Die Versionsnummer steht in `pubspec.yaml`, die Änderungen je Version in `CHANGELOG.md`. Eine Version entsteht auf `main`, wenn alles für sie gemergt ist:
+Die Versionsnummer steht in `pubspec.yaml`, die Änderungen je Version in `CHANGELOG.md`. Es gibt zwei Kanäle, „Stabil“ und „Testversionen (Nightly)“; die Regeln dazu stehen in [CONTRIBUTING.md](CONTRIBUTING.md). Beide Kanäle veröffentlicht derselbe Workflow, `.github/workflows/release.yml` („Release“ unter „Actions“ auf GitHub). Er baut den Windows-Installer, die drei Linux-Pakete (siehe „Unter Linux bauen“) und das Disk-Image für den Mac (siehe „Auf dem Mac bauen“) und hängt sie an ein Release mit dem Abschnitt der Version aus `CHANGELOG.md` als Text. Die Dateien tragen die ganze Version im Namen, und nur unter diesem Namen findet die Update-Prüfung sie:
+
+| Paket | Name im Release |
+|---|---|
+| Windows | `moocp_setup_<Version>.exe` |
+| Linux | `moocp_setup_<Version>.run`, `moocp_<Version>-x86_64.AppImage`, `moocp_<Version>_amd64.deb` |
+| Mac | `moocp_<Version>_macos.dmg` |
+
+Die Entscheidungen des Workflows – ob eine Nightly fällig ist, Tag und laufende Nummer, die Version aus `pubspec.yaml`, der Abschnitt des Changelogs – stehen in `tool/ci_release.py`, mit Tests in `tool/test_ci_release.py` (`python tool/test_ci_release.py`, die GitHub-Schnittstelle ist darin nachgebaut); die YAML-Datei ruft das Skript nur auf.
+
+**Nightly.** Eine Nightly ist ein Stand von `main`. Sie entsteht jede Nacht, wenn `main` seit der letzten Nightly einen neuen Commit hat, und jederzeit von Hand: „Run workflow“ mit Kanal `nightly`, ohne Rücksicht auf neue Commits. Der Tag heißt `v<Version>-nightly.<JJJJMMTT>.<n>`, etwa `v0.13.0-nightly.20261124.2`; `<Version>` ist die Version aus `pubspec.yaml` ohne Buildnummer, `<n>` zählt die Nightlies desselben Tages von 1 an. Das Release ist eine Vorabversion und nie „latest“, ein Rechner im Kanal „Stabil“ bekommt sie also nicht angeboten. Die Nightly-Version kommt beim Bau in die Arbeitskopie des Runners, in keinen Commit: In der App, unter „Über“ und mit `moocp --version` heißt eine Nightly auf jeder Plattform gleich, `0.13.0.20261124.2+2`, ohne „nightly“: Der Mac erlaubt in der Version einer App nur Ziffern und Punkte, und eine Nightly erkennt man am Datum hinter der Version, das eine stabile Version nicht hat. Die Dateiversion der exe bleibt rein numerisch (`0.13.0.2`), und der Installer liest seine Version weiter aus der gebauten exe. Veröffentlicht wird nur ein Commit, auf dem `flutter analyze` und `flutter test` aus `Checks` grün sind (siehe „Prüfen und Bauen mit GitHub Actions“); sonst bricht der Lauf vor dem Bauen ab. Die Labels `nightly` und `post-reviewed` legt der Workflow beim Veröffentlichen an, wenn sie fehlen.
+
+**Stabile Version.** Sie entsteht aus einem Tag, der schon auf `main` (bei einem Hotfix auf `release/x.y`) steht:
 
 ```bash
-git tag v0.10.1
-git push origin v0.10.1
+git tag v0.13.0
+git push origin v0.13.0
 ```
 
-Danach wird auf GitHub aus diesem Tag ein Release erzeugt, mit dem Windows-Installer, den drei Linux-Paketen (`moocp_setup_0.10.1.run`, `moocp_0.10.1-x86_64.AppImage`, `moocp_0.10.1_amd64.deb`, siehe „Unter Linux bauen") und dem Disk-Image für den Mac (`moocp_0.10.1_macos.dmg`, siehe „Auf dem Mac bauen") als Dateien und dem Abschnitt der Version aus `CHANGELOG.md` als Text. Tag und Datei müssen dem Schema folgen, sonst findet die Update-Prüfung der App die Version nicht: Tag `v0.10.1`, Datei `moocp_setup_0.10.1.exe`, kein Entwurf und keine Vorabversion.
+Danach „Run workflow“ mit diesem Tag als Ref (nicht mit `main`) und Kanal `stable`. Der Workflow prüft, dass der Tag zur Version in `pubspec.yaml` auf diesem Stand passt, auf `main` oder einem Zweig `release/x.y` liegt und noch kein Release hat und dass `Checks` auf dem Commit grün ist; er baut die Pakete und wartet dann im Environment `stable`: Der andere Maintainer bestätigt dort die Veröffentlichung. Die Schranke aus CONTRIBUTING.md (14 Tage, keine offenen Fehler der Nightly, alles `post-reviewed`) prüft der Workflow noch nicht; sie prüft der andere Maintainer, bevor er bestätigt. Danach entsteht ein normales Release, „latest“, kein Entwurf und keine Vorabversion – sonst findet die Update-Prüfung der App die Version nicht.
+
+**Nur bauen.** Ein Lauf mit „publish“ aus und jeder Lauf, der nicht von `main` (Nightly) oder einem Tag (stabil) im Repository des Vereins kommt, auch aus einem Fork, baut alle Pakete und lädt sie als Artefakte des Laufs hoch (sieben Tage), ohne Tag und ohne Release. So lässt sich der Workflow selbst und jede Änderung an den Paketen von einem Zweig aus ausprobieren. Der Installer für Windows entsteht mit `create_installer.bat`; im Workflow setzt sie `MOOCP_OHNE_PRUEFUNG`, weil Analyse und Tests schon in `Checks` laufen und ein Lauf ohne grüne Prüfungen nicht veröffentlicht, und `MOOCP_VERSION_ZUSATZ`, die Vorabkennung für Namen und Anzeige des Installers.
 
 ### Mitwirken
 

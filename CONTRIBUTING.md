@@ -111,14 +111,14 @@ Testers report problems with the issue template for nightlies; such issues get t
 
 ### Stable
 
-A maintainer picks a published nightly (not necessarily the latest) and starts the stable release workflow for exactly its commit. The workflow checks:
+A maintainer picks a published nightly (not necessarily the latest), tags exactly its commit `v<version>` and starts the release workflow for that tag (README part 4, "Veröffentlichen"). Before a stable release:
 
 - the nightly has been out for at least 14 days,
 - no open issue with `nightly` and `bug` affects it or an earlier nightly,
 - every PR up to that commit has `post-reviewed`,
 - the other maintainer approves the `stable` environment, confirming they used that nightly long enough.
 
-Then it creates the tag `v<version>` and the release, and `main` moves to the next minor version.
+The workflow checks the tag, the version and green checks, then waits for the approval in the environment `stable`; the first three points are not automated yet, so the other maintainer checks them before approving. Then the workflow creates the release, and `main` moves to the next minor version.
 
 ### Hotfixes
 
@@ -145,4 +145,4 @@ These settings carry the rules; changing them is a rule change (Ask):
 - `main`: PR required, required status checks `flutter analyze` and `flutter test` (the job names of the `Checks` workflow, which runs on Linux for every PR and every push to `main`; rename a job only together with this rule), required approvals 0, review from code owners not required, no force-push, no deletion. Ask relies on the agreement between the maintainers; if that proves too loose, "require review from code owners" is switched on again.
 - `release/*`: same, but one approval required.
 - Environment `stable`: required reviewer is the other maintainer; the person who started the run cannot approve it.
-- Workflows: `Checks` (`flutter analyze`, `flutter test`) runs automatically on every PR and every push to `main`, Linux only. Builds and tests on Windows and macOS run only on request, never automatically (their runners are scarce and slow): `python3 tool/ci_bau.py <platforms>` from a branch, the commit markers `[ci:linux]`, `[ci:windows]`, `[ci:macos]`, or "Run workflow" with `platform` and `task`. Details in the README (part 4, "Prüfen und Bauen mit GitHub Actions"). Workflows use pinned major versions of actions and `permissions: contents: read`.
+- Workflows: `Checks` (`flutter analyze`, `flutter test`) runs automatically on every PR and every push to `main`, Linux only. Builds and tests on Windows and macOS run only on request or in the release workflow (a nightly builds all three platforms when `main` has new commits), never otherwise (their runners are scarce and slow): `python3 tool/ci_bau.py <platforms>` from a branch, the commit markers `[ci:linux]`, `[ci:windows]`, `[ci:macos]`, or "Run workflow" with `platform` and `task`. Details in the README (part 4, "Prüfen und Bauen mit GitHub Actions"). Workflows use pinned major versions of actions and `permissions: contents: read`.

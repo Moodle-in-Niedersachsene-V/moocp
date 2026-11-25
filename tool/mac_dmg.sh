@@ -18,7 +18,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 unset MOOCP_TESTZUGANG_PROFILE MOOCP_TESTZUGANG MOOCP_TESTZUGANG_ADRESSE
-VERSION="$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml | head -1)"
+VERSION="$(sed -nE 's/^version: *([0-9][0-9.]*(-[0-9A-Za-z.]+)?).*/\1/p' pubspec.yaml | head -1)"
 [[ -n "$VERSION" ]] || { echo 'Version in pubspec.yaml nicht gefunden' >&2; exit 1; }
 
 WERKZEUG="build/tools/dmgbuild-1.6.5"

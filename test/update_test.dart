@@ -31,6 +31,15 @@ void main() {
   group('Versionen vergleichen', () {
     test('kleiner, gleich, größer', () {
       expect(versionVergleich('0.9.4', '0.9.5'), -1);
+      // Eine Nightly ist älter als die stabile Version mit denselben drei Zahlen,
+      // in beiden Schreibweisen (pubspec.yaml und App, E39).
+      expect(versionVergleich('0.13.0', '0.13.0.20261124.2'), 1);
+      expect(versionVergleich('0.13.0', '0.13.0-nightly.20261124.2+2'), 1);
+      expect(versionVergleich('0.13.0.20261124.2', '0.13.0'), -1);
+      expect(versionVergleich('0.12.0', '0.13.0.20261124.2'), -1);
+      expect(versionVergleich('0.13.1', '0.13.0.20261124.2'), 1);
+      expect(versionVergleich('0.13.0.20261125.1', '0.13.0.20261124.2'), 1);
+      expect(versionVergleich('0.13.0-nightly.20261124.2', '0.13.0.20261124.2'), 0);
       expect(versionVergleich('0.9.5', '0.9.4'), 1);
       expect(versionVergleich('0.9.4', '0.9.4'), 0);
     });

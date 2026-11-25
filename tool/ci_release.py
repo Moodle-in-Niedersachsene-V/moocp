@@ -121,28 +121,6 @@ def next_nightly_number(repo, base, date):
     return max(numbers, default=0) + 1
 
 
-def nightly_due(repo, sha):
-    """Ob `main` seit der letzten Nightly einen neuen Commit hat (oder es noch keine gibt)."""
-    releases = api(f'repos/{repo}/releases?per_page=100') or []
-    last = None
-    for release in releases:
-        found = NIGHTLY_TAG.match(release.get('tag_name', ''))
-        if found and release.get('prerelease') and not release.get('draft'):
-            key = (found.group(2), int(found.group(3)))
-            if last is None or key > last[0]:
-                last = (key, release['tag_name'])
-    if last is None:
-        return True
-    last_sha = (api(f'repos/{repo}/commits/{last[1]}') or {}).get('sha')
-    if not last_sha:
-        # Der Tag der letzten Nightly ist weg: lieber eine Nightly zu viel.
-        return True
-    if last_sha == sha:
-        return False
-    comparison = api(f'repos/{repo}/compare/{last_sha}...{sha}?per_page=1') or {}
-    return comparison.get('ahead_by', 1) > 0
-
-
 # Die Namen der Aufträge im Workflow Checks, zugleich die erforderlichen Prüfungen von main.
 REQUIRED_CHECKS = ('flutter analyze', 'flutter test')
 
@@ -189,11 +167,12 @@ def plan(env, today_value=None, pubspec='pubspec.yaml'):
     repo = env['repo']
     sha = env['sha']
     manual = event == 'workflow_dispatch'
-    scheduled = event == 'schedule'
     channel = env.get('channel') or 'nightly'
     if channel not in ('nightly', 'stable'):
         raise ReleaseError(f'Unbekannter Kanal: {channel}')
-    wants_publish = (manual and env.get('publish', True)) or scheduled
+    # Veröffentlicht wird nur, was ein Maintainer von Hand startet (E39): Einen
+    # Zeitplan gibt es nicht, und jeder andere Anlass baut höchstens.
+    wants_publish = manual and env.get('publish', True)
     base = read_pubspec_version(pubspec)
 
     # Wer veröffentlichen darf, steht hier und nirgends sonst: nur das
@@ -223,13 +202,6 @@ def plan(env, today_value=None, pubspec='pubspec.yaml'):
 
     if channel == 'nightly':
         date = today_value or today()
-        if scheduled and not official:
-            # Ein Fork mit eingeschalteten Actions baut nachts nicht alle drei Plattformen umsonst.
-            result.update(build='false', reason='nicht das offizielle Repository')
-            return result
-        if scheduled and not nightly_due(repo, sha):
-            result.update(build='false', reason='keine neuen Commits seit der letzten Nightly')
-            return result
         number = next_nightly_number(repo, base, date)
         suffix = f'-nightly.{date}.{number}'
         result.update(version=f'{base}{suffix}', tag=f'v{base}{suffix}', build_number=str(number),

@@ -13,11 +13,9 @@
 - Speichern: Eine Sperre nach unklarem Ausgang heben Sie jetzt selbst in den Einstellungen auf.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
-- Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind.
-- Wiederherstellung: Linkunterschiede bleiben erkennbar; Anhangsreparaturen schützen inzwischen geänderte Dateien und fremde Aktivitäten, und ihre vollständigen Befunde bleiben im Status erhalten.
+- Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
-- Wiederherstellung: Die App vergleicht auch die Texte einschließlich bedeutenden Leerraums mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
-- Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.
+- Wiederherstellung: Die App vergleicht Texte (auch Links, einschließlich bedeutenden Leerraums) und Anhänge mit der Sicherung und meldet, was ungeprüft bleibt; Einstellungen vergleicht sie weiterhin nicht; fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren, und ersetzt wird eine abweichende Datei nur nach Ihrer ausdrücklichen Bestätigung.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.

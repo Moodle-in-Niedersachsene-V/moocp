@@ -1,5 +1,5 @@
 // Offene Sperren aufheben (E37): Kern, Dialog (nur Maus, Wartezeit) und die
-// Gewissheit, dass es über MCP nicht erreichbar ist.
+// Gewissheit, dass die KI keine Sperre ohne Entscheidung in der App aufhebt.
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -56,6 +56,12 @@ void main() {
     await tester.pump();
     expect(offeneSperren(moodle), hasLength(1), reason: 'vor der Wartezeit wirkt der Klick nicht');
     await tester.pump(Sperrzeit.dauerVorgabe);
+    await tester.tap(knopf);
+    await tester.pump();
+    expect(offeneSperren(moodle), hasLength(1), reason: 'Wartezeit allein ersetzt nicht das ausdrückliche Abhaken');
+    await tester.ensureVisible(find.byKey(Key('geprueft-${vorgang.id}')));
+    await tester.tap(find.byKey(Key('geprueft-${vorgang.id}')));
+    await tester.pump();
     // Return und Leertaste entscheiden nichts.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
@@ -72,6 +78,6 @@ void main() {
         profil: Profil.migriert(''));
     final namen = await dienst.eingebauteWerkzeugnamen();
     expect(namen.where((n) => n.contains('sperre') || n.contains('aufheb')), isEmpty);
-    expect(namen, contains('aendern_status'), reason: 'prüfen darf die KI weiterhin, nur lesend');
+    expect(namen, contains('aendern_status'), reason: 'die KI darf den Stand prüfen oder eine menschliche Entscheidung in der App anfordern');
   });
 }

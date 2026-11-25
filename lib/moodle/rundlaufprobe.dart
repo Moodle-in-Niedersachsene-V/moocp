@@ -238,8 +238,13 @@ Future<ProbeErgebnis> rundlaufProbe(
     final antwort = await absenden(moodle, form, knoepfe: const ['submitbutton']);
     probe = int.tryParse(moodle.umleitungsziel(antwort)?.queryParameters['lastchanged'] ?? '');
   } on MoodleFehler catch (x) {
-    r.ausgangUnklar = true;
-    r.befunde.add('Speichern des Bearbeitungsformulars: ${x.meldung}. ${vorgang.hinweis}');
+    if (x is FormularAbgelehnt || x is SitzungAbgelaufen || x is SchutzPruefung || x is AnfrageGesperrt || x is NichtAngemeldet) {
+      vorgang.verwerfen();
+      r.befunde.add('Speichern des Bearbeitungsformulars abgelehnt: ${x.meldung}');
+    } else {
+      r.ausgangUnklar = true;
+      r.befunde.add('Speichern des Bearbeitungsformulars: ${x.meldung}. ${vorgang.hinweis}');
+    }
     return r;
   } catch (x) {
     r.ausgangUnklar = true;
@@ -260,6 +265,10 @@ Future<ProbeErgebnis> rundlaufProbe(
   final probeExport = await frageExport(moodle, sammlung, probe);
   if (probeExport.xml == null) {
     r.befunde.add('Die Probeversion $probe lässt sich nicht exportieren.');
+    r.ausgangUnklar = true;
+    r.probeBleibt = true;
+    r.hinweise.add(vorgang.hinweis);
+    return r;
   } else {
     // Gleich bis auf den Status: Ein Entwurf darf sich in hidden niederschlagen.
     final a = _ohneStatus(aus.xml!), b = _ohneStatus(probeExport.xml!);
@@ -271,19 +280,28 @@ Future<ProbeErgebnis> rundlaufProbe(
   final gespeichert = await formularHolen(moodle,
       '/question/bank/editquestion/question.php?cmid=$sammlung&id=$probe');
   final probeStatus = gespeichert.form.querySelector('select[name="status"] option[selected]')?.attributes['value'];
-  if (r.befunde.isNotEmpty || probeStatus != 'draft') {
+  if (probeStatus == null) {
     r.ausgangUnklar = true;
     r.probeBleibt = true;
     r.befunde.add('Der Zielstand der Probeversion ist nicht bestätigt. ${vorgang.hinweis}');
     return r;
   }
-  vorgang.abschliessen();
+  if (probeStatus != 'draft') r.befunde.add('Die Probeversion wurde nicht als Entwurf gespeichert.');
+  if (r.befunde.isEmpty) {
+    vorgang.abschliessen();
+  } else {
+    // Der zurückgelesene Stand ist bekannt, wenn auch falsch: E37 sperrt nur
+    // ohne Nachweis des Ausgangs. Die direkt gemeldete Probe darf entfernt werden.
+    vorgang.rueckgelesen();
+  }
   final weg = await loescheAngelegtes(moodle, arbeitsordner, sammlung, angelegt, probe,
       alleVersionen: false, verbleibend: frage);
   if (!weg.weg) {
     r.probeBleibt = true;
-    r.hinweise.add('Die Probeversion $probe ließ sich nicht löschen und liegt als Entwurf in der Fragenbank '
-        '(von keinem Test benutzt): ${weg.text}');
+    r.hinweise.add(probeStatus == 'draft'
+        ? 'Die Probeversion $probe ließ sich nicht löschen und liegt als Entwurf in der Fragenbank '
+            '(von keinem Test benutzt): ${weg.text}'
+        : 'Die Probeversion $probe ließ sich nicht löschen und kann in Tests aktiv sein: ${weg.text}');
   } else if (weg.text.contains('ACHTUNG')) {
     r.befunde.add(weg.text);
   }

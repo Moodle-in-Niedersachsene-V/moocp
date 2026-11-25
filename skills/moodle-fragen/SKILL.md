@@ -302,6 +302,13 @@ Frage mit `aendern_status` und der genannten Vorgangsnummer lesend nach;
 wiederhole den Schreibauftrag nicht. Auch ein noch unveränderter Ausgangsstand
 gibt keine Wiederholung frei, denn Moodle könnte den Auftrag noch verarbeiten.
 Ein erneutes Lesen oder Neustarten der App hebt diese Sperre nicht auf.
+Hat die Lehrkraft in Moodle nachgesehen und will das Objekt wieder ändern
+lassen (die Anfrage kam nie an, sie hat es von Hand in Ordnung gebracht, oder
+bei einer Frage ist der Stand nicht prüfbar), ruf `aendern_status` mit
+`sperre_aufheben` auf: Die App fragt dann die Lehrkraft, du entscheidest es
+nicht und bietest es nie von dir aus an. Lehnt Moodle ein Formular nur ab oder
+weicht der zurückgelesene Stand ab, gibt es keine Sperre; lies frisch und plane
+neu.
 <!-- >>> gemeinsam/protokoll.md -->
 
 <!-- <<< gemeinsam/bildschirmfoto.md - von build.py erzeugt, hier nicht bearbeiten -->

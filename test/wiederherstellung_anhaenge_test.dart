@@ -94,7 +94,7 @@ class _Moodle extends MoodleZugang {
   final Map<int, String> namen = {1: 'Alt'};
 
   @override
-  Future<Object?> dienst(String name, Map<String, Object?> args) async {
+  Future<Object?> dienst(String name, Map<String, Object?> args, {Future<void>? abbruch}) async {
     if (name == 'core_backup_get_async_backup_progress') {
       return [
         {'backupid': 'r-1', 'progress': 1, 'status': 1000},
@@ -161,6 +161,23 @@ void main() {
       });
       expect(quelldateienAus(mbz, modul: 'resource', titel: 'Blatt'),
           [(name: 'blatt.pdf', sha1: 'abc', dateimanager: true)]);
+    });
+
+    test('Bild der Beschreibung einer Datei-Aktivität liegt nicht im Dateimanager', () {
+      final mbz = _mbz({
+        'moodle_backup.xml': utf8.encode('<moodle_backup><activities><activity><modulename>resource</modulename>'
+            '<title>Blatt</title><directory>activities/resource_3</directory></activity></activities></moodle_backup>'),
+        'activities/resource_3/inforef.xml': utf8.encode('<inforef><fileref><file><id>1</id></file><file><id>2</id></file></fileref></inforef>'),
+        'activities/resource_3/resource.xml': utf8.encode('<activity><resource><intro>&lt;img src="@@PLUGINFILE@@/skizze.png"&gt;</intro></resource></activity>'),
+        'files.xml': utf8.encode('<files><file id="1"><contenthash>abc</contenthash><filename>blatt.pdf</filename>'
+            '<component>mod_resource</component><filearea>content</filearea></file>'
+            '<file id="2"><contenthash>def</contenthash><filename>skizze.png</filename>'
+            '<component>mod_resource</component><filearea>intro</filearea></file></files>'),
+      });
+      expect(quelldateienAus(mbz, modul: 'resource', titel: 'Blatt'), [
+        (name: 'blatt.pdf', sha1: 'abc', dateimanager: true),
+        (name: 'skizze.png', sha1: 'def', dateimanager: false),
+      ]);
     });
 
     test('fehlende Quellaufnahme ist null, nicht leer', () {

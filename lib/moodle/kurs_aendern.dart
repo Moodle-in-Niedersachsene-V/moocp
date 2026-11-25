@@ -415,33 +415,50 @@ void einrueckungPruefen(int einrueckung) {
 }
 
 /// Rückt die Aktivität [cmid] auf [soll] und liest die Kursstruktur danach frisch zurück.
-/// Ändert sich nichts oder meldet Moodle einen Fehler, wird nicht wiederholt.
+/// Ändert sich nichts oder meldet Moodle einen Fehler, wird nicht wiederholt. Der Text
+/// trägt kein „verified": Das Urteil fällt, wer den Aufruf mit seinem übrigen Ergebnis
+/// zusammenfasst (A3: eine Antwort, ein Urteil). Auch ein Fehler beim Lesen kommt als
+/// Ergebnis zurück statt als Ausnahme: Beim Anlegen steht die Aktivität dann schon,
+/// und die Antwort muss das sagen können, statt einen zweiten Anlauf zu provozieren.
 Future<({bool ok, String text})> einrueckungSetzen(MoodleZugang moodle, int kurs, int cmid, int soll) async {
-  var k = await kursLesen(moodle, kurs);
-  final jetzt = k.nachCmid[cmid]?.einzug;
-  if (jetzt == null) {
-    return (ok: false, text: 'Einrückung: Aktivität $cmid in der Kursstruktur nicht gefunden. verified: false');
-  }
   String? fehler;
-  final schritte = soll - jetzt;
+  int? jetzt;
   try {
-    for (var i = 0; i < schritte.abs(); i++) {
-      await kursAktion(moodle, kurs, schritte > 0 ? 'cm_moveright' : 'cm_moveleft', [cmid]);
+    var k = await kursLesen(moodle, kurs);
+    jetzt = k.nachCmid[cmid]?.einzug;
+    if (jetzt == null) {
+      return (ok: false, text: 'Einrückung: Aktivität $cmid in der Kursstruktur nicht gefunden.');
     }
+    final schritte = soll - jetzt;
+    try {
+      for (var i = 0; i < schritte.abs(); i++) {
+        await kursAktion(moodle, kurs, schritte > 0 ? 'cm_moveright' : 'cm_moveleft', [cmid]);
+      }
+    } on MoodleAbgebrochen {
+      rethrow;
+    } on MoodleFehler catch (x) {
+      fehler = x.meldung;
+    }
+    k = await kursLesen(moodle, kurs);
+    final danach = k.nachCmid[cmid]?.einzug;
+    final ok = danach == soll;
+    return (
+      ok: ok,
+      text: ok
+          ? 'Einrückung von $jetzt auf $soll gesetzt'
+          : 'Einrückung: verlangt $soll, in Moodle jetzt ${danach ?? '?'} (vorher $jetzt)'
+              '${fehler == null ? '' : '; Moodle meldet: $fehler'}. Nicht wiederholt; die Einrückung ist '
+              'mit dem Kursformat oder den Moodle-Grenzen so nicht erreichbar',
+    );
+  } on MoodleAbgebrochen {
+    rethrow;
   } on MoodleFehler catch (x) {
-    fehler = x.meldung;
+    return (
+      ok: false,
+      text: 'Einrückung nicht geprüft: ${x.meldung}. Nicht wiederholt; in Moodle nachsehen, '
+          'ob die Aktivität $cmid richtig eingerückt ist',
+    );
   }
-  k = await kursLesen(moodle, kurs);
-  final danach = k.nachCmid[cmid]?.einzug;
-  final ok = danach == soll;
-  return (
-    ok: ok,
-    text: ok
-        ? 'Einrückung von $jetzt auf $soll gesetzt. verified: true'
-        : 'Einrückung: verlangt $soll, in Moodle jetzt ${danach ?? '?'} (vorher $jetzt)'
-            '${fehler == null ? '' : '; Moodle meldet: $fehler'}. Nicht wiederholt; die Einrückung ist '
-            'mit dem Kursformat oder den Moodle-Grenzen so nicht erreichbar. verified: false',
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -502,21 +519,24 @@ Future<String> verschieben(MoodleZugang moodle, Freigaben freigaben,
     ));
     if (!ja) return 'Nicht verschoben: ${_nichtGefragt(freigaben)}';
     await _nachFreigabe(moodle, kurs, cmid, abschnittId, name);
-    var text = '';
+    final zeilen = <String>[];
+    var ok = true;
     if (!nurEinrueckung) {
       await kursAktion(moodle, kurs, 'cm_move', [c.cmid], zielAbschnitt: zielAbschnittId, zielCmid: vorCmid);
       k = await kursLesen(moodle, kurs);
       final liste = k.nachId[zielAbschnittId]?.aktivitaeten.map((x) => x.cmid).toList() ?? const [];
       final i = liste.indexOf(c.cmid);
-      final ok = i >= 0 && (vorCmid == null ? i == liste.length - 1 : i + 1 < liste.length && liste[i + 1] == vorCmid);
-      text = '${typName(c.modul)} „${c.name}" liegt jetzt in „${k.nachId[zielAbschnittId]?.titel}"'
-          '${i < 0 ? ' -- NICHT gefunden' : ', Position ${i + 1} von ${liste.length}'}. verified: $ok';
+      ok = i >= 0 && (vorCmid == null ? i == liste.length - 1 : i + 1 < liste.length && liste[i + 1] == vorCmid);
+      zeilen.add('${typName(c.modul)} „${c.name}" liegt jetzt in „${k.nachId[zielAbschnittId]?.titel}"'
+          '${i < 0 ? ' -- NICHT gefunden' : ', Position ${i + 1} von ${liste.length}'}');
     }
     if (einrueckung != null) {
       final e = await einrueckungSetzen(moodle, kurs, c.cmid, einrueckung);
-      text = nurEinrueckung ? '${typName(c.modul)} „${c.name}": ${e.text}' : '$text\n${e.text}';
+      ok = ok && e.ok;
+      zeilen.add(nurEinrueckung ? '${typName(c.modul)} „${c.name}": ${e.text}' : e.text);
     }
-    return text;
+    // Ein Urteil für alles, was dieser Aufruf getan hat.
+    return zeilen.length == 1 ? '${zeilen.single}. verified: $ok' : '${zeilen.join('\n')}\nverified: $ok';
   }
   if (einrueckung != null) {
     throw MoodleFehler('einrueckung gilt nur für Aktivitäten, nicht für Abschnitte.');

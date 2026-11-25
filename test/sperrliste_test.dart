@@ -189,6 +189,36 @@ void main() {
     }
   });
 
+  group('Neue Schreibwege: nur bestehende Aktivitäten, nur gemessene Aktionen (E3)', () {
+    final z = MoodleZugang(Protokoll());
+    final speichern = Uri.parse('https://m.example/course/modedit.php');
+    bool post(String modul, {String? update}) => z.erlaubt('POST', speichern, [
+      const MapEntry('course', '12'),
+      MapEntry('modulename', modul),
+      MapEntry('_qf__mod_${modul}_mod_form', '1'),
+      if (update != null) MapEntry('update', update),
+    ]);
+
+    for (final modul in ['choicegroup', 'lightboxgallery']) {
+      test('$modul: Speichern nur mit der Nummer einer bestehenden Aktivität', () {
+        expect(post(modul, update: '7'), isTrue);
+        expect(post(modul, update: '0'), isFalse, reason: 'update=0 ist kein Bearbeiten');
+        expect(post(modul), isFalse, reason: 'Anlegen ist für diesen Typ nicht erlaubt');
+        expect(post(modul, update: 'x'), isFalse);
+      });
+    }
+
+    test('Einrücken und Ausrücken: genau die beiden gemessenen Aktionen', () {
+      final dienst = z.dienste['core_courseformat_update_course']!;
+      for (final a in ['cm_moveright', 'cm_moveleft']) {
+        expect(dienst({'action': a, 'courseid': 5, 'ids': [11]}), isTrue, reason: a);
+      }
+      for (final a in ['cm_moveup', 'cm_moveright2', 'cm_duplicate_all']) {
+        expect(dienst({'action': a, 'courseid': 5, 'ids': [11]}), isFalse, reason: a);
+      }
+    });
+  });
+
   test('Die Positivliste allein ließe Abgaben unter pluginfile.php durch -- darum die Sperrliste', () {
     final z = MoodleZugang(Protokoll());
     final u = Uri.parse(

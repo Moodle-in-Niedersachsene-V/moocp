@@ -34,6 +34,8 @@ import '../moodle/buch.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
 import '../moodle/frage_ersetzen.dart';
+import '../moodle/fragen_kategorie.dart';
+import '../moodle/fragen_verschieben.dart';
 import '../moodle/fragen_version.dart';
 import '../moodle/fragetyp_notizen.dart';
 import '../moodle/rundlaufprobe.dart';
@@ -66,8 +68,9 @@ part 'lernlandkarten.dart';
 /// Was die eingestellte Stufe für die Werkzeuge bedeutet, für `status`.
 const _stufenText = {
   Bestaetigungen.keine:
-      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen und das Ersetzen eines Kurses durch eine '
-      'Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche Entscheidung in der App. '
+      'Schreibfreigaben entfallen. Fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines '
+      'Kurses durch eine Wiederherstellung (löscht alle Inhalte) brauchen weiterhin eine menschliche '
+      'Entscheidung in der App. '
       'Die Freigabe je Bildschirmfoto bleibt davon unberührt.',
   Bestaetigungen.mittel:
       'Freigabe vor Ändern, Verschieben, Sichtbarkeit, Löschen und sichtbarem '
@@ -118,6 +121,7 @@ class McpDienst implements AufrufKontext {
     this.werkzeugquellen = const [],
     this.schucuVorlagen,
     this.notizenOrdner,
+    this.fragenSicherungsOrdner,
     this.fragetypNotizGeliefert,
   });
 
@@ -171,6 +175,12 @@ class McpDienst implements AufrufKontext {
   /// Lokale Fragetyp-Notizen dieses Profils (E38); ohne Angabe der dauerhafte
   /// Ordner der App je Profil, außerhalb des Arbeitsordners.
   final String? notizenOrdner;
+
+  /// Ordner der XML-Sicherungen vor dem Löschen von Fragen (E9); ohne Angabe
+  /// der dauerhafte Ordner der App je Profil, außerhalb des Arbeitsordners.
+  final String? fragenSicherungsOrdner;
+
+  String get _fragenSicherungen => fragenSicherungsOrdner ?? p.join(einstellungenOrdner, 'fragen-sicherungen', profil.kennung);
 
   /// Die mit dem Skill gelieferte Notiz zu einem Typ (Asset der App; laden kann
   /// sie nur Flutter, deshalb kommt der Zugriff von main.dart).
@@ -1192,7 +1202,9 @@ class McpDienst implements AufrufKontext {
       beschreibung:
           'Löscht eine Aktivität (auch einen Unterabschnitt samt Inhalt über seine cmid, auch '
           'eine Fragensammlung samt Kategorien und Fragen) oder einen Abschnitt samt Inhalt -- nur nach '
-          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Nummer und Name müssen '
+          'Freigabe in der App, die Kurs, Namen und alles Mitgelöschte zeigt. Eine Fragensammlung '
+          '(auch in einem gelöschten Abschnitt) fragt auf jeder Stufe, jede Kategorie einzeln abgehakt, '
+          'und wird vorher als XML gesichert (verborgene Fragen, die in einem Test benutzt werden, sind nie darin, bleiben aber erhalten: Moodle verschiebt sie nach kurzer Zeit in eine geteilte Fragensammlung des Kurses, und die Tests benutzen sie weiter; diese Tests nennt die Freigabe; die Antwort nennt den Pfad). Nummer und Name müssen '
           'zusammenpassen, vor der Freigabe und noch einmal danach. Prüft danach die Kursstruktur.',
       parameter: {
         'kurs': _kurs,
@@ -1209,6 +1221,7 @@ class McpDienst implements AufrufKontext {
         cmid: _zahlOder(a, 'cmid'),
         abschnittId: _zahlOder(a, 'abschnitt_id'),
         name: _text(a, 'name'),
+        sicherungsOrdner: _fragenSicherungen,
       ),
     );
 
@@ -2113,14 +2126,59 @@ class McpDienst implements AufrufKontext {
 
     _aufrufe.registrieren(
       server,
+      'kategorie_aendern',
+      titel: 'Kategorie umbenennen oder verschieben',
+      beschreibung:
+          'Benennt eine Fragenkategorie um und/oder verschiebt sie mit ihren Unterkategorien und Fragen unter eine '
+          'andere Kategorie desselben Kurses, auch in eine andere Fragensammlung. Nichts wird gelöscht. '
+          'Die Kategorie wird mit Sammlung, id und ihrem jetzigen Namen genannt (fragen_lesen); passt der Name nicht, '
+          'ist es die oberste Kategorie, soll sie unter sich selbst oder eine ihrer Unterkategorien, gibt es unter dem Ziel '
+          'schon eine gleich benannte Kategorie, ist sie das einzige Kind der obersten Ebene (verschieben geht dann nicht) '
+          'oder ist eine Sachnummer im Ziel vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Ohne ziel_eltern '
+          'kommt die Kategorie auf die oberste Ebene der Zielsammlung. Die App fragt in einem Dialog (Stufe „mittel“ und '
+          '„alle“). verified nur, wenn Name, Elternteil und Unterkategorien nach dem Zurücklesen stimmen; Zufallsplätze '
+          'und feste Fragen in Tests, Dateien der Fragen und die Reihenfolge sind „nicht geprüft“.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'kategorie': JsonSchema.integer(description: 'id der Kategorie (aus fragen_lesen)'),
+        'name': JsonSchema.string(description: 'Der jetzige Name der Kategorie, wie er in Moodle steht'),
+        'neuer_name': JsonSchema.string(description: 'Optional: neuer Name'),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'Optional: cmid der Sammlung, in die verschoben wird (gleicher Kurs; ohne Angabe die eigene)',
+        ),
+        'ziel_eltern': JsonSchema.string(
+          description: 'Optional: Kategorie-id oder Name in der Zielsammlung, unter die sie kommt; mit ziel_sammlung '
+              'ohne ziel_eltern kommt sie auf die oberste Ebene',
+        ),
+      },
+      pflicht: ['kurs', 'sammlung', 'kategorie', 'name'],
+      ausfuehren: (a) => kategorieAendern(
+        moodle,
+        freigaben,
+        kurs: _zahl(a, 'kurs'),
+        sammlung: _zahl(a, 'sammlung'),
+        kategorie: _zahl(a, 'kategorie'),
+        name: _text(a, 'name'),
+        neuerName: a['neuer_name'] as String?,
+        zielSammlung: a['ziel_sammlung'] == null ? null : _zahl(a, 'ziel_sammlung'),
+        zielEltern: a['ziel_eltern']?.toString(),
+      ),
+    );
+
+    _aufrufe.registrieren(
+      server,
       'fragen_loeschen',
       titel: 'Fragen löschen',
       beschreibung:
           'Löscht Fragen einer Fragensammlung endgültig, jede mit allen Versionen. Je Frage die AKTUELLE '
           'questionid (fragen_lesen) und der Name, wie er jetzt in Moodle steht; passt ein Name nicht, bricht '
-          'das Werkzeug ab, bevor etwas geschieht. Nur nach Freigabe in der App. Steckt eine Frage in einem '
-          'Test, löscht Moodle sie nicht, sondern verbirgt sie nur -- das Zurücklesen meldet es. Nicht '
-          'rückgängig zu machen.',
+          'das Werkzeug ab, bevor etwas geschieht. Die App fragt IMMER in einem Dialog, auf jeder Stufe, '
+          'jede Frage einzeln zum Abhaken (höchstens 25 je Aufruf); rufe das Werkzeug erst auf, nachdem die '
+          'Lehrkraft im Chat ausdrücklich Ja gesagt hat. Vorher legt die App die aktuelle Version jeder Frage '
+          'als XML-Sicherung ab (der Pfad steht in der Antwort); lässt sich eine Frage nicht exportieren, '
+          'wird nichts gelöscht. Steckt eine Frage in einem Test, löscht Moodle sie nicht, sondern verbirgt '
+          'sie nur -- die Antwort nennt das je Frage. Nicht rückgängig zu machen.',
       parameter: {
         'sammlung': sammlung,
         'fragen': JsonSchema.array(
@@ -2136,6 +2194,7 @@ class McpDienst implements AufrufKontext {
           description: 'Die Fragen, je {id, name}',
         ),
       },
+      zerstoerend: true,
       pflicht: ['sammlung', 'fragen'],
       ausfuehren: (a) {
         final liste = a['fragen'];
@@ -2154,6 +2213,56 @@ class McpDienst implements AufrufKontext {
             for (final f in liste.cast<Map>())
               ((f['id'] as num).toInt(), f['name'] as String),
           ],
+          sicherungsOrdner: _fragenSicherungen,
+        );
+      },
+    );
+
+    _aufrufe.registrieren(
+      server,
+      'fragen_verschieben',
+      titel: 'Fragen verschieben',
+      beschreibung:
+          'Verschiebt Fragen mit allen Versionen in eine andere Kategorie desselben Kurses, auch in eine andere '
+          'Fragensammlung. Tests behalten die Fragen. Je Frage die AKTUELLE questionid (fragen_lesen) und der Name, '
+          'wie er jetzt in Moodle steht; passt ein Name nicht, steht eine Frage nicht in der Quellsammlung oder ist '
+          'die Sachnummer im Ziel schon vergeben, bricht das Werkzeug ab, bevor etwas geschieht. Die App fragt in '
+          'einem Dialog (Stufe „mittel“ und „alle“). Die Antwort sagt je Frage, wo sie jetzt steht, und meldet '
+          'verified nur, wenn jede im Ziel steht und ihre Sachnummer gleich blieb; ältere Versionen und Verweise '
+          'von Tests sind „nicht geprüft“. Zieht ein Zufallsplatz eines Tests aus der Quellkategorie, hat er danach '
+          'weniger Fragen zur Auswahl: vorher mit test_lesen nachsehen und der Lehrkraft sagen.',
+      parameter: {
+        'kurs': _kurs,
+        'sammlung': sammlung,
+        'fragen': JsonSchema.array(
+          items: JsonSchema.object(
+            properties: {
+              'id': JsonSchema.integer(description: 'questionid'),
+              'name': JsonSchema.string(description: 'Name der Frage, wie er jetzt in Moodle steht'),
+            },
+            required: ['id', 'name'],
+          ),
+          description: 'Die Fragen, je {id, name}',
+        ),
+        'ziel_sammlung': JsonSchema.integer(
+          description: 'cmid der Fragensammlung, in die verschoben wird (aus fragensammlungen, gleicher Kurs)',
+        ),
+        'ziel_kategorie': JsonSchema.string(description: 'Kategorie-id oder Name in der Zielsammlung (aus fragen_lesen)'),
+      },
+      pflicht: ['kurs', 'sammlung', 'fragen', 'ziel_sammlung', 'ziel_kategorie'],
+      ausfuehren: (a) {
+        final liste = a['fragen'];
+        if (liste is! List || liste.any((f) => f is! Map || f['id'] is! num || f['name'] is! String)) {
+          throw MoodleFehler('fragen: eine Liste aus {id, name}.');
+        }
+        return fragenVerschieben(
+          moodle,
+          freigaben,
+          kurs: _zahl(a, 'kurs'),
+          sammlung: _zahl(a, 'sammlung'),
+          fragen: [for (final f in liste.cast<Map>()) ((f['id'] as num).toInt(), f['name'] as String)],
+          zielSammlung: _zahl(a, 'ziel_sammlung'),
+          zielKategorie: '${a['ziel_kategorie']}',
         );
       },
     );
@@ -2231,6 +2340,7 @@ class McpDienst implements AufrufKontext {
           ],
           loeschen: a['loeschen'] as bool,
           stackTesten: (f) => stackTesten(moodle, sammlung: s, frage: f),
+          sicherungsOrdner: _fragenSicherungen,
         );
       },
     );
@@ -2785,7 +2895,8 @@ class McpDienst implements AufrufKontext {
           'Liest die Zusammenstellung eines Tests (nie Ergebnisse): Plätze mit Seite, slotid, Typ, '
           'Name, Punkten und questionid, Summe der Punkte, Beste Bewertung, Fragen je Seite, ob die Fragen '
           'gemischt werden (je Testabschnitt), und Befunde '
-          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche). '
+          '(Beste Bewertung ungleich Summe, Fragen mit 0 Punkten, von Hand gesetzte Seiten, schon Versuche) '
+          'und die Herkunft der Fragen (ohne Abzeichen: Bank eines Tests, vermutlich der eigenen; sonst geteilte Fragensammlung, in der Bankliste des Kurses oder nicht). '
           'Einstellungen des Tests: aktivitaet_lesen. Nur lesen.',
       parameter: {
         'cmid': JsonSchema.integer(
@@ -2795,7 +2906,7 @@ class McpDienst implements AufrufKontext {
       pflicht: ['cmid'],
       nurLesen: true,
       ausfuehren: (a) async =>
-          (await testLesen(moodle, _zahl(a, 'cmid'))).text(),
+          (await testLesen(moodle, _zahl(a, 'cmid'), banken: true)).text(),
     );
 
     _aufrufe.registrieren(

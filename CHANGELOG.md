@@ -1,6 +1,11 @@
 # Changelog
 
 ## 0.13.0
+- Tests: moocp zeigt, ob die Fragen eines Tests, auch einer Kopie, aus einer geteilten Fragensammlung stammen.
+- Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.
+- Fragen: Fragen lassen sich in eine andere Kategorie des Kurses verschieben.
+- Fragen löschen: moocp fragt auf jeder Stufe, jede Frage einzeln, und sichert sie vorher als XML.
+- Fragensammlungen löschen: moocp fragt auf jeder Stufe und sichert die Fragen vorher als XML.
 - Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
 - Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
 - Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.

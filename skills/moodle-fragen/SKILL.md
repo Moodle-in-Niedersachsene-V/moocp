@@ -21,11 +21,12 @@ diesen.
 | Wofür | Werkzeuge |
 |---|---|
 | Sammlungen | `fragensammlungen`, `fragetypen`; anlegen über `aktivitaet_anlegen` (Typ `qbank`) |
-| Kategorien | `kategorie_anlegen` — die Gliederung *innerhalb* einer Sammlung |
+| Kategorien | `kategorie_anlegen` — die Gliederung *innerhalb* einer Sammlung; `kategorie_aendern` benennt um und verschiebt (auch mit Unterkategorien in eine andere Sammlung) |
 | Fragen lesen | `fragen_lesen`, `frage_lesen` |
 | Fragen anlegen | `fragetyp_notiz_lesen`, dann `fragen_importieren`, dazu die Bauhilfen `stack_xml`, `coderunner_xml` |
 | Fragen ändern | `fragen_lesen`, XML bearbeiten, `fragen_version_importieren` (neue Version, Verlauf bleibt); kleine Änderungen auch `frage_lesen`, dann `aendern`; Typwechsel und Instanzen ohne das Plugin: `frage_ersetzen` |
 | Wissen zum Fragetyp | `fragetyp_notiz_lesen`, `fragetyp_notiz_schreiben` |
+| Fragen verschieben | `fragen_lesen` (Quelle und Ziel), dann `fragen_verschieben` |
 | Fragen löschen | `fragen_lesen`, dann `fragen_loeschen` |
 | STACK | `stack_cas`, `stack_testen`, `stack_varianten` |
 | Tests | `test_lesen`, `test_aendern`; anlegen und Einstellungen über `aktivitaet_anlegen`, `aktivitaet_lesen`, `aendern` |
@@ -70,14 +71,49 @@ App das bewusst nicht kann.
 - **Anlegen** von Fragen, Kategorien, Sammlungen und Tests: erst der Plan, dann ein Ja, dann die Arbeit (Abschnitt „Erst der Plan, dann das Schreiben"). Der Auftrag „erstelle einen Test zu Thema X mit 8 Fragen" ist der Anlass für den Plan, nicht die Freigabe — Typ, Punkte, AFB, Kategorie und Formulierung stehen im Plan, weil sie die Lehrkraft entscheidet.
 - **Ändern bestehender Fragen**: erst lesen, dann ändern. Eine Frage, die schon
   in einem Test benutzt wird, ändert sich für alle Tests mit.
+- **Fragen verschieben** (`fragen_verschieben`): erst der Plan im Chat — welche
+  Fragen (Name, Typ, Sachnummer), aus welcher Kategorie in welche Kategorie
+  welcher Sammlung — und ein Ja der Lehrkraft, dann der Aufruf. Verschoben wird
+  nur innerhalb eines Kurses (`kurs`, die Sammlungen aus `fragensammlungen`), die
+  Fragen mit allen Versionen und mit ihren Plätzen in Tests. Die Nummern kommen
+  frisch aus `fragen_lesen`, die Namen so, wie sie dort stehen. Ist die Sachnummer
+  im Ziel schon vergeben, bricht das Werkzeug ab; schlag dann vor, eine der beiden
+  Fragen umzunummerieren (`aendern`), und frag nach. Zieht ein Zufallsplatz
+  eines Tests aus der Quellkategorie, hat er danach weniger zur Auswahl; schau
+  mit `test_lesen` in die Tests der Sammlung, soweit du sie kennst, und sag es.
+  Die Antwort nennt je Frage, wo sie steht; was sie „nicht geprüft" nennt (ältere
+  Versionen, Verweise von Tests), gibst du so weiter. Ein Export und Neuimport
+  ist kein Ersatz dafür.
 - **Fragen löschen** (`fragen_loeschen`) nur, wenn der Auftrag es ausdrücklich
-  verlangt, und mit jeder Frage im Plan: Name, Typ, Sachnummer. Gelöscht wird
-  jede Frage mit allen Versionen; es ist nicht rückgängig zu machen. Die
-  Nummern kommen frisch aus `fragen_lesen`, die Namen so, wie sie dort stehen.
-  Steckt eine Frage in einem Test, verbirgt Moodle sie nur; das Werkzeug meldet
-  das, und dann gehört in die Antwort, in welchem Test sie noch steckt, falls
-  bekannt. Leere Kategorien löscht die App nicht — das erledigt die Lehrkraft
-  in Moodle.
+  verlangt. Liste vorher im Chat jede Frage einzeln auf — Name, Typ, Sachnummer,
+  Zahl der Versionen und die Tests, in denen sie steckt, soweit `fragen_lesen`
+  und `test_lesen` es zeigen — und ruf das Werkzeug erst auf, wenn die
+  Lehrkraft darauf ausdrücklich Ja gesagt hat. Gelöscht wird jede Frage mit
+  allen Versionen; es ist nicht rückgängig zu machen. Die Nummern kommen frisch
+  aus `fragen_lesen`, die Namen so, wie sie dort stehen. Die App fragt dann auf
+  jeder Stufe noch einmal, und die Lehrkraft hakt jede Frage einzeln ab (höchstens
+  25 je Aufruf, mehr in mehreren Aufrufen). Vorher legt die App die aktuelle
+  Version jeder Frage als XML-Sicherung ab; die Antwort nennt den Pfad, und
+  zurück kommt eine Frage über `fragen_importieren`. Gesichert ist nur die
+  aktuelle Version, nicht der Verlauf; eine Frage, die sich nicht exportieren
+  lässt (etwa eine verborgene), wird deshalb nicht gelöscht. Steckt eine Frage
+  in einem Test, verbirgt Moodle sie nur; die Antwort sagt das je Frage, und
+  dann gehört in deinen Bericht, in welchem Test sie noch steckt, falls
+  bekannt. Dasselbe gilt für `frage_ersetzen` mit `loeschen: true`. Leere
+  Kategorien löscht die App nicht — das erledigt die Lehrkraft in Moodle.
+- **Eine ganze Fragensammlung löschen** (`loeschen` mit ihrer cmid) nimmt alle
+  Kategorien und Fragen mit und gilt deshalb wie das Löschen von Fragen: Liste
+  vorher im Chat jede Kategorie mit Fragenzahl und die Tests auf, in denen
+  Fragen stecken, und ruf das Werkzeug erst nach einem ausdrücklichen Ja auf.
+  Die App sichert vorher alle Fragen als XML (die Antwort nennt den Pfad) und
+  fragt auf jeder Stufe; die Lehrkraft hakt jede Kategorie einzeln ab.
+  **Verborgene Fragen (in einem Test benutzt und „gelöscht“) liefert Moodles
+  Export nicht aus, sie sind nicht in der Sicherung** — sag das im Plan. Die
+  Freigabe nennt die Tests, die Plätze aus der Sammlung haben. Moodle behält
+  diese Fragen: Nach kurzer Zeit verschiebt es sie in eine geteilte
+  Fragensammlung des Kurses („System geteilte Fragensammlung“ oder ähnlich),
+  und die Tests benutzen sie von dort weiter. Die gesicherten Fragen
+  lassen sich über `fragen_importieren` wieder einspielen.
 - **Wenn es bereits Versuche gibt** (`test_lesen` meldet das): anhalten und
   nachfragen. Punkte- oder Fragenänderungen verschieben dann rückwirkend
   Bewertungen.
@@ -139,7 +175,7 @@ ein Ja im Chat ersetzt sie nicht.
 
 Was du gerade selbst verborgen angelegt hast, ist dabei noch nichts Bestehendes: Es zu füllen oder zu ändern, solange es verborgen ist — die Spalten eines neuen Boards, die Fragen eines neuen Tests, die Links zwischen den Blättern einer neuen Lernsituation —, gehört zum Anlegen und fragt wie dieses erst bei „alle". Kopien zählen nicht dazu; bei ihnen zeigt die Freigabe, was sich gegenüber dem Original ändert.
 
-**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
+**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
 <!-- >>> gemeinsam/plan.md -->
 
 <!-- <<< gemeinsam/ueberarbeiten.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -508,7 +544,7 @@ Zwei verschiedene Dinge — und das kleinere ist nie der Ersatz für das größe
 
 Weil eine Sammlung eine Aktivität ist, gehört ihr **Name** in den Plan — den Abschnitt wählst du nicht: Moodle legt jede Sammlung im allgemeinen Abschnitt ab, einerlei welche `abschnitt_id` du mitgibst (verlangt wird sie trotzdem, weil jede andere Aktivität sie braucht). **Als Gliederung schlägst du eine eigene Sammlung je Lernsituation oder Thema vor**, mit Kategorien darin, wo sie etwas tragen — je Teilthema, damit Zufallsfragen gezielt ziehen, und Übungsfragen getrennt von denen für die Leistungsfeststellung, damit die Klassenarbeit nicht aus der Übung bekannt ist. Die Sammlung, die Moodle für den ganzen Kurs angelegt hat, bleibt unberührt, solange die Lehrkraft nichts anderes sagt. Sieh vorher mit `fragensammlungen(kurs)` nach: Gibt es schon eine Sammlung für das Thema, kommen die Fragen dorthin. Begründung und Einzelheiten: `references/sammlungen.md`.
 
-Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe und mit allem, was darin liegt.
+Zwei Eigenheiten, die du kennen musst: Eine Sammlung steht **nicht** in `kurs_uebersicht`, nur in `fragensammlungen`. Und **verbergen, verschieben und duplizieren gehen bei ihr nicht** — löschen schon, mit `loeschen(kurs, cmid, name)`, nach Freigabe auf jeder Stufe und mit allem, was darin liegt (Fragen vorher als XML gesichert, in Tests benutzte verborgene Fragen nie darin, Moodle behält sie in einer geteilten Fragensammlung; Einzelheiten im Abschnitt „Fragen löschen“ oben).
 
 ## Ab Moodle 5: Fragensammlungen sind Aktivitäten
 
@@ -527,7 +563,7 @@ Unterscheidung ist folgenreich:
 
 Frag im Zweifel, wohin eine neue Frage soll, oder leg sie in die geteilte
 Sammlung und sag es dazu. Leg sie gleich in die richtige Kategorie: Zwischen
-Kategorien verschieben kann die App nicht (`references/sammlungen.md`).
+Kategorien benennt `kategorie_aendern` um und verschiebt sie mit allem darin; Fragen zwischen Kategorien verschiebt `fragen_verschieben` (beide: `references/sammlungen.md`).
 
 ## Fragen lesen
 
@@ -890,7 +926,7 @@ Testplatz. Eine Änderung an der Frage wirkt deshalb **sofort in jedem Test**,
 der sie benutzt. Gibt es dort bereits Versuche, verschiebt das rückwirkend
 Bewertungen. Vorher fragen; `test_lesen` meldet vorhandene Versuche.
 
-**In der Kopie eines Tests** (Abschnitt „Bestehendes überarbeiten") stehen keine eigenen Fragen: Ein duplizierter Test verweist auf dieselben Fragen der Fragensammlung wie das Original. Eine Frage zu ändern ändert sie deshalb auch im Original — und dort womöglich rückwirkend Bewertungen. Soll eine Frage nur im neuen Test anders sein, tauschst du sie mit `frage_ersetzen` nur in diesem Test aus, mit `loeschen: false`. Welcher Weg für welche Frage gilt, steht im Plan.
+**In der Kopie eines Tests** (Abschnitt „Bestehendes überarbeiten") kann es sein, dass keine eigenen Fragen stehen: Verweist die Kopie auf eine geteilte Fragensammlung, sind es dieselben Fragen wie im Original. Ob das so ist, sagt `test_lesen` (Zeile „Herkunft", je Platz die Bank, bei einer Bank, die nicht in der Bankliste des Kurses steht, „Bank nicht in der Bankliste dieses Kurses") und nach `duplizieren`, `uebertragen` und Wiederherstellen die Antwort der Kopie. **Ruf nach dem Kopieren eines Tests und vor jeder Änderung an seinen Fragen `test_lesen` auf** und gib der Lehrkraft das Ergebnis weiter: eigene Kopien, geteilt mit dem Original, oder nicht entscheidbar (feste Version). Bei „kein Abzeichen einer geteilten Bank" (die Fragen liegen dann in der Bank eines Tests, vermutlich der eigenen) lässt sich nur am Vergleich mit dem Original erkennen, ob die Fragen eigene Kopien sind; die Antwort von `duplizieren` macht diesen Vergleich. Wo Fragen geteilt sind, ändert eine Änderung der Frage sie auch im Original — und dort womöglich rückwirkend Bewertungen. Soll eine Frage nur im neuen Test anders sein, tauschst du sie mit `frage_ersetzen` nur in diesem Test aus, mit `loeschen: false`. Welcher Weg für welche Frage gilt, steht im Plan.
 
 **Struktur ändert man so nicht.** Eine zusätzliche Antwort, ein weiterer
 Knoten im Rückmeldebaum oder ein zusätzliches Eingabefeld entstehen im
@@ -1019,7 +1055,10 @@ Einen **neuen Test** legt `aktivitaet_anlegen(… typ: "quiz")` an (Skill
 
 `test_lesen(cmid)` — Plätze mit Seite, slotid, Typ, Name, Punkten und
 questionid, Summe, Beste Bewertung, Fragen je Seite, ob gemischt wird, und
-Befunde.
+Befunde. Dazu die Herkunft der Fragen: ohne Abzeichen einer geteilten Bank
+(also in der Bank eines Tests, vermutlich der eigenen) oder in einer geteilten
+Fragensammlung (cmid, Name, in der Bankliste des Kurses oder nicht), bei Zufallsplätzen die Bank, aus der sie ziehen. Nur gelesen, die Bank
+selbst wird dabei nicht geöffnet.
 
 `test_aendern(cmid, name, aktionen)` — alle Aktionen nach **einer** Freigabe,
 danach zurückgelesen:

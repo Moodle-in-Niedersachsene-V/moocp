@@ -2682,6 +2682,32 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
         ],
       ),
     );
+    // Die Haken zum Bestätigen; jeder bleibt anklickbar, solange der Bereich scrollt.
+    // Material statt DecoratedBox: Ein Hintergrund zwischen Material und ListTile
+    // verdeckte dessen Tintenwirkung (Flutter weist darauf hin).
+    Widget tickBox() => Material(
+      color: const Color(0x14B71C1C),
+      shape: const RoundedRectangleBorder(side: BorderSide(color: rot)),
+      child: Column(
+        children: [
+          for (final (i, text) in anfrage.abhaken.indexed)
+            CheckboxListTile(
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _abgehakt.contains(i),
+              title: Text(
+                text,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onChanged: !_abhakenFrei
+                  ? null
+                  : (an) => setState(
+                      () => an == true ? _abgehakt.add(i) : _abgehakt.remove(i),
+                    ),
+            ),
+        ],
+      ),
+    );
     // Entschieden wird nur mit der Maus (nur_maus.dart).
     return NurMaus(
       child: AlertDialog(
@@ -2729,9 +2755,12 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
           width: gross || knoepfe ? 900 : 620,
           // Die Übergabe kommt nur bei geändertem Text, also immer mit
           // Zeilenvergleich; der gibt den Schritten Platz ab.
+          // Mit Haken (ohne Übergabe) bekommt der Inhalt die volle Höhe, die das
+          // Fenster hergibt (SizedBox wird auf den freien Platz gekürzt): Punkte
+          // und Haken scrollen in einem eigenen Bereich über den Knöpfen.
           height: anfrage.bilder.isNotEmpty
               ? 680
-              : gross || knoepfe
+              : gross || knoepfe || bestaetigen
               ? 560
               : anfrage.vomPlugin != null
               ? 360
@@ -2778,7 +2807,26 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
               ],
               // Bei einer Sammelfreigabe viele Punkte: Sie scrollen für sich,
               // damit der Zeilenvergleich darunter sichtbar bleibt.
-              if (linksFuellen)
+              if (bestaetigen && anfrage.links.isEmpty)
+                // Punkte, Moodles Text und alle Haken scrollen zusammen; die
+                // Knöpfe darunter liegen nie darüber, und jeder Haken bleibt
+                // erreichbar, wie viele es auch sind.
+                Expanded(
+                  flex: anfrage.vergleich.isEmpty && anfrage.bilder.isEmpty
+                      ? 1
+                      : 2,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final p in anfrage.punkte) Text('•  $p'),
+                        const SizedBox(height: 8),
+                        tickBox(),
+                      ],
+                    ),
+                  ),
+                )
+              else if (linksFuellen)
                 Expanded(child: punkteUndLinks())
               else
                 ConstrainedBox(
@@ -2791,6 +2839,12 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                   ),
                   child: punkteUndLinks(),
                 ),
+              // Mit Verweisen stehen die Haken darunter, scrollen aber für sich,
+              // wenn es viele sind.
+              if (bestaetigen && anfrage.links.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Flexible(child: SingleChildScrollView(child: tickBox())),
+              ],
               if (knoepfe) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -2919,38 +2973,6 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                   ),
                 ),
               ],
-              if (bestaetigen) ...[
-                const SizedBox(height: 8),
-                // Material statt DecoratedBox: Ein Hintergrund zwischen Material und ListTile
-                // verdeckte dessen Tintenwirkung (Flutter weist darauf hin).
-                Material(
-                  color: const Color(0x14B71C1C),
-                  shape: const RoundedRectangleBorder(
-                    side: BorderSide(color: rot),
-                  ),
-                  child: Column(
-                    children: [
-                      for (final (i, text) in anfrage.abhaken.indexed)
-                        CheckboxListTile(
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          value: _abgehakt.contains(i),
-                          title: Text(
-                            text,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          onChanged: !_abhakenFrei
-                              ? null
-                              : (an) => setState(
-                                  () => an == true
-                                      ? _abgehakt.add(i)
-                                      : _abgehakt.remove(i),
-                                ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 12),
               if (anfrage.vergleich.isNotEmpty) ...[
                 Text(
@@ -2992,7 +3014,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                     ),
                   ),
                 ),
-              ] else if (!linksFuellen)
+              ] else if (!linksFuellen &&
+                  !(bestaetigen && anfrage.links.isEmpty))
                 const Spacer(),
               const SizedBox(height: 8),
               Text(

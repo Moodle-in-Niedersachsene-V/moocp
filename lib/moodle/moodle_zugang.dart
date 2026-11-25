@@ -497,6 +497,8 @@ class MoodleZugang {
   static const Set<String> schreibendeDienste = {
     'core_courseformat_update_course',
     'mod_quiz_add_random_questions',
+    'core_question_move_questions',
+    'qbank_managecategories_move_category',
     'core_form_dynamic_form', //
     'mod_board_delete_column',
     'mod_board_move_column',
@@ -688,6 +690,30 @@ class MoodleZugang {
     // Zufallsfragen in einen Test.
     'mod_quiz_add_random_questions': (a) =>
         _nur(a, {'cmid', 'addonpage', 'randomcount', 'filtercondition'}),
+    // Fragen verschieben (fragen_verschieben, einziger Aufrufer): genau eine
+    // Frage je Aufruf (bei mehreren Versionen desselben Eintrags hängt Moodle
+    // der Sachnummer einen Suffix an) und die lokale Platzhalteradresse, die
+    // Moodle 5.1 verlangt und die nie abgerufen wird.
+    'core_question_move_questions': (a) =>
+        _nur(a, {'newcontextid', 'newcategoryid', 'questionids', 'returnurl'}) &&
+        a['newcontextid'] is int &&
+        a['newcategoryid'] is int &&
+        a['questionids'] is String &&
+        _zahl(a['questionids'] as String) &&
+        a['returnurl'] is String &&
+        RegExp(r'^/question/edit\.php\?cmid=\d+$').hasMatch(a['returnurl'] as String),
+    // Fragenkategorie verschieben (kategorie_aendern, einziger Aufrufer), mit
+    // ihren Unterkategorien und Fragen, auch in eine andere Fragensammlung:
+    // genau diese vier Schlüssel, Nummern als Zahlen, der Vorgänger ohne Wert
+    // oder Zahl (ganz oben). Moodle schützt weder vor Zyklen noch vor gleichen
+    // Namen; das prüft die App vorher.
+    'qbank_managecategories_move_category': (a) =>
+        _nur(a, {'pagecontextid', 'categoryid', 'targetparentid', 'precedingsiblingid'}) &&
+        a['pagecontextid'] is int &&
+        a['categoryid'] is int &&
+        a['targetparentid'] is int &&
+        a.containsKey('precedingsiblingid') &&
+        (a['precedingsiblingid'] == null || a['precedingsiblingid'] is int),
     // Board: lesen (Notizen anderer gibt die App nicht heraus), Spalten
     // löschen, verschieben, sperren, eigene Notizen löschen.
     'mod_board_get_board': (a) =>

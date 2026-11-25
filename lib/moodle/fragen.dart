@@ -28,6 +28,7 @@ import '../freigabe.dart';
 import 'formular.dart';
 import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
+import 'fragen_sicherung.dart';
 import 'fragen_xml.dart';
 import 'moodle_zugang.dart';
 
@@ -91,6 +92,41 @@ Future<String> exportieren(MoodleZugang moodle, int sammlung, Kategorie k) async
   final x = await moodle.lesen(link);
   if (!x.text.trimLeft().startsWith('<?xml')) throw MoodleFehler('Der Export lieferte kein XML.');
   return x.text;
+}
+
+/// Eine Kategorie einer Sammlung mit ihrem Pfad ([pfad]: Namen von oben nach unten), der Fragenzahl,
+/// die Moodles Kategorieliste nennt ([Kategorie.anzahl]), und ihrem Export; [xml] ist bei einer leeren
+/// Kategorie null. [exportiert] sind die Fragen, die der Export wirklich enthält.
+typedef SammlungsKategorie = ({Kategorie kat, List<String> pfad, String? xml, int exportiert});
+
+/// Liest alle Kategorien einer Sammlung samt Export, für die Sicherung vor dem Löschen der ganzen
+/// Sammlung. Eine Frage, die in einem Test benutzt und „gelöscht" wurde, ist in Moodle nur verborgen
+/// (auf Moodle 5.1 gemessen): Moodles Kategorieliste zählt sie nicht mit, und der Export der Kategorie
+/// liefert sie nicht. Eine Kategorie mit Zahl 0 wird deshalb nicht angefragt und gilt als leer; verborgene
+/// Fragen sind nie in der Sicherung. Moodle zerstört sie beim Löschen der Sammlung nicht, sondern verschiebt
+/// sie nach kurzer Zeit in eine geteilte Fragensammlung des Kurses, die die Tests weiter benutzen (siehe
+/// `_testsLesen` in kurs_aendern.dart). Scheitert der Export einer Kategorie mit Zahl über 0 (etwa weil
+/// Moodle keinen Download nennt), bricht das Lesen ab; sie gilt nie stillschweigend als leer.
+Future<List<SammlungsKategorie>> sammlungExportieren(MoodleZugang moodle, int sammlung) async {
+  final kats = await kategorienLesen(moodle, sammlung);
+  final namen = <String>[];
+  final aus = <SammlungsKategorie>[];
+  for (final k in kats) {
+    // Die Einrückung der Liste ist die Tiefe: Der Pfad ist die Kette der Namen bis hierher.
+    if (k.tiefe < namen.length) namen.removeRange(k.tiefe, namen.length);
+    while (namen.length < k.tiefe) {
+      namen.add('');
+    }
+    namen.add(k.name);
+    final xml = k.anzahl == 0 ? null : await exportieren(moodle, sammlung, k);
+    aus.add((
+      kat: k,
+      pfad: List.of(namen),
+      xml: xml,
+      exportiert: xml == null ? 0 : fragenAusXml(xml).length,
+    ));
+  }
+  return aus;
 }
 
 String _sammlungsOrdner(String arbeitsordner, int sammlung) => p.join(arbeitsordner, 'fragen-$sammlung');
@@ -512,62 +548,162 @@ Future<({String? xml, String? fehlercode, String meldung})> frageExport(
 /// andere Ablehnung (etwa ein fehlendes Recht) heißt: unklar.
 const _frageFehlt = {'invalidrecord', 'invalidrecordunknown', 'questiondoesnotexist'};
 
+/// Wie viele Fragen ein Aufruf löschen darf: Jede bekommt im Dialog einen
+/// eigenen Haken, und die Lehrkraft muss alle lesen können.
+const loeschenHoechstzahl = 25;
+
 /// Löscht Fragen einer Sammlung mit allen Versionen, so wie die
 /// Fragensammlung es anbietet: Rückfrage von delete.php holen, ihr Formular
 /// nach der Freigabe absenden, wie es dasteht. Steckt eine Frage in einem
 /// Test, löscht Moodle sie nicht, sondern verbirgt sie nur; das Zurücklesen
 /// meldet das.
 ///
+/// Fragt auf jeder Stufe (E20), jede Frage einzeln mit Haken. Vor dem
+/// Löschen liegt die aktuelle Version jeder Frage als XML in
+/// [sicherungsOrdner] (fragen_sicherung.dart); lässt sich eine Frage nicht
+/// exportieren oder die Datei nicht schreiben, wird nichts gelöscht.
+///
 /// Vor allem anderen wird jede Frage einzeln exportiert und ihr Name gegen
 /// den genannten geprüft -- eine vertauschte Nummer löscht so nichts.
 Future<String> fragenLoeschen(MoodleZugang moodle, Freigaben freigaben, String arbeitsordner,
-    {required int sammlung, required List<(int, String)> fragen}) async {
-  final gefunden = await loeschenPruefen(moodle, sammlung, fragen);
+    {required int sammlung, required List<(int, String)> fragen, required String sicherungsOrdner}) async {
+  if (fragen.length > loeschenHoechstzahl) {
+    throw MoodleFehler('Höchstens $loeschenHoechstzahl Fragen je Aufruf, damit die Lehrkraft jede einzeln prüfen '
+        'kann; die Fragen auf mehrere Aufrufe verteilen. Nichts gelöscht.');
+  }
+  final geprueft = await loeschenPruefen(moodle, sammlung, fragen);
+  final gefunden = [for (final g in geprueft) g.frage];
   final r = await _loeschRueckfrage(moodle, arbeitsordner, sammlung, gefunden);
+  final benutzung = fragenInBenutzung(r.zeilen, gefunden);
 
-  final ja = await freigaben.anfragen(FreigabeAnfrage(
-    titel: fragen.length == 1 ? 'Frage endgültig löschen?' : '${fragen.length} Fragen endgültig löschen?',
-    punkte: [
-      'Aus der Fragensammlung cmid $sammlung, jeweils mit allen Versionen:',
-      for (final f in gefunden) '„${f.name}" (${f.typ}, questionid ${f.id}${f.idnummer == null ? '' : ', ${f.idnummer}'})',
-      'Steckt eine Frage in einem Test, löscht Moodle sie nicht, sondern verbirgt sie nur.',
-      if (r.hinweis != null && r.hinweis!.isNotEmpty) 'Moodle fragt: ${r.hinweis}',
-    ],
-    vergleich: const [],
-    knopf: 'Löschen',
-  ));
+  // Die Sicherung entsteht vor der Freigabe, damit der Dialog ihren Ort nennt;
+  // sie wird vor dem Löschen noch einmal gegen den Stand geprüft.
+  final sicherung = await fragenSichern(
+      sicherungsOrdner, sammlung, [for (final g in geprueft) (id: g.frage.id!, xml: g.xml)]);
+  void verwerfen() {
+    final d = File(sicherung);
+    if (d.existsSync()) d.deleteSync();
+  }
+
+  bool ja;
+  try {
+    ja = await freigaben.anfragen(FreigabeAnfrage(
+      titel: fragen.length == 1 ? 'Frage endgültig löschen?' : '${fragen.length} Fragen endgültig löschen?',
+      punkte: [
+        'Aus der Fragensammlung cmid $sammlung, jeweils mit allen Versionen:',
+        for (final f in gefunden) '„${f.name}" (${f.typ}, questionid ${f.id}${f.idnummer == null ? '' : ', ${f.idnummer}'})',
+        'Vorher gesichert als XML: $sicherung -- gesichert ist die aktuelle Version jeder Frage, nicht ihr '
+            'Verlauf. Zurück kommt sie mit fragen_importieren.',
+        'Steckt eine Frage in einem Test, löscht Moodle sie nicht, sondern verbirgt sie nur.',
+        if (r.hinweis != null && r.hinweis!.isNotEmpty) 'Moodle fragt: ${r.hinweis}',
+      ],
+      vergleich: const [],
+      knopf: 'Löschen',
+      // Löschen fragt auf jeder Stufe, und hier jede Frage einzeln (E20).
+      ab: Bestaetigungen.keine,
+      abhaken: [
+        for (final f in gefunden)
+          'Ich habe geprüft: „${f.name}" (${f.typ}, questionid ${f.id}${f.idnummer == null ? '' : ', ${f.idnummer}'}) '
+              '${benutzung.contains(f.id) ? 'steckt in einem Test; Moodle verbirgt sie nur und löscht sie nicht.' : 'wird mit allen Versionen endgültig gelöscht.'}',
+      ],
+    ));
+    if (ja) {
+      // Die Freigabe darf lange offen gewesen sein: Was freigegeben wurde,
+      // muss das sein, was jetzt gelöscht würde (A3).
+      try {
+        final frisch = await loeschenPruefen(moodle, sammlung, fragen);
+        for (var i = 0; i < frisch.length; i++) {
+          if (frisch[i].xml != geprueft[i].xml) {
+            throw MoodleFehler('Frage ${frisch[i].frage.id} „${frisch[i].frage.name}" ist nicht mehr, wie sie war');
+          }
+        }
+      } on MoodleFehler catch (e) {
+        throw MoodleFehler('Abgebrochen, nichts gelöscht: Seit der Freigabe hat sich etwas geändert (${e.meldung}). '
+            'Neu lesen und neu freigeben lassen.');
+      }
+    }
+  } catch (_) {
+    verwerfen();
+    rethrow;
+  }
   if (!ja) {
+    verwerfen();
     return 'Nicht gelöscht: in der App abgelehnt oder nicht rechtzeitig freigegeben. '
         'Die Rückfrage von Moodle liegt unter ${r.seite}.';
   }
-  final (b, alleWeg) = await _loeschAbsenden(moodle, sammlung, gefunden, r);
+  final (b, alleWeg) = await _loeschAbsenden(moodle, sammlung, gefunden, r, inBenutzung: benutzung);
   return '${alleWeg ? 'Gelöscht' : 'Nicht alles gelöscht'}: ${fragen.length} Frage(n) aus Sammlung $sammlung. '
-      'verified: $alleWeg\n$b';
+      'verified: $alleWeg\nSicherung (aktuelle Version jeder Frage, vor dem Löschen angelegt): $sicherung\n$b';
+}
+
+/// Welche der Fragen laut Moodles Rückfrage in Benutzung sind. Gemessen auf
+/// Moodle 5.1 (deutsche Oberfläche): Die Rückfrage steht in `#modal-body`,
+/// jede Version in einer Zeile, getrennt mit `<br />`, als „Name v1"; Moodle
+/// setzt vor jede benutzte Version ein `* `. Am Ende steht, ebenfalls mit
+/// `* `, der Erklärsatz „* Fragen, die in Verwendung sind …", der zu keiner Frage
+/// passt. Die ältere Schreibweise „Name (Version n)" wird weiter erkannt.
+/// Die Zuordnung läuft über den ganzen Namen vor dem Versionszusatz; Fragen mit
+/// gleichem Namen lassen sich so nicht trennen, dann gelten vorsichtig beide als
+/// benutzt. Fehlt die Liste, gilt keine Frage als benutzt, und das Zurücklesen
+/// entscheidet.
+Set<int?> fragenInBenutzung(List<String> zeilen, List<FrageKurz> fragen) {
+  final aus = <int?>{};
+  for (final z in zeilen) {
+    if (!z.startsWith('* ')) continue;
+    final text = z.substring(2).trim();
+    // Nur der Name davor zählt, damit „Frage" nicht „Frage 2" mitmeint.
+    final name = RegExp(r'^(.*?)\s*(?:v\d+|\(Version\s*\d+\))$').firstMatch(text)?.group(1) ?? text;
+    for (final f in fragen) {
+      if (name == f.name.trim()) aus.add(f.id);
+    }
+  }
+  return aus;
 }
 
 /// Exportiert jede genannte Frage einzeln und prüft ihren Namen; schreibt
-/// nichts. Gibt die gefundenen Fragen in der genannten Reihenfolge.
-Future<List<FrageKurz>> loeschenPruefen(MoodleZugang moodle, int sammlung, List<(int, String)> fragen) async {
+/// nichts. Gibt die gefundenen Fragen in der genannten Reihenfolge, mit
+/// ihrem Export (für die Sicherung).
+Future<List<({FrageKurz frage, String xml})>> loeschenPruefen(
+    MoodleZugang moodle, int sammlung, List<(int, String)> fragen) async {
   if (fragen.isEmpty) throw MoodleFehler('Keine Fragen genannt.');
   final ids = [for (final (id, _) in fragen) id];
   if (ids.toSet().length != ids.length) throw MoodleFehler('Eine Frage ist doppelt genannt.');
-  final gefunden = <FrageKurz>[];
+  final gefunden = <({FrageKurz frage, String xml})>[];
   for (final (id, name) in fragen) {
     final e = await frageExport(moodle, sammlung, id);
     final f = e.xml == null ? null : fragenAusXml(e.xml!).where((x) => x.id == id).firstOrNull;
     if (f == null) {
-      throw MoodleFehler('Abgebrochen, nichts gelöscht: Frage $id ist in Sammlung $sammlung nicht zu finden'
-          '${e.meldung.isEmpty ? '' : ' (Moodle: ${e.meldung})'}. Nummern mit fragen_lesen prüfen.');
+      throw MoodleFehler('Abgebrochen, nichts gelöscht: Frage $id ist in Sammlung $sammlung nicht zu finden '
+          'oder lässt sich nicht exportieren${e.meldung.isEmpty ? '' : ' (Moodle: ${e.meldung})'}. Ohne Export '
+          'gibt es keine Sicherung, und ohne Sicherung löscht die App nicht (verborgene Fragen lassen sich nicht '
+          'exportieren). Nummern mit fragen_lesen prüfen.');
     }
     nameBestaetigen(name, f.name, 'Frage $id');
-    gefunden.add(f);
+    gefunden.add((frage: f, xml: e.xml!));
+  }
+  // Der Einzelexport nimmt jede Version und prüft die Sammlung nicht: Eine ältere Version
+  // würde als „aktuelle" gesichert, eine Frage aus einer anderen Sammlung gelöscht, obwohl
+  // `sammlung` etwas anderes sagt. Gelöscht wird nur, was der Export der Kategorien dieser
+  // Sammlung als neueste Version zeigt.
+  final kategorien = await kategorienLesen(moodle, sammlung);
+  final aktuell = <int?>{};
+  for (final k in kategorien) {
+    if (k.anzahl == 0) continue;
+    aktuell.addAll(fragenAusXml(await exportieren(moodle, sammlung, k)).map((x) => x.id));
+  }
+  for (final g in gefunden) {
+    if (!aktuell.contains(g.frage.id)) {
+      throw MoodleFehler('Abgebrochen, nichts gelöscht: Frage ${g.frage.id} „${g.frage.name}" ist nicht die neueste '
+          'Version einer Frage in Sammlung $sammlung (ältere Version oder andere Sammlung). Gebraucht wird die '
+          'aktuelle questionid aus fragen_lesen dieser Sammlung.');
+    }
   }
   return gefunden;
 }
 
 /// Moodles Rückfrage zum Löschen: ihr Formular oder ihr Bestätigungslink und
 /// was sie zur Auswahl sagt. Die Rückfrage ändert nichts.
-typedef _Rueckfrage = ({Uri adresse, dom.Element? form, Uri? link, String? hinweis, String seite});
+typedef _Rueckfrage = ({Uri adresse, dom.Element? form, Uri? link, String? hinweis, String seite, List<String> zeilen});
 
 Future<_Rueckfrage> _loeschRueckfrage(
     MoodleZugang moodle, String arbeitsordner, int sammlung, List<FrageKurz> fragen,
@@ -614,13 +750,20 @@ Future<_Rueckfrage> _loeschRueckfrage(
       ?.text
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  return (adresse: r.adresse, form: form, link: link, hinweis: hinweis, seite: seite.path);
+  // Moodle trennt die Versionen mit <br />; das Zählen und Erkennen der benutzten
+  // Versionen braucht die Zeilen einzeln (der flache Text oben verliert sie).
+  final zeilen = [
+    for (final t in (doc.querySelector('#modal-body')?.innerHtml ?? '').split(RegExp(r'<br\s*/?>')))
+      html_parser.parseFragment(t).text?.replaceAll(RegExp(r'\s+'), ' ').trim() ?? '',
+  ].where((z) => z.isNotEmpty).toList();
+  return (adresse: r.adresse, form: form, link: link, hinweis: hinweis, seite: seite.path, zeilen: zeilen);
 }
 
 /// Sendet die Rückfrage ab und liest jede Frage nach. Gibt je Frage eine
 /// Zeile und ob alle wirklich weg sind.
 Future<(String, bool)> _loeschAbsenden(
-    MoodleZugang moodle, int sammlung, List<FrageKurz> fragen, _Rueckfrage r) async {
+    MoodleZugang moodle, int sammlung, List<FrageKurz> fragen, _Rueckfrage r,
+    {Set<int?> inBenutzung = const {}}) async {
   // Absenden, wie Moodle es anbietet. Der Umleitung danach (auf die
   // Fragenübersicht, die Klarnamen zeigt) folgt die App nicht.
   final form = r.form;
@@ -641,13 +784,37 @@ Future<(String, bool)> _loeschAbsenden(
 
   final b = StringBuffer();
   var alleWeg = true;
+  // Gemessen auf Moodle 5.1: Eine benutzte Frage verbirgt Moodle nur. Sie fehlt dann
+  // im Export ihrer Kategorie und in der Fragenliste, lässt sich aber weiter einzeln
+  // nach id exportieren. Das Urteil „nur verborgen" braucht deshalb beides, und die
+  // Kategorien werden nur gelesen, wenn eine benutzte Frage noch einzeln zu holen ist.
+  Set<int?>? inKategorien;
+  Future<Set<int?>> kategorieFragen() async {
+    final aus = <int?>{};
+    for (final k in await kategorienLesen(moodle, sammlung)) {
+      if (k.anzahl == 0) continue;
+      aus.addAll(fragenAusXml(await exportieren(moodle, sammlung, k)).map((x) => x.id));
+    }
+    return aus;
+  }
+
   for (final f in fragen) {
     final e = await frageExport(moodle, sammlung, f.id!);
     if (e.xml == null && _frageFehlt.contains(e.fehlercode)) {
       b.writeln('  gelöscht: „${f.name}" (${f.id})');
+    } else if (e.xml == null && inBenutzung.contains(f.id)) {
+      // Nicht gemessen: ob Moodle den Einzelexport einer verborgenen Frage je ablehnt (auf
+      // Moodle 5.1 liefert er sie). Hier zählt, dass sie laut Rückfrage benutzt war und der
+      // Export nicht mehr „gibt es nicht" sagt; das gilt als unklar, nicht als erwartetes Ergebnis.
+      alleWeg = false;
+      b.writeln('  nur verborgen: „${f.name}" (${f.id}) -- steckt in einem Test, Moodle hat sie nicht gelöscht, '
+          'sondern verborgen (Export abgelehnt mit ${e.fehlercode ?? 'unbekanntem Fehler'}).');
+    } else if (e.xml != null && inBenutzung.contains(f.id) && !(inKategorien ??= await kategorieFragen()).contains(f.id)) {
+      b.writeln('  nur verborgen: „${f.name}" (${f.id}) -- steckt in einem Test, Moodle hat sie wie angekündigt '
+          'nicht gelöscht, sondern in der Fragensammlung ausgeblendet.');
     } else if (e.xml != null) {
       alleWeg = false;
-      b.writeln('  NOCH DA: „${f.name}" (${f.id}) -- steckt vermutlich in einem Test; Moodle hat sie dann nur verborgen.');
+      b.writeln('  NOCH DA: „${f.name}" (${f.id}) -- ${inBenutzung.contains(f.id) ? 'steckt in einem Test und steht noch in ihrer Kategorie, ist also nicht einmal verborgen' : 'nicht als benutzt gemeldet und trotzdem nicht gelöscht'}.');
     } else {
       alleWeg = false;
       b.writeln('  UNKLAR: „${f.name}" (${f.id}) -- Export abgelehnt mit ${e.fehlercode ?? 'unbekanntem Fehler'}'

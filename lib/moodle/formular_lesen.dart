@@ -55,7 +55,7 @@ import 'moodle_zugang.dart';
 import 'sperrliste.dart';
 
 /// Welche Art Formular.
-enum Zielart { aktivitaet, abschnitt, buchkapitel, frage }
+enum Zielart { aktivitaet, abschnitt, buchkapitel, frage, kategorie }
 
 /// Ein Moodle-Formular, das die App lesen und zurückschreiben kann.
 class Formularziel {
@@ -78,6 +78,10 @@ class Formularziel {
   factory Formularziel.frage(int sammlung, int frage) =>
       Formularziel(Zielart.frage, frage, cmid: sammlung);
 
+  /// Eine Fragenkategorie der Sammlung [sammlung] (kategorie_aendern, E37).
+  factory Formularziel.kategorie(int sammlung, int kategorie) =>
+      Formularziel(Zielart.kategorie, kategorie, cmid: sammlung);
+
   /// Wo das Formular abgerufen wird.
   String get adresse => switch (art) {
     Zielart.aktivitaet => '/course/modedit.php?update=$id',
@@ -85,6 +89,10 @@ class Formularziel {
     Zielart.buchkapitel => '/mod/book/edit.php?cmid=$cmid&id=$id',
     Zielart.frage =>
       '/question/bank/editquestion/question.php?cmid=$cmid&id=$id',
+    // Nur eine Kennung für den Schreibvorgang (E37): Die Kategorie wird über
+    // ein dynamisches Formular gelesen, nicht über eine Adresse abgerufen.
+    Zielart.kategorie =>
+      '/question/bank/managecategories/category.php?cmid=$cmid&categoryid=$id',
   };
 
   /// Unterordner im Arbeitsordner.
@@ -93,6 +101,7 @@ class Formularziel {
     Zielart.abschnitt => 'abschnitt-$id',
     Zielart.buchkapitel => p.join('buch-$cmid', 'kapitel-$id'),
     Zielart.frage => 'frage-$id',
+    Zielart.kategorie => 'kategorie-$id',
   };
 
   String get bezeichnung => switch (art) {
@@ -100,6 +109,7 @@ class Formularziel {
     Zielart.abschnitt => 'Abschnitt (id $id)',
     Zielart.buchkapitel => 'Kapitel $id im Buch cmid $cmid',
     Zielart.frage => 'Frage $id (Sammlung cmid $cmid)',
+    Zielart.kategorie => 'Kategorie $id (Sammlung cmid $cmid)',
   };
 
   Map<String, Object?> toJson() => {

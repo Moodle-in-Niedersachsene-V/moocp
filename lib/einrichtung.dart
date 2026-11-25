@@ -93,8 +93,16 @@ List<String> _linuxVerzeichnisse(String? heim) => [
   if (heim != null) ...[p.join(heim, '.local', 'bin'), p.join(heim, '.npm-global', 'bin'), p.join(heim, '.bun', 'bin')],
 ];
 
+/// Ersetzt die festen Programmordner außerhalb von PATH (null: die der
+/// Plattform). Nur für die Tests, damit die Werkzeugsuche nicht vom
+/// installierten Bestand des Rechners abhängt. Bewusst keine Umgebungsvariable:
+/// Wer sie setzen kann, bestimmte, welches Programm die App startet und
+/// welchem sie den Zugangsschlüssel gibt (vgl. [claudeSigniert]).
+List<String>? festeProgrammOrdner;
+
 /// Die festen Programmordner dieser Plattform außerhalb von PATH.
-List<String> _unixVerzeichnisse(String? heim) => Platform.isLinux ? _linuxVerzeichnisse(heim) : _macVerzeichnisse;
+List<String> _unixVerzeichnisse(String? heim) =>
+    festeProgrammOrdner ?? (Platform.isLinux ? _linuxVerzeichnisse(heim) : _macVerzeichnisse);
 
 // ---------------------------------------------------------------------------
 // Die Verbindung: der MCP-Eintrag „moodle"

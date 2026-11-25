@@ -2,10 +2,12 @@
 #
 # Zwei Kanäle:
 #   nightly  Ein Stand von main als Vorabversion v<Version>-nightly.<JJJJMMTT>.<n>,
-#            von Hand ("Run workflow") oder jede Nacht, wenn main neue Commits hat.
+#            nur von Hand ("Run workflow"), von jedem Maintainer allein. Einen
+#            Zeitplan gibt es bewusst nicht: Veröffentlicht wird, wenn jemand es will.
 #   stable   Ein vorhandener Tag v<Version> (auf main oder release/x.y), als
 #            normales Release "latest". Läuft im Environment "stable": Der andere
-#            Maintainer bestätigt dort die Veröffentlichung.
+#            Maintainer bestätigt dort die Veröffentlichung; wer den Lauf startet,
+#            kann sie nicht selbst bestätigen (Einstellung des Environments).
 #
 # Alles Entscheiden steht in tool/ci_release.py (mit Tests); diese Datei ruft es auf.
 # Jeder Lauf, der nicht veröffentlichen darf (anderer Zweig, Fork, "publish" aus),
@@ -13,9 +15,6 @@
 name: Release
 run-name: Release ${{ inputs.channel || 'nightly' }} (${{ github.event_name }}${{ inputs.publish == false && ', nur Bau' || '' }})
 on:
-  schedule:
-    # Nicht zur vollen Stunde: Dort ist bei GitHub am meisten los (03:41 deutscher Zeit im Winter).
-    - cron: '41 2 * * *'
   workflow_dispatch:
     inputs:
       channel:

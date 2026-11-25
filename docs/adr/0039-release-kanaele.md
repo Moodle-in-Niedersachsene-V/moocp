@@ -8,7 +8,7 @@ Es gibt zwei Kanäle: **Stabil** und **Nightly**. Wer Neues früh ausprobieren w
 
 ### Woher eine Nightly kommt
 
-Eine Nightly ist ein Stand von `main`. Gebaut und veröffentlicht wird sie von GitHub Actions, einmal täglich, wenn `main` seit der letzten Nightly einen neuen Commit hat, und jederzeit von Hand durch einen Maintainer – so kommt eine Korrektur, die schon getestet ist, ohne Warten zu den Testern. Einen eigenen Zweig für Nightlies gibt es nicht.
+Eine Nightly ist ein Stand von `main`. Gebaut und veröffentlicht wird sie von GitHub Actions, wenn ein Maintainer es von Hand startet; das darf jeder Maintainer allein und jederzeit – so kommt eine Korrektur, die schon getestet ist, ohne Warten zu den Testern. Einen Zeitplan gibt es nicht: Was zu den Testern geht, hat jemand entschieden. Der Name „Nightly“ sagt nichts über den Zeitpunkt. Einen eigenen Zweig für Nightlies gibt es nicht.
 
 Der Tag heißt `v<kommende Version>-nightly.<JJJJMMTT>.<n>`, etwa `v0.13.0-nightly.20261120.1`; das Release ist bei GitHub als Vorabversion markiert. In der App, unter „Über“ und mit `--version` heißt eine Nightly auf jeder Plattform gleich, `0.13.0.20261120.1`, ohne „nightly“: macOS erlaubt in der Version einer App nur Ziffern und Punkte, und dass eine Lehrkraft auf jedem Rechner dieselbe Version sieht, ist wichtiger als das Wort. Erkennbar ist die Nightly am Datum dahinter, das eine stabile Version nicht hat. Die kommende Version ist die, die in `pubspec.yaml` auf `main` steht, und sie ist immer die nächste **Nebenversion** (0.13.0 nach 0.12.0): Die Fehlerversionen (0.12.**1**) bleiben den Hotfixes vorbehalten. Für den Vergleich gilt `0.13.0-nightly.…` < `0.13.0`, auch in der Form ohne „nightly“: Wer eine Nightly hat, bekommt die stabile Version derselben Nummer als Update. Als Text des Releases trägt die Nightly den Abschnitt der kommenden Version aus `CHANGELOG.md`, wie er auf diesem Stand steht; die Lehrkraft sieht deutsche Zeilen, keine englischen Titel von Pull Requests.
 
@@ -19,7 +19,7 @@ Ein Maintainer wählt eine veröffentlichte Nightly – nicht zwingend die letzt
 - die Nightly ist mindestens 14 Tage veröffentlicht (bei zwei Maintainern und in den Ferien kommt in kürzerer Zeit zu wenig Rückmeldung);
 - kein offenes Issue mit den Labels `nightly` und `bug` betrifft diese oder eine frühere Nightly;
 - jeder Pull Request bis zu diesem Commit trägt das Label `post-reviewed`;
-- der andere Maintainer bestätigt im GitHub-Environment `stable`, dass er die Nightly selbst lange genug benutzt hat.
+- der andere Maintainer bestätigt im GitHub-Environment `stable`, dass er die Nightly selbst lange genug benutzt hat; wer den Lauf gestartet hat, kann ihn dort nicht selbst bestätigen. Eine stabile Version braucht so immer beide.
 
 Danach wird die Version Tag `v<Version>` und Release wie in E12, und `main` springt auf die nächste Nebenversion; was nach dem gewählten Commit gemergt wurde, gehört zu ihr.
 
@@ -64,6 +64,7 @@ Probleme mit einer Nightly melden Tester über die Issue-Vorlage „Problem in e
 
 ## Verworfen
 
+- **Eine Nightly nach Zeitplan, jede Nacht bei neuen Commits:** Dann ginge jeder Stand von `main` zu den Testern, ohne dass jemand es entschieden hat, auch ein halb fertiger. Ein Zeitplan wäre eine eigene, spätere Entscheidung; der Name bleibt dafür offen.
 - **Ein eigener Zweig `nightly` neben `main`:** Er läuft auseinander, Korrekturen müssten in beide Richtungen, und der Pull Request von `nightly` nach `main` wäre bei jeder Version ein Riesen-Review über alles, was Tester ohnehin schon hatten.
 - **Pflicht-Review vor jedem Merge, wie bisher:** Zwei Maintainer halten sich gegenseitig auf, und wer warten muss, sammelt mehrere Issues in einem großen Pull Request – das Gegenteil dessen, was ein Review leisten kann.
 - **Ask in GitHub erzwingen (Review der Code-Owner verpflichtend):** Die Absprache findet ohnehin statt, oft am selben Tisch; der Klick in GitHub hielte nur auf. Er bleibt der Rückweg, falls Absprachen verloren gehen.

@@ -182,48 +182,19 @@ class PlanTest(unittest.TestCase):
         result = self.plan(publish=False)
         self.assertEqual((result['build'], result['publish']), ('true', 'false'))
 
-    def test_scheduled_run_in_a_fork_builds_nothing(self):
-        result = self.plan(event='schedule', repo='someone/moocp')
-        self.assertEqual((result['build'], result['publish']), ('false', 'false'))
-
     def test_pubspec_must_have_plain_version(self):
         for pubspec in ['0.13', '0.13.0-nightly.1+1', 'x']:
             self.write_pubspec(pubspec)
             with self.subTest(pubspec=pubspec), self.assertRaises(ci_release.ReleaseError):
                 self.plan()
 
-    # --- Wann eine Nightly fällig ist ----------------------------------------
+    # --- Nur von Hand -------------------------------------------------------
 
-    def test_scheduled_run_without_new_commits_builds_and_publishes_nothing(self):
-        self.github.add_nightly('v0.13.0-nightly.20261123.1', MAIN_SHA)
-        result = self.plan(event='schedule')
-        self.assertEqual((result['build'], result['publish']), ('false', 'false'))
-
-    def test_scheduled_run_with_new_commits_publishes(self):
-        self.github.add_nightly('v0.13.0-nightly.20261123.1', OLD_SHA)
-        self.github.compare[(OLD_SHA, MAIN_SHA)] = {'status': 'ahead', 'ahead_by': 3, 'behind_by': 0}
-        result = self.plan(event='schedule')
-        self.assertEqual((result['build'], result['publish']), ('true', 'true'))
-        self.assertEqual(result['tag'], 'v0.13.0-nightly.20261124.1')
-
-    def test_scheduled_run_publishes_when_there_is_no_nightly_yet(self):
-        self.assertEqual(self.plan(event='schedule')['publish'], 'true')
-
-    def test_scheduled_run_compares_with_the_newest_nightly_only(self):
-        self.github.add_nightly('v0.13.0-nightly.20261120.1', OLD_SHA)
-        self.github.add_nightly('v0.13.0-nightly.20261123.2', MAIN_SHA)
-        self.github.add_nightly('v0.13.0-nightly.20261123.10', MAIN_SHA)
-        self.assertEqual(self.plan(event='schedule')['publish'], 'false')
-
-    def test_scheduled_run_ignores_stable_and_draft_releases(self):
-        self.github.releases.append({'tag_name': 'v0.12.0', 'prerelease': False, 'draft': False})
-        self.github.releases.append({'tag_name': 'v0.13.0-nightly.20261123.1', 'prerelease': True, 'draft': True})
-        self.github.tags['v0.13.0-nightly.20261123.1'] = MAIN_SHA
-        self.assertEqual(self.plan(event='schedule')['publish'], 'true')
-
-    def test_scheduled_run_publishes_when_the_tag_of_the_last_nightly_is_gone(self):
-        self.github.releases.append({'tag_name': 'v0.13.0-nightly.20261123.1', 'prerelease': True, 'draft': False})
-        self.assertEqual(self.plan(event='schedule')['publish'], 'true')
+    def test_a_run_not_started_by_hand_never_publishes(self):
+        for event in ['schedule', 'push']:
+            with self.subTest(event=event):
+                result = self.plan(event=event)
+                self.assertEqual((result['build'], result['publish']), ('true', 'false'))
 
     def test_manual_run_publishes_even_without_new_commits(self):
         self.github.add_nightly('v0.13.0-nightly.20261124.1', MAIN_SHA)

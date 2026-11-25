@@ -301,7 +301,7 @@ _Englisch_: stable release
 _Vermeiden_: Release (allein, für die stabile Version)
 
 **Nightly**:
-Eine Version aus dem aktuellen Stand von `main`, zum Testen, gebaut einmal täglich, wenn sich etwas geändert hat, oder sofort auf Anstoß eines Maintainers. Ihre Änderungen sind vor der Veröffentlichung nicht unbedingt vom zweiten Maintainer gesehen. In der App heißt sie „Testversion (Nightly)“.
+Eine Version aus dem aktuellen Stand von `main`, zum Testen, gebaut und veröffentlicht, wenn ein Maintainer es anstößt; jeder darf das allein. Der Name sagt nichts über den Zeitpunkt. Ihre Änderungen sind vor der Veröffentlichung nicht unbedingt vom zweiten Maintainer gesehen. In der App heißt sie „Testversion (Nightly)“.
 _Englisch_: nightly
 _Vermeiden_: Lightning, Beta, Vorabversion (das ist nur das Feld bei GitHub)
 

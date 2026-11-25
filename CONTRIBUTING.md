@@ -105,7 +105,7 @@ There are two channels. The decision and its reasons are ADR E39 (`docs/adr/0039
 
 ### Nightly
 
-A nightly is the current state of `main`. GitHub Actions builds and publishes it every night if `main` has new commits, and any maintainer can start one by hand at any time ("Run workflow"); that is also how a tested fix reaches testers quickly. The tag is `v<upcoming version>-nightly.<YYYYMMDD>.<n>`, the release is marked as a pre-release, and its text is the section of the upcoming version in `CHANGELOG.md`. `main` always carries the next minor version in `pubspec.yaml`. Patch versions are kept for hotfixes.
+A nightly is the current state of `main`. GitHub Actions builds and publishes it only when a maintainer starts the release workflow by hand ("Run workflow"); any maintainer may do so alone, at any time, which is also how a tested fix reaches testers quickly. There is no schedule: whatever reaches testers, someone decided to ship. The name does not mean it comes every night. The tag is `v<upcoming version>-nightly.<YYYYMMDD>.<n>`, the release is marked as a pre-release, and its text is the section of the upcoming version in `CHANGELOG.md`. `main` always carries the next minor version in `pubspec.yaml`. Patch versions are kept for hotfixes.
 
 Testers report problems with the issue template for nightlies; such issues get the label `nightly`.
 

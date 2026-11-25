@@ -38,6 +38,7 @@ class Profil {
     required this.mcpName,
     this.bestaetigungen = Bestaetigungen.vorgabe,
     this.schluessel = '',
+    this.unbekannteFelder = const {},
   });
 
   /// Kennung des ersten Profils. Der Altbestand und der Testzugang gehören
@@ -69,6 +70,9 @@ class Profil {
   /// (Einstellungen.schluesselFuer), und er steht nur dort in der Datei.
   final String schluessel;
 
+  /// Felder anderer Versionen, die dieses Profil nicht auswertet.
+  final Map<String, Object?> unbekannteFelder;
+
   bool get istStandard => kennung == standardKennung;
 
   /// Ändert nur den Anzeigenamen, der Servername bleibt (siehe [mcpName]).
@@ -80,6 +84,7 @@ class Profil {
         mcpName: mcpName ?? this.mcpName,
         bestaetigungen: bestaetigungen,
         schluessel: schluessel ?? this.schluessel,
+        unbekannteFelder: unbekannteFelder,
       );
 
   Profil mitBestaetigungen(Bestaetigungen neu) => Profil(
@@ -90,9 +95,11 @@ class Profil {
         mcpName: mcpName,
         bestaetigungen: neu,
         schluessel: schluessel,
+        unbekannteFelder: unbekannteFelder,
       );
 
   Map<String, Object?> toJson() => {
+        ...unbekannteFelder,
         'kennung': kennung,
         'name': name,
         'adresse': adresse,
@@ -126,6 +133,11 @@ class Profil {
       mcpName: mcpName is String && mcpNameGueltig(mcpName) ? mcpName : mcpNameFuer(name, kennung),
       bestaetigungen: Bestaetigungen.ausText(j['bestaetigungen'] as String?),
       schluessel: schluessel is String ? schluessel : '',
+      unbekannteFelder: {
+        for (final e in j.entries)
+          if (e.key is String && !const {'kennung', 'name', 'adresse', 'port', 'mcpName', 'bestaetigungen', 'schluessel'}.contains(e.key))
+            e.key as String: e.value,
+      },
     );
   }
 

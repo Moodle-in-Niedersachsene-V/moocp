@@ -50,6 +50,7 @@ import '../moodle/lernlandkarte_verteilen.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sicherung_regeln.dart';
 import '../moodle/sicherung.dart';
+import '../moodle/sicherung_loeschen.dart';
 import '../moodle/stack.dart';
 import '../moodle/test.dart';
 import '../moodle/wiederherstellung.dart';
@@ -1281,6 +1282,30 @@ class McpDienst implements AufrufKontext {
       ),
     );
 
+    _aufrufe.registrieren(
+      server,
+      'sicherung_loeschen',
+      titel: 'Sicherungsdatei in Moodle löschen',
+      beschreibung:
+          'Löscht die eine Datei, die eine Sicherung der App (sichern_aktivitaet, sichern_auswahl) im '
+          'persönlichen Sicherungsbereich in Moodle zurückgelassen hat, nach Freigabe in der App. Die Kopie im '
+          'Sicherungsordner der App bleibt. Nummer und Dateiname in Moodle (wie die Antwort der Sicherung ihn nennt) '
+          'müssen zusammenpassen und die Datei muss genau einmal in Moodle stehen. Moodle schreibt beim Speichern '
+          'den ganzen Bereich neu; die App vergleicht ihn vor dem Speichern noch einmal mit dem freigegebenen Stand '
+          'und liest danach zurück: verified: true heißt, dass genau diese Datei fehlt und alle übrigen noch unter ihrem Namen '
+          'da sind (Inhalte werden nicht verglichen). Eine Datei, die in den letzten Sekunden von anderer Stelle dazukommt, kann verloren gehen; '
+          'das nennt die Freigabe. Während einer Sicherung oder Wiederherstellung in der App wird nichts gelöscht.',
+      parameter: {
+        'id': JsonSchema.string(description: 'Nummer der Sicherung, wie sichern_aktivitaet sie nennt'),
+        'name': JsonSchema.string(
+          description: 'Dateiname der Sicherung in Moodle, nicht der im Sicherungsordner (steht als „Name der Datei in Moodle“ in der Antwort der Sicherung und in sicherung_status)',
+        ),
+      },
+      pflicht: ['id', 'name'],
+      zerstoerend: true,
+      ausfuehren: (a) => sicherungLoeschen(moodle, freigaben, vorgaenge, id: _text(a, 'id'), name: _text(a, 'name')),
+    );
+
     // ---- Wiederherstellen einer Sicherungsdatei in einen bestehenden Kurs (E29, moodle/wiederherstellung.dart)
     // MCP kennzeichnet das ganze Werkzeug, nicht den gewählten Zielweg: Ersetzen kann löschen.
     _aufrufe.registrieren(
@@ -2279,7 +2304,9 @@ class McpDienst implements AufrufKontext {
           'es verborgen an, mit einer festen Beschreibung, die Menschen erklärt, was darin liegt. '
           'Gibt es die Datei schon, prüft die App zuerst, dass Moodle noch den Stand vom Lesen '
           'zeigt, und schreibt erst nach Freigabe in der App, die den Zeilenvergleich zeigt. '
-          'Danach Rückleseprobe (verified). Weitere Dateien des Verzeichnisses (Vorlagen, '
+          'Danach Rückleseprobe (verified). Steht das Verzeichnis nicht am Anfang seines '
+          'Abschnitts, verschiebt es das Werkzeug mit regulärer Freigabe und prüft die Reihenfolge. '
+          'Weitere Dateien des Verzeichnisses (Vorlagen, '
           'Skripte, Zeichnungsquellen) mit aktivitaet_lesen und aendern; das ganze Verzeichnis '
           'mit loeschen.',
       parameter: {

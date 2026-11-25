@@ -20,6 +20,29 @@ import 'plugin/entscheidung.dart';
 import 'profil.dart';
 
 class Einstellungen {
+  static const _bekannt = {
+    'moodleAdresse', 'profile', 'port', 'schluessel', 'bestaetigungen',
+    'wahlSkills', 'werkzeugeAbgewaehlt', 'updatePruefen', 'updateZuletzt',
+    'updateErwartet', 'plugins', 'pluginUpdates', 'pluginSkillOrdner',
+    'fremdeSkillOrdner', 'skillFehlerGesehen', 'schnittstelleGesehen',
+  };
+  static const _pluginFelder = {'version', 'pruefsumme', 'zugestimmt', 'profile', 'werkzeuge'};
+  static const _updateFelder = {'aus', 'zuletzt'};
+
+  // Nur unbekannte Felder aufbewahren: bekannte, auch ungültige Werte dürfen
+  // beim Speichern die validierten Werte oder deren Weglassen nicht überlagern.
+  Map<String, Object?> _unbekannt = {};
+  Map<String, Map<String, Object?>> _unbekanntePlugins = {};
+  Map<String, Map<String, Object?>> _unbekannteUpdates = {};
+
+  static Map<String, Object?> _rest(Object? wert, Set<String> bekannt) => wert is Map
+      ? {for (final e in wert.entries) if (e.key is String && !bekannt.contains(e.key)) e.key as String: e.value}
+      : {};
+
+  static Map<String, Map<String, Object?>> _resteJeEintrag(Object? wert, Set<String> bekannt) => wert is Map
+      ? {for (final e in wert.entries) if (e.key is String) e.key as String: _rest(e.value, bekannt)}
+      : {};
+
   /// [moodleAdresse] ist der Altbestand eines einzelnen Moodle und wird zum
   /// ersten Profil ([profile]). Mit [profile] gewinnt die Liste.
   Einstellungen({
@@ -84,13 +107,9 @@ class Einstellungen {
         mcp = '$basis-${zaehler++}';
       }
       namen.add(mcp);
-      ergebnis.add(Profil(
-        kennung: p.kennung,
-        name: p.name,
-        adresse: p.adresse,
+      ergebnis.add(p.copyWith(
         port: port,
         mcpName: mcp,
-        bestaetigungen: p.bestaetigungen,
         schluessel: p.istStandard
             ? ''
             : p.schluessel.isNotEmpty
@@ -203,21 +222,22 @@ class Einstellungen {
     return List.generate(32, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
   }
 
-  static Future<Einstellungen> laden() async {
+  static Future<Einstellungen> laden({File? datei}) async {
+    final quelle = datei ?? _datei;
     final standard = Einstellungen(
       moodleAdresse: '',
       schluessel: neuerSchluessel(),
     );
     try {
-      if (await _datei.exists()) {
-        final j = jsonDecode(await _datei.readAsString()) as Map<String, dynamic>;
+      if (await quelle.exists()) {
+        final j = jsonDecode(await quelle.readAsString()) as Map<String, dynamic>;
         final e = Einstellungen.aus(j, standard);
         // Frisch vergebene Schlüssel gleich festhalten: Sonst bekäme das
         // Profil bei jedem Start einen neuen, und die Einträge in den
         // KI-Werkzeugen wären jedes Mal veraltet.
         if (schluesselFehlen(j)) {
           try {
-            await e.speichern();
+            await e._speichern(quelle);
           } catch (_) {
             // Nicht schreibbar: Die Schlüssel gelten für diesen Lauf; der
             // Fall nach dem catch unten (Standardwerte schreiben) ist es nicht.
@@ -228,7 +248,7 @@ class Einstellungen {
     } catch (_) {
       // Kaputte Datei: mit den Standardwerten weiter und beim Speichern ersetzen.
     }
-    await standard.speichern();
+    await standard._speichern(quelle);
     return standard;
   }
 
@@ -267,7 +287,7 @@ class Einstellungen {
         profile[i] = profile[i].mitBestaetigungen(alteStufe);
       }
     }
-    return Einstellungen(
+    final ergebnis = Einstellungen(
       moodleAdresse: altAdresse,
       profile: profile,
       schluessel: j['schluessel'] as String? ?? standard.schluessel,
@@ -285,10 +305,15 @@ class Einstellungen {
       skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
       schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
+    ergebnis._unbekannt = _rest(j, _bekannt);
+    ergebnis._unbekanntePlugins = _resteJeEintrag(j['plugins'], _pluginFelder);
+    ergebnis._unbekannteUpdates = _resteJeEintrag(j['pluginUpdates'], _updateFelder);
+    return ergebnis;
   }
 
   /// Der Inhalt der Datei, wie ihn [speichern] schreibt.
   Map<String, Object?> zuJson() => {
+        ..._unbekannt,
         'moodleAdresse': moodleAdresse,
         'profile': [for (final p in profile) p.toJson()],
         'port': port,
@@ -299,17 +324,19 @@ class Einstellungen {
         if (updatePruefen != null) 'updatePruefen': updatePruefen,
         if (updateZuletzt != null) 'updateZuletzt': updateZuletzt,
         if (updateErwartet != null) 'updateErwartet': updateErwartet,
-        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: e.value.toJson()},
+        if (plugins.isNotEmpty) 'plugins': {for (final e in plugins.entries) e.key: {...?_unbekanntePlugins[e.key], ...e.value.toJson()}},
         if (pluginUpdates.isNotEmpty)
-          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: e.value.toJson()},
+          'pluginUpdates': {for (final e in pluginUpdates.entries) e.key: {...?_unbekannteUpdates[e.key], ...e.value.toJson()}},
         if (pluginSkillOrdner.isNotEmpty) 'pluginSkillOrdner': (pluginSkillOrdner.toList()..sort()),
         if (fremdeSkillOrdner.isNotEmpty) 'fremdeSkillOrdner': (fremdeSkillOrdner.toList()..sort()),
         if (skillFehlerGesehen.isNotEmpty) 'skillFehlerGesehen': (skillFehlerGesehen.toList()..sort()),
         if (schnittstelleGesehen.isNotEmpty) 'schnittstelleGesehen': (schnittstelleGesehen.toList()..sort()),
       };
 
-  Future<void> speichern() async {
-    await Directory(einstellungenOrdner).create(recursive: true);
-    await _datei.writeAsString(const JsonEncoder.withIndent('  ').convert(zuJson()));
+  Future<void> speichern() => _speichern(_datei);
+
+  Future<void> _speichern(File ziel) async {
+    await ziel.parent.create(recursive: true);
+    await ziel.writeAsString(const JsonEncoder.withIndent('  ').convert(zuJson()));
   }
 }

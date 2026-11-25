@@ -49,6 +49,7 @@ import '../freigabe.dart';
 import 'formular_lesen.dart';
 import 'formular_schreiben.dart';
 import 'kurs.dart';
+import 'kurs_aendern.dart';
 import 'moodle_zugang.dart';
 
 /// Name des Verzeichnisses im Kurs und der Datei darin.
@@ -384,6 +385,87 @@ Future<String> claudeMitreiten(MoodleZugang moodle, KursStruktur k, {int? abschn
   }
 }
 
+/// Verschiebt nur nach Prüfung des gesamten Abschnitts; die allgemeine
+/// Verschiebung prüft nicht die Reihenfolge aller mitbetroffenen Aktivitäten.
+Future<String> _claudeAnAnfang(
+  MoodleZugang moodle,
+  Freigaben freigaben,
+  int kurs,
+  int abschnittId,
+  int cmid,
+  String name,
+) async {
+  final vorher = await kursLesen(moodle, kurs);
+  final abschnitt = vorher.nachId[abschnittId];
+  final aktivitaet = vorher.nachCmid[cmid];
+  if (abschnitt == null ||
+      aktivitaet == null ||
+      aktivitaet.abschnittId != abschnittId ||
+      aktivitaet.name != name ||
+      !_istClaudeVerzeichnis(aktivitaet) ||
+      !abschnitt.aktivitaeten.any((c) => c.cmid == cmid)) {
+    throw MoodleFehler(
+      'Das CLAUDE-Verzeichnis oder sein Abschnitt hat sich geändert; bitte neu lesen.',
+    );
+  }
+  final liste = abschnitt.aktivitaeten;
+  if (liste.first.cmid == cmid) {
+    return 'Position am Abschnittsanfang geprüft. verified: true';
+  }
+  final stand = [for (final c in liste) (c.cmid, c.name, c.modul, c.sichtbarkeit)];
+  final ziel = liste.first;
+  final ja = await freigaben.anfragen(
+    FreigabeAnfrage(
+      titel: 'Verschieben?',
+      punkte: [
+        'Verzeichnis „${aktivitaet.name}“ in ${await kursBezeichnung(moodle, kurs)}',
+        'Im Abschnitt „${abschnitt.titel}“ vor „${ziel.name}“',
+        'Weitere Aktivitäten in bisheriger Reihenfolge: ${liste.where((c) => c.cmid != cmid).map((c) => '„${c.name}“').join(', ')}',
+      ],
+      vergleich: const [],
+      knopf: 'Verschieben',
+    ),
+  );
+  if (!ja) {
+    return 'Nicht verschoben: Die Freigabe wurde abgelehnt oder ist abgelaufen. verified: false';
+  }
+  final frisch = await kursLesen(moodle, kurs);
+  final jetzt = frisch.nachId[abschnittId]?.aktivitaeten;
+  if (frisch.nachId[abschnittId]?.titel != abschnitt.titel || jetzt == null ||
+      jetzt.length != stand.length ||
+      List.generate(
+        jetzt.length,
+        (i) => (jetzt[i].cmid, jetzt[i].name, jetzt[i].modul, jetzt[i].sichtbarkeit),
+      ).indexed.any((e) => e.$2 != stand[e.$1])) {
+    throw MoodleFehler(
+      'Der Abschnitt hat sich seit der Freigabe geändert; nichts verschoben. Bitte neu lesen.',
+    );
+  }
+  await kursAktion(
+    moodle,
+    kurs,
+    'cm_move',
+    [cmid],
+    zielAbschnitt: abschnittId,
+    zielCmid: ziel.cmid,
+  );
+  final nachher = (await kursLesen(
+    moodle,
+    kurs,
+  )).nachId[abschnittId]?.aktivitaeten;
+  final erwartet = [
+    stand.firstWhere((c) => c.$1 == cmid),
+    ...stand.where((c) => c.$1 != cmid),
+  ];
+  final ok =
+      nachher != null &&
+      nachher.length == erwartet.length &&
+      !nachher.indexed.any(
+        (e) => (e.$2.cmid, e.$2.name, e.$2.modul, e.$2.sichtbarkeit) != erwartet[e.$1],
+      );
+  return 'Position des Verzeichnisses am Abschnittsanfang: verified: $ok';
+}
+
 /// Werkzeug claude_schreiben: legt CLAUDE.md an oder ändert sie. Das
 /// Verzeichnis entsteht mit, wenn es fehlt -- verborgen, mit der festen
 /// Beschreibung und so eingestellt, dass sein Inhalt auf der Kursseite steht.
@@ -413,7 +495,7 @@ Future<String> claudeSchreiben(
     await Directory(p.join(q.path, 'bereiche', 'files')).create(recursive: true);
     await File(p.join(q.path, 'introeditor.html')).writeAsString(claudeBeschreibung);
     await File(p.join(q.path, 'bereiche', 'files', claudeDateiname)).writeAsString(inhalt);
-    final bericht = await aktivitaetAnlegen(moodle, freigaben,
+    final (bericht, cmid, ok) = await aktivitaetAnlegenMitErgebnis(moodle, freigaben,
         kurs: kurs,
         abschnittId: o.abschnittId,
         typ: 'folder',
@@ -421,8 +503,22 @@ Future<String> claudeSchreiben(
         arbeitsordner: arbeitsordner,
         ordner: q.path,
         einstellungen: const {'display': '1', 'showdescription': true});
+    if (cmid == null) {
+      return bericht;
+    }
+    if (!ok) {
+      return 'Das Anlegen des Verzeichnisses wurde nicht vollständig geprüft. Position nicht geändert.\n$bericht';
+    }
+    final position = await _claudeAnAnfang(
+      moodle,
+      freigaben,
+      kurs,
+      o.abschnittId,
+      cmid,
+      claudeVerzeichnis,
+    );
     return 'Das Verzeichnis $claudeVerzeichnis ${o.herkunft} gab es noch nicht -- angelegt mit '
-        '$claudeDateiname und der festen Beschreibung.\n$bericht';
+        '$claudeDateiname und der festen Beschreibung.\n$bericht\n$position';
   }
 
   // Bestehend: frisch lesen (E17), die Datei ersetzen, den Rest des
@@ -442,12 +538,16 @@ Future<String> claudeSchreiben(
     await File(p.join(g.ordner, 'introeditor.html')).writeAsString(claudeBeschreibung);
   }
 
-  final bericht = await aendern(moodle, freigaben, ordner: g.ordner, arbeitsordner: arbeitsordner);
+  final (bericht, ok) = await aendernMitErgebnis(moodle, freigaben, ordner: g.ordner, arbeitsordner: arbeitsordner);
+  final position = ok
+      ? await _claudeAnAnfang(moodle, freigaben, kurs, o.abschnittId, o.cmid!, k.nachCmid[o.cmid!]!.name)
+      : 'Position nicht geändert, da das Schreiben nicht bestätigt wurde.';
   return [
     'Verzeichnis $claudeVerzeichnis ${o.herkunft}, cmid ${o.cmid}.',
     if (leer) 'Die Beschreibung war leer und bekommt den festen Hinweistext.',
     if (intro == null)
       'Hinweis: Das Formular hat kein Feld introeditor -- die Beschreibung bleibt, wie sie ist.',
     bericht,
+    position,
   ].join('\n');
 }

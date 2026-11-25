@@ -254,7 +254,7 @@ class McpDienst implements AufrufKontext {
     _lauscher = l;
     _laufendeNamen[profil.port] = name;
     _annahme = l.verbindungen.listen(_verbindungAufnehmen);
-    protokoll.eintrag(Art.info, 'MCP-Server läuft ($name), erreichbar nur für dieses Konto');
+    protokoll.eintrag(Art.info, 'MCP-Server läuft auf dem Kanal des Kontos ($name)');
   }
 
   /// Eine geprüfte Verbindung ist eine MCP-Sitzung mit eigenem Server (wie

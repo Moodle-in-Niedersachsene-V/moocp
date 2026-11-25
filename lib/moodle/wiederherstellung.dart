@@ -49,6 +49,9 @@ import 'wiederherstellung_texte.dart';
 /// Vorgänge, die gerade laufen (Freigabe, Upload oder Abfrage) in dieser Sitzung.
 final Set<String> _laufendeWiederherstellungen = {};
 
+/// Ob in dieser App gerade eine Wiederherstellung läuft (sicherung_loeschen wartet dann ab).
+bool get wiederherstellungLaeuft => _laufendeWiederherstellungen.isNotEmpty;
+
 /// Fingerabdrücke, für die gerade eine Freigabe oder ein Vorgang läuft.
 /// Hält den Doppelstart-Schutz auch dann, wenn der Vorgang noch nicht gespeichert ist.
 final Set<String> _reserviert = {};

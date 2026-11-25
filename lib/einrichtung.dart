@@ -8,15 +8,15 @@
 // „KI-Werkzeuge einrichten", wie bei den Freigaben. Beim Deinstallieren
 // entfernt die App beides wieder ([einrichtungEntfernen]).
 //
-// Eingerichtet werden Claude Code, Codex CLI und LM Studio. Alle drei sind
+// Eingerichtet werden Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio. Alle drei sind
 // MCP-Clients, die auf demselben Rechner laufen, Skills im Format
 // `SKILL.md` laden und eigene Werkzeuge für Dateien haben -- mehr braucht
-// diese App von einem Client nicht. Der normale Chat der ChatGPT-App gehört
-// nicht dazu: Er erreicht nur öffentliche HTTPS-Server, und der Weg über
-// OpenAIs Tunnel führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6)
-// und brächte trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ihre
-// Codex-Sitzungen teilen dagegen `~/.codex` mit Codex CLI und sehen die Einträge.
-// Ollama ist ein Modellserver und gar kein MCP-Client.
+// diese App von einem Client nicht. Der Chat der ChatGPT-App gehört nicht
+// dazu (das in ihr mitgelieferte Codex schon, es teilt `~/.codex` mit der
+// CLI): Er erreicht nur öffentliche HTTPS-Server, und der Weg über OpenAIs Tunnel
+// führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6) und brächte
+// trotzdem keinen Zugriff auf den Arbeitsordner (E5). Ollama ist ein
+// Modellserver und gar kein MCP-Client.
 //
 // Hier steht nur die Logik, ohne Oberfläche, damit sie sich an einem
 // nachgebauten Ordnerbaum prüfen lässt (test/einrichtung_test.dart).
@@ -94,8 +94,21 @@ List<String> _linuxVerzeichnisse(String? heim) => [
   if (heim != null) ...[p.join(heim, '.local', 'bin'), p.join(heim, '.npm-global', 'bin'), p.join(heim, '.bun', 'bin')],
 ];
 
+/// Ersetzt die festen Programmordner außerhalb von PATH (null: die der
+/// Plattform). Nur für die Tests, damit die Werkzeugsuche nicht vom
+/// installierten Bestand des Rechners abhängt. Bewusst keine Umgebungsvariable:
+/// Wer sie setzen kann, bestimmte, welches Programm die App startet und
+/// welchem sie den Zugangsschlüssel gibt (vgl. [claudeSigniert]).
+List<String>? festeProgrammOrdner;
+
+/// Ersetzt die Ordner, in denen die App nach der ChatGPT-App sucht (null: unter
+/// macOS `/Applications` und `~/Applications`, sonst keine). Nur für die Tests,
+/// aus demselben Grund wie [festeProgrammOrdner].
+List<String>? festeAppOrdner;
+
 /// Die festen Programmordner dieser Plattform außerhalb von PATH.
-List<String> _unixVerzeichnisse(String? heim) => Platform.isLinux ? _linuxVerzeichnisse(heim) : _macVerzeichnisse;
+List<String> _unixVerzeichnisse(String? heim) =>
+    festeProgrammOrdner ?? (Platform.isLinux ? _linuxVerzeichnisse(heim) : _macVerzeichnisse);
 
 // ---------------------------------------------------------------------------
 // Die Verbindung: der MCP-Eintrag „moodle"
@@ -165,6 +178,9 @@ abstract class KiWerkzeug {
 
   /// Was fehlt, wenn [bedienbar] false ist; sonst null.
   String? get hindernis;
+
+  /// Ein Hinweis für den Dialog, der nichts verhindert; sonst null.
+  String? get hinweis => null;
 
   /// Der Stand des MCP-Eintrags [name] (E31: je Instanzprofil einer) in diesem Werkzeug.
   Verbindung verbindung(int port, String schluessel, {String name = mcpName});
@@ -530,10 +546,10 @@ Future<int> _ausfuehren(String programm, List<String> argumente) async {
 }
 
 // ---------------------------------------------------------------------------
-// Codex CLI
+// Codex (ChatGPT-App oder CLI)
 // ---------------------------------------------------------------------------
 
-/// Codex CLI von OpenAI. Der Eintrag wird in `~/.codex/config.toml`
+/// Codex von OpenAI, als CLI oder in der ChatGPT-App. Der Eintrag wird in `~/.codex/config.toml`
 /// geschrieben, nicht über `codex mcp add`: Dessen Kommandozeile kennt nur
 /// `--bearer-token-env-var`, das den Schlüssel in eine dauerhafte
 /// Umgebungsvariable zwänge, die jedes Programm des Benutzers liest. Ein
@@ -547,7 +563,7 @@ class CodexCli extends KiWerkzeug {
   @override
   String get id => 'codex';
   @override
-  String get name => 'Codex CLI';
+  String get name => 'Codex (ChatGPT-App oder CLI)';
   @override
   // Der Schlüssel für Moodle steht bei Codex im Klartext in der Datei
   // (ADR 0021, 0013): Das muss die Anzeige sagen, bevor die Lehrkraft
@@ -587,8 +603,29 @@ class CodexCli extends KiWerkzeug {
     return null;
   }
 
+  /// Das mitgelieferte Codex der ChatGPT-App unter macOS
+  /// (`ChatGPT.app/Contents/Resources/codex-cli/bin/codex`); „ChatGPT Classic"
+  /// hat es nicht. App und CLI teilen sich `~/.codex` (Konfiguration und
+  /// Skills). Erkannt wird nur der Ort, das Programm wird nie gestartet. Nur
+  /// macOS (E24): Unter Windows ist es nicht gemessen, unter Linux gibt es die App nicht.
+  String? get chatgptApp {
+    final h = _heimOrdner(umgebung);
+    final orte = festeAppOrdner ?? (Platform.isMacOS ? ['/Applications', if (h != null) p.join(h, 'Applications')] : const <String>[]);
+    for (final o in orte) {
+      final f = p.join(o, 'ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin', 'codex');
+      if (File(f).existsSync()) return f;
+    }
+    return null;
+  }
+
   @override
-  bool get gefunden => heim.existsSync() || exe != null;
+  bool get gefunden => heim.existsSync() || exe != null || chatgptApp != null;
+
+  @override
+  String? get hinweis => !heim.existsSync() && exe == null && chatgptApp != null
+      ? 'Codex aus der ChatGPT-App hat seinen Ordner ${heim.path} noch nicht angelegt. Öffnen Sie Codex in der '
+          'ChatGPT-App einmal, bevor Sie installieren; sonst legt moocp den Ordner selbst an.'
+      : null;
 
   @override
   bool get bedienbar => true;

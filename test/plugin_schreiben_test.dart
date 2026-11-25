@@ -13,6 +13,7 @@ import 'package:moocp/einstellungen.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/moodle/sperrliste.dart';
 import 'package:moocp/plugin/adressmuster.dart';
@@ -94,6 +95,15 @@ class _Kontext implements AufrufKontext {
     }
     return ausgang;
   }
+
+  /// Die Adresse der App fragt nie die Lehrkraft; nur die laufenden Plugins
+  /// tun es (test/plugin_start_test.dart, test/plugin_datenschutz_test.dart).
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async => DatenschutzAusgang.sperren;
 
   @override
   String? get testDialogantworten => null;
@@ -477,7 +487,7 @@ void main() {
     });
 
     test('ein gesperrter Name in Pfad, Parameter- oder Feldname: 422, kein Name im Protokoll', () async {
-      adresse.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      adresse.pruefung.namenHinzufuegen('beispiel', ['Erika Mustermann']);
       for (final daten in [
         anfrage('/mod/beispiel/datei.php/7/Erika.txt'),
         anfrage('/mod/beispiel/datei.php/7/M%75stermann.txt'),

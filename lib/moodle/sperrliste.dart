@@ -39,7 +39,7 @@ final RegExp _sicherungDatei = RegExp(r'^/pluginfile\.php/\d+/user/backup/(?:\d+
 final RegExp _personenRegel = RegExp(r'/user/(view|profile|index|files|editadvanced)\.php');
 
 /// Die Teilnehmendenseite eines Kurses, genau in der Form, in der die App
-/// selbst sie für die letzte Sperre liest (E36): Kursnummer, Seitengröße 5000
+/// selbst sie für die Datenschutzprüfung liest (E36): Kursnummer, Seitengröße 5000
 /// (Moodles „alle zeigen“), der Filter nach Anfangsbuchstaben leer. Nur
 /// diese Adresse und nur für diesen einen Aufrufer (moodle_zugang.dart,
 /// `MoodleZugang.teilnehmendenseiteLesen`); für die eingebauten Werkzeuge,
@@ -129,7 +129,7 @@ final List<RegExp> _bewertungsschema = [
 String? sperrregel(Uri uri) => _sperrregel(uri, namenssperre: false);
 
 /// Die Regel, die [uri] für den einen Aufrufer sperrt, der die Namen der
-/// Teilnehmenden für die letzte Sperre liest (E36): wie [sperrregel], nur dass
+/// Teilnehmenden für die Datenschutzprüfung liest (E36): wie [sperrregel], nur dass
 /// die Regel für Seiten zu Personen die Teilnehmendenseite in genau der einen
 /// Form durchlässt, in der die App sie liest. Jede andere Regel gilt weiter,
 /// und jede andere Adresse unter /user/ bleibt gesperrt.

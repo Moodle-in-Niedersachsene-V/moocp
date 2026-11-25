@@ -43,11 +43,19 @@ SetCompressor /SOLID lzma
 ; Bauen in die exe (Dateiversion 1.0.0.1). Von dort statt aus pubspec.yaml:
 ; So trägt der Installer immer die Version dessen, was er einpackt.
 !getdllversion "${QUELLE}\${EXE}" V_
-!define VERSION "${V_1}.${V_2}.${V_3}+${V_4}"
+; Eine Nightly trägt hinter x.y.z eine Vorabkennung („-nightly.20261124.1"),
+; die die Dateiversion der exe nicht tragen kann (sie ist rein numerisch,
+; x.y.z.<laufende Nummer>). Der Release-Workflow reicht sie mit
+; /DVERSION_ZUSATZ=-nightly.20261124.1 herein (tool/ci_release.py,
+; create_installer.bat); ohne den Schalter ist sie leer.
+!ifndef VERSION_ZUSATZ
+  !define VERSION_ZUSATZ ""
+!endif
+!define VERSION "${V_1}.${V_2}.${V_3}${VERSION_ZUSATZ}+${V_4}"
 ; Für den Dateinamen ohne Buildnummer: Die Update-Prüfung der App sucht im
 ; Release genau diese Datei, und ein „+" müsste in einer Adresse „%2B"
 ; heißen (lib/update/update.dart).
-!define VERSION3 "${V_1}.${V_2}.${V_3}"
+!define VERSION3 "${V_1}.${V_2}.${V_3}${VERSION_ZUSATZ}"
 
 Name "${NAME}"
 OutFile "moocp_setup_${VERSION3}.exe"
@@ -100,7 +108,7 @@ Page custom HinweisSeite HinweisSeiteEnde
 !define MUI_FINISHPAGE_RUN_TEXT "${NAME} starten"
 !insertmacro MUI_PAGE_FINISH
 
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "${NAME} wird entfernt, zusammen mit Einstellungen, Protokoll, gespeicherten Anmeldedaten und Arbeitsordner. Auch die Verbindung in Claude Code, Codex CLI und LM Studio und die Skills der App werden entfernt."
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "${NAME} wird entfernt, zusammen mit Einstellungen, Protokoll, gespeicherten Anmeldedaten und Arbeitsordner. Auch die Verbindung in Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio und die Skills der App werden entfernt."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
@@ -339,7 +347,7 @@ Section "Uninstall"
   StrCpy $1 ""
   IntOp $2 $0 & 1
   ${If} $2 <> 0
-    StrCpy $1 "$1$\n$\n• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: in einer Eingabeaufforderung$\n    claude mcp remove moodle --scope user$\nCodex CLI: den Abschnitt [mcp_servers.moodle] in %USERPROFILE%\.codex\config.toml löschen.$\nLM Studio: in Bionic unter Einstellungen, MCP den Server moodle löschen."
+    StrCpy $1 "$1$\n$\n• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: in einer Eingabeaufforderung$\n    claude mcp remove moodle --scope user$\nCodex (ChatGPT-App oder CLI): den Abschnitt [mcp_servers.moodle] in %USERPROFILE%\.codex\config.toml löschen.$\nLM Studio: in Bionic unter Einstellungen, MCP den Server moodle löschen."
   ${EndIf}
   IntOp $2 $0 & 2
   ${If} $2 <> 0

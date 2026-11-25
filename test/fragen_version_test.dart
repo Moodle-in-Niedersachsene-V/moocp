@@ -170,7 +170,7 @@ void main() {
     expect(e.versionen, hasLength(2));
     expect(moodle.geloescht, isEmpty);
     expect(bericht, contains('kann in Tests aktiv sein'));
-    expect(bericht, contains('Nicht erneut schreiben'));
+    expect(bericht, contains('Frisch lesen'));
   });
 
   test('Paralleles Speichern nach dem Import berechtigt niemals zum Löschen der fremden Version', () async {

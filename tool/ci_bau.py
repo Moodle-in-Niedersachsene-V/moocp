@@ -20,11 +20,24 @@ def auswahl(text):
     return [p for p in PLATTFORMEN if p in werte]
 
 
-def matrix(platform, message):
+def aufgabe(task, message):
+    """Umfang: ausdrücklich gewählt, sonst aus dem Commit-Marker, sonst alles."""
+    return task or ('tests' if '[ci:tests]' in message else 'builds' if '[ci:builds]' in message else 'all')
+
+
+def matrix(platform, message, task='', gedeckt=False):
+    """Aufträge je Plattform. `gedeckt`: Für Linux laufen Prüfung und Tests in `Checks` schon."""
     plattformen = auswahl(platform) if platform else [p for p in PLATTFORMEN if f'[ci:{p}]' in message]
     plattformen = plattformen or ['linux']
+    umfang = aufgabe(task, message)
     runner = {'linux': 'ubuntu-24.04', 'windows': 'windows-2022', 'macos': 'macos-26'}
-    return {'include': [{'platform': p, 'runner': runner[p]} for p in plattformen]}
+    include = []
+    for p in plattformen:
+        tests = umfang != 'builds' and not (gedeckt and p == 'linux')
+        builds = umfang != 'tests'
+        if tests or builds:
+            include.append({'platform': p, 'runner': runner[p], 'tests': tests, 'builds': builds})
+    return {'include': include}
 
 
 def run(*args):
@@ -42,7 +55,9 @@ def main():
     parser.add_argument('--matrix', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.matrix:
-        print(json.dumps(matrix(os.environ.get('PLATFORM', ''), os.environ.get('MESSAGE', ''))))
+        env = os.environ.get
+        print(json.dumps(matrix(env('PLATFORM', ''), env('MESSAGE', ''), env('TASK', ''), env('COVERED') == 'true'),
+                         separators=(',', ':')))
         return
     if args.install_linux and (not sys.platform.startswith('linux') or args.platform != ['linux'] or args.download is None):
         parser.error('--install-linux braucht einen Linux-Rechner, nur linux und --download RUN_ID.')

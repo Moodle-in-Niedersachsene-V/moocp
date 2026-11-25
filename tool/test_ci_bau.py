@@ -11,7 +11,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import ci_bau
+# Auch mit `python -I` und aus jedem Arbeitsverzeichnis: das Skript liegt daneben.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_bau  # noqa: E402
 
 
 class CiBauTest(unittest.TestCase):
@@ -50,9 +52,38 @@ class CiBauTest(unittest.TestCase):
             with self.subTest(requested=requested):
                 self.assertEqual([r['platform'] for r in ci_bau.matrix(requested, '')['include']], expected)
         self.assertEqual(ci_bau.matrix('', '[ci:macos] [ci:windows]')['include'],
-                         [{'platform': 'windows', 'runner': 'windows-2022'}, {'platform': 'macos', 'runner': 'macos-26'}])
+                         [{'platform': 'windows', 'runner': 'windows-2022', 'tests': True, 'builds': True},
+                          {'platform': 'macos', 'runner': 'macos-26', 'tests': True, 'builds': True}])
         with self.assertRaises(argparse.ArgumentTypeError):
             ci_bau.auswahl('linux,unknown')
+
+    def test_task_comes_from_input_or_marker(self):
+        self.assertEqual(ci_bau.aufgabe('tests', '[ci:builds]'), 'tests')
+        self.assertEqual(ci_bau.aufgabe('', 'x [ci:builds]'), 'builds')
+        self.assertEqual(ci_bau.aufgabe('', 'x [ci:tests]'), 'tests')
+        self.assertEqual(ci_bau.aufgabe('', 'x [ci:linux]'), 'all')
+
+    def test_tasks_select_tests_and_builds(self):
+        for task, tests, builds in [('all', True, True), ('tests', True, False), ('builds', False, True)]:
+            with self.subTest(task=task):
+                entry, = ci_bau.matrix('windows', '', task)['include']
+                self.assertEqual((entry['tests'], entry['builds']), (tests, builds))
+
+    def test_linux_tests_are_not_repeated_where_checks_already_cover_the_commit(self):
+        # Mit offenem Pull Request laufen Prüfung und Tests auf Linux schon in `Checks`.
+        entries = {e['platform']: e for e in ci_bau.matrix('all', '', 'all', gedeckt=True)['include']}
+        self.assertEqual((entries['linux']['tests'], entries['linux']['builds']), (False, True))
+        self.assertTrue(entries['windows']['tests'] and entries['macos']['tests'])
+        # Nur Tests auf Linux, schon gedeckt: kein Auftrag.
+        self.assertEqual(ci_bau.matrix('linux', '', 'tests', gedeckt=True), {'include': []})
+        # Ohne Deckung (kein Pull Request) bleibt der Auftrag vollständig.
+        self.assertTrue(ci_bau.matrix('linux', '', 'all')['include'][0]['tests'])
+
+    def test_matrix_output_is_compact_json_for_the_empty_check(self):
+        with patch.dict(ci_bau.os.environ, {'PLATFORM': 'linux', 'TASK': 'tests', 'COVERED': 'true', 'MESSAGE': ''}), \
+                patch.object(sys, 'argv', ['ci_bau.py', '--matrix']), contextlib.redirect_stdout(io.StringIO()) as out:
+            ci_bau.main()
+        self.assertEqual(out.getvalue().strip(), '{"include":[]}')
 
     def test_request_pushes_only_current_feature_branch_with_selected_platform(self):
         self.execute('linux', '--task', 'builds')

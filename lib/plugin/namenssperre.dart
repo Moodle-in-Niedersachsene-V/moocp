@@ -1,20 +1,16 @@
-// Die letzte Sperre gegen Namen (E36): Jede Antwort eines Plugins an die KI
-// und jede Zeile, die ein Plugin ins Protokoll schreibt, prüft die App gegen
-// alle Namen, die sie seit ihrem Start für dieses Plugin geladen hat. Hier
-// steht die Regel selbst, ohne Flutter und ohne Ein- und Ausgabe; wo geprüft
-// wird, steht in laufende_plugins.dart (Antworten, Werkzeugliste nach einem
-// Neustart), app_adresse.dart (Protokollzeilen, Aufrufe eingebauter
-// Werkzeuge, Pfade an Moodle) und entwicklung.dart (Werkzeugliste beim
-// Wiederverbinden eines Entwicklungs-Plugins).
+// Die Regel, nach der moocp einen Text auf mögliche Namen prüft (E36): Jede
+// Antwort eines Plugins an die KI und jede Zeile, die ein Plugin ins Protokoll
+// schreibt, prüft die App gegen alle Namen, die sie seit ihrem Start für
+// dieses Plugin geladen hat. Ein Treffer sperrt nichts von selbst: Bei einer
+// Antwort entscheidet die Lehrkraft in einer Datenschutzwarnung, ob sie
+// trotzdem an die KI geht (datenschutz.dart); eine Protokollzeile erscheint
+// nur als Platzhalter. Hier steht die Regel selbst, ohne Flutter und ohne Ein-
+// und Ausgabe; wo geprüft wird, steht in datenschutz.dart (Antworten,
+// Pfade), laufende_plugins.dart und app_adresse.dart.
 //
-// Ebenso, für jedes Plugin, der Pfad des Ordners, in dem die App die Downloads
-// der Plugins ablegt (downloads.dart, [LetzteSperre.pfadSperren]): Wer ihn
-// kennt, kann die Dateien darin mit eigenen Mitteln lesen. Ein Treffer darauf
-// wird behandelt wie einer auf einen Namen; nur die Warnung an die Lehrkraft
-// nennt statt des Worts den Ordner.
-//
-// Die Regel ist bewusst einfach, weil sie die letzte Sperre ist, nicht die
-// erste; Tippfehler, Dateiformate und alles Weitere fängt das Plugin ab:
+// Die Regel ist bewusst einfach; Tippfehler, Dateiformate und alles Weitere
+// fängt das Plugin ab, und falsche Treffer kosten die Lehrkraft nur einen
+// Klick:
 //
 // - Ein Wort ist eine ununterbrochene Folge von Buchstaben, Ziffern und
 //   Zeichen, die zu einem Buchstaben gehören (kombinierende Akzente, Unicode
@@ -24,38 +20,40 @@
 //   Komma, Schrägstrich, Unterstrich, Klammern, Anführungszeichen, Zeichen
 //   aus HTML und JSON. Der Unterstrich trennt, damit `erika_mustermann` in
 //   einem Dateinamen trifft; der Apostroph, damit „Brien“ auch allein trifft.
-// - Namen zerfallen nach derselben Regel in Teile, und jeder Teil sperrt für
-//   sich, schon der Vorname allein: „Müller-Lüdenscheidt“ sperrt
+// - Namen zerfallen nach derselben Regel in Teile, und jeder Teil trifft für
+//   sich, schon der Vorname allein: „Müller-Lüdenscheidt“ trifft
 //   „Müller-Lüdenscheidt“, „Müller“ und „Lüdenscheidt“. Wer die Klasse kennt,
 //   erkennt eine Person oft am Vornamen.
 // - Getroffen wird nur ein ganzes Wort („Max“ trifft nicht „Maximal“), ohne
-//   Mindestlänge (auch „Li“ und „Jo“ sperren), gleich in welcher Groß- und
+//   Mindestlänge (auch „Li“ und „Jo“ treffen), gleich in welcher Groß- und
 //   Kleinschreibung.
 // - Die Schreibweise von Umlauten und Akzenten zählt nicht: ä, ö, ü treffen
 //   ae, oe, ue und auch a, o, u, ß trifft ss, und Akzente fallen weg („René“
 //   = „Rene“). Ob ein Akzent als eigenes Zeichen kommt oder mit dem
 //   Buchstaben verbunden (Unicode-Normalform NFD oder NFC), ist gleich.
-// - Falsche Treffer sind in Kauf genommen: Ein Max in der Klasse sperrt auch
-//   „max. 10 Punkte“. Deshalb sieht die Lehrkraft das Wort, das getroffen hat.
-// - Leere Teile und reine Satzzeichen sperren nichts.
+// - Falsche Treffer sind in Kauf genommen: Ein Max in der Klasse trifft auch
+//   „max. 10 Punkte“. Deshalb sieht die Lehrkraft das Wort im Zusammenhang
+//   und entscheidet.
+// - Leere Teile und reine Satzzeichen treffen nichts.
 // - Einfache Kodierungen zählen nicht ([kodierungenAufgeloest]): Geprüft wird
 //   der Text, wie er ist, und dazu in den Formen, die sich durch Auflösen von
-//   Prozentkodierung (mit `+` als Leerzeichen), Unicode-Escapes (Backslash,
-//   `u` und vier Hexadezimalziffern wie in JSON, `\u{fc}` wie in JavaScript)
-//   und HTML-Zeichenreferenzen (`&#252;`, `&#xfc;`, `&uuml;`)
-//   ergeben, auch ineinander geschachtelt bis zu einer festen Tiefe. Was sich
-//   nicht auflösen lässt, bleibt stehen, wie es ist; ungültige Kodierung
-//   wirft nie und lässt nie etwas durch, denn die Rohform zählt immer mit.
-//   Das Wort für die Warnung ist das, wie es aufgelöst dasteht.
+//   Unicode-Escapes (Backslash, `u` und vier Hexadezimalziffern wie in JSON,
+//   `\u{fc}` wie in JavaScript) und HTML-Zeichenreferenzen (`&#252;`,
+//   `&#xfc;`, `&uuml;`) ergeben, auch ineinander geschachtelt bis zu einer
+//   festen Tiefe. Was sich nicht auflösen lässt, bleibt stehen, wie es ist;
+//   ungültige Kodierung wirft nie und lässt nie etwas durch, denn die Rohform
+//   zählt immer mit. Prozentkodierung löst die Prüfung nicht auf: Sie kommt in
+//   Antworten von Plugins kaum vor, und falsche Treffer wären häufiger als
+//   echte. Das Wort für die Warnung ist das, wie es aufgelöst dasteht.
 //
 // Nicht abgedeckt: Namen, die ohne Trennung in einem längeren Wort stecken
 // („ErikaMustermann“, „Erikas“), Schreibweisen über das hinaus, was die
 // Tabelle unten kennt (Vollbreitenbuchstaben, Ligaturen wie „ﬁ“, Buchstaben
 // außerhalb der lateinischen Schrift bleiben, wie sie sind, und treffen nur
-// sich selbst), andere Kodierungen (Base64, Kompression, eigene Formate),
-// tiefer geschachtelte Kodierungen und Tippfehler. Base64 bleibt mit
-// Absicht draußen: Jede Folge von Buchstaben ließe sich als Base64 lesen, und
-// die Sperre träfe beliebige Wörter.
+// sich selbst), andere Kodierungen (Prozent, Base64, Kompression, eigene
+// Formate), tiefer geschachtelte Kodierungen und Tippfehler. Base64 bleibt
+// mit Absicht draußen: Jede Folge von Buchstaben ließe sich als Base64 lesen,
+// und die Prüfung träfe beliebige Wörter.
 //
 // Schnell auch bei vielen Namen und langen Texten: Jedes Wort des Texts wird
 // einmal in seine Vergleichsform gebracht und in einer Menge nachgeschlagen;
@@ -65,87 +63,30 @@
 // keinem Protokoll, keiner Einstellung, keiner Fehlermeldung und keiner
 // Antwort. Darum hat keine Klasse hier ein toString, das sie nennt, und es gibt
 // keinen Weg, sie auszulesen oder zu entfernen.
-//
-// Prüfen lässt sich ein Text aber ([LetzteSperre.pruefen], für
-// `/v1/namen/pruefen`): Ein Plugin erfährt, wo in seinem Text die Sperre
-// träfe, nach genau dieser Regel und gegen genau diese Namen, damit es seine
-// Antwort vorher bereinigt, statt einen Werkzeugfehler zu bekommen. Es erfährt
-// dabei, welche seiner Wörter gesperrte Namen sind, auch solche, die es nicht
-// selbst genannt hat (die Teilnehmenden eines Laufs, die angemeldete
-// Lehrkraft). Das ist in Kauf genommen: Geschützt wird die KI, nicht das
-// Plugin vor Daten, die es über seine Zusatzadressen ohnehin bekommt (E36).
 
-import 'dart:convert';
+import '../datenschutzwarnung.dart' show Herkunft;
 
 /// Ein Wort im Sinn der Sperre (siehe oben).
 final _wort = RegExp(r'[\p{L}\p{N}\p{M}\p{Cf}]+', unicode: true);
 
-/// Wie oft die Sperre Kodierungen ineinander auflöst: genug für eine dreifach
-/// prozentkodierte Folge oder eine prozentkodierte HTML-Referenz, und klein
-/// genug, dass ein langer Text schnell geprüft ist (höchstens 15 Formen).
+/// Wie oft die Prüfung Kodierungen ineinander auflöst: genug für eine
+/// dreifach verschachtelte Referenz, und klein genug, dass ein langer Text
+/// schnell geprüft ist (höchstens drei Formen zusätzlich).
 const _kodierTiefe = 3;
 
 /// [text], wie er ist, und danach jede verschiedene Form, die sich durch
-/// Auflösen von Prozentkodierung ([_prozentAufgeloest]) oder von
-/// Unicode-Escapes und HTML-Zeichenreferenzen ([_escapesAufgeloest])
-/// ergibt, Stufe für Stufe bis zur [_kodierTiefe]. Faul: Wer schon in der
-/// Rohform trifft, löst nichts auf.
+/// Auflösen von Unicode-Escapes und HTML-Zeichenreferenzen
+/// ([_escapesAufgeloest]) ergibt, Stufe für Stufe bis zur [_kodierTiefe].
+/// Faul: Wer schon in der Rohform trifft, löst nichts auf.
 Iterable<String> kodierungenAufgeloest(String text) sync* {
   yield text;
-  final gesehen = <String>{text};
-  var stufe = [text];
-  for (var i = 0; i < _kodierTiefe && stufe.isNotEmpty; i++) {
-    final naechste = <String>[];
-    for (final t in stufe) {
-      for (final neu in [_prozentAufgeloest(t), _escapesAufgeloest(t)]) {
-        if (identical(neu, t) || !gesehen.add(neu)) continue;
-        naechste.add(neu);
-        yield neu;
-      }
-    }
-    stufe = naechste;
+  var aktuell = text;
+  for (var i = 0; i < _kodierTiefe; i++) {
+    final neu = _escapesAufgeloest(aktuell);
+    if (identical(neu, aktuell) || neu == aktuell) return;
+    yield neu;
+    aktuell = neu;
   }
-}
-
-/// Der Wert einer Hexadezimalziffer (Code-Einheit [c]); -1, wenn [c] keine ist.
-int _hexwert(int c) => switch (c) {
-  >= 0x30 && <= 0x39 => c - 0x30,
-  >= 0x41 && <= 0x46 => c - 0x41 + 10,
-  >= 0x61 && <= 0x66 => c - 0x61 + 10,
-  _ => -1,
-};
-
-/// [s] mit aufgelöster Prozentkodierung und `+` als Leerzeichen, wie ein
-/// Formular oder eine Adresse es meint. Folgen von `%HH` gelten als UTF-8;
-/// was darin kein gültiges UTF-8 ist, wird zum Ersatzzeichen U+FFFD, und ein
-/// `%` ohne zwei Hexadezimalziffern bleibt stehen. Ohne `%` und `+` kommt
-/// [s] selbst zurück.
-String _prozentAufgeloest(String s) {
-  if (!s.contains('%') && !s.contains('+')) return s;
-  final aus = StringBuffer();
-  final bytes = <int>[];
-  void leeren() {
-    if (bytes.isEmpty) return;
-    aus.write(utf8.decode(bytes, allowMalformed: true));
-    bytes.clear();
-  }
-
-  for (var i = 0; i < s.length; i++) {
-    final c = s.codeUnitAt(i);
-    if (c == 0x25 && i + 2 < s.length) {
-      final hoch = _hexwert(s.codeUnitAt(i + 1));
-      final tief = _hexwert(s.codeUnitAt(i + 2));
-      if (hoch >= 0 && tief >= 0) {
-        bytes.add(hoch << 4 | tief);
-        i += 2;
-        continue;
-      }
-    }
-    leeren();
-    aus.write(c == 0x2b ? ' ' : s[i]);
-  }
-  leeren();
-  return aus.toString();
 }
 
 /// Unicode-Escapes wie in JSON und JavaScript (`\uXXXX`, `\u{X…}`) und
@@ -290,11 +231,15 @@ final Map<int, (String, String)> _tabelle = () {
   return (mitE.toString(), ohne.toString());
 }
 
+/// Ein Wort in einer Form eines Texts, das einen Namensteil trifft, mit Anfang
+/// und Ende (ausschließlich) in UTF-16-Codeeinheiten.
+typedef NamenFund = ({int anfang, int ende, Set<Herkunft> herkunft});
+
 /// Die Namen eines Plugins, gegen die die App seine Texte prüft. Namen
 /// lassen sich nur hinzufügen, nie entfernen oder abfragen.
 class Namenssperre {
-  /// Die Vergleichsformen aller Namensteile.
-  final _teile = <String>{};
+  /// Die Vergleichsformen aller Namensteile, je mit ihrer Herkunft.
+  final _teile = <String, Set<Herkunft>>{};
 
   /// Die verschiedenen Namen, je als Folge ihrer Teile; nur zum Zählen.
   final _namen = <String>{};
@@ -306,7 +251,7 @@ class Namenssperre {
   /// Ob noch kein Name geladen ist.
   bool get leer => _teile.isEmpty;
 
-  /// Ob [name] mindestens einen Teil hat, der sperrt: nicht leer, nicht nur
+  /// Ob [name] mindestens einen Teil hat, der trifft: nicht leer, nicht nur
   /// Satzzeichen.
   static bool hatTeile(String name) => _teileVon(name).isNotEmpty;
 
@@ -316,19 +261,28 @@ class Namenssperre {
       if (_formen(m[0]!) case final f when f.$1.isNotEmpty) f,
   ];
 
-  /// Nimmt [namen] auf; jeder Teil jedes Namens sperrt von nun an für sich.
-  /// Namen ohne Teile (leer, nur Satzzeichen) sperren nichts.
-  void hinzufuegen(Iterable<String> namen) {
+  /// Nimmt [namen] aus [herkunft] auf; jeder Teil jedes Namens trifft von nun
+  /// an für sich. Namen ohne Teile (leer, nur Satzzeichen) treffen nichts.
+  void hinzufuegen(Iterable<String> namen, {Herkunft herkunft = Herkunft.pluginName}) {
     for (final name in namen) {
       final teile = _teileVon(name);
       if (teile.isEmpty) continue;
       _namen.add(teile.map((t) => t.$1).join(' '));
       for (final (mitE, ohne) in teile) {
-        _teile
-          ..add(mitE)
-          ..add(ohne);
+        (_teile[mitE] ??= {}).add(herkunft);
+        (_teile[ohne] ??= {}).add(herkunft);
       }
     }
+  }
+
+  Set<Herkunft>? _herkunft(String wort) {
+    final (mitE, ohne) = _formen(wort);
+    if (mitE.isEmpty) return null;
+    final a = _teile[mitE];
+    final b = _teile[ohne];
+    if (a == null) return b;
+    if (b == null || identical(a, b)) return a;
+    return {...a, ...b};
   }
 
   /// Das erste Wort in [text] oder einer seiner aufgelösten Formen
@@ -338,208 +292,20 @@ class Namenssperre {
     if (_teile.isEmpty || text.isEmpty) return null;
     for (final form in kodierungenAufgeloest(text)) {
       for (final m in _wort.allMatches(form)) {
-        final w = m[0]!;
-        final (mitE, ohne) = _formen(w);
-        if (mitE.isEmpty) continue;
-        if (_teile.contains(mitE) || _teile.contains(ohne)) return w;
+        if (_herkunft(m[0]!) != null) return m[0];
       }
     }
     return null;
   }
 
-  /// Jedes Wort in [text], so wie er dasteht, das einen Namensteil trifft,
-  /// als Anfang und Ende (ausschließlich) in UTF-16-Codeeinheiten, der
-  /// Reihenfolge nach. Die aufgelösten Formen des Texts sieht diese Suche
-  /// nicht; dafür [LetzteSperre.pruefen].
-  List<(int, int)> fundstellen(String text) {
-    if (_teile.isEmpty || text.isEmpty) return const [];
-    return [
-      for (final m in _wort.allMatches(text))
-        if (_formen(m[0]!) case (final mitE, final ohne)
-            when mitE.isNotEmpty && (_teile.contains(mitE) || _teile.contains(ohne)))
-          (m.start, m.end),
-    ];
-  }
-}
-
-/// Das Ergebnis von [LetzteSperre.pruefen]: wo die Sperre im Text träfe.
-///
-/// [stellen] sind die Wörter, die einen Namen treffen, so wie der Text
-/// dasteht, als Anfang und Ende in UTF-16-Codeeinheiten. [kodiert] heißt: Auch
-/// wenn diese Stellen fehlen, träfe die Sperre noch, und zwar erst nach dem
-/// Auflösen einer Kodierung; wo genau, lässt sich im Rohtext nicht sagen.
-/// [pfad] heißt: Der Text nennt den Ordner für Downloads. Sind [stellen] leer
-/// und beide Angaben falsch, sperrt die App den Text nicht.
-typedef NamenPruefung = ({List<(int, int)> stellen, bool kodiert, bool pfad});
-
-/// Wo die letzte Sperre gegriffen hat, wie es die Warnung an die Lehrkraft
-/// nennt.
-enum SperrStelle {
-  ergebnis('Antwort an die KI'),
-  protokollzeile('Protokollzeile'),
-  werkzeugliste('Werkzeugliste'),
-  werkzeugaufruf('Aufruf eines Werkzeugs von moocp'),
-  moodle('Anfrage an Moodle');
-
-  const SperrStelle(this.text);
-  final String text;
-}
-
-/// Ein Treffer der letzten Sperre, für die Warnung an die Lehrkraft: Plugin,
-/// Werkzeug (null, wenn es keinen Aufruf gab), die Stelle und das Wort, so
-/// wie es im Text stand. Nur für die Anzeige in der App; das Wort geht in
-/// kein Protokoll und an keine KI. Bei [pfad] hat nicht ein Name getroffen,
-/// sondern der Pfad des Ordners für Downloads (downloads.dart); [wort] ist
-/// dann dieser Pfad.
-class SperrTreffer {
-  SperrTreffer({
-    required this.plugin,
-    required this.werkzeug,
-    required this.stelle,
-    required this.wort,
-    this.pfad = false,
-    DateTime? zeit,
-  }) : zeit = zeit ?? DateTime.now();
-
-  /// Der Anzeigename des Plugins.
-  final String plugin;
-  final String? werkzeug;
-  final SperrStelle stelle;
-  final String wort;
-  final bool pfad;
-  final DateTime zeit;
-
-  /// Ohne das Wort: Ein Treffer, der versehentlich in einer Ausgabe landet,
-  /// trägt den Namen nicht mit.
-  @override
-  String toString() => 'SperrTreffer(${stelle.name})';
-}
-
-/// Die Namen aller Plugins, je Plugin (nach Kurzname) getrennt: Namen, die
-/// ein Plugin geladen hat, sperren nur seine eigenen Texte. Eine Menge für
-/// die ganze App, über alle Instanzprofile; sie überlebt das Ende eines
-/// Aufrufs, einen Neustart des Plugins und das Wiederverbinden eines
-/// Entwicklungs-Plugins und endet mit der App.
-class LetzteSperre {
-  LetzteSperre({this.melden});
-
-  /// Bekommt jeden Treffer, für die Warnung an die Lehrkraft; null ohne
-  /// Oberfläche (Tests). Gesperrt wird auch ohne.
-  final void Function(SperrTreffer treffer)? melden;
-
-  final _je = <String, Namenssperre>{};
-
-  /// Die gesperrten Pfade in ihrer Vergleichsform ([_pfadform]), mit dem
-  /// Pfad, wie er genannt wurde, und dem letzten Teil der Vergleichsform für
-  /// die schnelle Vorprüfung.
-  final _pfade = <String, ({String pfad, String letzter})>{};
-
-  /// Nimmt [namen] für das Plugin [kurzname] auf.
-  void namenHinzufuegen(String kurzname, Iterable<String> namen) =>
-      (_je[kurzname] ??= Namenssperre()).hinzufuegen(namen);
-
-  /// Sperrt den Pfad eines Ordners (der Ordner für Downloads, downloads.dart)
-  /// für jedes Plugin: Jeder Text, der ihn enthält, trifft. Verglichen wird
-  /// als Teil des Texts, ohne Rücksicht auf Groß- und Kleinschreibung, mit
-  /// `\` und `/` als gleichwertigen Trennern, auch doppelt (`\\` in JSON) oder
-  /// gemischt. So trifft auch eine Datei darin und eine Adresse mit
-  /// `file:///`. Wie bei Namen zählen die aufgelösten Formen des Texts mit
-  /// ([kodierungenAufgeloest]: Prozentkodierung, Unicode-Escapes,
-  /// HTML-Zeichenreferenzen). Nicht erkannt werden andere Kodierungen
-  /// (Base64) und Kurznamen für einen anderen Teil des Pfads als den
-  /// gesperrten; die Sperre bleibt die letzte, nicht die erste.
-  void pfadSperren(String pfad) {
-    var f = _pfadform(pfad);
-    while (f.endsWith('/')) {
-      f = f.substring(0, f.length - 1);
+  /// Jedes Wort in [form], das einen Namensteil trifft, der Reihenfolge
+  /// nach. [form] ist ein Text oder eine seiner aufgelösten Formen
+  /// ([kodierungenAufgeloest]); die aufgelösten sieht diese Suche nicht.
+  Iterable<NamenFund> fundeIn(String form) sync* {
+    if (_teile.isEmpty || form.isEmpty) return;
+    for (final m in _wort.allMatches(form)) {
+      if (_herkunft(m[0]!) case final h?) yield (anfang: m.start, ende: m.end, herkunft: h);
     }
-    final letzter = f.split('/').last;
-    // Ein Laufwerk oder die Wurzel allein sperrte jeden Pfad.
-    if (letzter.isEmpty || !f.contains('/')) return;
-    _pfade[f] = (pfad: pfad, letzter: letzter);
-  }
-
-  static String _pfadform(String s) => s.toLowerCase().replaceAll(RegExp(r'[\\/]+'), '/');
-
-  /// Der gesperrte Pfad, den [text] oder eine seiner aufgelösten Formen
-  /// ([kodierungenAufgeloest]) nennt, so wie er gesperrt wurde; sonst null.
-  String? _pfadIn(String text) {
-    if (_pfade.isEmpty || text.isEmpty) return null;
-    for (final t in kodierungenAufgeloest(text)) {
-      final klein = t.toLowerCase();
-      String? form;
-      for (final MapEntry(key: f, value: (:pfad, :letzter)) in _pfade.entries) {
-        if (!klein.contains(letzter)) continue;
-        form ??= _pfadform(t);
-        if (form.contains(f)) return pfad;
-      }
-    }
-    return null;
-  }
-
-  /// Wie viele verschiedene Namen für das Plugin [kurzname] geladen sind.
-  int anzahl(String kurzname) => _je[kurzname]?.anzahl ?? 0;
-
-  /// Das erste Wort aus [texte], das einen Namen des Plugins [kurzname]
-  /// trifft, oder der gesperrte Pfad, den einer der Texte nennt; null ohne
-  /// Treffer.
-  String? treffer(String kurzname, Iterable<String> texte) => _suchen(kurzname, texte)?.wort;
-
-  ({String wort, bool pfad})? _suchen(String kurzname, Iterable<String> texte) {
-    final s = _je[kurzname];
-    final namen = s != null && !s.leer;
-    if (!namen && _pfade.isEmpty) return null;
-    for (final t in texte) {
-      final w = namen ? s.treffer(t) : null;
-      if (w != null) return (wort: w, pfad: false);
-      final pfad = _pfadIn(t);
-      if (pfad != null) return (wort: pfad, pfad: true);
-    }
-    return null;
-  }
-
-  /// Wo die Sperre in [text] des Plugins [kurzname] träfe ([NamenPruefung]),
-  /// ohne Warnung an die Lehrkraft: Es geht nichts hinaus.
-  ///
-  /// [NamenPruefung.kodiert] ergibt sich so: Die Stellen im Rohtext werden
-  /// durch Leerzeichen gleicher Länge ersetzt und der Rest mit der ganzen
-  /// Regel geprüft, also auch in seinen aufgelösten Formen. Leerzeichen
-  /// trennen nur und bilden keine neue Kodierung; was dann noch trifft, steckt
-  /// in einer Kodierung. Ersetzt ein Plugin die Stellen durch eigenen Text,
-  /// kann der mit den Nachbarzeichen Neues ergeben (`%4` vor einem Ersatz, der
-  /// mit `1` beginnt); wer sichergehen will, prüft das Ergebnis noch einmal.
-  NamenPruefung pruefen(String kurzname, String text) {
-    final s = _je[kurzname];
-    final stellen = s?.fundstellen(text) ?? const <(int, int)>[];
-    var kodiert = false;
-    if (s != null && !s.leer) {
-      final rest = StringBuffer();
-      var bis = 0;
-      for (final (anfang, ende) in stellen) {
-        rest
-          ..write(text.substring(bis, anfang))
-          ..write(' ' * (ende - anfang));
-        bis = ende;
-      }
-      rest.write(text.substring(bis));
-      kodiert = s.treffer(rest.toString()) != null;
-    }
-    return (stellen: stellen, kodiert: kodiert, pfad: _pfadIn(text) != null);
-  }
-
-  /// Prüft [texte] des Plugins [kurzname] und meldet einen Treffer der
-  /// Lehrkraft ([melden]). Liefert true, wenn gesperrt ist.
-  bool gesperrt(
-    String kurzname,
-    Iterable<String> texte, {
-    required String plugin,
-    required String? werkzeug,
-    required SperrStelle stelle,
-  }) {
-    final t = _suchen(kurzname, texte);
-    if (t == null) return false;
-    melden?.call(SperrTreffer(plugin: plugin, werkzeug: werkzeug, stelle: stelle, wort: t.wort, pfad: t.pfad));
-    return true;
   }
 }
 

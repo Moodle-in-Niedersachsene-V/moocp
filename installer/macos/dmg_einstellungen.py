@@ -2,7 +2,7 @@
 # (tool/mac_dmg.sh, E24). dmgbuild führt diese Datei aus und gibt ihr die
 # Werte aus -D als `defines`.
 #
-# Das Fenster ist so groß wie der Hintergrund (560 × 360), ohne Symbolleiste,
+# Das Fenster ist so groß wie der Hintergrund (560 × 440), ohne Symbolleiste,
 # Pfadleiste und Statusleiste: links die App, rechts die Verknüpfung auf
 # /Applications, dazwischen der Pfeil aus dem Hintergrund. Die Verknüpfung
 # heißt „Programme“, weil der Finder den Namen einer Verknüpfung nicht
@@ -31,9 +31,9 @@ show_tab_view = False
 show_toolbar = False
 show_pathbar = False
 show_sidebar = False
-window_rect = ((200, 120), (560, 360))
+window_rect = ((200, 120), (560, 440))
 default_view = "icon-view"
 show_icon_preview = False
 icon_size = 128
 text_size = 13
-icon_locations = {name: (140, 150), "Programme": (420, 150)}
+icon_locations = {name: (140, 170), "Programme": (420, 170)}

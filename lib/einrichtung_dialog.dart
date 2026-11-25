@@ -329,6 +329,7 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
       _zeile(ws.gewaehlt ? 'Skills ($skillNamen)' : 'Skills', '${w.id}/skills', _skillsAktuell(ws), _skillText(ws)),
       if (ws.brauchtEtwas && w.hindernis != null)
         Padding(padding: const EdgeInsets.only(left: 40), child: _hinweis(w.hindernis!)),
+      if (w.hinweis != null) Padding(padding: const EdgeInsets.only(left: 40), child: _hinweis(w.hinweis!)),
     ];
   }
 
@@ -414,7 +415,7 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
             if (s != null) ...[
               for (final ws in s.werkzeuge) ..._werkzeug(ws),
               if (s.werkzeuge.isEmpty)
-                _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex CLI und LM Studio. '
+                _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex (ChatGPT-App oder CLI) und LM Studio. '
                     'Eines davon installieren und einmal starten, danach „Nochmal prüfen".'),
               // Das Wählbare für sich, damit es nicht wie ein Pflichtteil aussieht.
               if (s.werkzeuge.isNotEmpty && s.skills.any((x) => s.wahlSkills.containsKey(x.name))) ...[

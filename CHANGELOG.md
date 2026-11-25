@@ -1,6 +1,13 @@
 # Changelog
 
 ## 0.13.0
+- Einrichtung: Auf dem Mac findet moocp Codex auch, wenn es nur in der ChatGPT-App installiert ist, und nennt es „Codex (ChatGPT-App oder CLI)“.
+- Neu: Testversionen (Nightlies) mit den neuesten Änderungen gibt es auf GitHub, für Windows, Linux und den Mac.
+- Plugins: Bei einem möglichen Namen oder geschützten Pfad in einer Antwort entscheidet jetzt die Lehrkraft, und ein Plugin kann moocp Pfade nennen, die nicht an die KI gehören.
+- Kurskonventionen: Das CLAUDE-Verzeichnis steht beim Schreiben am Anfang seines Abschnitts.
+- Sicherungen: Die Datei, die eine Sicherung in Moodle zurücklässt, lässt sich nach Ihrer Freigabe löschen.
+- Einstellungen: Beim Wechsel zwischen Versionen gehen unbekannte Einstellungen nicht mehr verloren.
+- Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - KI-Werkzeuge einrichten: Der Dialog sagt bei jedem Werkzeug, wo die Verbindung wirkt, etwa in Claude Desktop nur im Reiter „Code“.
 - Lesen: Bricht ein Lesen ab oder schlägt fehl, bleibt der zuletzt gelesene Stand erhalten.
 - Mehrere Seiten speichern: Wurde ein Ordner während der Freigabe neu gelesen, wird keine Seite des Stapels gespeichert.
@@ -8,6 +15,7 @@
 - Fragen: Fragenkategorien lassen sich umbenennen und verschieben, auch in eine andere Fragensammlung des Kurses.
 - Fragen: Fragen lassen sich in eine andere Kategorie des Kurses verschieben.
 - Fragen löschen: moocp fragt auf jeder Stufe, jede Frage einzeln, und sichert sie vorher als XML.
+- Fragensammlungen löschen: moocp fragt auf jeder Stufe und sichert die Fragen vorher als XML.
 - Entwicklung: Desktop-Bauten auf GitHub gezielt für Linux, Windows und macOS anfordern und geprüfte Linux-Bauten regulär installieren.
 - Fragen: Jede importierte Frage und Version wird aus Moodle zurückgelesen und geprüft; fehlgeschlagene Prüfungen und zur manuellen Prüfung stehen gebliebene Versionen werden ausdrücklich gemeldet.
 - Fragen: Bestehende Fragen lassen sich über ihr Moodle-XML als neue Version einspielen, mit Verlauf, Sachnummer und Plätzen in Tests – wo Moodle das Plugin „Import question as new version“ hat.
@@ -15,11 +23,9 @@
 - Speichern: Eine Sperre nach unklarem Ausgang heben Sie jetzt selbst in den Einstellungen auf.
 - Gruppenwahl und Bildergalerie: Beschreibungstext und normale Optionen bestehender Aktivitäten bearbeiten; Bild- und Dateiänderungen bleiben ausdrücklich gesperrt.
 - Lesen von Aktivitäten: Hängende Bildabrufe enden mit einer Meldung; abgebrochene Formular- und Bildabrufe blockieren keine weiteren Leseaufrufe.
-- Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind.
-- Wiederherstellung: Linkunterschiede bleiben erkennbar; Anhangsreparaturen schützen inzwischen geänderte Dateien und fremde Aktivitäten, und ihre vollständigen Befunde bleiben im Status erhalten.
+- Speichern: Nach einem Verbindungsabbruch bleibt der Ausgang auch bei Sammeländerungen ausdrücklich unklar; eine Statusabfrage prüft den Speicherstand, bevor weitere Änderungen möglich sind, und Sie können die Sperre in der App aufheben, wenn Sie in Moodle nachgesehen haben. Lehnt Moodle ein Formular ab oder weicht der Stand beim Zurücklesen ab, bleibt das Objekt nicht gesperrt.
 - Kursstruktur: Aktivitäten lassen sich einrücken und ausrücken, beim Anlegen und beim Verschieben; die App prüft danach auch eine ausdrücklich gewünschte Einrückung 0.
-- Wiederherstellung: Die App vergleicht auch die Texte einschließlich bedeutenden Leerraums mit der Sicherung; Einstellungen vergleicht sie weiterhin nicht, und der Bericht nennt, was ungeprüft blieb.
-- Wiederherstellung: Fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren; die Freigabe nennt jede Datei, und die Prüfung allein schreibt nichts.
+- Wiederherstellung: Die App vergleicht Texte (auch Links, einschließlich bedeutenden Leerraums) und Anhänge mit der Sicherung und meldet, was ungeprüft bleibt; Einstellungen vergleicht sie weiterhin nicht; fehlende oder abweichende Bilder und Anhänge lassen sich auf Wunsch reparieren, und ersetzt wird eine abweichende Datei nur nach Ihrer ausdrücklichen Bestätigung.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.
 - Moodle-Profile: Beim Start meldet moocp alle Profile mit gespeicherten Anmeldedaten an, nicht nur das ausgewählte.
 - Lernlandkarten: Die Übersicht einer Karte zeigt je Ort, ob er verknüpft, fehlend, fremd oder nicht prüfbar ist.

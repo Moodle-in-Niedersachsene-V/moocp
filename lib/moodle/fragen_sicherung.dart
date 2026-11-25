@@ -83,3 +83,72 @@ Future<String> fragenSichern(String ordner, int sammlung, List<({int id, String 
         '(Moodles Export ist kein lesbares XML).');
   }
 }
+
+
+/// Die Sicherung einer ganzen Fragensammlung vor ihrem Löschen: eine Datei
+/// `sammlung-<cmid>-geloescht-<Zeitstempel>.xml` mit jeder Kategorie als
+/// `<question type="category">` und den Fragen darunter (aktuelle Version jeder
+/// Frage). Die Fragen lassen sich mit fragen_importieren wieder einspielen.
+/// Verborgene Fragen liefert Moodles Export nicht, sie fehlen also.
+///
+/// UNGEMESSEN: der Kategoriename im Format `$module$/top/<Pfad>` (so schreibt
+/// Moodle die Kategorien einer Sammlung beim Export mit Kategorien; hier von Hand gebaut, weil der
+/// Export der App die Kategorie bewusst weglässt) und ob ein Import sie so wieder anlegt.
+/// Die Fragen selbst stehen unabhängig davon in der Datei und lassen sich einzeln importieren.
+///
+/// Geprüft wird wie bei [fragenSichern]: Die Datei wird zurückgelesen und muss jede
+/// Frage enthalten. Scheitert etwas, wird sie entfernt und [MoodleFehler] geworfen.
+Future<String> sammlungSichern(String ordner, int sammlung, List<({List<String> pfad, String? xml})> kategorien,
+    {DateTime? jetzt}) async {
+  try {
+    final b = XmlBuilder();
+    b.processing('xml', 'version="1.0" encoding="UTF-8"');
+    final erwartet = <int>{};
+    b.element('quiz', nest: () {
+      for (final k in kategorien) {
+        final pfad = k.pfad.map((n) => n.replaceAll('/', '%2F')).join('/');
+        b.element('question', attributes: {'type': 'category'}, nest: () {
+          b.element('category', nest: () => b.element('text', nest: '\$module\$/top/$pfad'));
+        });
+        if (k.xml == null) continue;
+        for (final n in XmlDocument.parse(k.xml!).rootElement.children) {
+          if (n is XmlElement || n is XmlComment) b.xml(n.toXmlString());
+        }
+        erwartet.addAll([for (final f in fragenAusXml(k.xml!)) if (f.id != null) f.id!]);
+      }
+    });
+    final bytes = utf8.encode(b.buildDocument().toXmlString());
+    if (bytes.length > sicherungGrenzeBytes) {
+      throw MoodleFehler('Die Sicherung wäre größer als ${sicherungGrenzeBytes ~/ (1024 * 1024)} MB.');
+    }
+    await Directory(ordner).create(recursive: true);
+    final t = jetzt ?? DateTime.now();
+    String z(int n) => n.toString().padLeft(2, '0');
+    final stempel = '${t.year}${z(t.month)}${z(t.day)}-${z(t.hour)}${z(t.minute)}${z(t.second)}';
+    var datei = File(p.join(ordner, 'sammlung-$sammlung-geloescht-$stempel.xml'));
+    for (var i = 2; datei.existsSync(); i++) {
+      datei = File(p.join(ordner, 'sammlung-$sammlung-geloescht-$stempel-$i.xml'));
+    }
+    await datei.writeAsBytes(bytes, flush: true);
+    try {
+      final zurueck = await datei.readAsString(encoding: utf8);
+      final ids = {for (final f in fragenAusXml(zurueck)) f.id};
+      final fehlt = [for (final i in erwartet) if (!ids.contains(i)) i];
+      if (zurueck.isEmpty || fehlt.isNotEmpty) {
+        throw MoodleFehler('Die Sicherung enthält nicht alle Fragen (fehlt: ${fehlt.join(', ')}).');
+      }
+    } catch (_) {
+      if (datei.existsSync()) datei.deleteSync();
+      rethrow;
+    }
+    return datei.path;
+  } on MoodleFehler catch (e) {
+    throw MoodleFehler('Abgebrochen, nichts gelöscht: Die Sicherung vor dem Löschen ist gescheitert (${e.meldung}).');
+  } on FileSystemException catch (e) {
+    throw MoodleFehler('Abgebrochen, nichts gelöscht: Die Sicherung vor dem Löschen ist gescheitert '
+        '(${e.osError?.message ?? e.message}, ${p.basename(e.path ?? ordner)}).');
+  } on XmlException {
+    throw MoodleFehler('Abgebrochen, nichts gelöscht: Die Sicherung vor dem Löschen ist gescheitert '
+        '(Moodles Export ist kein lesbares XML).');
+  }
+}

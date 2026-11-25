@@ -50,6 +50,9 @@ import 'wiederherstellung_fragen.dart';
 /// Vorgänge, die gerade laufen (Freigabe oder Abfrage) in dieser Sitzung der App.
 final Set<String> _laufend = {};
 
+/// Ob in dieser App gerade eine Sicherung läuft (sicherung_loeschen wartet dann ab).
+bool get sicherungLaeuft => _laufend.isNotEmpty;
+
 /// Uhr und Wartezeit. Nur Testnähte: Tests setzen sie auf
 /// einen Zeitverlauf, damit Zeitlimit und Stillstand ohne echtes Warten laufen.
 DateTime Function() jetzt = DateTime.now;
@@ -446,9 +449,25 @@ class Vorgaenge {
 
   /// Hängt einen Befund unter der Speichersperre an den frischen Vorgang an.
   /// Parallele Reparaturen verschiedener Aktivitäten dürfen einander nicht verdrängen.
-  Future<void> befundAnhaengen(Vorgang v, String befund) => _speichern(v, befund: befund);
+  /// Mit [ersetzt] (der Anfang der Befundzeile) fällt ein früherer Befund mit demselben
+  /// Anfang weg: Der Status wächst sonst mit jeder Reparatur derselben Aktivität.
+  static String _ohneBefund(String text, String anfang) {
+    // Ein Befund reicht bis zur nächsten Zeile, die mit „Anhangsreparatur: " beginnt.
+    const kopf = 'Anhangsreparatur: ';
+    final zeilen = text.split('\n');
+    final aus = <String>[];
+    var weg = false;
+    for (final z in zeilen) {
+      if (z.startsWith(kopf)) weg = z.startsWith(anfang);
+      if (!weg) aus.add(z);
+    }
+    return aus.join('\n');
+  }
 
-  Future<void> _speichern(Vorgang v, {String? befund}) {
+  Future<void> befundAnhaengen(Vorgang v, String befund, {String? ersetzt}) =>
+      _speichern(v, befund: befund, ersetzt: ersetzt);
+
+  Future<void> _speichern(Vorgang v, {String? befund, String? ersetzt}) {
     final vorher = _schreibend[_schluessel] ?? Future<void>.value();
     final schreiben = vorher.catchError((Object _) {
       // Ein früher fehlgeschlagener Auftrag meldet seinen Fehler selbst; ein
@@ -460,7 +479,7 @@ class Vorgaenge {
         if (i < 0) throw MoodleFehler('Der Vorgang fehlt; Reparaturbefund konnte nicht gespeichert werden.');
         final frisch = liste[i];
         pruefeBindung(frisch);
-        frisch.text = '${frisch.text}\n$befund';
+        frisch.text = '${ersetzt == null ? frisch.text : _ohneBefund(frisch.text, ersetzt)}\n$befund';
         frisch.aktualisiert = DateTime.now();
       } else if (i < 0) {
         liste.add(v);
@@ -948,6 +967,7 @@ Future<String> _geladenePruefen(Vorgaenge vorgaenge, Vorgang vg, File ziel, int 
       text: '');
   return [
     'Gesichert: ${vg.datei} ($bytes Bytes, Nummer ${vg.id}). verified: true',
+    if (vg.dateiname != null) 'Name der Datei in Moodle (für sicherung_loeschen): ${vg.dateiname}',
     archivPruefbericht(befund.ungeprueft),
     if (befund.code.isNotEmpty)
       'Achtung: Die Datei enthält Code im Text oder in Dateien (${befund.code.length} '
@@ -1004,7 +1024,8 @@ String _zeile(Vorgang v) {
   final hinweis = v.text.isEmpty ? '' : '\n${v.text}';
   final wer = v.auswahl ?? 'cmid ${v.cmid}';
   final folge = _offen(v) ? '\nFolgeaufruf: sicherung_status ${v.id}' : '';
-  return '${v.id} · Kurs ${v.kurs} · $wer · ${v.stand.text} · ${v.datei}$verified$hinweis$folge';
+  final inMoodle = v.dateiname != null && !_offen(v) ? '\nName der Datei in Moodle: ${v.dateiname}' : '';
+  return '${v.id} · Kurs ${v.kurs} · $wer · ${v.stand.text} · ${v.datei}$verified$hinweis$inMoodle$folge';
 }
 
 bool _offen(Vorgang v) => v.wiederherstellung != null

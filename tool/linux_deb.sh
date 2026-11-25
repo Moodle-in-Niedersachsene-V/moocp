@@ -19,9 +19,12 @@ cd "$(dirname "$0")/.."
 unset MOOCP_TESTZUGANG_PROFILE MOOCP_TESTZUGANG MOOCP_TESTZUGANG_ADRESSE
 bash tool/linux_bau.sh release
 BUNDLE="build/linux/x64/release/bundle"
-VERSION="$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml | head -1)"
+VERSION="$(sed -nE 's/^version: *([0-9][0-9.]*(-[0-9A-Za-z.]+)?).*/\1/p' pubspec.yaml | head -1)"
 [[ -n "$VERSION" ]] || { echo 'Version in pubspec.yaml nicht gefunden' >&2; exit 1; }
 AUS="installer/moocp_${VERSION}_amd64.deb"
+# Eine Nightly (0.13.0-nightly.20261124.1) ist für dpkg älter als die stabile
+# Version: Dort kündigt „~“ eine Vorabversion an, „-“ eine Paketrevision.
+DEB_VERSION="${VERSION/-/\~}"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 R="$T/root"
@@ -52,7 +55,7 @@ find "$R" -type f -perm -u+x -exec chmod 755 {} +
 SIZE="$(du -sk "$R" | cut -f1)"
 cat > "$R/DEBIAN/control" <<CTRL
 Package: moocp
-Version: $VERSION
+Version: $DEB_VERSION
 Architecture: amd64
 Maintainer: moocp <noreply@users.noreply.github.com>
 Installed-Size: $SIZE

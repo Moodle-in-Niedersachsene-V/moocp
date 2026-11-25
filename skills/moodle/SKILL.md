@@ -23,7 +23,7 @@ Moodle-Instanz hat einen eigenen Server mit eigenem Präfix (etwa
 | Anlegen | `aktivitaet_anlegen`, `abschnitt_anlegen`, `buchkapitel_anlegen`, `wikiseite_schreiben` |
 | Ändern | `aendern`, `aendern_mehrere`, `links_setzen`, `claude_schreiben`, `fortschrittsliste_aendern`, `board_aendern`, `kanban_aendern`, `bewertungsschema_setzen`, `buch_ordnen`, `buchkapitel_verschieben` |
 | Kursrahmen | `sichtbarkeit_setzen`, `verschieben`, `duplizieren`, `loeschen`, `buchkapitel_loeschen`, `wikiseite_loeschen` |
-| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status` |
+| Sichern | `sichern_aktivitaet`, `sichern_auswahl`, `sicherung_status`, `sicherung_loeschen` |
 | Wiederherstellen | `wiederherstellen_datei`, `wiederherstellung_status`, `anhaenge_reparieren` |
 | Übertragung | `uebertragen` |
 | Ansehen | `bildschirmfoto` |
@@ -152,7 +152,7 @@ ein Ja im Chat ersetzt sie nicht.
 
 Was du gerade selbst verborgen angelegt hast, ist dabei noch nichts Bestehendes: Es zu füllen oder zu ändern, solange es verborgen ist — die Spalten eines neuen Boards, die Fragen eines neuen Tests, die Links zwischen den Blättern einer neuen Lernsituation —, gehört zum Anlegen und fragt wie dieses erst bei „alle". Kopien zählen nicht dazu; bei ihnen zeigt die Freigabe, was sich gegenüber dem Original ändert.
 
-**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
+**Wie viele Bestätigungen kommen, stellt die Lehrkraft in der App ein**, und `status` nennt die Stufe. Sieh dort nach, bevor du Freigaben ankündigst: Bei „alle" kommt eine vor jedem Schreibvorgang, auch vor verborgen Angelegtem, Kopien und importierten Fragen — dann gehört in den Plan, wie viele Fenster das werden (eines je Werkzeugaufruf; was ein Aufruf zusammen erledigt, bündelt die App). Bei „keine" entfallen Schreibfreigaben; Bildschirmfotos, fachliche Karten-Zuordnungen, das Löschen von Fragen und von Fragensammlungen und das Ersetzen eines Kursinhalts beim Wiederherstellen brauchen weiterhin eine Entscheidung in der App. Kündige nur die tatsächlich erforderlichen Dialoge an, und sag nach der Arbeit, was geschrieben wurde, statt auf eine Bestätigung zu verweisen. Die Stufe gehört allein der Lehrkraft: Schlag nie vor, sie zu senken, auch nicht, wenn viele Freigaben anstehen. Beim Plan ändert sie nichts — der kommt immer.
 <!-- >>> gemeinsam/plan.md -->
 
 <!-- <<< gemeinsam/ueberarbeiten.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -279,6 +279,13 @@ Frage mit `aendern_status` und der genannten Vorgangsnummer lesend nach;
 wiederhole den Schreibauftrag nicht. Auch ein noch unveränderter Ausgangsstand
 gibt keine Wiederholung frei, denn Moodle könnte den Auftrag noch verarbeiten.
 Ein erneutes Lesen oder Neustarten der App hebt diese Sperre nicht auf.
+Hat die Lehrkraft in Moodle nachgesehen und will das Objekt wieder ändern
+lassen (die Anfrage kam nie an, sie hat es von Hand in Ordnung gebracht, oder
+bei einer Frage ist der Stand nicht prüfbar), ruf `aendern_status` mit
+`sperre_aufheben` auf: Die App fragt dann die Lehrkraft, du entscheidest es
+nicht und bietest es nie von dir aus an. Lehnt Moodle ein Formular nur ab oder
+weicht der zurückgelesene Stand ab, gibt es keine Sperre; lies frisch und plane
+neu.
 <!-- >>> gemeinsam/protokoll.md -->
 
 <!-- <<< gemeinsam/bildschirmfoto.md - von build.py erzeugt, hier nicht bearbeiten -->
@@ -393,9 +400,12 @@ Was dort steht, fragst du nicht noch einmal. Fehlt eine Angabe, die der Auftrag 
 **Der Steckbrief steht nur in der Fassung des Kurses und nur mit dem, was für den ganzen Kurs gilt.** Was eine Lernsituation betrifft, etwa Lernfeld, Zeitrichtwert oder welche Phase im Computerraum läuft, steht in ihrer SchuCu-Tabelle und ihrer Handreichung. Eine Fassung im Abschnitt wiederholt das nicht; sie hält nur eine Abweichung fest, für die dort kein Platz ist.
 
 Geschrieben wird `CLAUDE.md` mit `claude_schreiben`; das Verzeichnis entsteht
-dabei von selbst. Die weiteren Dateien erreichst du über die cmid des
-Verzeichnisses, die in jeder Fassung steht: `aktivitaet_lesen(cmid)` holt sie
-in den Arbeitsordner, `aendern` schreibt sie zurück — hinzufügen, ersetzen,
+dabei von selbst. Steht es nicht am Anfang des Abschnitts, verschiebt das
+Werkzeug es dorthin; dafür gilt die reguläre Freigabe zum Verschieben. Die
+Antwort meldet, ob auch die Position geprüft ist. Die weiteren Dateien erreichst
+du über die cmid des Verzeichnisses, die in jeder Fassung steht:
+`aktivitaet_lesen(cmid)` holt sie in den Arbeitsordner, `aendern` schreibt sie
+zurück — hinzufügen, ersetzen,
 entfernen in `bereiche/files/` wie bei jedem Verzeichnis. Das ganze
 Verzeichnis entfernt `loeschen`.
 
@@ -619,7 +629,7 @@ Buch (`book`), Test (`quiz`), Fragensammlung (`qbank`), Fortschrittsliste
 Lernlandkarte (`learningmap`), die du anlegst und deren Ziele du setzt, deren
 Karte du aber nicht bearbeitest (`references/lernlandkarte.md`).
 
-*Lesen* geht bei allen Typen. Für Forum, Glossar, H5P und die übrigen Plugins ist das Formular nicht gemessen; die App weigert sich mit „Typ … kann die App nicht anlegen" bzw. „Ändern geht bisher für …". Das ist eine **Lücke** (Abschnitt „Was der Skill nicht kann"). Offen bleiben die **Kursrahmen-Aktionen**: Ein von Hand angelegtes Forum darf verborgen, verschoben, dupliziert und gelöscht werden — sie sind typunabhängig. Nicht so die **Fragensammlung** (`qbank`): Sie steht nicht in der Kursstruktur, deshalb geht von diesen vieren nur `loeschen`. Moodle legt sie außerdem immer im allgemeinen Abschnitt an, einerlei welchen du angibst.
+*Lesen* geht bei allen Typen. Für Forum, Glossar, H5P und die übrigen Plugins ist das Formular nicht gemessen; die App weigert sich mit „Typ … kann die App nicht anlegen" bzw. „Ändern geht bisher für …". Das ist eine **Lücke** (Abschnitt „Was der Skill nicht kann"). Offen bleiben die **Kursrahmen-Aktionen**: Ein von Hand angelegtes Forum darf verborgen, verschoben, dupliziert und gelöscht werden — sie sind typunabhängig. Nicht so die **Fragensammlung** (`qbank`): Sie steht nicht in der Kursstruktur, deshalb geht von diesen vieren nur `loeschen`; das fragt auf jeder Stufe, die Lehrkraft hakt jede Kategorie einzeln ab, und die App sichert vorher alle Fragen als XML (verborgene Fragen nie darin). Liste vor dem Aufruf jede Kategorie mit Fragenzahl im Chat auf und warte auf ein ausdrückliches Ja. Moodle legt sie außerdem immer im allgemeinen Abschnitt an, einerlei welchen du angibst.
 
 ### Einrückung auf der Kursseite
 

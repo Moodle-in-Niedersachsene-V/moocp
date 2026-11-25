@@ -416,7 +416,7 @@ class _InstallerSeiteState extends State<InstallerSeite> {
       case _Seite.bestaetigen:
         return const Text(
           'moocp wird entfernt, zusammen mit Einstellungen, Protokoll, Sicherungen, gespeicherten Anmeldedaten und '
-          'Arbeitsordner. Auch die Verbindung in Claude Code und Codex CLI und die Skills der App werden entfernt.',
+          'Arbeitsordner. Auch die Verbindung in Claude Code und Codex (ChatGPT-App oder CLI) und die Skills der App werden entfernt.',
         );
       case _Seite.arbeit:
         return Column(

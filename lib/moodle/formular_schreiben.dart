@@ -568,6 +568,14 @@ void nameSetzen(dom.Element form, Felder f, String name) {
   f.removeWhere((e) => e.key == 'usedefaultname' && e.value != '0');
 }
 
+/// Moodle hat das Formular beantwortet und nicht angenommen (Prüffehler im
+/// Formular, 403 von Moodle oder einem Filter davor): Es wurde nichts
+/// gespeichert. Anders als ein Abbruch ohne Antwort ist der Ausgang bekannt,
+/// darum sperrt er das Objekt nicht (E37).
+class FormularAbgelehnt extends MoodleFehler {
+  FormularAbgelehnt(super.meldung);
+}
+
 /// Sendet das Formular mit „Speichern" (bei Aktivitäten „Speichern und zum
 /// Kurs", das es bei jedem Typ gibt). Erfolg ist eine Umleitung; sonst
 /// sammelt die Meldung Moodles Hinweise aus dem Formular.
@@ -618,7 +626,11 @@ Future<Antwort> absenden(
       feld.isEmpty ? text : '„$feld"${name == null ? '' : ' ($name)'}: $text',
     );
   }
-  throw MoodleFehler(formularAbgelehnt(antwort.status, meldungen));
+  final meldung = formularAbgelehnt(antwort.status, meldungen);
+  // Ab 500 weiß niemand, ob der Server vorher gespeichert hat.
+  throw antwort.status >= 500
+      ? MoodleFehler(meldung)
+      : FormularAbgelehnt(meldung);
 }
 
 /// Die Meldung, wenn Moodle ein Formular nicht annimmt. Bei HTTP 403 ohne
@@ -885,6 +897,24 @@ Future<String> aktivitaetAnlegen(
   bool sichtbar = false,
   Map<String, Object?> einstellungen = const {},
   int? einrueckung,
+}) async => (await aktivitaetAnlegenMitErgebnis(moodle, freigaben, kurs: kurs,
+    abschnittId: abschnittId, typ: typ, name: name, arbeitsordner: arbeitsordner,
+    ordner: ordner, sichtbar: sichtbar, einstellungen: einstellungen,
+    einrueckung: einrueckung)).$1;
+
+/// Bericht, neue cmid und Ergebnis der Rückleseprüfung.
+Future<(String, int?, bool)> aktivitaetAnlegenMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required int kurs,
+  required int abschnittId,
+  required String typ,
+  required String name,
+  required String arbeitsordner,
+  String? ordner,
+  bool sichtbar = false,
+  Map<String, Object?> einstellungen = const {},
+  int? einrueckung,
 }) async {
   if (einrueckung != null) {
     einrueckungPruefen(einrueckung);
@@ -962,6 +992,7 @@ Future<String> aktivitaetAnlegen(
           if (e.value.trim().isNotEmpty) '${e.key}: ${e.value.length} Zeichen',
         for (final e in einstellungen.entries)
           'Einstellung ${e.key}: ${e.value}',
+        if (einrueckung != null) 'Einrückung: Stufe $einrueckung (gehört zum Anlegen)',
         if (kartenVorlage != null)
           'Kartenvorlage: ${(kartenVorlage['orte'] as List).length} Orte, '
               '${(kartenVorlage['wege'] as List).length} Wege; Ziele bleiben zunächst leer.',
@@ -973,9 +1004,9 @@ Future<String> aktivitaetAnlegen(
     ),
   );
   if (!ja) {
-    return 'Nicht angelegt: ${sichtbar ? 'Sichtbares Anlegen' : 'Das Anlegen'} wurde in der App '
+    return ('Nicht angelegt: ${sichtbar ? 'Sichtbares Anlegen' : 'Das Anlegen'} wurde in der App '
         'abgelehnt oder nicht innerhalb von ${freigaben.frist.inMinutes} Minuten freigegeben.'
-        '${sichtbar ? ' Verborgen anlegen braucht nur bei Bestätigungen „alle" eine Freigabe.' : ''}';
+        '${sichtbar ? ' Verborgen anlegen braucht nur bei Bestätigungen „alle" eine Freigabe.' : ''}', null, false);
   }
 
   final vorher = istSammlung
@@ -1071,16 +1102,31 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (!sichtbar) moodle.selbstAngelegt.add(cmid);
-  // Einrücken folgt direkt auf das Anlegen und braucht keine eigene Freigabe.
+  // Einrücken gehört zum Anlegen: Die Freigabe zum Anlegen nennt es, eine eigene
+  // gibt es nicht (E20). Ein Fehler dabei kommt als Ergebnis, nicht als Ausnahme:
+  // Die Aktivität steht schon, und ihre cmid muss in der Antwort bleiben.
   final einr = einrueckung == null
       ? null
       : await einrueckungSetzen(moodle, kurs, cmid, einrueckung);
 
-  final g = await formularLesen(
-    moodle,
-    Formularziel.aktivitaet(cmid),
-    arbeitsordner,
-  );
+  final FormularGelesen g;
+  try {
+    g = await formularLesen(
+      moodle,
+      Formularziel.aktivitaet(cmid),
+      arbeitsordner,
+    );
+  } on MoodleAbgebrochen {
+    rethrow;
+  } on MoodleFehler catch (x) {
+    // Nach dem Anlegen darf ein Lesefehler die cmid nicht verschweigen: Die KI
+    // legte die Aktivität sonst ein zweites Mal an.
+    throw MoodleFehler(
+      '${x.meldung}\nDie Aktivität ist bereits angelegt (${typName(typ)}, cmid $cmid, '
+      '${sichtbar ? 'SICHTBAR' : 'verborgen'}). Nicht erneut anlegen; mit aktivitaet_lesen nachsehen.'
+      '${einr == null ? '' : '\n${einr.text}'}',
+    );
+  }
   final probe = await zuruecklesen(
     g,
     felder: geschrieben,
@@ -1092,6 +1138,8 @@ Future<String> aktivitaetAnlegen(
     // hat keinen eigenen Namen; Moodle bildet ihn aus dem Text.
     name: typ == 'label' ? null : name,
   );
+  // Ein Urteil: Scheitert die Einrückung, ist auch die Rückleseprobe nicht bestanden.
+  if (einr != null) probe.pruefe(einr.ok, 'Einrückung');
   if (typ == 'learningmap') {
     probe.pruefe(g.modul == typ, 'Modultyp (gelesen ${g.modul})');
     probe.pruefe(g.kurs == kurs, 'Kurs (gelesen ${g.kurs})');
@@ -1117,7 +1165,7 @@ Future<String> aktivitaetAnlegen(
     }
   }
   if (angehalten != null) {
-    return inhaltUebergeben(
+    final (bericht, ok) = await _inhaltUebergebenMitErgebnis(
       moodle,
       freigaben,
       ziel: Formularziel.aktivitaet(cmid),
@@ -1126,10 +1174,11 @@ Future<String> aktivitaetAnlegen(
       fehler: angehalten,
       angelegt:
           'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
-          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}'}',
+          '${sichtbar ? "SICHTBAR" : "verborgen"}.\n${probe.text}${einr == null ? '' : '\n${einr.text}.'}',
     );
+    return (bericht, cmid, ok && probe.ok);
   }
-  return [
+  return ([
     'Angelegt: ${typName(typ)} „$angelegt" in $wo, cmid $cmid, '
         '${sichtbar ? "SICHTBAR" : "verborgen"}.',
     if (istSammlung && abschnitt.nummer != 0)
@@ -1142,11 +1191,11 @@ Future<String> aktivitaetAnlegen(
     if (gesetzt.isNotEmpty)
       'Einstellungen: ${gesetzt.map((s) => '${s.label}: ${s.nachher}').join("; ")}.',
     probe.text,
-    if (einr != null) einr.text,
+    if (einr != null) '${einr.text}.',
     'Einstellungen jetzt:',
     wichtigeText(g),
     'Zurückgelesen nach: ${g.ordner}',
-  ].join('\n');
+  ].join('\n'), cmid, probe.ok);
 }
 
 // ---------------------------------------------------------------------------
@@ -1699,7 +1748,16 @@ Future<(String, bool)> _schreibenOhneSperre(
         vorgang.abschliessen();
         return ergebnis;
       }
-      return ('${vorgang.hinweis}\n${ergebnis.$1}', false);
+      // Die Rückleseprobe hat gelesen und Abweichungen gefunden: Der Stand
+      // in Moodle ist bekannt, der Ausgang nicht unklar. Der Vorgang bleibt
+      // dokumentiert, sperrt aber nicht; vor jeder weiteren Änderung wird
+      // frisch gelesen (E17).
+      vorgang.rueckgelesen();
+      return (
+        '${ergebnis.$1}\nMoodle zeigt einen abweichenden Stand (verified: false). '
+            'Frisch lesen und neu planen; der Ordner zeigt den gelesenen Stand.',
+        false,
+      );
     } catch (e) {
       // Vor dem letzten POST gibt es noch keinen Vorgang. Nach seinem Beginn
       // ist auch ein Fehler beim Rücklesen kein Nachweis eines Misserfolgs.
@@ -1787,6 +1845,16 @@ Future<(String, bool)> _schreibenMitProbe(
       vorgang.verwerfen();
       rethrow;
     } on SchutzPruefung {
+      vorgang.verwerfen();
+      rethrow;
+    } on FormularAbgelehnt {
+      vorgang.verwerfen();
+      rethrow;
+    } on AnfrageGesperrt {
+      // Moodle hat die Anfrage nie gesehen.
+      vorgang.verwerfen();
+      rethrow;
+    } on NichtAngemeldet {
       vorgang.verwerfen();
       rethrow;
     }
@@ -1897,6 +1965,17 @@ Future<String> inhaltUebergeben(
   required String arbeitsordner,
   required SchutzPruefung fehler,
   required String angelegt,
+}) async => (await _inhaltUebergebenMitErgebnis(moodle, freigaben, ziel: ziel,
+    felder: felder, arbeitsordner: arbeitsordner, fehler: fehler, angelegt: angelegt)).$1;
+
+Future<(String, bool)> _inhaltUebergebenMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required Formularziel ziel,
+  required Map<String, String> felder,
+  required String arbeitsordner,
+  required SchutzPruefung fehler,
+  required String angelegt,
 }) => ordnerSperre(ordnerSchluessel(ziel, arbeitsordner), () async {
   final g = await formularLesenOhneSperre(moodle, ziel, arbeitsordner);
   for (final e in felder.entries) {
@@ -1908,7 +1987,7 @@ Future<String> inhaltUebergeben(
     ordner: g.ordner,
     arbeitsordner: arbeitsordner,
   );
-  if (a == null) return '$angelegt\nDer Inhalt steht schon so in Moodle.';
+  if (a == null) return ('$angelegt\nDer Inhalt steht schon so in Moodle.', true);
   final (text, ok) = await _uebergeben(
     moodle,
     freigaben,
@@ -1916,14 +1995,14 @@ Future<String> inhaltUebergeben(
     arbeitsordner,
     fehler,
   );
-  return [
+  return ([
     '$angelegt\nMIT PLATZHALTER: Der Schutzdienst vor Moodle hat das Anlegen mit diesem Inhalt '
         'angehalten; angelegt ist es mit „Inhalt folgt.", der Inhalt ging an die Lehrkraft.',
     text,
     if (!ok)
       '${a.kopf()} steht weiter mit Platzhalter im Kurs. Die Lehrkraft fragen, ob es gelöscht '
           'werden soll; nicht ungefragt löschen.',
-  ].join('\n');
+  ].join('\n'), ok);
 });
 
 /// Hält ein Schutzdienst das Speichern an (SchutzPruefung), kann die App es
@@ -2126,12 +2205,19 @@ Future<(String, bool)> _uebergeben(
   }
 }
 
-/// Klärt einen offenen Vorgang ausschließlich lesend. Ein unveränderter Stand
-/// beweist nicht, dass Moodle einen noch laufenden POST später nicht ausführt.
+/// Klärt einen offenen Vorgang lesend. Ein unveränderter Stand beweist nicht,
+/// dass Moodle einen noch laufenden POST später nicht ausführt; er hebt die
+/// Sperre darum nicht von selbst auf. Mit [aufheben] fragt die App die
+/// Lehrkraft (auf jeder Stufe, E20): Sie entscheidet, ob sie in Moodle
+/// nachgesehen hat und die Sperre fällt -- der Ausweg, wenn die Anfrage nie
+/// ankam, die Lehrkraft das Objekt von Hand in Ordnung gebracht hat oder der
+/// Stand nicht prüfbar ist (Fragen).
 Future<String> aendernStatus(
   MoodleZugang moodle, {
   required String vorgang,
   required String arbeitsordner,
+  Freigaben? freigaben,
+  bool aufheben = false,
 }) async {
   final v = Schreibvorgang.laden(moodle, vorgang);
   final ziel = v.ziel;
@@ -2147,10 +2233,45 @@ Future<String> aendernStatus(
         return 'Vorgang $vorgang: Die Lehrkraft hat die Sperre in der App aufgehoben (verified: false). Neu lesen, '
             'bevor etwas geändert wird.';
       }
+      if (j.status == Schreibstatus.rueckgelesen) {
+        return 'Vorgang $vorgang: Moodle wurde nach dem Senden gelesen und weicht vom Ziel ab (verified: false). '
+            'Keine Sperre; frisch lesen und neu planen.';
+      }
+
+      Future<String> ungeklaert(String befund) async {
+        if (!aufheben) {
+          return '${v.hinweis}\n$befund'
+              '${freigaben == null ? '' : '\nHat die Lehrkraft in Moodle nachgesehen und ist die Sperre nicht mehr nötig, '
+                  'aendern_status mit sperre_aufheben aufrufen: Die Lehrkraft entscheidet dann in der App.'}';
+        }
+        if (freigaben == null) return '${v.hinweis}\n$befund\nDie Sperre lässt sich hier nicht aufheben.';
+        final frei = await freigaben.anfragen(FreigabeAnfrage(
+          titel: 'Sperre nach unklarem Speichern aufheben',
+          punkte: [
+            ziel.bezeichnung,
+            befund,
+            'Beim Speichern ist der Ausgang unklar geblieben. Hebt die Sperre auf, wer in Moodle nachgesehen hat '
+                'und weiß, dass die Änderung nicht (mehr) kommt oder nicht mehr gilt.',
+            'Wurde die Anfrage doch noch verarbeitet, kann die Änderung später oder doppelt erscheinen.',
+          ],
+          vergleich: const [],
+          abhaken: const ['Ich habe in Moodle nachgesehen und will dieses Objekt wieder ändern lassen.'],
+          knopf: 'Sperre aufheben',
+          ablehnen: 'Gesperrt lassen',
+          ohneEntscheidung: 'bleibt das Objekt gesperrt',
+          // Eine Entscheidung der Lehrkraft, keine Freigabe zum Schreiben.
+          ab: Bestaetigungen.keine,
+        ));
+        if (!frei) return '${v.hinweis}\n$befund\nDie Lehrkraft hat die Sperre bestehen lassen.';
+        v.verwerfen();
+        return 'Vorgang $vorgang: Sperre auf Entscheidung der Lehrkraft aufgehoben (verified: false, nichts als gespeichert belegt). '
+            'Vor einer weiteren Änderung frisch lesen und planen.';
+      }
+
       // Ohne Umleitungsziel fehlt bei Fragen die neue Versionsnummer. Die alte
       // Frage zurückzulesen wäre ein falscher Nachweis.
       if (ziel.art == Zielart.frage) {
-        return '${v.hinweis}\nNeue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.';
+        return ungeklaert('Neue Fragenversion nicht sicher zuordenbar; durch die Lehrkraft prüfen lassen.');
       }
       final temp = await Directory(arbeitsordner)
           .createTemp('.aendern-status-');
@@ -2165,10 +2286,10 @@ Future<String> aendernStatus(
           return 'Vorgang $vorgang: Zielstand bestätigt (verified: true). '
               'Vor einer weiteren Änderung frisch lesen und planen. Kein POST wiederholt.';
         }
-        return '${v.hinweis}\n${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
-            'Prozessende nicht belegt; durch die Lehrkraft beziehungsweise Verwaltung klären lassen.';
+        return await ungeklaert('${gleichVorher ? 'Ausgangsstand unverändert' : 'Stand weicht vom Ausgangs- und Zielstand ab'}. '
+            'Prozessende nicht belegt.');
       } on MoodleFehler catch (e) {
-        return '${v.hinweis}\nStatus nicht lesbar: ${e.meldung}';
+        return ungeklaert('Status nicht lesbar: ${e.meldung}');
       } finally {
         await temp.delete(recursive: true);
       }
@@ -2196,10 +2317,21 @@ Future<String> aendern(
   required String arbeitsordner,
   Map<String, Object?> einstellungen = const {},
   bool neuSpeichern = false,
+}) async => (await aendernMitErgebnis(moodle, freigaben, ordner: ordner,
+    arbeitsordner: arbeitsordner, einstellungen: einstellungen, neuSpeichern: neuSpeichern)).$1;
+
+/// Bericht und ob der Inhalt bestätigt oder unverändert ist.
+Future<(String, bool)> aendernMitErgebnis(
+  MoodleZugang moodle,
+  Freigaben freigaben, {
+  required String ordner,
+  required String arbeitsordner,
+  Map<String, Object?> einstellungen = const {},
+  bool neuSpeichern = false,
 }) async {
   final quelle = imArbeitsordner(ordner, arbeitsordner);
   final vorgang = Schreibvorgang(moodle, Formularziel.ausOrdner(quelle));
-  if (vorgang.offen) return vorgang.hinweis;
+  if (vorgang.offen) return (vorgang.hinweis, false);
   final schluessel = ordnerSchluessel(
     Formularziel.ausOrdner(quelle),
     arbeitsordner,
@@ -2215,7 +2347,7 @@ Future<String> aendern(
     return (a, a == null ? '' : await _ordnerAbdruck(a.quelle));
   });
   if (a == null) {
-    return 'Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.';
+    return ('Keine Änderung gegenüber dem Stand beim Lesen -- nichts geschrieben.', true);
   }
 
   final ja = await freigaben.anfragen(
@@ -2227,20 +2359,20 @@ Future<String> aendern(
     ),
   );
   if (!ja) {
-    return 'Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
-        '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.';
+    return ('Nicht gespeichert: Die Änderung wurde in der App abgelehnt oder nicht innerhalb von '
+        '${freigaben.frist.inMinutes} Minuten freigegeben. Der Ordner ist unverändert.', false);
   }
   return ordnerSperre(schluessel, () async {
     if (await _ordnerAbdruck(a.quelle) != abdruck) {
-      return 'Nicht gespeichert: Der Ordner ${a.ordner} wurde während der Freigabe neu gelesen oder '
+      return ('Nicht gespeichert: Der Ordner ${a.ordner} wurde während der Freigabe neu gelesen oder '
           'verändert; die freigegebene Änderung gibt es dort nicht mehr. Der Ordner und Moodle sind '
-          'unverändert. Neu lesen und die Änderung noch einmal machen.';
+          'unverändert. Neu lesen und die Änderung noch einmal machen.', false);
     }
     try {
-      return (await _schreibenOhneSperre(moodle, a, arbeitsordner)).$1;
+      return await _schreibenOhneSperre(moodle, a, arbeitsordner);
     } on SchutzPruefung catch (e) {
       // Die Sperre des Ordners hält diese Funktion (aendern).
-      return (await _uebergeben(moodle, freigaben, a, arbeitsordner, e)).$1;
+      return await _uebergeben(moodle, freigaben, a, arbeitsordner, e);
     }
   });
 }

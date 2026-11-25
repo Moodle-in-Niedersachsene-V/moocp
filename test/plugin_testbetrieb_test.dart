@@ -5,7 +5,7 @@
 // Lauf im gebundenen Testkurs frei; Dialoge eines Plugins beantwortet er aus
 // einer Datei neben der Zugangsdatei des Testprofils. Nie automatisch: die
 // Zustimmung, der Dialog eines Entwicklungs-Plugins, Schnittstelle und Update,
-// alles, was auf jeder Stufe fragt, und die letzte Sperre.
+// alles, was auf jeder Stufe fragt, und die Datenschutzprüfung.
 //
 // Auf der einen Seite steht ein HTTP-Client im Test an Stelle eines Plugins,
 // auf der anderen ein Moodle-Doppel; die Testzugänge sind von Hand gebunden,
@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/datenschutzwarnung.dart' show protokollPlatzhalterName, protokollPlatzhalterPfad;
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/testbetrieb.dart' show pluginDialogantwortenDatei;
@@ -27,7 +28,8 @@ import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/beschreibung.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/moodle_schreiben.dart';
-import 'package:moocp/plugin/namenssperre.dart';
+import 'package:moocp/plugin/datenschutz.dart'
+    show DatenschutzAusgang, Datenschutzpruefung, Datenschutzwarnung, Fund, Herkunft;
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:moocp/testschalter.dart';
@@ -93,7 +95,6 @@ void main() {
   late Protokoll protokoll;
   late Freigaben freigaben;
   late PluginDialoge dialoge;
-  late SperrHinweise hinweise;
   late AppAdresse adresse;
 
   /// Die Freigaben und Dialoge, die die Lehrkraft zu sehen bekam; beantwortet
@@ -123,8 +124,7 @@ void main() {
         scheduleMicrotask(() => dialoge.beantworten(d, null));
       }
     });
-    hinweise = SperrHinweise();
-    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, sperre: LetzteSperre(melden: hinweise.melden));
+    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, pruefung: Datenschutzpruefung());
     adresse.pluginAnmelden('beispiel', 'Beispiel', _schluessel, zusatzadressen: _zusatzadressen);
   });
 
@@ -798,7 +798,7 @@ void main() {
       expect(zeilen(), contains(contains('Ein Eintrag der Datei mit vorbereiteten Dialogantworten ist ungültig')));
     });
 
-    test('die letzte Sperre bleibt: Gesperrtes geht nicht hinaus, die Warnung beantwortet niemand', () async {
+    test('die Datenschutzprüfung bleibt: Eine Protokollzeile mit Namen erscheint nur als Platzhalter, ohne Dialog', () async {
       antwortenSchreiben([
         for (final art in ['auswahl', 'eingabe', 'pfad', 'hinweis'])
           {'plugin': 'beispiel', 'art': art, 'titel': 'Gesperrt: möglicher Name', 'antwort': <String, Object?>{}},
@@ -810,9 +810,151 @@ void main() {
 
       final r = await _post(adresse.adresse, pfadProtokoll, {'text': 'Bearbeitet: Erika'}, token: a.token);
 
-      expect(r.status, 422);
+      expect(r.status, 200);
       expect(zeilen().join('\n'), isNot(contains('Erika')));
-      expect(hinweise.offen, hasLength(1));
+      expect(zeilen(), contains(contains('[gesperrt: möglicher Name]')));
+      expect(dialogeGezeigt, isEmpty);
+      expect(gezeigt, isEmpty);
+    });
+  });
+
+  group('Datenschutzwarnung im Testbetrieb', () {
+    late PluginTestMoodle moodle;
+    late MoodleZugang zugang;
+
+    setUp(() async {
+      moodle = PluginTestMoodle();
+      await moodle.starten();
+      zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      await zugang.sesskey();
+    });
+
+    tearDown(() => moodle.server.close(force: true));
+
+    String antwortdatei() => p.join(wurzel.path, pluginDialogantwortenDatei);
+
+    void antwortenSchreiben(List<Map<String, Object?>> antworten) =>
+        File(antwortdatei()).writeAsStringSync(jsonEncode({'antworten': antworten}));
+
+    Map<String, Object?> eintrag(String ausgang, {String werkzeug = 'beispiel_echo'}) => {
+      'plugin': 'beispiel',
+      'art': 'datenschutz',
+      'titel': werkzeug,
+      'antwort': {'ausgang': ausgang},
+    };
+
+    Fund fund(String wort, List<Herkunft> herkunft, {bool pfad = false}) =>
+        Fund(wort: wort, pfad: pfad, herkunft: herkunft, davor: 'Abgabe von ', danach: '');
+
+    Datenschutzwarnung warnung(List<Fund> funde, {String werkzeug = 'beispiel_echo'}) =>
+        Datenschutzwarnung(plugin: 'Beispiel', werkzeug: werkzeug, funde: funde, kurzname: 'beispiel');
+
+    Future<DatenschutzAusgang> fragen(McpDienst d, Datenschutzwarnung w) =>
+        d.datenschutzwarnung(warnung: w, abbruch: Completer<void>().future, aufrufer: 'Plugin „Beispiel“');
+
+    test('„senden“ aus der vorbereiteten Antwort: ohne Dialog, im Protokoll als ohne Lehrkraft beantwortet', () async {
+      antwortenSchreiben([eintrag('senden')]);
+
+      final aus = await fragen(dienst(zugang), warnung([fund('Erika', [Herkunft.teilnehmende(12)])]));
+
+      expect(aus, DatenschutzAusgang.sendenAutomatisch);
+      expect(aus.gesendet && aus.automatisch, isTrue);
+      expect(gezeigt, isEmpty);
+      expect(
+        zeilen(),
+        contains(
+          'Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von Plugin „Beispiel“, '
+          'Werkzeug beispiel_echo, 1 Treffer (Erika) -- trotzdem gesendet',
+        ),
+      );
+    });
+
+    test('„sperren“ aus der vorbereiteten Antwort: ohne Dialog, gesperrt', () async {
+      antwortenSchreiben([eintrag('sperren')]);
+
+      final aus = await fragen(dienst(zugang), warnung([fund('Erika', [Herkunft.lehrkraft])]));
+
+      expect(aus, DatenschutzAusgang.sperrenAutomatisch);
+      expect(aus.gesendet, isFalse);
+      expect(gezeigt, isEmpty);
+      expect(zeilen(), contains(endsWith('1 Treffer (Erika) -- gesperrt')));
+    });
+
+    test('keine vorbereitete Antwort heißt sperren, ohne Dialog', () async {
+      final w = warnung([fund('Erika', [Herkunft.lehrkraft])]);
+      expect(await fragen(dienst(zugang), w), DatenschutzAusgang.sperrenAutomatisch, reason: 'keine Datei');
+
+      final faelle = <List<Map<String, Object?>>>[
+        [eintrag('senden', werkzeug: 'beispiel_anderes')],
+        [{...eintrag('senden'), 'plugin': 'zweites'}],
+        [{...eintrag('senden'), 'art': 'hinweis'}],
+        [eintrag('vielleicht')],
+        [{...eintrag('senden'), 'antwort': null}],
+      ];
+      for (final inhalt in faelle) {
+        antwortenSchreiben(inhalt);
+        expect(await fragen(dienst(zugang), w), DatenschutzAusgang.sperrenAutomatisch, reason: '$inhalt');
+      }
+      File(antwortdatei()).writeAsStringSync('{"antworten": [');
+      expect(await fragen(dienst(zugang), w), DatenschutzAusgang.sperrenAutomatisch, reason: 'ungültige Datei');
+      expect(gezeigt, isEmpty);
+    });
+
+    test('es gilt der erste passende Eintrag, bei jeder Warnung neu gelesen: erst sperren, dann senden', () async {
+      final d = dienst(zugang);
+      final w = warnung([fund('Erika', [Herkunft.lehrkraft])]);
+      antwortenSchreiben([eintrag('sperren'), eintrag('senden')]);
+      expect(await fragen(d, w), DatenschutzAusgang.sperrenAutomatisch);
+
+      antwortenSchreiben([eintrag('senden'), eintrag('sperren')]);
+      expect(await fragen(d, w), DatenschutzAusgang.sendenAutomatisch);
+    });
+
+    test('das Wort steht im Protokoll nur bei Treffern aus dem Testkonto oder einem gebundenen Testkurs', () async {
+      antwortenSchreiben([eintrag('sperren')]);
+
+      await fragen(
+        dienst(zugang),
+        warnung([
+          fund('Anna', [Herkunft.teilnehmende(12)]),
+          fund('Berta', [Herkunft.lehrkraft]),
+          fund('Clara', [Herkunft.teilnehmende(99)]),
+          fund('Dora', [Herkunft.pluginName]),
+          fund('Emma', [Herkunft.lehrkraft, Herkunft.pluginName]),
+          fund('Frieda', [Herkunft.teilnehmende(12), Herkunft.pluginName]),
+          fund('Gerda', [Herkunft.pluginPfad], pfad: true),
+          fund('Hanna', [Herkunft.downloadOrdner], pfad: true),
+          fund('Ida', [Herkunft.teilnehmende(12), Herkunft.teilnehmende(99)]),
+        ]),
+      );
+
+      final zeile = zeilen().singleWhere((z) => z.startsWith('Testbetrieb, ohne Lehrkraft beantwortet'));
+      const n = protokollPlatzhalterName;
+      const pf = protokollPlatzhalterPfad;
+      expect(zeile, contains('9 Treffer (Anna, Berta, $n, $n, $n, $n, $pf, $pf, $n)'));
+      for (final wort in ['Clara', 'Dora', 'Emma', 'Frieda', 'Gerda', 'Hanna', 'Ida']) {
+        expect(zeilen().join('\n'), isNot(contains(wort)), reason: wort);
+      }
+    });
+
+    test('ohne Testbetrieb entscheidet die Lehrkraft: nicht gebundenes Profil, fremde Instanz, kein Bauschalter', () async {
+      antwortenSchreiben([eintrag('senden')]);
+      final w = warnung([fund('Erika', [Herkunft.lehrkraft])]);
+
+      final faelle = <McpDienst Function()>[
+        () => dienst(zugang, kennung: 'fremd'),
+        () => dienst(zugang, adresse: 'https://fremd.schule.example'),
+        () {
+          testbetriebFuerTestsSetzen(false);
+          return dienst(zugang);
+        },
+      ];
+      for (final neu in faelle) {
+        // Die Warnung steht als Dialog an; die Lehrkraft (hier der Listener) sperrt.
+        expect(await fragen(neu(), w), DatenschutzAusgang.sperren);
+      }
+      expect([for (final g in gezeigt) g.datenschutz], [w, w, w]);
+      expect(zeilen().where((z) => z.startsWith('Testbetrieb, ohne Lehrkraft')), isEmpty);
     });
   });
 
@@ -836,8 +978,8 @@ void main() {
       }
     });
 
-    test('die letzte Sperre kennt den Testbetrieb nicht', () {
-      for (final datei in ['lib/plugin/namenssperre.dart', 'lib/plugin/laufende_plugins.dart']) {
+    test('die Datenschutzprüfung kennt den Testbetrieb nicht', () {
+      for (final datei in ['lib/plugin/namenssperre.dart', 'lib/plugin/datenschutz.dart', 'lib/plugin/laufende_plugins.dart']) {
         final text = File(datei).readAsStringSync();
         expect(text, isNot(contains(RegExp(r'testbetriebAktiv|Testzugang|imTest\('))), reason: datei);
       }

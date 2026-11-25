@@ -90,17 +90,28 @@ void main() {
     final r = await probe();
     expect(r.befunde.join(' '), contains('Speichern'));
     expect(moodle.geloescht, isEmpty);
+    expect(r.ausgangUnklar, isFalse);
+    expect(Schreibvorgang(zugang, Formularziel.frage(FragenbankDoppel.sammlung, eintrag.neueste.id)).offen, isFalse);
+  });
+
+  test('Ein Serverfehler beim Speichern bleibt unklar und sperrt weitere Änderungen', () async {
+    moodle.entwurfAbgelehnt = true;
+    moodle.entwurfAblehnungStatus = 500;
+    final r = await probe();
+    expect(r.verified, isFalse);
     expect(r.ausgangUnklar, isTrue);
+    expect(moodle.geloescht, isEmpty);
     expect(Schreibvorgang(zugang, Formularziel.frage(FragenbankDoppel.sammlung, eintrag.neueste.id)).offen, isTrue);
   });
 
-  test('Weicht die Probeversion vom Zielstand ab, bleibt die Sperre und es wird nicht weiter geschrieben', () async {
+  test('Eine bekannte Abweichung sperrt nicht und die direkt bestätigte Probeversion wird entfernt', () async {
     moodle.beimEntwurf = (x) => x.replaceAll('<text>A</text></answer>', '<text>Z</text></answer>');
     final r = await probe();
     expect(r.befunde.join(' '), contains('Unverändert gespeichert'));
-    expect(r.ausgangUnklar, isTrue);
-    expect(moodle.geloescht, isEmpty);
-    expect(eintrag.versionen, hasLength(2));
+    expect(r.ausgangUnklar, isFalse);
+    expect(moodle.geloescht, hasLength(1));
+    expect(eintrag.versionen, hasLength(1));
+    expect(Schreibvorgang(zugang, Formularziel.frage(FragenbankDoppel.sammlung, eintrag.neueste.id)).offen, isFalse);
   });
 
   test('Fehlt die Nummer nach dem Speichern, sperrt ein neuer Aufruf weitere Änderungen', () async {

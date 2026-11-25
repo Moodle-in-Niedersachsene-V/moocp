@@ -25,6 +25,19 @@ class DoppelVersion {
   String get name => XmlDocument.parse('<r>$xml</r>').findAllElements('name').first.innerText.trim();
 }
 
+class DoppelPlatz {
+  DoppelPlatz(this.slotid, this.frage, this.seite, this.punkte);
+  final int slotid;
+  int frage;
+  int seite;
+  double punkte;
+
+  /// Fragensammlung (cmid), aus der der Platz kommt: bei einem festen Platz das Abzeichen der
+  /// geteilten Bank, bei einem Zufallsplatz der Link zur Bank; null: Bank des Tests selbst.
+  int? bank;
+  bool zufall = false;
+}
+
 class DoppelEintrag {
   DoppelEintrag(this.kategorie, this.idnummer, this.typ);
   int kategorie;
@@ -56,6 +69,40 @@ class FragenbankDoppel {
 
   /// Ein Schutzdienst hält die Übersicht der Sammlungen (`banks.php`) an.
   bool schutzBeiBanken = false;
+
+  // --- Kursstruktur (core_courseformat_get_state / _update_course) ---------
+  /// Aktivitäten der Kursstruktur: cmid -> Name, Modul, Abschnitt. Eine Fragensammlung steht
+  /// dort nicht (Moodle 5 zeigt sie nicht auf der Kursseite); wer sie trotzdem braucht, trägt sie ein.
+  final Map<int, ({String name, String modul, int abschnitt})> kursAktivitaeten = {};
+
+  /// Abschnitte der Kursstruktur: id -> Titel.
+  final Map<int, String> kursAbschnitte = {4: 'Allgemein', 5: 'Thema 1'};
+
+  /// Unterabschnitte (mod_subsection): cmid der Aktivität -> id ihres delegierten Abschnitts, der in
+  /// [kursAbschnitte] stehen muss; die Aktivität steht in `kursAktivitaeten` mit Modul `subsection`.
+  final Map<int, int> unterabschnitte = {};
+
+  /// Jeder Aufruf von core_courseformat_update_course: Aktion und ids.
+  final List<({String aktion, List<int> ids})> kursAktionen = [];
+
+  /// Die Löschaktionen melden Erfolg und ändern nichts.
+  bool kursLoeschenWirktNicht = false;
+
+  /// Wird aufgerufen, kurz bevor eine Kursaktion ausgeführt wird.
+  void Function()? beiKursAktion;
+
+  /// Zusammenstellung von Tests: cmid -> Plätze (`mod/quiz/edit.php`, `edit_rest.php`).
+  final Map<int, List<DoppelPlatz>> testPlaetze = {};
+  int _naechsterPlatz = 500;
+
+  /// Wird aufgerufen, kurz bevor ein Platz in einen Test eingefügt wird.
+  void Function()? beiPlatzEinfuegen;
+
+  /// Legt einen Test an: Eintrag der Kursstruktur und Plätze (Frage, Seite, Punkte).
+  void legeTestAn(int cmid, String name, List<(DoppelEintrag, int, double)> plaetze) {
+    kursAktivitaeten[cmid] = (name: name, modul: 'quiz', abschnitt: 5);
+    testPlaetze[cmid] = [for (final (e, seite, punkte) in plaetze) DoppelPlatz(_naechsterPlatz++, e.neueste.id, seite, punkte)];
+  }
 
   /// Die Zusammenstellungsseiten von Tests (`mod/quiz/edit.php`): cmid -> HTML.
   final Map<int, String> quizSeiten = {};
@@ -107,7 +154,10 @@ class FragenbankDoppel {
     return false;
   }
 
-  int _eintraegeIn(int kat) => eintraege.where((e) => e.kategorie == kat && e.versionen.isNotEmpty).length;
+  /// Wie Moodles Kategorieliste: verborgene (in einem Test benutzte, „gelöschte") Fragen zählen nicht
+  /// (auf Moodle 5.1 gemessen).
+  int _eintraegeIn(int kat) =>
+      eintraege.where((e) => e.kategorie == kat && e.versionen.isNotEmpty && !versteckt.contains(e.neueste.id)).length;
 
   int _bank(int kategorie) => bankVon[kategorie] ?? sammlung;
   static int _kontext(int bank) => bank == sammlung ? 55 : 60 + bank;
@@ -119,6 +169,7 @@ class FragenbankDoppel {
   bool formularFehler = false;
   bool vorschauFehler = false;
   bool entwurfAbgelehnt = false;
+  int entwurfAblehnungStatus = 200;
   bool entwurfOhneNummer = false;
   String? stackTestHtml;
 
@@ -137,13 +188,29 @@ class FragenbankDoppel {
   /// Löscht „alle Versionen", auch wenn nur eine gewählt war (Moodle ohne die erwartete Wirkung).
   bool loeschtAlles = false;
 
+  /// Kategorien, deren Export Moodle ohne Download beantwortet (Formular ohne Umleitung).
+  final Set<int> exportAbgelehnt = {};
+
+  /// Die Kategorien, die als Export angefordert wurden.
+  final List<int> exportAufrufe = [];
+
   /// Das Löschen wirkt nicht.
   bool loeschenWirktNicht = false;
 
   /// Versions-ids, die ein Test nutzt: Moodle markiert sie in der Rückfrage mit
-  /// `* ` und verbirgt sie beim Löschen nur (Gemessenes steht in fragen.dart;
-  /// der Export einer verborgenen Frage ist dort als nicht gemessen vermerkt).
+  /// `* ` und verbirgt sie beim Löschen nur. Eine so verborgene Frage fehlt danach
+  /// im Export ihrer Kategorie, lässt sich aber noch einzeln nach id exportieren
+  /// (auf Moodle 5.1 gemessen).
   final Set<int> inBenutzung = {};
+
+  /// Die Rückfrage nennt die Version wie ältere Moodle-Versionen: „Name (Version n)".
+  bool alteVersionsschreibweise = false;
+
+  /// Das Verbergen wirkt nicht: Die benutzte Frage bleibt in ihrer Kategorie.
+  bool verbergenWirktNicht = false;
+
+  /// Versionen, die Moodle in der Fragensammlung ausgeblendet hat.
+  final Set<int> versteckt = {};
 
   /// Verborgene Versionen: Moodle exportiert sie nicht (Fehlerseite mit anderem Code).
   final Set<int> verborgen = {};
@@ -303,13 +370,15 @@ class FragenbankDoppel {
       }
       final f = Uri.splitQueryString(koerper);
       final kat = f['category']!.split(',').first;
+      exportAufrufe.add(int.parse(kat));
+      if (exportAbgelehnt.contains(int.parse(kat))) return _text(r, _seite('<p>Export nicht möglich</p>'));
       return _um(r, '/pluginfile.php/${_kontext(_bank(int.parse(kat)))}/question/export/$kat/export.xml');
     }
     if (RegExp(r'^/pluginfile\.php/\d+/question/export/').hasMatch(pfad)) {
       final kat = int.parse(pfad.split('/')[5]);
       final b = StringBuffer('<?xml version="1.0" encoding="UTF-8"?>\n<quiz>\n');
       for (final e in eintraege.where((e) => e.kategorie == kat)) {
-        if (e.versionen.isEmpty) continue;
+        if (e.versionen.isEmpty || versteckt.contains(e.neueste.id)) continue;
         b.writeln('<!-- question: ${e.neueste.id}  -->');
         b.writeln(_ausgeliefert(e.neueste));
       }
@@ -317,12 +386,46 @@ class FragenbankDoppel {
       return _text(r, b.toString());
     }
     if (pfad == '/mod/quiz/edit.php') {
-      final seite = quizSeiten[int.tryParse(r.uri.queryParameters['cmid'] ?? '')];
+      final cmid = int.tryParse(r.uri.queryParameters['cmid'] ?? '');
+      final plaetze = testPlaetze[cmid];
+      if (plaetze != null && r.uri.queryParameters.containsKey('addquestion')) {
+        beiPlatzEinfuegen?.call();
+        final seite = int.tryParse(r.uri.queryParameters['addonpage'] ?? '') ?? 0;
+        final letzte = plaetze.fold<int>(1, (m, x) => x.seite > m ? x.seite : m);
+        final s = seite == 0 ? letzte : seite;
+        final nach = plaetze.lastIndexWhere((x) => x.seite == s);
+        plaetze.insert(nach < 0 ? plaetze.length : nach + 1,
+            DoppelPlatz(_naechsterPlatz++, int.parse(r.uri.queryParameters['addquestion']!), s, 1));
+        return _um(r, '/mod/quiz/edit.php?cmid=$cmid');
+      }
+      final seite = plaetze != null ? _testSeite(cmid!, plaetze) : quizSeiten[cmid];
       if (seite == null) {
         r.response.statusCode = 404;
         return _text(r, _seite('<p>nicht gefunden</p>'));
       }
       return _text(r, seite);
+    }
+    if (pfad == '/mod/quiz/edit_rest.php') {
+      final f = Uri.splitQueryString(koerper);
+      final plaetze = testPlaetze.values.firstWhere((l) => l.any((x) => '${x.slotid}' == f['id']), orElse: () => []);
+      final platz = plaetze.where((x) => '${x.slotid}' == f['id']).firstOrNull;
+      r.response.headers.contentType = ContentType.json;
+      if (platz == null) {
+        r.response.write(jsonEncode({'error': 'Platz ${f['id']} gibt es nicht'}));
+        return r.response.close();
+      }
+      if (f['action'] == 'DELETE') {
+        plaetze.remove(platz);
+      } else if (f['field'] == 'move') {
+        final davor = plaetze.where((x) => '${x.slotid}' == f['previousid']).firstOrNull;
+        plaetze.remove(platz);
+        platz.seite = int.tryParse(f['page'] ?? '') ?? platz.seite;
+        plaetze.insert(davor == null ? 0 : plaetze.indexOf(davor) + 1, platz);
+      } else if (f['field'] == 'updatemaxmark') {
+        platz.punkte = double.parse(f['maxmark']!);
+      }
+      r.response.write('{}');
+      return r.response.close();
     }
     if (pfad == '/question/banks.php') {
       if (schutzBeiBanken) {
@@ -343,6 +446,36 @@ class FragenbankDoppel {
       };
       if (aufruf['methodname'] == 'core_form_dynamic_form') {
         r.response.write(jsonEncode([_kategorieFormular((aufruf['args'] as Map).cast<String, dynamic>(), fehler)]));
+        return r.response.close();
+      }
+      if (aufruf['methodname'] == 'core_courseformat_get_state') {
+        r.response.write(jsonEncode([
+          {'error': false, 'data': jsonEncode(_kursZustand())}
+        ]));
+        return r.response.close();
+      }
+      if (aufruf['methodname'] == 'core_courseformat_update_course') {
+        final a = (aufruf['args'] as Map).cast<String, dynamic>();
+        final ids = [for (final x in a['ids'] as List) (x as num).toInt()];
+        kursAktionen.add((aktion: '${a['action']}', ids: ids));
+        beiKursAktion?.call();
+        if (!kursLoeschenWirktNicht) {
+          if (a['action'] == 'cm_delete') {
+            for (final id in ids) {
+              _aktivitaetWeg(id);
+            }
+          } else if (a['action'] == 'section_delete') {
+            for (final id in ids) {
+              for (final c in [for (final e in kursAktivitaeten.entries) if (e.value.abschnitt == id) e.key]) {
+                _aktivitaetWeg(c);
+              }
+              kursAbschnitte.remove(id);
+            }
+          }
+        }
+        r.response.write(jsonEncode([
+          {'error': false, 'data': '[]'}
+        ]));
         return r.response.close();
       }
       if (aufruf['methodname'] == 'qbank_managecategories_move_category') {
@@ -417,7 +550,7 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
 <input type="submit" name="submitbutton" value="Änderungen speichern"></form>'''));
       }
       if (entwurfAbgelehnt) {
-        return _text(r, _seite('<form class="mform" method="post"><div class="fitem"><div class="col-form-label">Status</div><div class="alert-danger">Nicht speicherbar</div></div></form>'));
+        return _text(r, _seite('<form class="mform" method="post"><div class="fitem"><div class="col-form-label">Status</div><div class="alert-danger">Nicht speicherbar</div></div></form>'), status: entwurfAblehnungStatus);
       }
       final f = Uri.splitQueryString(koerper);
       final e = eintragVon(v.id)!;
@@ -460,12 +593,14 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       final q = {...r.uri.queryParameters, if (koerper.isNotEmpty) ...Uri.splitQueryString(koerper)};
       if (!q.containsKey('confirm')) {
         final ids = q.keys.where((k) => RegExp(r'^q\d+$').hasMatch(k)).map((k) => k.substring(1)).join(',');
+        // Gemessen auf Moodle 5.1 (deutsche Oberfläche): Aufbau der Rückfrage wörtlich.
         final zeilen = [
           for (final s in ids.split(','))
             if (eintragVon(int.parse(s)) case final e?)
-              for (final v in e.versionen) '${inBenutzung.contains(v.id) ? '* ' : ''}${v.name} (Version ${v.nr})',
+              for (final v in e.versionen)
+                '${inBenutzung.contains(v.id) ? '* ' : ''}${v.name} ${alteVersionsschreibweise ? '(Version ${v.nr})' : 'v${v.nr}'}',
         ].join('<br />');
-        return _text(r, _seite('''<div id="modal-body">$zeilen</div><form method="post" action="/question/bank/deletequestion/delete.php">
+        return _text(r, _seite('''<div role="alert" data-aria-autofocus="true" id="modal-body" class="box py-3 modal-body"><p>Die folgende Fragen und alle ihre Versionen werden gelöscht: <br /><br />$zeilen<br /><br />* Fragen, die in Verwendung sind und nicht gelöscht werden können, werden hiermit gekennzeichnet. Stattdessen werden sie in der Fragensammlung ausgeblendet, außer die Option "Verborgene Fragen anzeigen" ist gewählt.</p></div><form method="post" action="/question/bank/deletequestion/delete.php">
 <input type="hidden" name="sesskey" value="$sesskey"><input type="hidden" name="cmid" value="$sammlung">
 <input type="hidden" name="deleteselected" value="$ids"><input type="hidden" name="deleteall" value="${q['deleteall'] ?? '0'}">
 <input type="hidden" name="confirm" value="${'a' * 32}"><input type="submit" name="x" value="Löschen"></form>'''));
@@ -474,7 +609,7 @@ ${statusFeld ? '<select name="status"><option value="ready"${v.status == 'ready'
       for (final s in q['deleteselected']!.split(',')) {
         final id = int.parse(s);
         if (inBenutzung.contains(id)) {
-          verborgen.add(id);
+          if (!verbergenWirktNicht) versteckt.add(id);
           continue;
         }
         geloescht.add(id);
@@ -545,6 +680,74 @@ ${nurKind ? '' : '<select name="parent">$optionen</select>'}
       }
     }
     return {'error': false, 'data': <Object?>[]};
+  }
+
+  /// Löscht eine Aktivität; eine Fragensammlung nimmt Kategorien und Fragen mit.
+  void _aktivitaetWeg(int cmid) {
+    kursAktivitaeten.remove(cmid);
+    testPlaetze.remove(cmid);
+    if (kursBanken.remove(cmid) != null) {
+      for (final k in [for (final k in kategorien.keys) if (_bank(k) == cmid) k]) {
+        for (final e in eintraege.where((e) => e.kategorie == k)) {
+          e.versionen.clear();
+        }
+        kategorien.remove(k);
+      }
+    }
+  }
+
+  Map<String, dynamic> _kursZustand() => {
+        'course': {'sectionlist': kursAbschnitte.keys.map((i) => '$i').toList()},
+        'section': [
+          for (final a in kursAbschnitte.entries)
+            {
+              'id': '${a.key}',
+              'number': kursAbschnitte.keys.toList().indexOf(a.key),
+              'title': a.value,
+              'visible': true,
+              if (unterabschnitte.containsValue(a.key)) ...{
+                'component': 'mod_subsection',
+                'parentsectionid': '${kursAktivitaeten[unterabschnitte.entries.firstWhere((e) => e.value == a.key).key]?.abschnitt ?? 0}',
+              },
+              'cmlist': [for (final c in kursAktivitaeten.entries) if (c.value.abschnitt == a.key) '${c.key}'],
+            }
+        ],
+        'cm': [
+          for (final c in kursAktivitaeten.entries)
+            {
+              'id': '${c.key}',
+              'name': c.value.name,
+              'module': c.value.modul,
+              'visible': true,
+              'sectionid': '${c.value.abschnitt}',
+              if (unterabschnitte.containsKey(c.key)) 'delegatesectionid': '${unterabschnitte[c.key]}',
+            }
+        ],
+      };
+
+  String _testSeite(int cmid, List<DoppelPlatz> plaetze) {
+    final b = StringBuffer();
+    var seite = 0;
+    var summe = 0.0;
+    for (final x in plaetze) {
+      while (seite < x.seite) {
+        seite++;
+        b.write('<li class="pagenumber" id="page-$seite"></li>');
+      }
+      final v = version(x.frage);
+      summe += x.punkte;
+      final herkunft = x.bank == null
+          ? ''
+          : x.zufall
+              ? '<a class="mod_quiz_random_qbank_link" href="/question/edit.php?cmid=${x.bank}">Bank</a>'
+              : '<div class="sharedbank"><a href="/question/edit.php?cmid=${x.bank}">Bank</a></div>';
+      b.write('<li class="slot ${x.zufall ? 'qtype_random' : 'qtype_shortanswer'}" id="slot-${x.slotid}">'
+          '${x.zufall ? '' : '<a href="/question/bank/editquestion/question.php?cmid=$sammlung&id=${x.frage}">Bearbeiten</a>'}'
+          '$herkunft<span class="questionname">${v?.name ?? 'unbekannt'}</span>'
+          '<span class="instancemaxmark">${x.punkte.toStringAsFixed(2).replaceAll('.', ',')}</span></li>');
+    }
+    return _seite('<script>var q = {"quizid":"7"};</script><ul>$b</ul>'
+        '<p>Summe der Punkte: ${summe.toStringAsFixed(2).replaceAll('.', ',')}</p>');
   }
 
   String _ausgeliefert(DoppelVersion v) => beimExport?.call(v.xml) ?? v.xml;

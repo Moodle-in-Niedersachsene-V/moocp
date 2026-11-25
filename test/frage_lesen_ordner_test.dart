@@ -28,6 +28,10 @@ class _Doppel {
   /// Das Bild bricht mitten im Lesen ab (Verbindung zu), solange gesetzt.
   bool bildAbbrechen = false;
 
+  /// Ein zweites Bild im Formular. Ein einzelnes Bild ohne Antwort ist nur ein
+  /// Befund an der Datei; erst das zweite in Folge bricht das Lesen ab.
+  bool zweitesBild = false;
+
   /// Hält die Antwort auf das Bild an, bis es sich erfüllt; [bildAngefragt]
   /// meldet, dass die Anfrage da ist.
   Completer<void>? bildHalten;
@@ -78,10 +82,11 @@ class _Doppel {
 <input type="hidden" name="sesskey" value="$sesskey">
 <div id="fitem_id_name"><label for="id_name">Fragenname</label><input type="text" name="name" id="id_name" value="ZZ Frage"></div>
 <input type="hidden" name="qtype" value="multichoice">
-<textarea name="questiontext[text]"><p>ZZ Text</p><img src="${basis.resolve('/draftfile.php/55/user/draft/9/bild.png')}" alt="ZZ Bild"></textarea>
+<textarea name="questiontext[text]"><p>ZZ Text</p><img src="${basis.resolve('/draftfile.php/55/user/draft/9/bild.png')}" alt="ZZ Bild">${zweitesBild ? '<img src="${basis.resolve('/draftfile.php/55/user/draft/9/bild2.png')}" alt="ZZ Bild 2">' : ''}</textarea>
 </form>'''));
     }
-    if (pfad == '/draftfile.php/55/user/draft/9/bild.png') {
+    if (pfad == '/draftfile.php/55/user/draft/9/bild.png' ||
+        pfad == '/draftfile.php/55/user/draft/9/bild2.png') {
       if (bildAbbrechen) {
         final socket = await r.response.detachSocket(writeHeaders: false);
         socket.destroy();
@@ -202,6 +207,7 @@ void main() {
     test('Ein Fehler mitten im Lesen erhält den vorherigen vollständigen Stand', () async {
       await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
       doppel.bildAbbrechen = true;
+      doppel.zweitesBild = true;
       await expectLater(
         frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34),
         throwsA(isA<MoodleFehler>()),
@@ -210,12 +216,14 @@ void main() {
       keineReste();
       // Danach geht das Lesen wieder.
       doppel.bildAbbrechen = false;
+      doppel.zweitesBild = false;
       await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
       erwarteStand(ordner());
     });
 
     test('Ein Fehler beim ersten Lesen hinterlässt keinen Ergebnisordner', () async {
       doppel.bildAbbrechen = true;
+      doppel.zweitesBild = true;
       await expectLater(
         frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34),
         throwsA(isA<MoodleFehler>()),
@@ -272,6 +280,7 @@ void main() {
     test('Ein gescheitertes Lesen einer Frage lässt eine gleichzeitig gelesene andere vollständig', () async {
       await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 35);
       doppel.bildAbbrechen = true;
+      doppel.zweitesBild = true;
       final ergebnisse = await Future.wait([
         frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34).then((_) => 'ok', onError: (_) => 'fehler'),
         frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 35).then((_) => 'ok', onError: (_) => 'fehler'),

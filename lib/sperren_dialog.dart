@@ -22,8 +22,10 @@ class SperrenDialog extends StatefulWidget {
 
 class _SperrenDialogState extends State<SperrenDialog> {
   late List<OffeneSperre> _sperren = offeneSperren(widget.moodle);
+  final Set<String> _geprueft = {};
 
   void _aufheben(OffeneSperre s) {
+    if (!_geprueft.remove(s.vorgang)) return;
     sperreAufheben(widget.moodle, s.vorgang);
     setState(() => _sperren = offeneSperren(widget.moodle));
   }
@@ -32,7 +34,7 @@ class _SperrenDialogState extends State<SperrenDialog> {
   Widget build(BuildContext context) => NurMaus(
     child: AlertDialog(
       title: const Text('Offene Sperren'),
-      content: SizedBox(
+      content: SingleChildScrollView(child: SizedBox(
         width: 520,
         child: _sperren.isEmpty
             ? const Text('Es gibt keine offene Sperre.')
@@ -43,21 +45,36 @@ class _SperrenDialogState extends State<SperrenDialog> {
                   const Text(
                     'Bei diesen Objekten blieb nach einer Änderung unklar, ob Moodle sie gespeichert hat. moocp '
                     'ändert sie deshalb nicht noch einmal. Wenn Sie in Moodle nachgesehen haben und die Sperre '
-                    'nicht mehr gebraucht wird, heben Sie sie hier auf; danach wird frisch gelesen.',
+                    'nicht mehr gebraucht wird, heben Sie sie hier auf; danach wird frisch gelesen. Eine noch '
+                    'laufende Anfrage kann später oder doppelt wirken; das Aufheben bestätigt keinen Speichererfolg.',
                   ),
                   const SizedBox(height: 12),
                   for (final s in _sperren)
                     Sperrzeit(
                       builder: (bereit) => Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Expanded(child: Text(s.ziel, style: const TextStyle(fontFamily: 'monospace'))),
-                            const SizedBox(width: 8),
-                            OutlinedButton(
-                              key: Key('aufheben-${s.vorgang}'),
-                              onPressed: bereit ? () => _aufheben(s) : null,
-                              child: const Text('Sperre aufheben'),
+                            Row(children: [
+                              Expanded(child: Text(s.ziel, style: const TextStyle(fontFamily: 'monospace'))),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                key: Key('aufheben-${s.vorgang}'),
+                                onPressed: bereit && _geprueft.contains(s.vorgang) ? () => _aufheben(s) : null,
+                                child: const Text('Sperre aufheben'),
+                              ),
+                            ]),
+                            CheckboxListTile(
+                              key: Key('geprueft-${s.vorgang}'),
+                              title: const Text('Ich habe in Moodle nachgesehen und will dieses Objekt wieder ändern lassen.'),
+                              value: _geprueft.contains(s.vorgang),
+                              onChanged: (an) => setState(() {
+                                if (an == true) {
+                                  _geprueft.add(s.vorgang);
+                                } else {
+                                  _geprueft.remove(s.vorgang);
+                                }
+                              }),
                             ),
                           ],
                         ),
@@ -65,7 +82,7 @@ class _SperrenDialogState extends State<SperrenDialog> {
                     ),
                 ],
               ),
-      ),
+      )),
       actions: [
         Sperrzeit(
           builder: (bereit) => TextButton(

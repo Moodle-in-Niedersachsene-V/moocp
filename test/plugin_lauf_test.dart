@@ -1,6 +1,6 @@
 // Läufe (E36): Ein Plugin liest über seine Zusatzadressen mit der Art „lesen“
 // nur in einem Lauf. Beim Beginn ermittelt moocp den Kurs der Aktivität selbst
-// und lädt die Namen seiner Teilnehmenden in die letzte Sperre; jede Anfrage
+// und lädt die Namen seiner Teilnehmenden in die Datenschutzprüfung; jede Anfrage
 // des Laufs ist an Kurs und Aktivität gebunden. Dazu der Nachtrag zum rohen
 // Lesen: von einer Seite nur der Hauptbereich, nie der sesskey, und der Name
 // der Lehrkraft sperrt. Auf der einen Seite steht ein HTTP-Client im Test an
@@ -15,6 +15,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung, protokollPlatzhalterName;
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
 import 'package:moocp/plugin/app_adresse.dart';
@@ -75,6 +76,15 @@ class _Kontext implements AufrufKontext {
     String? protokolltitel,
     int? laufKurs,
   }) async => PluginFreigabeAusgang.freigegeben;
+
+  /// Die Adresse der App fragt nie die Lehrkraft; nur die laufenden Plugins
+  /// tun es (test/plugin_start_test.dart, test/plugin_datenschutz_test.dart).
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async => DatenschutzAusgang.sperren;
 
   @override
   String? get testDialogantworten => null;
@@ -208,18 +218,18 @@ void main() {
         zeilen(),
         containsAllInOrder([
           'moodle: GET /course/modedit.php?update=501 → 200',
-          'moodle: Letzte Sperre, Namen der Teilnehmenden: GET /user/index.php?id=…&perpage=…&tifirst=…&tilast=… → 200',
+          'moodle: Datenschutzprüfung, Namen der Teilnehmenden: GET /user/index.php?id=…&perpage=…&tifirst=…&tilast=… → 200',
           'info: Plugin „Beispiel“: Lauf begonnen, 4 Namen zum Sperren geladen',
         ]),
       );
       ohneNamen(zeilen().join('\n'));
       for (final n in ['Erika', 'Mustermann', 'Max', 'Lieschen', 'Mueller', 'Paula', 'Musterlehrerin']) {
-        expect(adresse.sperre.treffer('beispiel', [n]), isNotNull, reason: n);
+        expect(adresse.pruefung.treffer('beispiel', [n]), isNotNull, reason: n);
       }
       // Kürzel und Bild gehören nicht zum Namen.
-      expect(adresse.sperre.treffer('beispiel', ['EM PM']), isNull);
+      expect(adresse.pruefung.treffer('beispiel', ['EM PM']), isNull);
       // Nur für dieses Plugin.
-      expect(adresse.sperre.treffer('zweites', ['Erika']), isNull);
+      expect(adresse.pruefung.treffer('zweites', ['Erika']), isNull);
     });
 
     test('ein Kurs ohne Teilnehmende oder nur mit der Lehrkraft ist kein Fehler', () async {
@@ -265,7 +275,7 @@ void main() {
         if (grund != null) expect(r.json['fehler'], contains(grund), reason: fall);
         ohneNamen(r.roh, grund: fall);
         for (final n in ['Erika', 'Max', 'Lieschen']) {
-          expect(adresse.sperre.treffer('beispiel', [n]), isNull, reason: '$fall: $n');
+          expect(adresse.pruefung.treffer('beispiel', [n]), isNull, reason: '$fall: $n');
         }
         moodle.angefragt.clear();
         expect((await lesen(a.token, '/mod/beispiel/bericht.php?id=$cmid')).status, 403, reason: fall);
@@ -294,7 +304,7 @@ void main() {
         await keinLauf('Serverfehler', grund: 'nicht abrufbar');
         moodle.teilnehmendenseite[12] = 'umleitung';
         await keinLauf('Umleitung auf eine andere Form der Seite');
-        expect(zeilen(), contains(startsWith('gesperrt: Letzte Sperre, Namen der Teilnehmenden: Datenschutz-Sperre: GET /user/index.php?id=…')));
+        expect(zeilen(), contains(startsWith('gesperrt: Datenschutzprüfung, Namen der Teilnehmenden: Datenschutz-Sperre: GET /user/index.php?id=…')));
       });
 
       test('die Teilnehmendenseite lässt sich nicht sicher auswerten', () async {
@@ -534,18 +544,27 @@ void main() {
     });
   });
 
-  group('Letzte Sperre', () {
-    test('die Namen des Kurses sperren für dieses Plugin, auch nach dem Ende von Lauf und Aufruf', () async {
+  group('Datenschutzprüfung', () {
+    test('die Namen des Kurses treffen für dieses Plugin, auch nach dem Ende von Lauf und Aufruf: Platzhalter statt Zeile', () async {
       final a = await imLauf();
-      expect((await protokollzeile(a.token, 'Lieschen hat abgegeben')).status, 422);
+      Future<bool> platzhalter(String token, String text) async {
+        final vorher = zeilen().where((z) => z.endsWith(protokollPlatzhalterName)).length;
+        final r = await protokollzeile(token, text);
+        expect(r.status, 200, reason: text);
+        return zeilen().where((z) => z.endsWith(protokollPlatzhalterName)).length == vorher + 1;
+      }
+
+      expect(await platzhalter(a.token, 'Lieschen hat abgegeben'), isTrue);
       await beenden(a.token);
-      expect((await protokollzeile(a.token, 'Müller fehlt')).status, 422);
+      expect(await platzhalter(a.token, 'Müller fehlt'), isTrue);
       a.ende();
       final b = aufruf();
-      expect((await protokollzeile(b.token, 'mustermann')).status, 422);
-      expect((await protokollzeile(b.token, 'Aufgabe 3 fertig')).status, 200);
-      // Ohne Token gilt die Sperre ebenso.
-      expect((await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Erika'})).status, 422);
+      expect(await platzhalter(b.token, 'mustermann'), isTrue);
+      expect(await platzhalter(b.token, 'Aufgabe 3 fertig'), isFalse);
+      // Ohne Token gilt die Prüfung ebenso.
+      final ohne = await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Erika'});
+      expect(ohne.status, 200);
+      expect(zeilen().where((z) => z.endsWith(protokollPlatzhalterName)), hasLength(3), reason: 'ohne Token geht die Zeile ins Protokoll der App');
       ohneNamen(zeilen().join('\n'));
     });
 
@@ -555,34 +574,17 @@ void main() {
       final r = await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
       expect(r.status, 200);
       expect(zugang.lehrkraftNamen, [lehrkraftImDoppel]);
-      expect((await protokollzeile(a.token, 'Frau Musterlehrerin')).status, 422);
+      expect((await protokollzeile(a.token, 'Frau Musterlehrerin')).status, 200);
+      expect(zeilen(), contains('info: Plugin „Beispiel“: $protokollPlatzhalterName'));
       // Für jedes Plugin, das in diesem Profil arbeitet.
       final b = aufruf(kurzname: 'zweites');
       expect(
         (await anAdresse(adresse.adresse, pfadProtokoll, {'text': 'Paula'}, token: b.token, schluessel: _zweiterSchluessel)).status,
-        422,
+        200,
       );
+      expect(zeilen().where((z) => z == 'info: Plugin „Beispiel“: $protokollPlatzhalterName'), hasLength(1));
       ohneNamen(zeilen().where((z) => !z.contains('Paula')).join('\n'));
       expect(zeilen().join('\n'), isNot(contains('Musterlehrerin')));
-    });
-
-    test('/v1/namen/pruefen kennt die Namen des Kurses und der Lehrkraft und nennt nur Stellen', () async {
-      final a = await imLauf();
-      await anAdresse(adresse.adresse, pfadMoodleLesen, {'pfad': '/question/banks.php?courseid=12'}, token: a.token);
-      const text = 'Lieschen und Frau Musterlehrerin: Aufgabe 3';
-
-      final r = await anAdresse(adresse.adresse, pfadNamenPruefen, {'text': text}, token: a.token);
-
-      expect(r.status, 200);
-      expect(r.json, {
-        'stellen': [
-          {'anfang': 0, 'ende': 8},
-          {'anfang': 18, 'ende': 32},
-        ],
-        'kodiert': false,
-        'pfad': false,
-      });
-      expect(zeilen().join('\n'), isNot(contains('Lieschen')));
     });
   });
 

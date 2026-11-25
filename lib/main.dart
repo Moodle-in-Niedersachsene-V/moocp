@@ -834,7 +834,7 @@ class _HauptseiteState extends State<Hauptseite> {
   /// lässt, wird nicht angeboten.
   Future<String> _eigeneVersion() async {
     try {
-      return (await PackageInfo.fromPlatform()).version;
+      return versionOhneBuild(await PackageInfo.fromPlatform());
     } catch (e) {
       widget.protokoll.eintrag(
         Art.fehler,

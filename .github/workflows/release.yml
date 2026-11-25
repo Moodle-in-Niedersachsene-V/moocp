@@ -141,23 +141,24 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          # Die App zeigt eine Nightly ohne „-nightly“, wie auf dem Mac (lib/ueber.dart).
+          $erwartet = $env:VERSION.Replace('-nightly.', '.')
           $out = (& build\windows\x64\runner\Release\moocp.exe --version | Out-String).Trim()
           Write-Host "moocp --version: $out"
-          if (-not $out.StartsWith($env:VERSION)) { throw "Unexpected version: $out" }
+          if (-not $out.StartsWith($erwartet)) { throw "Unexpected version: $out" }
       - name: macOS disk image
         if: matrix.platform == 'macos'
         run: bash tool/mac_dmg.sh
       # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
-      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. Geprüft wird nur, dass sie
-      # mit der Version aus pubspec.yaml beginnt.
+      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. So zeigt die App eine
+      # Nightly auf jeder Plattform (lib/ueber.dart).
       - name: Version of the macOS build
         if: matrix.platform == 'macos'
-        env:
-          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
         run: |
+          erwartet="${VERSION/-nightly./.}"
           out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
           echo "moocp --version: $out"
-          [[ "$out" == "$BASE_VERSION"* ]]
+          [[ "$out" == "$erwartet"* ]]
       - name: Check packages
         run: python tool/ci_release.py check-assets --version "$VERSION" --platform ${{ matrix.platform }}
       - name: Packages

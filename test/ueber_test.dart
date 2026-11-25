@@ -35,4 +35,12 @@ void main() {
     final info = PackageInfo(appName: '', packageName: '', version: '1.0.0', buildNumber: '');
     expect(versionText(info), '1.0.0');
   });
+
+  test('Nightly heißt auf jeder Plattform gleich', () {
+    // Windows und Linux lesen die Version aus pubspec.yaml, der Mac ohne „-nightly".
+    final pubspec = PackageInfo(appName: '', packageName: '', version: '0.13.0-nightly.20261124.2', buildNumber: '2');
+    final mac = PackageInfo(appName: '', packageName: '', version: '0.13.0.20261124.2', buildNumber: '2');
+    expect(versionText(pubspec), '0.13.0.20261124.2+2');
+    expect(versionText(mac), '0.13.0.20261124.2+2');
+  });
 }

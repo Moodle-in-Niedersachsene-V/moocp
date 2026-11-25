@@ -44,7 +44,7 @@
 // seines Schreibvorgangs zugestimmt hat und Moodle nach dem Speichern meist
 // genau dorthin zurückführt. Eine mit der Art „lesen“ genügt nur in einem
 // Lauf (lauf.dart), in dem moocp den Kurs kennt und die Namen seiner
-// Teilnehmenden für die letzte Sperre geladen hat (E36), und nur, wenn das
+// Teilnehmenden für die Datenschutzprüfung geladen hat (E36), und nur, wenn das
 // Ziel zu Kurs und Aktivität des Laufs passt; außerhalb eines Laufs wird
 // solch einem Ziel nicht gefolgt. Wird einer Umleitung nicht gefolgt, sagt
 // die Antwort, dass der Schreibvorgang schon gesendet ist.
@@ -53,7 +53,7 @@
 // Umleitung) bekommt das Plugin nur in einem Lauf und nur, wenn diese Seite
 // zu Kurs und Aktivität des Laufs passt (laufBindungVerletzt, beim POST mit
 // den Formularfeldern): Hinter einer Zusatzadresse ist mit Namen zu rechnen,
-// und nur im Lauf stehen die Namen des Kurses in der letzten Sperre. Sonst
+// und nur im Lauf stehen die Namen des Kurses in der Datenschutzprüfung. Sonst
 // bekommt es nur Status und Pfad bis zum Skriptnamen ([inhaltNurImLauf]).
 // Schreiben selbst geht auch ohne Lauf.
 //
@@ -71,7 +71,7 @@
 // Protokoll (A4): Methode, Pfad bis zum Skriptnamen ([skriptAdresse]), die
 // Namen der Parameter und der Status; nie Werte, nie Formularfelder, nie der
 // Rest des Pfads hinter dem Skriptnamen. Pfad, Parameter- und Feldnamen gehen
-// vorher durch die letzte Sperre (app_adresse.dart).
+// vorher durch die Datenschutzprüfung (app_adresse.dart).
 //
 // Zurücklesen und das Urteil `verified` (A3) sind Sache des Plugins: moocp
 // kann den Inhalt fremder Formulare nicht beurteilen. Die Antwort an die KI
@@ -228,6 +228,14 @@ String zusatzKennzeichnung(String plugin, int anzahl, {int automatisch = 0}) {
 String testantwortenKennzeichnung(String plugin, int anzahl) =>
     'Hinweis von moocp: Debug-Testbetrieb: ${anzahl == 1 ? 'Einen Dialog' : '$anzahl Dialoge'} des Plugins „$plugin“ '
     'hat moocp in diesem Aufruf aus vorbereiteten Antworten beantwortet, ohne die Lehrkraft.';
+
+/// Was moocp vor die Antwort eines Werkzeugs eines Plugins an die KI setzt,
+/// wenn der Testbetrieb die Datenschutzwarnung zu ihr aus einer vorbereiteten
+/// Antwort beantwortet hat (E20). Ein fester Satz ohne Wort und ohne Pfad.
+String datenschutzAutomatischKennzeichnung(String plugin, {required bool gesendet}) =>
+    'Hinweis von moocp: Debug-Testbetrieb: Die Datenschutzwarnung zu dieser Antwort des Plugins „$plugin“ '
+    'hat moocp aus einer vorbereiteten Antwort beantwortet, ohne die Lehrkraft: '
+    '${gesendet ? 'Die Antwort geht unverändert hinaus.' : 'Die Antwort ist gesperrt.'}';
 
 /// Ein Plugin, das über eine seiner Zusatzadressen schreibt, als Aufrufer des
 /// Moodle-Zugangs: der freigegebene POST ([umleitung] false) oder das GET auf

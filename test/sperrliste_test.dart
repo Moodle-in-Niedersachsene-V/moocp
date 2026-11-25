@@ -236,12 +236,12 @@ void main() {
     );
   });
 
-  group('Ausnahme Teilnehmendenseite, nur für die letzte Sperre (E36)', () {
+  group('Ausnahme Teilnehmendenseite, nur für die Datenschutzprüfung (E36)', () {
     const basis = 'https://m.example';
     const genau = '/user/index.php?id=12&perpage=5000&tifirst=&tilast=';
     Uri u(String a) => Uri.parse('$basis$a');
 
-    test('genau diese Form: für die letzte Sperre erlaubt, für alle anderen gesperrt', () {
+    test('genau diese Form: für die Datenschutzprüfung erlaubt, für alle anderen gesperrt', () {
       final z = MoodleZugang(Protokoll());
       expect(sperrregelFuerNamenssperre(u(genau)), isNull);
       expect(z.erlaubtFuerNamenssperre(u(genau)), isTrue);
@@ -256,7 +256,7 @@ void main() {
       expect(weg, isNot(BrowserWeg.ueberApp));
     });
 
-    test('jede andere Form und jede andere Seite zu Personen bleibt auch für die letzte Sperre gesperrt', () {
+    test('jede andere Form und jede andere Seite zu Personen bleibt auch für die Datenschutzprüfung gesperrt', () {
       final z = MoodleZugang(Protokoll());
       for (final a in [
         '/user/index.php?id=12',
@@ -275,7 +275,7 @@ void main() {
       ]) {
         expect(sperrregelFuerNamenssperre(u(a)), isNotNull, reason: a);
       }
-      // Die Positivliste für die letzte Sperre ist ebenso eng.
+      // Die Positivliste für die Datenschutzprüfung ist ebenso eng.
       for (final a in [
         '/user/index.php?id=12&perpage=5000',
         '/user/index.php?id=12&perpage=5000&tifirst=&tilast=&x=1',
@@ -287,7 +287,7 @@ void main() {
       }
     });
 
-    test('genau eine Regel der Positivliste ist für die letzte Sperre, und sie gilt für sonst niemanden', () {
+    test('genau eine Regel der Positivliste ist für die Datenschutzprüfung, und sie gilt für sonst niemanden', () {
       final regeln = MoodleZugang(Protokoll()).positivliste.where((e) => e.nurNamenssperre).toList();
       expect(regeln, hasLength(1));
       expect(regeln.single.methode, 'GET');

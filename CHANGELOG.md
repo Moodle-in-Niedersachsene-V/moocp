@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Plugins: Bei einem möglichen Namen oder geschützten Pfad in einer Antwort entscheidet jetzt die Lehrkraft, und ein Plugin kann moocp Pfade nennen, die nicht an die KI gehören.
 - Kurskonventionen: Das CLAUDE-Verzeichnis steht beim Schreiben am Anfang seines Abschnitts.
 - Sicherungen: Die Datei, die eine Sicherung in Moodle zurücklässt, lässt sich nach Ihrer Freigabe löschen.
 - Einstellungen: Beim Wechsel zwischen Versionen gehen unbekannte Einstellungen nicht mehr verloren.

@@ -12,6 +12,7 @@ import 'dart:math';
 
 import '../freigabe.dart' show Bestaetigungen;
 import '../moodle/moodle_zugang.dart' show MoodleZugang;
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import '../profil.dart';
 import '../protokoll.dart';
 
@@ -160,6 +161,20 @@ abstract interface class AufrufKontext {
     List<String> punkte = const [],
     String? protokolltitel,
     int? laufKurs,
+  });
+
+  /// Hält die Antwort des Plugins [aufrufer] an die KI an und fragt die
+  /// Lehrkraft, ob sie trotzdem hinausgeht ([Datenschutzwarnung], E36):
+  /// durch die Freigaben dieses Profils (Freigaben.anfragen), auf jeder
+  /// Stufe, mit allen Regeln einer Freigabe (nur Maus, Wartezeit, Frist, ein
+  /// Dialog nach dem anderen, Protokoll). Ohne Entscheidung, nach Ablauf der
+  /// Frist und wenn sich [abbruch] erfüllt (der Client wartet nicht mehr),
+  /// gilt [DatenschutzAusgang.sperren]. Der Testbetrieb beantwortet sie aus
+  /// vorbereiteten Dialogantworten (E20).
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
   });
 
   /// Im Testbetrieb mit gebundenem Testprofil der Pfad der Datei mit

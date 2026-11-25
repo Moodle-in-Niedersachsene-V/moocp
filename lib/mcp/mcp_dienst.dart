@@ -2232,7 +2232,9 @@ class McpDienst implements AufrufKontext {
           'es verborgen an, mit einer festen Beschreibung, die Menschen erklärt, was darin liegt. '
           'Gibt es die Datei schon, prüft die App zuerst, dass Moodle noch den Stand vom Lesen '
           'zeigt, und schreibt erst nach Freigabe in der App, die den Zeilenvergleich zeigt. '
-          'Danach Rückleseprobe (verified). Weitere Dateien des Verzeichnisses (Vorlagen, '
+          'Danach Rückleseprobe (verified). Steht das Verzeichnis nicht am Anfang seines '
+          'Abschnitts, verschiebt es das Werkzeug mit regulärer Freigabe und prüft die Reihenfolge. '
+          'Weitere Dateien des Verzeichnisses (Vorlagen, '
           'Skripte, Zeichnungsquellen) mit aktivitaet_lesen und aendern; das ganze Verzeichnis '
           'mit loeschen.',
       parameter: {

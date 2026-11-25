@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Kurskonventionen: Das CLAUDE-Verzeichnis steht beim Schreiben am Anfang seines Abschnitts.
 - Sicherungen: Die Datei, die eine Sicherung in Moodle zurücklässt, lässt sich nach Ihrer Freigabe löschen.
 - Freigaben: Ein Dialog mit einer Bestätigung zum Abhaken läuft unten nicht mehr über, sodass der Text vollständig lesbar ist.
 - Lernsituation: Die Selbstprüfung der Entwürfe ist jetzt in moocp eingebaut und braucht kein Python mehr.

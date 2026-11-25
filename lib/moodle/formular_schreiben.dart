@@ -2567,8 +2567,13 @@ Future<String> aendernMehrere(
         final f = await formularHolen(moodle, a.ziel.adresse);
         _pruefeAenderungsStand(f, a);
       });
+    } on SchutzPruefung {
+      // Diese Seite lässt sich vorab nicht prüfen; beim Schreiben unten übergibt
+      // die App sie der Lehrkraft (E34), und die Prüfung vor dem POST bleibt.
+      continue;
     } on MoodleFehler catch (x) {
-      return '${a.kopf(mitKurs: false)}: ${x.meldung} Nichts gespeichert. Die Ordner sind unverändert.';
+      final nichts = x.meldung.contains('Nichts gespeichert') ? '' : ' Nichts gespeichert.';
+      return '${a.kopf(mitKurs: false)}: ${x.meldung}$nichts Die Ordner sind unverändert.';
     }
   }
 

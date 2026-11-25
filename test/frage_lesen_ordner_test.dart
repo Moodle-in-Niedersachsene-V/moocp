@@ -76,6 +76,13 @@ class _Doppel {
     }
     if (!eingeloggt) return _umleiten(r, '/login/index.php');
     if (pfad == '/my/') return _text(r, _seite('<p>Startseite</p>'));
+    if (pfad == '/mod/book/edit.php') {
+      return _text(r, _seite('''<form class="mform" method="post">
+<input type="hidden" name="sesskey" value="$sesskey">
+<div id="fitem_id_title"><label for="id_title">Kapiteltitel</label><input type="text" name="title" id="id_title" value="ZZ Kapitel"></div>
+<textarea name="content_editor[text]"><p>ZZ Kapiteltext</p></textarea>
+</form>'''));
+    }
     if (pfad == '/question/bank/editquestion/question.php') {
       formulare++;
       return _text(r, _seite('''<form class="mform" method="post">
@@ -274,6 +281,18 @@ void main() {
       await frageLesen(zugang, arbeitsordner.path, sammlung: 12, frage: 34);
       erwarteStand(ordner());
       expect(File(p.join(ordner(), 'halb.html')).existsSync(), isFalse);
+      keineReste();
+    });
+
+    test('Ein Buchkapitel lässt sich lesen, bevor es den Ordner seines Buchs gibt', () async {
+      await formularLesen(zugang, Formularziel.buchkapitel(5, 7), arbeitsordner.path);
+      final kapitel = p.join(arbeitsordner.path, 'buch-5', 'kapitel-7');
+      expect(File(p.join(kapitel, 'content_editor.html')).existsSync(), isTrue);
+      keineReste();
+      // Ein zweites Lesen tauscht den Stand im Buchordner aus.
+      await formularLesen(zugang, Formularziel.buchkapitel(5, 7), arbeitsordner.path);
+      expect(File(p.join(kapitel, 'content_editor.html')).existsSync(), isTrue);
+      expect(Directory(p.join(arbeitsordner.path, 'buch-5')).listSync().map((e) => p.basename(e.path)), ['kapitel-7']);
       keineReste();
     });
 

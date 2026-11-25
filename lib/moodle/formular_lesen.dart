@@ -683,7 +683,10 @@ Future<FormularGelesen> formularLesenOhneSperre(
   VorVeroeffentlichung? vorVeroeffentlichung,
 }) async {
   final endgueltig = Directory(p.join(arbeitsordner, ziel.ordnerName));
-  final stand = Directory(p.join(arbeitsordner, '.lesen-${ziel.ordnerName}'));
+  // Flach neben dem Ergebnis, auch für ein Buchkapitel (`buch-<cmid>/kapitel-<id>`):
+  // sonst bliebe nach dem Austausch ein leerer Elternordner `.lesen-buch-<cmid>`.
+  final flach = ziel.ordnerName.replaceAll(RegExp(r'[\\/]'), '_');
+  final stand = Directory(p.join(arbeitsordner, '.lesen-$flach'));
   // Ein Rest eines früheren, hart beendeten Lesens; Löschfehler gehen weiter.
   if (await stand.exists()) await stand.delete(recursive: true);
   final FormularGelesen ergebnis;
@@ -703,7 +706,16 @@ Future<FormularGelesen> formularLesenOhneSperre(
     }
     rethrow;
   }
-  await _standAustauschen(stand, endgueltig);
+  try {
+    await _standAustauschen(stand, endgueltig);
+  } on FileSystemException {
+    try {
+      if (await stand.exists()) await stand.delete(recursive: true);
+    } on FileSystemException {
+      // Der Fehler beim Austausch ist die Meldung.
+    }
+    rethrow;
+  }
   return ergebnis;
 }
 
@@ -712,11 +724,23 @@ Future<FormularGelesen> formularLesenOhneSperre(
 /// es nie einen Zeitpunkt ohne vollständigen Ordner, und unter Windows, wo
 /// ein geöffneter Ordner sich nicht löschen, wohl aber oft umbenennen lässt,
 /// bleibt der Austausch möglich (E24). Schlägt das Hineinbenennen fehl, wird
-/// der alte Ordner zurückbenannt. Löschfehler des alten Ordners gehen weiter:
-/// Der neue Stand liegt dann schon vollständig bereit.
+/// der alte Ordner zurückbenannt. Lässt sich der alte Ordner danach nicht
+/// löschen (unter Windows hält ihn oft ein anderes Programm offen), ist das
+/// kein Fehler: Der neue Stand liegt dann schon vollständig bereit, und der
+/// Rest geht mit dem Arbeitsordner beim Beenden (E5).
 Future<void> _standAustauschen(Directory stand, Directory endgueltig) async {
-  final alt = Directory('${stand.path}-alt');
-  if (await alt.exists()) await alt.delete(recursive: true);
+  var alt = Directory('${stand.path}-alt');
+  if (await alt.exists()) {
+    try {
+      await alt.delete(recursive: true);
+    } on FileSystemException {
+      // Ein Rest, der sich nicht löschen lässt, darf kein späteres Lesen sperren.
+      alt = Directory('${stand.path}-alt-${DateTime.now().microsecondsSinceEpoch}');
+    }
+  }
+  // Ein Buchkapitel liegt unter `buch-<cmid>`, den es vor dem ersten Lesen
+  // des Buchs noch nicht gibt.
+  await endgueltig.parent.create(recursive: true);
   final hatAlten = await endgueltig.exists();
   if (hatAlten) await endgueltig.rename(alt.path);
   try {
@@ -725,7 +749,13 @@ Future<void> _standAustauschen(Directory stand, Directory endgueltig) async {
     if (hatAlten) await alt.rename(endgueltig.path);
     rethrow;
   }
-  if (hatAlten) await alt.delete(recursive: true);
+  if (hatAlten) {
+    try {
+      await alt.delete(recursive: true);
+    } on FileSystemException {
+      // siehe oben
+    }
+  }
 }
 
 Future<FormularGelesen> _formularInStandLesen(

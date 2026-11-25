@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/mcp/bruecke.dart' show werkzeuglisteFuerStart;
 import 'package:moocp/mcp/kanal.dart';
 import 'package:moocp/mcp/kanal_windows.dart';
 import 'package:moocp/plattform/datei_rechte.dart';
@@ -275,6 +276,42 @@ void main() {
     await expectLater(bruecke.verbinden('moodle'), throwsA(isA<KanalUnsicher>()));
     await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(gekommen, 0);
+  });
+
+  group('Werkzeugliste für die Brücke (Linux, Mac)', () {
+    final liste = jsonEncode({
+      'versionen': ['2025-06-18'],
+      'initialize': {'protocolVersion': '2025-06-18'},
+      'tools': {'tools': <Object?>[]},
+    });
+
+    test('abgelegt im Ordner des Kontos mit 0600, von dort gelesen', () async {
+      expect(await kanal.listeLesen(), isNull, reason: 'noch nichts abgelegt');
+      await kanal.listeAblegen(liste);
+      expect(FileStat.statSync(p.join(ordner, 'werkzeugliste.json')).mode & 0x1ff, 0x180);
+      expect(File(p.join(ordner, 'werkzeugliste.json.neu')).existsSync(), isFalse, reason: 'keine Zwischendatei übrig');
+      expect(await kanal.listeLesen(), liste);
+      final bruecke = await werkzeuglisteFuerStart(File('moocp'), ort: kanal);
+      expect(bruecke?.versionen, ['2025-06-18']);
+    }, skip: Platform.isWindows ? 'Windows fragt die exe' : null);
+
+    test('eine Datei eines anderen Kontos oder mit offenen Rechten wird nicht gelesen', () async {
+      await kanal.listeAblegen(liste);
+      final fremd = UnixKanal(ketten: () => [[ordner]], rechte: _FremderSocket());
+      expect(await fremd.listeLesen(), isNull);
+      Process.runSync('chmod', ['644', p.join(ordner, 'werkzeugliste.json')]);
+      expect(await kanal.listeLesen(), isNull);
+    });
+
+    test('ein Ordner, der nicht dem Konto allein gehört, liefert keine Liste', () async {
+      await kanal.listeAblegen(liste);
+      Process.runSync('chmod', ['755', ordner]);
+      expect(await kanal.listeLesen(), isNull);
+    });
+
+    test('ohne Datei keine Liste: die Brücke sagt es', () async {
+      expect(await werkzeuglisteFuerStart(File('moocp'), ort: kanal), isNull);
+    });
   });
 
   group('kanalOrdnerKetten', () {

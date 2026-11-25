@@ -451,7 +451,7 @@ class _PipeLauscher implements KanalLauscher {
   }
 }
 
-class WindowsKanal implements KanalOrt {
+class WindowsKanal extends KanalOrt {
   @override
   Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen}) async {
     if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');

@@ -73,14 +73,14 @@ Future<int> brueckeStarten(List<String> argumente) async {
     bruecke = Bruecke(
       verbinden: () async => throw KanalFehler('Der Profilname der Brücke (--profil) ist ungültig.'),
       ausgabe: stdout.writeln,
-      listeHolen: () => werkzeuglisteHolen(exe),
+      listeHolen: () => werkzeuglisteFuerStart(exe),
       appStarten: () async => false,
     );
   } else {
     bruecke = Bruecke(
       verbinden: () => standardKanalOrt.verbinden(profil),
       ausgabe: stdout.writeln,
-      listeHolen: () => werkzeuglisteHolen(exe),
+      listeHolen: () => werkzeuglisteFuerStart(exe),
       appStarten: () => moocpStarten(exe),
     );
   }
@@ -104,6 +104,21 @@ Future<bool> moocpStarten(File exe) async {
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+/// Die Werkzeugliste für initialize und tools/list: unter Windows von der
+/// moocp.exe neben der Brücke ([werkzeuglisteHolen]), auf Linux und Mac aus der
+/// Datei, die die App im Ordner des Kontos ablegt (kanal.dart, listeLesen) --
+/// die Oberfläche der App öffnet sich dort mit jedem Start, auch mit
+/// `--werkzeugliste`. Null, wenn es sie nicht gibt.
+Future<Werkzeugliste?> werkzeuglisteFuerStart(File exe, {KanalOrt? ort}) async {
+  if (Platform.isWindows) return werkzeuglisteHolen(exe);
+  try {
+    final text = await (ort ?? standardKanalOrt).listeLesen();
+    return text == null ? null : Werkzeugliste.ausJson(jsonDecode(text));
+  } catch (_) {
+    return null;
   }
 }
 
@@ -160,7 +175,7 @@ class Werkzeugliste {
   Map<String, dynamic> toJson() => {'versionen': versionen, 'initialize': initialize, 'tools': tools};
 }
 
-const _keineListe = 'moocp gibt seine Werkzeuge nicht heraus: moocp neu installieren.';
+const _keineListe = 'moocp gibt seine Werkzeuge nicht heraus: moocp einmal starten, sonst neu installieren.';
 const _laeuftNicht = 'moocp läuft nicht: die App starten und bei Moodle anmelden.';
 const _abgerissen = 'Die Verbindung zu moocp ist abgerissen; den Aufruf noch einmal versuchen.';
 
@@ -189,6 +204,7 @@ class Bruecke {
     // „moocp ist noch nicht bereit" bekommen, nicht nur eine Zeitüberschreitung.
     this.aufAppWarten = const Duration(minutes: 5),
     this.anmeldeFrist = const Duration(seconds: 30),
+    this.abschlussFrist = const Duration(seconds: 3),
   });
 
   /// Baut die Verbindung zur App auf, nachdem Endpunkt und Gegenstelle geprüft
@@ -216,6 +232,14 @@ class Bruecke {
   /// dass moocp noch nicht bereit ist, statt nur einer Zeitüberschreitung.
   final Duration aufAppWarten;
 
+  /// Wie lange die Brücke nach dem Ende von stdin noch auf Antworten wartet,
+  /// ehe sie die Verbindung schließt. Ein Client, der sein Rohr schließt, ist
+  /// weg (oder hat abgebrochen): Ein Aufruf, der noch läuft -- etwa hinter
+  /// einer Freigabe --, wird mit der Verbindung abgebrochen und schließt ihren
+  /// Dialog (E4). Kurze Antworten kommen so noch an, auch wenn ein Aufrufer sie
+  /// nur durch ein Rohr bestellt.
+  final Duration abschlussFrist;
+
   /// Wie lange die App für die Antwort auf die Anmeldung brauchen darf.
   final Duration anmeldeFrist;
 
@@ -235,8 +259,12 @@ class Bruecke {
   final _offen = <Object>{};
   final _abgebrochen = <Object>{};
 
-  /// Anfragen, die bei der App sind und noch keine Antwort haben.
-  final _ausstehend = <Object>{};
+  /// Anfragen, die bei der App sind und noch keine Antwort haben; erledigt,
+  /// wenn die Antwort da ist oder die Verbindung endet.
+  final _ausstehend = <Object, Completer<void>>{};
+
+  /// Ob stdin zu Ende ist: Dann wartet kein Client mehr auf die App.
+  bool _ende = false;
 
   /// Liest, bis der Client stdin schließt, und beendet dann die Sitzung.
   /// Nachrichten laufen nebeneinander: Ein Werkzeug, das auf eine Freigabe
@@ -247,8 +275,11 @@ class Bruecke {
     await for (final zeile in eingabe.transform(utf8.decoder).transform(const LineSplitter())) {
       if (zeile.trim().isNotEmpty) offen.add(_nachricht(zeile));
     }
-    await Future.wait(offen);
+    await Future.wait(offen).timeout(abschlussFrist, onTimeout: () => const []);
+    _ende = true;
     await _beenden();
+    // Was noch wartete, ist mit der Verbindung zu Ende.
+    await Future.wait(offen);
   }
 
   Future<void> _nachricht(String zeile) async {
@@ -286,6 +317,12 @@ class Bruecke {
         // Andere Benachrichtigungen (auch der Abbruch einer Anfrage, die schon
         // bei der App ist) nur an eine verbundene App.
         _senden(zeile);
+        if (methode == 'notifications/cancelled') {
+          // Auf eine abgebrochene Anfrage antwortet die App nicht mehr; die
+          // Brücke wartet auch nicht darauf.
+          final r = (n['params'] as Map?)?['requestId'];
+          if (r != null) _ausstehend.remove(r)?.complete();
+        }
         return;
     }
     // Sonst eine Antwort des Clients auf eine Anfrage des Servers: Die App
@@ -334,8 +371,11 @@ class Bruecke {
     // senden und nicht antworten -- der Client will keine Antwort mehr.
     if (_abgebrochen.contains(id)) return;
     if (grund == null && _kanal != null) {
-      _ausstehend.add(id);
+      final erledigt = _ausstehend[id] = Completer<void>();
       _senden(zeile);
+      // Bis die Antwort da ist: Endet stdin, bevor sie kommt, soll sie noch
+      // hinausgehen, ehe die Brücke die Verbindung schließt.
+      await erledigt.future;
       return;
     }
     final text = grund ?? _laeuftNicht;
@@ -382,6 +422,7 @@ class Bruecke {
     var gestartet = false;
     final bis = DateTime.now().add(aufAppWarten);
     while (true) {
+      if (_ende) return _abgerissen;
       final KanalVerbindung v;
       try {
         v = await verbinden();
@@ -451,7 +492,7 @@ class Bruecke {
           continue;
         }
         final id = n['id'];
-        if (id != null && n['method'] == null) _ausstehend.remove(id);
+        if (id != null && n['method'] == null) _ausstehend.remove(id)?.complete();
         // Neu kodiert: Über stdio darf eine Nachricht keinen Zeilenumbruch
         // enthalten.
         ausgabe(jsonEncode(n));
@@ -462,10 +503,11 @@ class Bruecke {
     if (identical(_kanal, v)) _kanal = null;
     final a = _angemeldet;
     if (a != null && !a.isCompleted) a.completeError(StateError('abgerissen'));
-    final verwaist = [..._ausstehend];
+    final verwaist = {..._ausstehend};
     _ausstehend.clear();
-    for (final id in verwaist) {
-      if (!_abgebrochen.contains(id)) _fehler(id, -32000, _abgerissen);
+    for (final MapEntry(:key, :value) in verwaist.entries) {
+      if (!_abgebrochen.contains(key)) _fehler(key, -32000, _abgerissen);
+      value.complete();
     }
   }
 

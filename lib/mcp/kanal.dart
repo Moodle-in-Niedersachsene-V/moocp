@@ -80,7 +80,7 @@ abstract interface class KanalLauscher {
   Future<void> schliessen();
 }
 
-abstract interface class KanalOrt {
+abstract class KanalOrt {
   /// Öffnet den Endpunkt des Profils [name]. [abgewiesen] hört den Grund jeder
   /// Verbindung, die die Prüfung der Gegenstelle nicht bestand (ohne Pfade
   /// und Namen).
@@ -90,6 +90,16 @@ abstract interface class KanalOrt {
   /// Gegenstelle geprüft sind: [KanalNichtDa], wenn dort niemand lauscht,
   /// [KanalUnsicher], wenn etwas nicht stimmt.
   Future<KanalVerbindung> verbinden(String name);
+
+  /// Die Werkzeugliste der App (bruecke.dart, Werkzeugliste), die sie für die
+  /// Brücke ablegt, als JSON; null, wenn es keine gibt. Nur auf Linux und Mac:
+  /// Dort kann die Brücke die App nicht nach der Liste fragen, ohne dass ein
+  /// Fenster aufgeht (`moocp --werkzeugliste` startet die Oberfläche), und eine
+  /// Datei im Ordner des Kontos kann sie lesen, ohne dass moocp läuft. Unter
+  /// Windows fragt die Brücke `moocp.exe --werkzeugliste`.
+  Future<String?> listeLesen() async => null;
+
+  Future<void> listeAblegen(String json) async {}
 }
 
 /// Der Kanal dieses Systems. Austauschbar für die Tests, die die App nicht
@@ -179,7 +189,7 @@ String? gegenstelleDesKontos(Socket verbindung, int uid) {
 /// Bytes auf dem Mac und 108 unter Linux, jeweils mit abschließender Null.
 const _socketPfadHoechstens = 100;
 
-class UnixKanal implements KanalOrt {
+class UnixKanal extends KanalOrt {
   UnixKanal({
     this.ketten,
     PrivatSystem? system,
@@ -302,6 +312,59 @@ class UnixKanal implements KanalOrt {
       return _SocketVerbindung(s);
     }
     throw unsicher != null ? KanalUnsicher(unsicher) : KanalNichtDa();
+  }
+
+  static const _listeDatei = 'werkzeugliste.json';
+
+  /// Höchstens so viel liest die Brücke von der Liste.
+  static const _listeHoechstens = 8 * 1024 * 1024;
+
+  /// Schreibt die Liste in den Kanalordner des Kontos, über eine Zwischendatei
+  /// und mit 0600; der Ordner ist derselbe, in dem [lauschen] den Socket anlegt.
+  @override
+  Future<void> listeAblegen(String json) async {
+    for (final kette in _kettenJetzt()) {
+      try {
+        for (final o in kette) {
+          privaterOrdnerAnlegen(o, system: system, bezeichnung: 'Der Ordner für den Kanal', pfadNennen: false);
+        }
+      } on PrivaterOrdnerFehler {
+        continue;
+      }
+      final ziel = p.join(kette.last, _listeDatei);
+      final zwischen = File('$ziel.neu');
+      zwischen.writeAsStringSync(json, flush: true);
+      rechte.chmod(zwischen.path, 0x180);
+      zwischen.renameSync(ziel);
+      return;
+    }
+    throw KanalUnsicher('Die Werkzeugliste ließ sich nicht ablegen.');
+  }
+
+  /// Liest die Liste, wenn Ordner und Datei dem Konto allein gehören.
+  @override
+  Future<String?> listeLesen() async {
+    for (final kette in _kettenJetzt()) {
+      if (system.angabe(kette.first) == null) continue;
+      try {
+        for (final o in kette) {
+          privaterOrdnerPruefen(o, system: system, bezeichnung: 'Der Ordner für den Kanal', pfadNennen: false);
+        }
+      } on PrivaterOrdnerFehler {
+        continue;
+      }
+      final pfad = p.join(kette.last, _listeDatei);
+      final e = rechte.eintrag(pfad);
+      if (e == null || e.art != FileSystemEntityType.file || e.uid != system.uid || e.modus & 0x3f != 0) continue;
+      try {
+        final datei = File(pfad);
+        if (datei.lengthSync() > _listeHoechstens) continue;
+        return datei.readAsStringSync();
+      } on FileSystemException {
+        continue;
+      }
+    }
+    return null;
   }
 }
 

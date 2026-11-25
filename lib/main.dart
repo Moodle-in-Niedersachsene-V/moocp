@@ -31,6 +31,7 @@ import 'freigabe.dart';
 import 'installer/installer_start.dart';
 import 'profile_dialog.dart';
 import 'log.dart';
+import 'mcp/kanal.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
@@ -141,8 +142,12 @@ Future<void> main(List<String> argumente) async {
         ? 'Arbeitsordner geleert: ${arbeitsordner.pfad}'
         : 'Arbeitsordner: ${arbeitsordner.pfad} -- $geblieben Einträge in Benutzung, nicht gelöscht',
   );
+  // Die Brücke erreicht die App über den Kanal des Kontos und liest die
+  // Werkzeugliste aus einer Datei darin, solange die App nicht läuft
+  // (mcp/kanal.dart); unter Windows fragt sie die exe.
+  unawaited(werkzeuglisteAblegen(protokoll));
   // Je Instanzprofil ein Zugang, eine Freigabe und ein MCP-Server mit eigenem
-  // Port und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
+  // Endpunkt und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
   // Anmeldung die Oberfläche zeigt.
   final profile = einstellungen.profile.isEmpty
       ? [Profil.migriert('')]
@@ -374,6 +379,22 @@ Future<int> _werkzeugliste() async {
     return 0;
   } catch (_) {
     return 1;
+  }
+}
+
+/// Legt die Werkzeugliste für die Brücke ab (nur Linux und Mac, siehe
+/// KanalOrt.listeLesen): dasselbe, was `--werkzeugliste` ausgibt. Ein Fehler
+/// dabei ändert nichts am Start; die Brücke sagt dann, dass sie keine Liste hat.
+Future<void> werkzeuglisteAblegen(Protokoll protokoll) async {
+  if (Platform.isWindows) return;
+  try {
+    final liste = await werkzeuglisteFuerBruecke(
+      einstellungen: () => einstellungenDatei,
+      plugins: () => Directory(pluginsOrdner),
+    );
+    await standardKanalOrt.listeAblegen(jsonEncode(liste));
+  } catch (e) {
+    protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
   }
 }
 
@@ -844,6 +865,8 @@ class _HauptseiteState extends State<Hauptseite> {
       await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
     }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
+    // Die Werkzeuge der Plugins stehen jetzt in den Einstellungen.
+    unawaited(werkzeuglisteAblegen(widget.protokoll));
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen

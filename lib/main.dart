@@ -576,6 +576,12 @@ class _HauptseiteState extends State<Hauptseite> {
   /// Haken „Anmeldedaten speichern" (anmeldedaten.dart).
   bool _merken = false;
 
+  /// Die Herkunft, für die das Passwort im Feld aus dem Speicher geladen wurde
+  /// (anmeldedaten.dart); null, wenn die Lehrkraft es selbst getippt hat oder
+  /// das Feld leer ist. Ändert sich die Herkunft der Adresse im Feld, geht das
+  /// geladene Passwort nicht mit: Es gehört zu der alten Instanz.
+  String? _passwortHerkunft;
+
   /// Ob „KI-Werkzeuge einrichten" beim Start durch ist; vorher gibt es keine
   /// Anmeldung und keinen MCP-Server (_starten).
   bool _eingerichtet = false;
@@ -1053,7 +1059,10 @@ class _HauptseiteState extends State<Hauptseite> {
         anwenden: (daten) => setState(() {
           _merken = daten.merken;
           if (daten.benutzer != null) _benutzer.text = daten.benutzer!;
-          if (daten.passwort != null) _passwort.text = daten.passwort!;
+          if (daten.passwort != null) {
+            _passwort.text = daten.passwort!;
+            _passwortHerkunft = Anmeldedaten.herkunftVon(profil.adresse);
+          }
         }),
       );
       if (geladen == null) return;
@@ -1401,6 +1410,7 @@ class _HauptseiteState extends State<Hauptseite> {
       _adresse.text = _profil.adresse;
       _benutzer.clear();
       _passwort.clear();
+      _passwortHerkunft = null;
       _meldung = null;
       _merken = false;
     });
@@ -1425,6 +1435,7 @@ class _HauptseiteState extends State<Hauptseite> {
           _merken = daten.merken;
           _benutzer.text = daten.benutzer ?? '';
           _passwort.text = daten.passwort ?? '';
+          _passwortHerkunft = daten.passwort == null ? null : Anmeldedaten.herkunftVon(profil.adresse);
         }),
       );
       if (geladen == null) return;
@@ -1576,12 +1587,28 @@ class _HauptseiteState extends State<Hauptseite> {
     super.dispose();
   }
 
+  /// Das aus dem Speicher geladene Passwort gehört zu seiner Herkunft: Zeigt
+  /// die Adresse im Feld auf eine andere Instanz, wird es aus dem Feld
+  /// genommen, damit es nicht von Hand dorthin geht. Gibt zurück, ob es
+  /// entfernt wurde.
+  bool _fremdesPasswortEntfernen() {
+    final herkunft = _passwortHerkunft;
+    if (herkunft == null || Anmeldedaten.herkunftVon(_adresse.text) == herkunft) return false;
+    _passwort.clear();
+    _passwortHerkunft = null;
+    return true;
+  }
+
   /// [gespeichert]: Die Anmeldung kommt vom Start oder von einem Profilwechsel
   /// und nutzt gespeicherte Zugangsdaten, nicht eine Eingabe der Lehrkraft.
   /// Lehnt Moodle sie ab, werden sie verworfen (E7): genau ein Fehlversuch,
   /// nicht einer je Start und je Wechsel, bis Moodle das Konto sperrt.
   Future<void> _anmelden({bool gespeichert = false}) async {
     if (_beschaeftigt) return;
+    if (!gespeichert && _fremdesPasswortEntfernen()) {
+      setState(() => _meldung = 'Die Moodle-Adresse wurde geändert; das gespeicherte Passwort gilt dafür nicht. Bitte das Passwort eingeben.');
+      return;
+    }
     final auftrag = AnmeldeAuftrag(
       instanz: _aktiv,
       profil: _profil,
@@ -1620,7 +1647,11 @@ class _HauptseiteState extends State<Hauptseite> {
       dienst.profil = profil.copyWith(adresse: adresse);
       await moodle.anmelden(adresse, benutzer, passwort);
       _meldung = 'Angemeldet.';
-      if (merken) {
+      // Eine automatische Anmeldung gelang mit der gespeicherten Bindung
+      // (geprüft in Anmeldedaten.laden, Adresse des Profils): Es gibt nichts
+      // neu zu speichern, und ein Fehler des Speichers soll die Bindung nicht
+      // kosten.
+      if (merken && !gespeichert) {
         try {
           // _beenden wartet darauf: Schließt die Lehrkraft das Fenster gleich
           // nach der Anmeldung, endete der Prozess sonst mitten im Schreiben,
@@ -1666,7 +1697,10 @@ class _HauptseiteState extends State<Hauptseite> {
     } finally {
       // Sonst bleibt das Passwort nicht im Eingabefeld stehen; die App hält es
       // nur intern im Arbeitsspeicher, für die automatische Neuanmeldung.
-      if (feldLeeren) _passwort.clear();
+      if (feldLeeren) {
+        _passwort.clear();
+        _passwortHerkunft = null;
+      }
       if (mounted) setState(() => _beschaeftigt = false);
     }
     await _mcpStarten();
@@ -1869,6 +1903,9 @@ class _HauptseiteState extends State<Hauptseite> {
                 _karte('Moodle-Anmeldung', [
                   TextField(
                     controller: _adresse,
+                    onChanged: (_) {
+                      if (_fremdesPasswortEntfernen()) setState(() {});
+                    },
                     enabled: !_beschaeftigt && !_moodle.angemeldet,
                     decoration: const InputDecoration(
                       labelText: 'Moodle-Adresse',
@@ -1884,6 +1921,8 @@ class _HauptseiteState extends State<Hauptseite> {
                   TextField(
                     controller: _passwort,
                     obscureText: true,
+                    // Was die Lehrkraft selbst tippt, gehört ihr, nicht dem Speicher.
+                    onChanged: (_) => _passwortHerkunft = null,
                     decoration: const InputDecoration(labelText: 'Passwort'),
                     onSubmitted: (_) {
                       if (_eingerichtet &&

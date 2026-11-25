@@ -158,6 +158,12 @@ abstract class KiWerkzeug {
   /// für jedes Werkzeug, auch für LM Studio.
   String get datenziel;
 
+  /// Wo die Verbindung zur App wirkt, in einem Satz. Steht im Dialog unter
+  /// dem Namen und im Abschluss. Nur Clients auf diesem Rechner erreichen die
+  /// App (E6); der normale Chat von Claude Desktop und der ChatGPT-App ist
+  /// keiner, ChatGPT und Claude im Browser auch nicht.
+  String get wirkt;
+
   /// Ob das Werkzeug auf diesem Rechner benutzt wird. Nicht gefundene
   /// Werkzeuge erscheinen nicht im Dialog und werden nicht eingerichtet.
   bool get gefunden;
@@ -425,6 +431,10 @@ class ClaudeCode extends KiWerkzeug {
   String get name => 'Claude Code';
   @override
   String get datenziel => 'Inhalte gehen an das eingestellte Modell, in der Regel bei Anthropic';
+  // Claude Desktop bringt Claude Code im Reiter „Code“ mit und teilt dessen
+  // Konfiguration; der normale Chat sieht die Einträge nicht.
+  @override
+  String get wirkt => 'Wirkt in Claude Code und im Reiter „Code“ von Claude Desktop, nicht im normalen Chat.';
 
   /// Pfad der claude-Programmdatei (unter Windows claude.exe); null, wenn sie nicht gefunden wurde.
   String? get exe {
@@ -561,6 +571,11 @@ class CodexCli extends KiWerkzeug {
   String get datenziel =>
       'Inhalte gehen an das eingestellte Modell, in der Regel bei OpenAI. Der Moodle-Schlüssel steht im '
       'Klartext in config.toml im Codex-Ordner (in der Regel ~/.codex)';
+
+  // Codex-Sitzungen der ChatGPT-App teilen ~/.codex mit der Kommandozeile und
+  // sehen die Einträge; der normale Chat der App ist kein Client.
+  @override
+  String get wirkt => 'Wirkt in Codex und in Codex-Sitzungen der ChatGPT-App, nicht im normalen Chat der App.';
 
   /// CODEX_HOME verlegt Konfiguration und Skills; sonst `~/.codex`.
   Directory get heim => Directory(_v(umgebung, 'CODEX_HOME') ?? p.join(_heimPflicht(umgebung), '.codex'));
@@ -819,6 +834,8 @@ class LmStudio extends KiWerkzeug {
   String get name => 'LM Studio (Bionic)';
   @override
   String get datenziel => 'Inhalte gehen an das eingestellte Modell, lokal oder in der Cloud';
+  @override
+  String get wirkt => 'Wirkt im Agenten Bionic, nicht im klassischen LM Studio.';
 
   Directory get heim => Directory(p.join(_heimPflicht(umgebung), '.lmstudio'));
 

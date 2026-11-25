@@ -70,6 +70,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import 'elemente.dart';
+import 'formeln.dart';
 import 'lernsituation_html.dart';
 
 const _ustd = 45;
@@ -1760,115 +1762,78 @@ final _markdown = [
   (pyRe(r'`[^`\n]+`'), '<code>'),
 ];
 
-// Interaktive Elemente: dieselbe Prüfung wie elementFehler in elemente.dart,
-// an der die App das Schreiben abbricht -- hier fällt es schon am Entwurf
-// auf. Den Kopf (Content-Security-Policy, Wächter) setzt erst die App bei
-// der Übertragung; im Entwurf fehlt er.
-final _elementKopf = pyRe(
-  r'<!-- moocp: Kopf des Elements, setzt die App -->.*?<!-- /moocp -->\n?',
-  dotAll: true,
-);
-final _elementAdresse = pyRe(
-  r'''(?:[=("'`]\s*|@import\s+)((?:https?:)?//[^\s"'`)<>]+)''',
-  caseSensitive: false,
-);
-final _w3 = pyRe(r'(?:https?:)?//www\.w3\.org/', caseSensitive: false);
-final _elementNetz = [
-  (pyRe(r'(^|[;{}\s])import\b', multiLine: true), 'import'),
-  (pyRe(r'\bfetch\s*\('), 'fetch'),
-  (pyRe(r'\bXMLHttpRequest\b'), 'XMLHttpRequest'),
-  (pyRe(r'\bWebSocket\b'), 'WebSocket'),
-  (pyRe(r'\bEventSource\b'), 'EventSource'),
-  (pyRe(r'\bsendBeacon\b'), 'sendBeacon'),
-  (pyRe(r'\bimportScripts\b'), 'importScripts'),
-];
-final _elementCode = [
-  (
-    pyRe(r'\b(?:localStorage|sessionStorage|indexedDB)\b|document\s*\.\s*cookie'),
-    'Speichern im Browser: Ein Element merkt sich nichts, und der Rahmen sperrt es.',
-  ),
-  (
-    pyRe(r'(?<![\w$.])(?:window\s*\.\s*)?(?:parent|top|opener)\s*\.'),
-    'Zugriff auf die Moodle-Seite (parent/top/opener): Der Rahmen sperrt ihn.',
-  ),
-];
-// Netz, Speicher und Moodle-Seite nur im Code: Inhalt der <script> und Werte
-// der Ereignis-Attribute. „We import goods" auf einer Vokabelkarte ist Text.
-final _elementSkript = pyRe(r'<script\b[^>]*>(.*?)</script\s*>', dotAll: true, caseSensitive: false);
-final _elementEreignis = pyRe(
-  r'''\son[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
-  caseSensitive: false,
-);
-final _elementSonst = [
-  (
-    pyRe(r'<script\b[^>]*\bsrc\s*=', caseSensitive: false),
-    'Nachgeladenes Skript (<script src>): Der Code steht im Element selbst.',
-  ),
-  (
-    pyRe(r'<(?:iframe|frame|object|embed)\b', caseSensitive: false),
-    'Rahmen oder Einbettung im Element: Ein Element bettet nichts ein.',
-  ),
-  (pyRe(r'<meta\b[^>]*http-equiv', caseSensitive: false), '<meta http-equiv> setzt nur die App (im Kopf).'),
-  (pyRe(r'<base\b', caseSensitive: false), '<base> verbiegt Adressen und ist gesperrt.'),
-];
+// Interaktive Elemente: Die Regeln stehen in elemente.dart (elementBefunde),
+// derselben Prüfung, an der die App das Schreiben abbricht -- hier fällt der
+// Befund schon am Entwurf auf. Bewusste Unterschiede zur App (E17, E22):
+//  - Den Kopf (Content-Security-Policy, Wächter) setzt erst die App bei der
+//    Übertragung; im Entwurf fehlt er, und das Gerüst mit <head> prüft die
+//    App erst beim Einsetzen des Kopfes (elementeVorbereiten), der Entwurf
+//    meldet es schon hier.
+//  - Die Adresse wird wie in der Python-Vorlage gekürzt (pyKurz) und der
+//    Satz endet ohne Punkt.
+//  - Entwürfe behalten die Unicode-Grenzen der Python-Vorlage; die App nutzt
+//    Dart-Muster. Beide wenden dieselben Regeln mit ihrem jeweiligen Leser an.
 final _kopfTag = pyRe(r'<head\b', caseSensitive: false);
+
+RegExp _entwurfMuster(String muster, bool gross, bool mehrzeilig, bool alles) =>
+    pyRe(muster, caseSensitive: gross, multiLine: mehrzeilig, dotAll: alles);
 
 /// Was in einem interaktiven Element nicht geht, je als Satz
 /// (references/elemente.md).
 List<String> _elementFehler(String text) {
-  final t = text.replaceAll(_elementKopf, '');
   final raus = <String>[];
-  if (!_kopfTag.hasMatch(t)) {
+  if (!_kopfTag.hasMatch(ohneKopf(text))) {
     raus.add('braucht ein Gerüst mit <head> (<!DOCTYPE html><html lang="de"><head>…</head><body>…)');
   }
-  for (final m in _elementAdresse.allMatches(t)) {
-    if (pyMatch(_w3, m[1]!) == null) {
-      raus.add(
-        'Adresse „${pyKurz(m[1]!, 60)}": Ein Element lädt nichts und verweist nirgendwohin -- Bilder als SVG im '
-        'Element, Verweise in den Text der Seite',
-      );
-      break;
-    }
-  }
-  final code = [
-    for (final m in _elementSkript.allMatches(t)) m[1]!,
-    for (final m in _elementEreignis.allMatches(t)) m[1] ?? m[2] ?? m[3]!,
-  ].join('\n');
-  for (final (muster, was) in _elementNetz) {
-    if (muster.hasMatch(code)) raus.add('Im Code steht $was: Ein Element lädt und sendet nichts.');
-  }
-  for (final (muster, satz) in _elementCode) {
-    if (muster.hasMatch(code)) raus.add(satz);
-  }
-  for (final (muster, satz) in _elementSonst) {
-    if (muster.hasMatch(t)) raus.add(satz);
+  for (final b in elementBefunde(text, muster: _entwurfMuster)) {
+    final adresse = b.adresse;
+    raus.add(
+      adresse == null
+          ? b.satz
+          : 'Adresse „${pyKurz(adresse, 60)}": Ein Element lädt nichts und verweist nirgendwohin -- Bilder als SVG im '
+                'Element, Verweise in den Text der Seite',
+    );
   }
   return raus;
 }
 
 // Code in Dateien, die kein Element sind: dieselbe Grenze wie codeInDatei in
-// elemente.dart. Moodle liefert HTML, SVG und XML direkt aus; über einen Link
-// oder in einem neuen Tab geöffnet, liefe ihr Code in der Sitzung des
-// Betrachters, und die App lädt so eine Datei nicht hoch.
-final _dokument = pyRe(r'\.(?:x?html?|xht|shtml|svgz?|xml|xslt?)$', caseSensitive: false);
+// elemente.dart (stellenInDatei). Moodle liefert HTML, SVG und XML direkt
+// aus; über einen Link oder in einem neuen Tab geöffnet, liefe ihr Code in
+// der Sitzung des Betrachters, und die App lädt so eine Datei nicht hoch.
+// Unterschied zur App: Der Entwurf nennt nur die Art der Stelle, nicht ihren
+// vollen Text (Befund, nicht Abbruchmeldung).
 
-/// Stellen, an denen Code läuft: <script>, Ereignis-Attribute (auch per
-/// SVG-Animation gesetzt), srcdoc und javascript:-Adressen.
+/// Die Stelle kurz: Tag und Art, ohne Inhalt.
+String _stelleKurz(Skriptstelle s) => switch (s.art) {
+  SkriptArt.skript => '<script>',
+  SkriptArt.srcdoc => '<${s.tag} srcdoc>',
+  SkriptArt.javascriptAdresse => 'javascript: an <${s.tag}>',
+  SkriptArt.ereignis => '${ereignisName(s.attribut, pyStrip(s.wert))} an <${s.tag}>',
+  SkriptArt.komprimiert => skriptstelleText(s),
+};
+
+/// Die Stellen mit Code in einer Datei, die der Browser als Dokument öffnet;
+/// bei anderen Dateien leer.
+List<String> _codeInDatei(String name, List<int> daten) => [
+  for (final s in stellenInDatei(name, daten, lesen: _entwurfSkriptstellen)) _stelleKurz(s),
+];
+
+// Der Fragmentparser der App repariert HTML und verwirft body-Attribute.
+// Entwürfe behalten ihren Leser und ihre Quellreihenfolge; nur die Regel,
+// welche Attribute Code auslösen, kommt aus elemente.dart.
+List<Skriptstelle> _entwurfSkriptstellen(String html) => (_Skriptstellen()..lesen(html)).stellen;
+
 class _Skriptstellen extends PyHtmlLeser {
-  final stellen = <String>[];
+  final stellen = <Skriptstelle>[];
 
   @override
   void starttag(String tag, List<Attribut> attrs) {
-    if (tag == 'script') stellen.add('<script>');
+    if (tag == 'script') stellen.add((art: SkriptArt.skript, tag: tag, attribut: '', wert: ''));
     for (final (k, w0) in attrs) {
       final w = w0 ?? '';
-      if (k.startsWith('on') || (k == 'attributename' && pyStrip(w).toLowerCase().startsWith('on'))) {
-        stellen.add('${k.startsWith('on') ? k : pyStrip(w)} an <$tag>');
-      } else if (k == 'srcdoc') {
-        stellen.add('<$tag srcdoc>');
-      } else if (_ohneSteuerzeichen(w).toLowerCase().startsWith('javascript:')) {
-        stellen.add('javascript: an <$tag>');
-      }
+      final art = skriptArtVonAttribut(k, pyStrip(w), muster: _entwurfMuster);
+      if (art != null) stellen.add((art: art, tag: tag, attribut: k, wert: w));
     }
   }
 
@@ -1876,57 +1841,30 @@ class _Skriptstellen extends PyHtmlLeser {
   void startendtag(String tag, List<Attribut> attrs) => starttag(tag, attrs);
 }
 
-// Python entfernt hier `[\s\x00-\x1f]` mit Unicode-\s.
-final _steuerUndLeer = pyRe(r'[\s\x00-\x1f]');
-String _ohneSteuerzeichen(String w) => w.replaceAll(_steuerUndLeer, '');
-
-/// Die Stellen mit Code in einer Datei, die der Browser als Dokument
-/// öffnet; bei anderen Dateien leer.
-List<String> _codeInDatei(String name, List<int> daten) {
-  if (!_dokument.hasMatch(name)) return const [];
-  if (name.toLowerCase().endsWith('.svgz')) {
-    try {
-      daten = gzip.decode(daten);
-    } on FormatException {
-      return const ['komprimierte SVG, die sich nicht entpacken lässt'];
-    }
-  }
-  return (_Skriptstellen()..lesen(utf8.decode(daten, allowMalformed: true))).stellen;
-}
-
-// Formelfehler: dieselbe Prüfung wie formelFehler in formeln.dart, die das
-// Schreiben in Moodle abbricht -- hier fällt der Fehler schon am Entwurf auf.
-// Ein Block ist ein Absatz, eine Zelle, ein Listenpunkt; ein Textstück endet
-// an jedem Tag. Anfang und Ende einer Formel stehen im selben Textstück,
-// sonst ist HTML darin oder ein rohes < hat sie zerbrochen.
-const _formelBloecke = {
-  'p', 'div', 'li', 'ul', 'ol', 'dl', 'dt', 'dd', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td',
-  'th', 'caption', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'figure', 'figcaption',
-  'section', 'article', 'header', 'footer', 'aside', 'details', 'summary', 'hr', 'form', 'fieldset',
-};
-const _formelAuslassen = {'code', 'pre', 'script', 'style', 'svg', 'math', 'textarea', 'select'};
-final _einfacheDollar = pyRe(r'(?<![\\$])\$(?!\$)([^$]*?\\[A-Za-z]+[^$]*?)(?<![\\$])\$(?!\$)');
-
-/// Die Textstücke je Block, ohne `<code>`, `<pre>`, `<svg>` und Ähnliches --
-/// dort setzt MathJax nichts.
+// Formelfehler: Die Regeln stehen in formeln.dart (formelBlockPruefen),
+// derselben Prüfung, die das Schreiben in Moodle abbricht -- hier fällt der
+// Fehler schon am Entwurf auf. Bewusste Unterschiede zur App: Die Blöcke
+// liest der Python-nachgebildete Leser (die SchuCu-Tabelle ist vorher
+// entfernt), und die Sätze kürzen und normalisieren wie die Python-Vorlage,
+// ohne Punkt am Ende.
 class _FormelText extends PyHtmlLeser {
   final bloecke = <List<String>>[[]];
   int aus = 0;
 
   @override
   void starttag(String tag, List<Attribut> attrs) {
-    if (_formelAuslassen.contains(tag)) {
+    if (formelAuslassen.contains(tag)) {
       aus++;
-    } else if (_formelBloecke.contains(tag)) {
+    } else if (formelBloecke.contains(tag)) {
       bloecke.add([]);
     }
   }
 
   @override
   void endtag(String tag) {
-    if (_formelAuslassen.contains(tag)) {
+    if (formelAuslassen.contains(tag)) {
       aus = aus > 0 ? aus - 1 : 0;
-    } else if (_formelBloecke.contains(tag)) {
+    } else if (formelBloecke.contains(tag)) {
       bloecke.add([]);
     }
   }
@@ -1937,64 +1875,21 @@ class _FormelText extends PyHtmlLeser {
   }
 }
 
-List<String> _formelBlock(List<String> stuecke) {
-  final s = stuecke.join();
-  final stueck = <int>[
-    for (var i = 0; i < stuecke.length; i++)
-      for (var j = 0; j < stuecke[i].length; j++) i,
-  ];
-  final raus = <String>[], ohne = <String>[];
-  String? offen;
-  var anfang = -1, frei = 0, i = 0;
-  while (i < s.length) {
-    if (s[i] != '\\' || i + 1 >= s.length) {
-      i++;
-      continue;
-    }
-    final n = s[i + 1];
-    if (n == '(' || n == '[') {
-      if (offen != null) {
-        raus.add(
-          'Formel ohne Ende: „${pyKurz(textNorm(s.substring(anfang, i)), 40)}" -- vor dem nächsten Formelanfang fehlt '
-          '${offen == '(' ? r'\)' : r'\]'}',
-        );
-      } else {
-        ohne.add(s.substring(frei, i));
-      }
-      offen = n;
-      anfang = i;
-    } else if (n == ')' || n == ']') {
-      final passt = (n == ')' && offen == '(') || (n == ']' && offen == '[');
-      if (!passt) {
-        raus.add(
-          'Formelende „\\$n" ohne Anfang: „${textNorm(s.substring(i - 30 < 0 ? 0 : i - 30, i + 2))}"',
-        );
-      } else if (stueck[anfang] != stueck[i + 1]) {
-        raus.add(
-          'HTML in der Formel „${pyKurz(textNorm(s.substring(anfang, i + 2)), 40)}": Zwischen Anfang und Ende steht '
+String _formelSatz(FormelBefund b) {
+  String kurz40(String t) => pyKurz(textNorm(t), 40);
+  return switch (b.art) {
+    FormelArt.ohneEndeVorAnfang =>
+      'Formel ohne Ende: „${kurz40(b.text)}" -- vor dem nächsten Formelanfang fehlt ${b.ende}',
+    FormelArt.endeOhneAnfang => 'Formelende „${b.ende}" ohne Anfang: „${textNorm(b.text)}"',
+    FormelArt.htmlInFormel =>
+      'HTML in der Formel „${kurz40(b.text)}": Zwischen Anfang und Ende steht '
           'ein Tag -- Hervorhebung und Zeilenumbruch macht LaTeX selbst',
-        );
-      }
-      if (passt) {
-        offen = null;
-        frei = i + 2;
-      }
-    }
-    i += 2; // jeder andere Befehl, auch \\ (Zeilenumbruch, \\[4pt]) und \$
-  }
-  if (offen != null) {
-    raus.add(
-      'Formel ohne Ende: „${pyKurz(textNorm(s.substring(anfang)), 40)}" -- ${offen == '(' ? r'\)' : r'\]'} fehlt im '
-      'selben Absatz. Steht ein rohes < darin? Als &lt; oder \\lt schreiben',
-    );
-  } else {
-    ohne.add(s.substring(frei));
-  }
-  final m = _einfacheDollar.firstMatch(ohne.join());
-  if (m != null) {
-    raus.add('LaTeX zwischen einfachen \$ wird nicht gesetzt: „${pyKurz(textNorm(m[0]!), 40)}" -- \\( … \\) schreiben');
-  }
-  return raus;
+    FormelArt.ohneEnde =>
+      'Formel ohne Ende: „${kurz40(b.text)}" -- ${b.ende} fehlt im '
+          'selben Absatz. Steht ein rohes < darin? Als &lt; oder \\lt schreiben',
+    FormelArt.einfacheDollar =>
+      'LaTeX zwischen einfachen \$ wird nicht gesetzt: „${kurz40(b.text)}" -- \\( … \\) schreiben',
+  };
 }
 
 /// Die Formelfehler eines Felds (references/html.md, „Formeln"). Die
@@ -2003,7 +1898,8 @@ List<String> _formelFehler(String h) {
   final f = _FormelText()..lesen(h);
   return [
     for (final b in f.bloecke)
-      if (b.isNotEmpty) ..._formelBlock(b),
+      if (b.isNotEmpty)
+        for (final x in formelBlockPruefen(b)) _formelSatz(x),
   ];
 }
 
@@ -2103,15 +1999,20 @@ class _HtmlRegeln extends PyHtmlLeser {
     }
     for (final MapEntry(key: k, value: w0) in a.entries) {
       final w = w0 ?? '';
-      if (k.startsWith('on') || (k == 'attributename' && pyStrip(w).toLowerCase().startsWith('on'))) {
-        befund(
-          'Code im Text (${k.startsWith('on') ? k : pyStrip(w)} an <$tag>) -- Interaktives als Element '
-          '(references/elemente.md)',
-        );
-      } else if (k == 'srcdoc') {
-        befund('<$tag srcdoc>: Der Moodle-Editor löscht ihn -- als Elementdatei in dateien/ einbinden');
-      } else if (_ohneSteuerzeichen(w).toLowerCase().startsWith('javascript:')) {
-        befund('javascript:-Adresse an <$tag> -- Code gehört in ein Element');
+      // Welche Attribute Code sind, entscheidet die App (skriptArtVonAttribut);
+      // die Sätze sind die des Entwurfs.
+      switch (skriptArtVonAttribut(k, pyStrip(w), muster: _entwurfMuster)) {
+        case SkriptArt.ereignis:
+          befund(
+            'Code im Text (${ereignisName(k, pyStrip(w))} an <$tag>) -- Interaktives als Element '
+            '(references/elemente.md)',
+          );
+        case SkriptArt.srcdoc:
+          befund('<$tag srcdoc>: Der Moodle-Editor löscht ihn -- als Elementdatei in dateien/ einbinden');
+        case SkriptArt.javascriptAdresse:
+          befund('javascript:-Adresse an <$tag> -- Code gehört in ein Element');
+        case _:
+          break;
       }
     }
     if (svg > 0) return; // eine eingebettete Zeichnung hat eigene Elemente

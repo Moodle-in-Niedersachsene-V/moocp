@@ -20,6 +20,12 @@ import 'package:path/path.dart' as p;
 
 late Directory tmp;
 
+/// Ein Ort, an dem die App die claude-Programmdatei findet: unter Windows die Ablage von
+/// Claude Desktop, sonst `~/.local/bin` (dort sucht die App auf allen Plattformen).
+final claudeOrt = Platform.isWindows
+    ? 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.9/claude.exe'
+    : 'heim/.local/bin/claude';
+
 File datei(String rel, [String inhalt = 'x']) {
   final f = File(p.joinAll([tmp.path, ...rel.split('/')]));
   f.parent.createSync(recursive: true);
@@ -39,9 +45,14 @@ void main() {
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('einrichtung_test');
     claudeSigniert = (_) => true;
+    // Kein Programm außerhalb des Testordners: unabhängig vom Bestand des Rechners.
+    festeProgrammOrdner = const [];
+    festeAppOrdner = const [];
   });
   tearDown(() {
     claudeSigniert = vonAnthropic;
+    festeProgrammOrdner = null;
+    festeAppOrdner = null;
     tmp.deleteSync(recursive: true);
   });
 
@@ -129,9 +140,9 @@ void main() {
     test('VS-Code-Erweiterung und Suchpfad', () {
       datei('heim/.vscode/extensions/anthropic.claude-code-2.1.9-win32-x64/resources/native-binary/claude.exe');
       datei('heim/.vscode/extensions/anthropic.claude-code-2.1.10-win32-x64/resources/native-binary/claude.exe');
-      expect(claudeFinden({'USERPROFILE': p.join(tmp.path, 'heim')}), contains('2.1.10'));
+      expect(claudeFinden({'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim')}), contains('2.1.10'));
       datei('bin/claude.exe');
-      expect(claudeFinden({'USERPROFILE': p.join(tmp.path, 'heim'), 'PATH': 'C:\\gibtsnicht;${p.join(tmp.path, 'bin')}'}),
+      expect(claudeFinden({'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim'), 'PATH': 'C:\\gibtsnicht;${p.join(tmp.path, 'bin')}'}),
           p.join(tmp.path, 'bin', 'claude.exe'));
     }, skip: Platform.isWindows ? null : 'Windows-Annahme: claude.exe, MSIX, VS Code, Bionic gibt es nur unter Windows');
 
@@ -159,7 +170,7 @@ void main() {
       };
 
   group('Claude Code: MCP-Eintrag', () {
-    ClaudeCode claude() => ClaudeCode({'USERPROFILE': tmp.path});
+    ClaudeCode claude() => ClaudeCode({'USERPROFILE': tmp.path, 'HOME': tmp.path});
     File konfig(Object inhalt) => datei('.claude.json', inhalt is String ? inhalt : jsonEncode(inhalt));
 
     test('aktuell, veraltet, fehlt, unlesbar', () {
@@ -174,7 +185,7 @@ void main() {
       expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
       konfig('{"mcpServers": {"moodle": ');
       expect(claude().verbindung(47811, 'abc'), Verbindung.unlesbar);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ohne Zeitlimit veraltet: Claude Code bräche jede Freigabe nach 60 Sekunden ab', () {
       final e = eintrag('http://127.0.0.1:47811/mcp', 'abc');
@@ -183,26 +194,26 @@ void main() {
       expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
       konfig(eintrag('http://127.0.0.1:47811/mcp', 'abc', timeout: 60000));
       expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('der Eintrag geht als ein JSON-Argument an claude mcp add-json', () {
       final a = claude().addArgumente(47811, 'abc');
       expect(a.sublist(0, a.length - 1), ['mcp', 'add-json', '--scope', 'user', 'moodle']);
       expect(jsonDecode(a.last), (eintrag('http://127.0.0.1:47811/mcp', 'abc')['mcpServers'] as Map)['moodle']);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('Zeitlimit: länger als die Frist einer Freigabe', () {
       expect(clientZeitlimit, greaterThan(Freigaben.fristVorgabe));
     });
 
     test('CLAUDE_CONFIG_DIR verlegt Einstellungen und Skills', () {
-      final o = ClaudeCode({'USERPROFILE': 'C:\\Users\\x', 'CLAUDE_CONFIG_DIR': 'D:\\claude'});
+      final o = ClaudeCode({'USERPROFILE': 'C:\\Users\\x', 'HOME': 'C:\\Users\\x', 'CLAUDE_CONFIG_DIR': 'D:\\claude'});
       expect(o.konfiguration.path, p.join('D:\\claude', '.claude.json'));
       expect(o.skillOrdner.path, p.join('D:\\claude', 'skills'));
-      final n = ClaudeCode({'USERPROFILE': 'C:\\Users\\x'});
+      final n = ClaudeCode({'USERPROFILE': 'C:\\Users\\x', 'HOME': 'C:\\Users\\x'});
       expect(n.konfiguration.path, p.join('C:\\Users\\x', '.claude.json'));
       expect(n.skillOrdner.path, p.join('C:\\Users\\x', '.claude', 'skills'));
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
   });
 
   group('Codex CLI: der Block in config.toml', () {
@@ -214,14 +225,14 @@ void main() {
     test('in eine leere oder fehlende Datei', () {
       expect(tomlBlockSetzen('', 'moodle', url, kopf), unser);
       expect(tomlBlockSetzen('\n\n', 'moodle', url, kopf), unser);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('angehängt: alles andere bleibt Zeichen für Zeichen', () {
       const alt = 'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
       final neu = tomlBlockSetzen(alt, 'moodle', url, kopf);
       expect(neu, '$alt\n$unser');
       expect(tomlBlockEntfernen(neu, 'moodle'), alt);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ersetzt samt Unterblock; Kommentar über dem nächsten Block bleibt', () {
       const alt = 'model = "gpt-5"\n\n'
@@ -235,18 +246,18 @@ void main() {
           '# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n');
       expect(tomlBlockEntfernen(neu, 'moodle'),
           'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n');
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ein Server mit ähnlichem Namen bleibt unberührt', () {
       const alt = '[mcp_servers.moodle2]\nurl = "x"\n';
       expect(tomlBlock(alt, 'moodle'), isNull);
       expect(tomlBlockSetzen(alt, 'moodle', url, kopf), '$alt\n$unser');
       expect(tomlBlockEntfernen(alt, 'moodle'), alt);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('Anführungszeichen im Kopf: [mcp_servers."moodle"]', () {
       expect(tomlBlock('[mcp_servers."moodle"]\nurl = "x"\n', 'moodle'), isNotNull);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('CRLF bleibt CRLF', () {
       const alt = 'model = "gpt-5"\r\n';
@@ -309,11 +320,11 @@ void main() {
     });
 
     test('CODEX_HOME verlegt Konfiguration und Skills', () {
-      final c = CodexCli({'USERPROFILE': 'C:\\Users\\x', 'CODEX_HOME': 'D:\\codex'});
+      final c = CodexCli({'USERPROFILE': 'C:\\Users\\x', 'HOME': 'C:\\Users\\x', 'CODEX_HOME': 'D:\\codex'});
       expect(c.konfiguration.path, p.join('D:\\codex', 'config.toml'));
       expect(c.skillOrdner.path, p.join('D:\\codex', 'skills'));
-      expect(CodexCli({'USERPROFILE': 'C:\\Users\\x'}).skillOrdner.path, p.join('C:\\Users\\x', '.codex', 'skills'));
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+      expect(CodexCli({'USERPROFILE': 'C:\\Users\\x', 'HOME': 'C:\\Users\\x'}).skillOrdner.path, p.join('C:\\Users\\x', '.codex', 'skills'));
+    });
   });
 
   group('LM Studio (Bionic): die Brücke in Bionics Liste', () {
@@ -338,7 +349,7 @@ void main() {
           },
         };
     List gelesen() => (jsonDecode(File(p.join(tmp.path, pfad)).readAsStringSync()) as Map)['servers'] as List;
-    LmStudio lm() => LmStudio({'USERPROFILE': tmp.path}, bruecke: exe);
+    LmStudio lm() => LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: exe);
 
     test('fehlt, aktuell, veraltet, unlesbar', () {
       expect(lm().verbindung(0, ''), Verbindung.fehlt);
@@ -358,7 +369,7 @@ void main() {
       expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'ein anderes Zeitlimit');
       datei(pfad, '{"servers": [');
       expect(lm().verbindung(0, ''), Verbindung.unlesbar);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('eintragen: neue Liste, Brücke ohne Schlüssel, keine Zwischendatei übrig', () async {
       expect(await lm().eintragen(47811, 'geheim'), isNull);
@@ -374,7 +385,7 @@ void main() {
       });
       expect(File(p.join(tmp.path, pfad)).readAsStringSync(), isNot(contains('geheim')));
       expect(File(p.join(tmp.path, '$pfad.moocp')).existsSync(), isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('eintragen: Fremdes bleibt, ein alter „moodle" wird ersetzt und behält seine id', () async {
       liste([
@@ -388,10 +399,10 @@ void main() {
       expect((s.first as Map)['connection'], (jsonDecode(jsonEncode(server('cmd', ['/c', 'uvx', 'blender-mcp']))) as Map)['connection']);
       expect((jsonDecode(File(p.join(tmp.path, pfad)).readAsStringSync()) as Map)['version'], 3);
       expect(lm().verbindung(0, ''), Verbindung.aktuell);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
-      final ohne = LmStudio({'USERPROFILE': tmp.path}, bruecke: p.join(tmp.path, 'weg', 'moocp-bruecke.exe'));
+      final ohne = LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', 'moocp-bruecke.exe'));
       expect(await ohne.eintragen(47811, 'abc'), contains('moocp-bruecke.exe fehlt'));
       expect(File(p.join(tmp.path, pfad)).existsSync(), isFalse);
     });
@@ -412,9 +423,84 @@ void main() {
     });
   }, skip: Platform.isWindows ? null : 'Windows-Annahme: claude.exe, MSIX, VS Code, Bionic gibt es nur unter Windows');
 
+  group('feste Programmordner: von außen vorgegeben', () {
+    test('claude und codex werden nur in den vorgegebenen Ordnern gefunden', () {
+      final heim = p.join(tmp.path, 'heim');
+      final u = {'USERPROFILE': heim, 'HOME': heim, 'PATH': ''};
+      final dir = p.join(tmp.path, 'prog');
+      File(p.join(dir, 'claude')).createSync(recursive: true);
+      File(p.join(dir, 'codex')).createSync(recursive: true);
+      // Unter Windows suchen diese Ordner nur Codex und nur im Suchpfad; die Naht gilt für Mac und Linux.
+      festeProgrammOrdner = [dir];
+      expect(claudeFinden(u), p.join(dir, 'claude'));
+      expect(CodexCli(u).exe, p.join(dir, 'codex'));
+      festeProgrammOrdner = [p.join(tmp.path, 'leer')];
+      expect(claudeFinden(u), isNull);
+      expect(CodexCli(u).exe, isNull);
+    }, skip: Platform.isWindows ? 'Die festen Programmordner gibt es nur auf Mac und Linux' : null);
+  });
+
+  group('Codex in der ChatGPT-App', () {
+    late String heim;
+    late Map<String, String> u;
+    setUp(() {
+      heim = p.join(tmp.path, 'heim');
+      u = {'USERPROFILE': heim, 'HOME': heim, 'PATH': ''};
+      festeAppOrdner = [p.join(tmp.path, 'Applications'), p.join(heim, 'Applications')];
+    });
+    tearDown(() => festeAppOrdner = null);
+    void app(String ort, {bool codex = true}) {
+      if (codex) {
+        datei('$ort/ChatGPT.app/Contents/Resources/codex-cli/bin/codex');
+      } else {
+        datei('$ort/ChatGPT.app/Contents/MacOS/ChatGPT');
+      }
+    }
+
+    test('App mit codex-cli ohne ~/.codex: gefunden, mit Hinweis, nichts angelegt', () {
+      app('Applications');
+      final c = CodexCli(u);
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, contains('einmal'));
+      expect(c.exe, isNull);
+      expect(Directory(p.join(heim, '.codex')).existsSync(), isFalse);
+    });
+
+    test('App im Benutzerordner ~/Applications wird auch gefunden', () {
+      app('heim/Applications');
+      expect(CodexCli(u).gefunden, isTrue);
+    });
+
+    test('App und ~/.codex: gefunden, kein Hinweis', () {
+      app('Applications');
+      Directory(p.join(heim, '.codex')).createSync(recursive: true);
+      final c = CodexCli(u);
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, isNull);
+    });
+
+    test('nur die CLI: wie bisher, kein Hinweis', () {
+      datei('bin/codex');
+      final c = CodexCli({...u, 'PATH': p.join(tmp.path, 'bin')});
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, isNull);
+    }, skip: Platform.isWindows ? 'Windows sucht codex.exe, .cmd und .bat' : null);
+
+    test('ChatGPT Classic ohne codex-cli: nicht gefunden', () {
+      app('Applications', codex: false);
+      final c = CodexCli(u);
+      expect(c.gefunden, isFalse);
+      expect(c.hinweis, isNull);
+    });
+
+    test('Name nennt App und CLI', () {
+      expect(CodexCli(u).name, 'Codex (ChatGPT-App oder CLI)');
+    });
+  });
+
   group('gefunden', () {
     test('an Konfigurationsordnern oder Programmen', () {
-      final u = {'USERPROFILE': p.join(tmp.path, 'heim'), 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
+      final u = {'USERPROFILE': p.join(tmp.path, 'heim'), 'HOME': p.join(tmp.path, 'heim'), 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
       expect(gefundeneWerkzeuge(u), isEmpty);
       Directory(p.join(tmp.path, 'heim', '.codex')).createSync(recursive: true);
       expect(gefundeneWerkzeuge(u).map((w) => w.id), ['codex']);
@@ -422,8 +508,9 @@ void main() {
       expect(gefundeneWerkzeuge(u).map((w) => w.id), ['codex'], reason: 'LM Studio, aber Bionic lief nie');
       Directory(p.join(tmp.path, 'heim', '.lmstudio', 'apps', 'bionic')).createSync(recursive: true);
       datei('heim/.claude.json', '{}');
-      expect(gefundeneWerkzeuge(u).map((w) => w.id), ['claude', 'codex', 'lmstudio']);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+      // LM Studio mit Bionic gibt es nur unter Windows (E24).
+      expect(gefundeneWerkzeuge(u).map((w) => w.id), ['claude', 'codex', if (Platform.isWindows) 'lmstudio']);
+    });
 
     test('Codex auch nur über npm', () {
       datei('roaming/npm/codex.cmd');
@@ -516,7 +603,7 @@ void main() {
 
     test('Dialog nur, wenn etwas zu tun ist', () async {
       claudeEintrag();
-      datei('lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.281/claude.exe');
+      final claudeDatei = datei(claudeOrt);
       var s = await pruefen();
       expect(s.brauchtEtwas, isTrue, reason: 'Skill fehlt');
       skillInstallieren(paket, skills('.claude', 'moodle'));
@@ -524,11 +611,11 @@ void main() {
       expect(s.brauchtEtwas, isFalse);
       expect(s.bereit, isTrue);
 
-      Directory(p.join(tmp.path, 'lokal')).deleteSync(recursive: true);
+      claudeDatei.deleteSync();
       s = await pruefen();
       expect((s.werkzeuge.single.werkzeug as ClaudeCode).exe, isNull);
       expect(s.brauchtEtwas, isFalse, reason: 'Eintrag stimmt schon, claude.exe braucht es nur zum Eintragen');
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('Ohne claude.exe einrichtbar sind nur die Skills', () async {
       datei('heim/.claude/skills/fremd/SKILL.md'); // Claude Code wird benutzt
@@ -545,7 +632,7 @@ void main() {
       s = await pruefen();
       expect(s.brauchtEtwas, isTrue, reason: 'Skill fehlt');
       expect(s.einrichtbar, isTrue, reason: 'Skills gehen ohne claude.exe');
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('kein Werkzeug gefunden: nicht bereit, nichts einzurichten', () async {
       final s = await pruefen();
@@ -553,7 +640,7 @@ void main() {
       expect(s.bereit, isFalse);
       expect(s.brauchtEtwas, isTrue, reason: 'ohne Werkzeug läuft die App nicht');
       expect(s.einrichtbar, isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('eines eingerichtet reicht zum Laufen; ein neues Werkzeug wird trotzdem angeboten', () async {
       claudeEintrag();
@@ -576,7 +663,7 @@ void main() {
       s = await pruefen();
       expect(s.werkzeuge.every((w) => w.fertig), isTrue);
       expect(s.brauchtEtwas, isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ein abgewähltes Werkzeug wird geräumt: Eintrag und alle Skills', () async {
       claudeEintrag();
@@ -596,7 +683,7 @@ void main() {
       skillEntfernen(skills('.codex', 'moodle'));
       s = await pruefen(abgewaehlt: {'codex'});
       expect(s.brauchtEtwas, isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('LM Studio abgewählt: Eintrag und Skills werden geräumt', () async {
       claudeEintrag();
@@ -627,7 +714,7 @@ void main() {
       w = s.werkzeuge.firstWhere((x) => x.werkzeug.id == 'lmstudio');
       expect(w.brauchtEtwas, isFalse);
       expect(s.brauchtEtwas, isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    }, skip: Platform.isWindows ? null : 'LM Studio mit Bionic gibt es nur unter Windows (E24)');
 
     test('alles abgewählt: nicht bereit, auch wenn alles stimmt', () async {
       claudeEintrag();
@@ -680,7 +767,7 @@ void main() {
     expect(entfernen(s), isEmpty);
     expect(s.brauchtEtwas, isFalse);
     expect(ziel('lernsituation').existsSync(), isFalse);
-  }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+  });
 
   test('Die wählbaren Skills der App: nur lernsituation, mit dem Satz aus dem Dialog', () {
     expect(appWahlSkills, {
@@ -731,11 +818,10 @@ void main() {
       skillInstallieren(fest, Directory(p.join(codex.skillOrdner.path, 'lernsituation')));
       expect(gewaehltVorgabe(u, wahl.keys), {'zusatz'});
       expect(gewaehltVorgabe(u, const []), isEmpty);
-    }, skip: Platform.isMacOS ? 'Werkzeugsuche unter macOS: findet echte Programme auf dem Rechner (/opt/homebrew/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
   });
 
   group('Entfernen beim Deinstallieren', () {
-    const desktop ='lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code';
     const fremd = {'type': 'http', 'url': 'http://127.0.0.1:2/mcp'};
     late Map<String, String> umgebung;
     late File konfig;
@@ -776,7 +862,7 @@ void main() {
         [ClaudeCode(umgebung)..ausfuehren = ausfuehren ?? claudeAttrappe, CodexCli(umgebung), LmStudio(umgebung)];
 
     test('Eintrag über claude.exe, Skills der App gelöscht, fremde bleiben', () async {
-      final exe = datei('$desktop/2.1.9/claude.exe').path;
+      final exe = datei(claudeOrt).path;
       final e = await einrichtungEntfernen(umgebung: umgebung, skills: ['moodle', 'lernsituation'], werkzeuge: werkzeuge());
       expect(aufrufe, [
         [exe, 'mcp', 'remove', 'moodle', '--scope', 'user'],
@@ -785,7 +871,7 @@ void main() {
       expect(Directory(p.join(tmp.path, 'cfg/skills/moodle')).existsSync(), isFalse);
       expect(Directory(p.join(tmp.path, 'cfg/skills/lernsituation')).existsSync(), isFalse);
       expect(File(p.join(tmp.path, 'cfg/skills/fremd/SKILL.md')).existsSync(), isTrue);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('ohne claude.exe: Eintrag bleibt und wird gemeldet, Skills trotzdem weg', () async {
       final e = await einrichtungEntfernen(umgebung: umgebung, skills: ['moodle'], werkzeuge: werkzeuge());
@@ -793,10 +879,10 @@ void main() {
       expect(e.eintragBleibt, ['claude']);
       expect(e.code, 1);
       expect(Directory(p.join(tmp.path, 'cfg/skills/moodle')).existsSync(), isFalse);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
 
     test('Exit-Code 0 von claude.exe zählt nicht, nur der Eintrag danach', () async {
-      datei('$desktop/2.1.9/claude.exe');
+      datei(claudeOrt);
       final e = await einrichtungEntfernen(
           umgebung: umgebung, skills: const [], werkzeuge: werkzeuge(ausfuehren: (_, _) async => 0));
       expect(e.code, 1);
@@ -851,13 +937,11 @@ void main() {
       expect(Directory(p.join(tmp.path, 'heim/.codex/skills/moodle')).existsSync(), isFalse);
       expect(Directory(p.join(tmp.path, 'heim/.lmstudio/skills/moodle')).existsSync(), isFalse);
       expect(File(p.join(tmp.path, 'heim/.lmstudio/skills/fremd/SKILL.md')).existsSync(), isTrue);
-    }, skip: !Platform.isWindows ? 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9' : null);
+    });
   });
 
   group('Profil löschen: Einträge in den Werkzeugen', () {
-    const claudeExe = 'lokal/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code/2.1.9/claude.exe';
-    const macSkip = 'Werkzeugsuche unter macOS und Linux: findet echte Programme auf dem Rechner (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin); braucht injizierbare Suchordner, siehe https://github.com/topse/moocp/issues/9';
-    late Map<String, String> umgebung;
+        late Map<String, String> umgebung;
     late File konfig;
     late File toml;
     final aufrufe = <List<String>>[];
@@ -896,7 +980,7 @@ void main() {
         [ClaudeCode(umgebung)..ausfuehren = ausfuehren, CodexCli(umgebung)];
 
     test('nimmt nur den Eintrag des gelöschten Profils heraus', () async {
-      datei(claudeExe);
+      datei(claudeOrt);
       final rest = await profilEintragEntfernen(
           umgebung: umgebung, name: 'moodle-test', werkzeuge: werkzeuge(claudeAttrappe));
       expect(rest, isEmpty);
@@ -907,16 +991,16 @@ void main() {
       expect(tomlBlock(toml.readAsStringSync(), 'moodle-test'), isNull);
       expect(tomlBlock(toml.readAsStringSync(), 'moodle'), isNotNull);
       expect(toml.readAsStringSync(), startsWith('model = "gpt-5"'));
-    }, skip: !Platform.isWindows ? macSkip : null);
+    });
 
     test('bleibt ein Eintrag stehen, nennt die Rückgabe Werkzeug und Namen', () async {
-      datei(claudeExe);
+      datei(claudeOrt);
       final rest = await profilEintragEntfernen(
           umgebung: umgebung, name: 'moodle-test', werkzeuge: werkzeuge((_, _) async => 0));
       expect(rest, ['Claude Code (moodle-test)']);
       // Codex wurde trotzdem aufgeräumt.
       expect(tomlBlock(toml.readAsStringSync(), 'moodle-test'), isNull);
-    }, skip: !Platform.isWindows ? macSkip : null);
+    });
 
     test('Codex: Block des Profils samt Unterblöcken weg, der andere bleibt', () async {
       final rest = await profilEintragEntfernen(
@@ -936,7 +1020,7 @@ void main() {
     });
 
     test('Deinstallation entfernt die Einträge aller Profile', () async {
-      datei(claudeExe);
+      datei(claudeOrt);
       final e = await einrichtungEntfernen(
           umgebung: umgebung,
           skills: const [],
@@ -945,6 +1029,6 @@ void main() {
       expect(e.code, 0);
       expect((jsonDecode(konfig.readAsStringSync()) as Map)['mcpServers'], isEmpty);
       expect(toml.readAsStringSync(), 'model = "gpt-5"\n');
-    }, skip: !Platform.isWindows ? macSkip : null);
+    });
   });
 }

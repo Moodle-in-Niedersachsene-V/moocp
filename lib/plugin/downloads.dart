@@ -18,7 +18,7 @@
 // Der Pfad des Ordners geht nie an die KI: Wer ihn kennt, kann die Dateien
 // mit eigenen Mitteln lesen. Das Plugin bekommt den Pfad einer Datei, weil es
 // mit ihr arbeitet. Die App schreibt den Pfad in kein Protokoll, und die
-// letzte Sperre (namenssperre.dart, LetzteSperre.pfadSperren) hält jede
+// Datenschutzprüfung (namenssperre.dart, LetzteSperre.pfadSperren) hält jede
 // Antwort und jede Protokollzeile eines Plugins an, die ihn nennt.
 
 import 'dart:convert';
@@ -61,7 +61,7 @@ class PluginDownloads {
 
   /// Die Schreibweisen des Pfads, die die App kennt: die lange Form und die,
   /// unter der das Temp-Verzeichnis gemeldet wurde (unter Windows oft mit
-  /// Kurznamen, auf dem Mac ohne `/private`). Beide sperrt die letzte Sperre.
+  /// Kurznamen, auf dem Mac ohne `/private`). Beide sperrt die Datenschutzprüfung.
   final Set<String> pfadformen;
 
   /// Löscht alles im Ordner, Eintrag für Eintrag, wie Arbeitsordner.leeren:

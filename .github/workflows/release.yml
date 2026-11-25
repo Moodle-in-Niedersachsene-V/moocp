@@ -1,0 +1,253 @@
+# Baut alle fünf Pakete und veröffentlicht sie (E12, E24, E39).
+#
+# Zwei Kanäle:
+#   nightly  Ein Stand von main als Vorabversion v<Version>-nightly.<JJJJMMTT>.<n>,
+#            von Hand ("Run workflow") oder jede Nacht, wenn main neue Commits hat.
+#   stable   Ein vorhandener Tag v<Version> (auf main oder release/x.y), als
+#            normales Release "latest". Läuft im Environment "stable": Der andere
+#            Maintainer bestätigt dort die Veröffentlichung.
+#
+# Alles Entscheiden steht in tool/ci_release.py (mit Tests); diese Datei ruft es auf.
+# Jeder Lauf, der nicht veröffentlichen darf (anderer Zweig, Fork, "publish" aus),
+# baut dieselben Pakete und lädt sie nur als Artefakte hoch: kein Tag, kein Release.
+name: Release
+run-name: Release ${{ inputs.channel || 'nightly' }} (${{ github.event_name }}${{ inputs.publish == false && ', nur Bau' || '' }})
+on:
+  schedule:
+    # Nicht zur vollen Stunde: Dort ist bei GitHub am meisten los (03:41 deutscher Zeit im Winter).
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Kanal (nightly = Stand von main, stable = Tag v<Version>)
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+      publish:
+        description: Veröffentlichen (aus = nur bauen und als Artefakte hochladen)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+# Ein Lauf je Ref zur Zeit: Zwei Nightlies am selben Tag vergeben sonst dieselbe Nummer.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+      channel: ${{ steps.plan.outputs.channel }}
+      version: ${{ steps.plan.outputs.version }}
+      base_version: ${{ steps.plan.outputs.base_version }}
+      version_suffix: ${{ steps.plan.outputs.version_suffix }}
+      build_number: ${{ steps.plan.outputs.build_number }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Script tests
+        run: python -m unittest discover -s tool -p 'test_ci_*.py' -v
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel }}
+          PUBLISH: ${{ inputs.publish }}
+        run: python tool/ci_release.py plan --channel "$CHANNEL" --publish "${PUBLISH:-true}"
+      - name: Release notes
+        if: steps.plan.outputs.build == 'true'
+        env:
+          BASE_VERSION: ${{ steps.plan.outputs.base_version }}
+          REQUIRE: ${{ steps.plan.outputs.publish == 'true' && '--require' || '' }}
+        # Ohne Abschnitt in CHANGELOG.md scheitert ein veröffentlichender Lauf hier, vor den Bauten.
+        run: python tool/ci_release.py notes --base-version "$BASE_VERSION" --out notes.md $REQUIRE
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-24.04
+          - platform: windows
+            runner: windows-2022
+          - platform: macos
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Dieselbe Einrichtung wie Checks und Desktop builds (Flutter-Version an einer Stelle);
+      # die Paketskripte brauchen unter Linux zusätzlich fakeroot und xvfb.
+      - uses: ./.github/actions/flutter-setup
+        with:
+          extra-packages: fakeroot xvfb xauth
+      - name: NSIS
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
+      # Die Nightly-Version kommt nur in die Arbeitskopie dieses Runners, in keinen Commit.
+      - name: Nightly version
+        if: needs.plan.outputs.version_suffix != ''
+        env:
+          BUILD_NUMBER: ${{ needs.plan.outputs.build_number }}
+        run: python tool/ci_release.py set-version --version "$VERSION" --build "$BUILD_NUMBER"
+      - name: Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          bash tool/linux_installer.sh
+          bash tool/linux_appimage.sh
+          bash tool/linux_deb.sh
+      # `moocp --version` schreibt unter Linux nichts nach stdout; die Version steht
+      # in den Assets des Baus, aus denen die App sie liest.
+      - name: Version of the Linux build
+        if: matrix.platform == 'linux'
+        run: |
+          cat build/linux/x64/release/bundle/data/flutter_assets/version.json
+          grep -q "\"version\":\"$VERSION\"" build/linux/x64/release/bundle/data/flutter_assets/version.json
+      - name: create_installer.bat keeps CRLF
+        if: matrix.platform == 'windows'
+        run: |
+          # cmd liest Sprungmarken in Dateien mit LF nicht zuverlässig (installer/CLAUDE.md).
+          test "$(tr -cd '\r' < create_installer.bat | wc -c)" = "$(wc -l < create_installer.bat)"
+      - name: Windows installer
+        if: matrix.platform == 'windows'
+        shell: cmd
+        env:
+          # Analyse und Tests laufen in Checks; veröffentlicht wird nur ein Commit, auf dem
+          # sie grün waren (tool/ci_release.py, checks_passed).
+          MOOCP_OHNE_PRUEFUNG: '1'
+          MOOCP_VERSION_ZUSATZ: ${{ needs.plan.outputs.version_suffix }}
+        run: create_installer.bat
+      - name: Version of the Windows build
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # Die App zeigt eine Nightly ohne „-nightly“, wie auf dem Mac (lib/ueber.dart).
+          $erwartet = $env:VERSION.Replace('-nightly.', '.')
+          $out = (& build\windows\x64\runner\Release\moocp.exe --version | Out-String).Trim()
+          Write-Host "moocp --version: $out"
+          if (-not $out.StartsWith($erwartet)) { throw "Unexpected version: $out" }
+      - name: macOS disk image
+        if: matrix.platform == 'macos'
+        run: bash tool/mac_dmg.sh
+      # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
+      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. So zeigt die App eine
+      # Nightly auf jeder Plattform (lib/ueber.dart).
+      - name: Version of the macOS build
+        if: matrix.platform == 'macos'
+        run: |
+          erwartet="${VERSION/-nightly./.}"
+          out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
+          echo "moocp --version: $out"
+          [[ "$out" == "$erwartet"* ]]
+      - name: Check packages
+        run: python tool/ci_release.py check-assets --version "$VERSION" --platform ${{ matrix.platform }}
+      - name: Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: moocp-${{ matrix.platform }}
+          path: installer/moocp_*
+          if-no-files-found: error
+          # Eine stabile Version wartet im Environment auf die Bestätigung, bis zu 30 Tage.
+          retention-days: ${{ needs.plan.outputs.channel == 'stable' && 30 || 7 }}
+  # Die Pakete aller drei Plattformen zusammen, wie ein Release sie bekäme: Erst wenn alle
+  # fünf da sind, darf veröffentlicht werden. Läuft auch ohne Veröffentlichen, damit ein
+  # Probelauf denselben Weg geht.
+  verify:
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: moocp-*
+          merge-multiple: true
+          path: assets
+      - name: Check all five packages
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: python tool/ci_release.py check-assets --version "$VERSION" --dir assets
+  publish-nightly:
+    needs: [plan, verify]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'nightly'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: moocp-*
+          merge-multiple: true
+          path: assets
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
+        run: |
+          python tool/ci_release.py notes --base-version "$BASE_VERSION" --out notes.md --require
+          python tool/ci_release.py publish --channel nightly --tag "$TAG" --version "$VERSION" --notes-file notes.md --dir assets
+  # Wie publish-nightly, aber im Environment "stable": Der andere Maintainer bestätigt hier,
+  # dass er die Nightly selbst lange genug benutzt hat (E39). Zwei Jobs statt eines, weil
+  # `environment` nicht je nach Kanal ausbleiben kann.
+  publish-stable:
+    needs: [plan, verify]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    environment: stable
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: moocp-*
+          merge-multiple: true
+          path: assets
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
+        run: |
+          python tool/ci_release.py notes --base-version "$BASE_VERSION" --out notes.md --require
+          python tool/ci_release.py publish --channel stable --tag "$TAG" --version "$VERSION" --notes-file notes.md --dir assets

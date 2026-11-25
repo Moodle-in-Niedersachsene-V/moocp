@@ -12,15 +12,16 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/datenschutzwarnung.dart' show protokollPlatzhalterName, protokollPlatzhalterPfad;
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeug_aufrufe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/app_adresse.dart';
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzpruefung, Datenschutzwarnung;
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/klartext.dart';
-import 'package:moocp/plugin/namenssperre.dart';
 import 'package:moocp/testschalter.dart';
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
@@ -88,6 +89,15 @@ class _Kontext implements AufrufKontext {
     return PluginFreigabeAusgang.freigegeben;
   }
 
+  /// Die Adresse der App fragt nie die Lehrkraft; nur die laufenden Plugins
+  /// tun es (test/plugin_start_test.dart, test/plugin_datenschutz_test.dart).
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async => DatenschutzAusgang.sperren;
+
   /// Ohne Testbetrieb: keine vorbereiteten Antworten.
   @override
   String? testDialogantworten;
@@ -138,14 +148,12 @@ void main() {
   late Protokoll protokoll;
   late AppAdresse adresse;
   late PluginDialoge dialoge;
-  late List<SperrTreffer> gemeldet;
 
   setUp(() async {
     wurzel = Directory.systemTemp.createTempSync('moocp_adresse_');
     protokoll = Protokoll();
     dialoge = PluginDialoge();
-    gemeldet = [];
-    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, sperre: LetzteSperre(melden: gemeldet.add));
+    adresse = await AppAdresse.starten(protokoll, dialoge: dialoge, pruefung: Datenschutzpruefung());
     adresse.pluginAnmelden('beispiel', 'Beispiel', _schluessel);
   });
 
@@ -1122,7 +1130,7 @@ void main() {
     });
   });
 
-  group('Letzte Sperre: Namen nennen und Protokollzeilen', () {
+  group('Datenschutzprüfung: Namen nennen und Protokollzeilen', () {
     // Erfundene Namen (A8, A11).
     const name = 'Erika Mustermann';
 
@@ -1139,35 +1147,47 @@ void main() {
       expect(r.status, 200);
       expect(r.json, isEmpty);
       expect(zeilen(), contains('[A] Plugin „Beispiel“: 2 Namen zum Sperren genannt'));
-      expect(adresse.sperre.anzahl('beispiel'), 2);
+      expect(adresse.pruefung.anzahl('beispiel'), 2);
       expect(zeilen().join('\n'), isNot(contains('Erika')));
       expect(zeilen().join('\n'), isNot(contains('Muster')));
     });
 
-    test('eine Protokollzeile mit einem Namensteil erscheint nicht; im Protokoll steht nur, dass gesperrt wurde', () async {
-      expect(testbetriebAktiv, isTrue, reason: 'auch im Testbetrieb sperrt die letzte Sperre');
+    test('eine Protokollzeile mit einem Namensteil erscheint nur als Platzhalter, ohne Rückfrage und ohne Fehler', () async {
+      expect(testbetriebAktiv, isTrue, reason: 'auch im Testbetrieb gilt die Datenschutzprüfung');
       final a = _aufruf(kontext('A'));
       adresse.aufrufAnmelden('beispiel', a);
       await nennen(a.token, [name]);
 
-      final gesperrt = await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Bearbeitet: ERIKA'}, token: a.token);
+      final mitName = await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Bearbeitet: ERIKA'}, token: a.token);
       final frei = await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Bearbeitet: Aufgabe 3'}, token: a.token);
 
-      expect(gesperrt.status, 422);
-      expect(gesperrt.json['fehler'], startsWith('Gesperrt: Die Zeile enthält ein Wort'));
-      expect(jsonEncode(gesperrt.json), isNot(contains('ERIKA')));
+      expect(mitName.status, 200);
+      expect(mitName.json, isEmpty);
       expect(frei.status, 200);
-      expect(
-        zeilen(),
-        contains('[A] Plugin „Beispiel“, Werkzeug beispiel_echo: Protokollzeile gesperrt (letzte Sperre: könnte einen Namen enthalten)'),
-      );
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: $protokollPlatzhalterName'));
       expect(zeilen(), contains('[A] Plugin „Beispiel“: Bearbeitet: Aufgabe 3'));
       expect(zeilen().join('\n').toLowerCase(), isNot(contains('erika')));
-      expect(protokoll.eintraege.where((e) => e.art == Art.gesperrt), hasLength(1));
-      expect(gemeldet.single.plugin, 'Beispiel');
-      expect(gemeldet.single.werkzeug, 'beispiel_echo');
-      expect(gemeldet.single.stelle, SperrStelle.protokollzeile);
-      expect(gemeldet.single.wort, 'ERIKA');
+      expect(zeilen().join('\n'), isNot(contains('Bearbeitet: ERIKA')));
+      expect(protokoll.eintraege.where((e) => e.art == Art.gesperrt), isEmpty);
+      expect(dialoge.aktuell, isNull, reason: 'eine Protokollzeile fragt nie die Lehrkraft');
+    });
+
+    test('der Platzhalter ist für jede Zeile gleich: keine Länge, kein Anfang; ein Pfad hat seinen eigenen', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      await nennen(a.token, [name]);
+      adresse.pruefung.pfadSperren(r'C:\Temp\moocp_plugin_downloads');
+
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Erika'}, token: a.token);
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Eine ganz lange Zeile mit Mustermann mittendrin und mehr'}, token: a.token);
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': r'Datei in C:\Temp\moocp_plugin_downloads\x.pdf'}, token: a.token);
+
+      final eigene = zeilen().where((z) => z.startsWith('[A] Plugin „Beispiel“: [gesperrt')).toList();
+      expect(eigene, [
+        '[A] Plugin „Beispiel“: $protokollPlatzhalterName',
+        '[A] Plugin „Beispiel“: $protokollPlatzhalterName',
+        '[A] Plugin „Beispiel“: $protokollPlatzhalterPfad',
+      ]);
     });
 
     test('die Sperre gilt nach dem Ende des Aufrufs weiter, auch ohne Token und nach einem neuen Schlüssel', () async {
@@ -1185,11 +1205,11 @@ void main() {
         schluessel: 'neuer-schluessel-0123456789abcdefghijklmnop',
       );
 
-      expect(ohneToken.status, 422);
-      expect(nachNeustart.status, 422);
-      expect(zeilen(), contains('Plugin „Beispiel“: Protokollzeile gesperrt (letzte Sperre: könnte einen Namen enthalten)'));
+      expect(ohneToken.status, 200);
+      expect(nachNeustart.status, 200);
+      expect(zeilen().where((z) => z == 'Plugin „Beispiel“: $protokollPlatzhalterName'), hasLength(2));
       expect(zeilen().join('\n'), isNot(contains('Mustermann')));
-      expect(gemeldet.map((t) => t.werkzeug), [null, null]);
+      expect(zeilen().join('\n'), isNot(contains('nach dem Neustart')));
     });
 
     test('die Namen eines Plugins sperren kein anderes, und sie gelten in jedem Profil', () async {
@@ -1212,13 +1232,10 @@ void main() {
         token: fremd.token,
       );
 
-      expect(imAnderenProfil.status, 422);
+      expect(imAnderenProfil.status, 200);
       expect(anderesPlugin.status, 200);
       expect(zeilen(), contains('[C] Plugin „Anderes“: Erika'));
-      expect(
-        zeilen(),
-        contains('[B] Plugin „Beispiel“, Werkzeug beispiel_echo: Protokollzeile gesperrt (letzte Sperre: könnte einen Namen enthalten)'),
-      );
+      expect(zeilen(), contains('[B] Plugin „Beispiel“: $protokollPlatzhalterName'));
     });
 
     test('Name und Argumente eines eingebauten Werkzeugs gehen nur ohne Namen ins Protokoll; sonst läuft es nicht', () async {
@@ -1246,13 +1263,12 @@ void main() {
       expect(
         zeilen(),
         contains(
-          '[A] Plugin „Beispiel“, Werkzeug beispiel_echo: Aufruf eines Werkzeugs von moocp gesperrt '
-          '(letzte Sperre: könnte einen Namen enthalten)',
+          '[A] Plugin „Beispiel“, Werkzeug beispiel_echo: Aufruf eines Werkzeugs von moocp abgelehnt '
+          '(Datenschutzsperre: könnte personenbezogene Daten enthalten)',
         ),
       );
       expect(zeilen().join('\n'), isNot(contains('Mustermann')));
-      expect(gemeldet.single.stelle, SperrStelle.werkzeugaufruf);
-      expect(gemeldet.single.wort, 'Mustermann');
+      expect(dialoge.aktuell, isNull);
       expect((await _post(adresse.adresse, pfadWerkzeug, daten: {'name': 'status'}, token: a.token)).status, 200);
     });
 
@@ -1282,7 +1298,7 @@ void main() {
       expect(antworten['zu lang']!.json['fehler'], 'Name Nr. 2 ist länger als $nameHoechstens Zeichen; nichts aufgenommen.');
       expect(antworten['nur Satzzeichen']!.json['fehler'], contains('Nr. 2'));
       expect(antworten.values.map((r) => jsonEncode(r.json)).join(), isNot(contains('Erika')));
-      expect(adresse.sperre.anzahl('beispiel'), 0, reason: 'über der Grenze nichts, auch nicht teilweise');
+      expect(adresse.pruefung.anzahl('beispiel'), 0, reason: 'über der Grenze nichts, auch nicht teilweise');
       expect((await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Erika'}, token: a.token)).status, 200);
       expect(
         (await nennen(a.token, [for (var i = 0; i < namenJeAnfrageHoechstens; i++) 'Erika$i'])).status,
@@ -1291,47 +1307,10 @@ void main() {
       );
     });
 
-    test('/v1/namen/pruefen: Stellen nach der Regel der Sperre, mit Token, ohne Warnung und ohne Protokoll', () async {
-      expect((await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Erika'})).status, 403);
-      final a = _aufruf(kontext('A'));
-      adresse.aufrufAnmelden('beispiel', a);
-      await nennen(a.token, [name]);
-      final vorher = zeilen().length;
-
-      final r = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Von ERIKA und Erik%61, 3 Punkte'}, token: a.token);
-      final ohne = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 'Aufgabe 3'}, token: a.token);
-      final fehlt = await _post(adresse.adresse, pfadNamenPruefen, daten: {'text': 3}, token: a.token);
-
-      expect(r.status, 200);
-      expect(r.json, {
-        'stellen': [
-          {'anfang': 4, 'ende': 9},
-        ],
-        'kodiert': true,
-        'pfad': false,
-      });
-      expect(ohne.json, {'stellen': <Object?>[], 'kodiert': false, 'pfad': false});
-      expect(fehlt.status, 400);
-      expect(zeilen().length, vorher, reason: 'Prüfen schreibt nichts ins Protokoll');
-      expect(gemeldet, isEmpty, reason: 'es geht nichts hinaus, also keine Warnung');
-      adresse.pluginAnmelden('anderes', 'Anderes', _fremderSchluessel);
-      final andere = _aufruf(kontext('A'));
-      adresse.aufrufAnmelden('anderes', andere);
-      final fremd = await _post(
-        adresse.adresse,
-        pfadNamenPruefen,
-        daten: {'text': 'Erika'},
-        token: andere.token,
-        schluessel: _fremderSchluessel,
-      );
-      expect(fremd.status, 200);
-      expect(fremd.json['stellen'], isEmpty, reason: 'die Namen eines Plugins gelten nur für seine Texte');
-    });
-
     test('je Plugin höchstens $namenJePluginHoechstens verschiedene Namen; gleiche zählen einmal', () async {
       final a = _aufruf(kontext('A'));
       adresse.aufrufAnmelden('beispiel', a);
-      adresse.sperre.namenHinzufuegen('beispiel', [for (var i = 0; i < namenJePluginHoechstens - 1; i++) 'Probe$i']);
+      adresse.pruefung.namenHinzufuegen('beispiel', [for (var i = 0; i < namenJePluginHoechstens - 1; i++) 'Probe$i']);
 
       final nochEiner = await nennen(a.token, ['Erika', 'erika', 'ERIKA']);
       final zuViel = await nennen(a.token, ['Max']);
@@ -1339,7 +1318,145 @@ void main() {
       expect(nochEiner.status, 200);
       expect(zuViel.status, 413);
       expect(zuViel.json['fehler'], contains('höchstens $namenJePluginHoechstens'));
-      expect(adresse.sperre.anzahl('beispiel'), namenJePluginHoechstens);
+      expect(adresse.pruefung.anzahl('beispiel'), namenJePluginHoechstens);
+    });
+  });
+
+  group('Datenschutzprüfung: Pfade melden', () {
+    // Erfundene Pfade (A8, A11).
+    const ordner = '/home/e.mustermann/Klasse 9b/Abgaben';
+
+    Future<({int status, Map json})> melden(String token, Object? pfade) =>
+        _post(adresse.adresse, pfadPfade, daten: {'pfade': pfade}, token: token);
+
+    test('Pfade melden braucht das Token eines laufenden Aufrufs; Antwort und Protokoll nennen nur die Zahl', () async {
+      expect((await _post(adresse.adresse, pfadPfade, daten: {'pfade': [ordner]})).status, 403);
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final r = await melden(a.token, [ordner, r'D:\Schule\Klassenarbeiten']);
+
+      expect(r.status, 200);
+      expect(r.json, isEmpty);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: 2 Pfade zum Sperren genannt'));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), 2);
+      expect(zeilen().join('\n'), isNot(contains('Klasse')));
+      expect(zeilen().join('\n'), isNot(contains('Klassenarbeiten')));
+    });
+
+    test('eine Protokollzeile mit dem Pfad erscheint nur als Pfad-Platzhalter, ohne Rückfrage und ohne Fehler', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      await melden(a.token, [ordner]);
+
+      final mit = await _post(
+        adresse.adresse,
+        pfadProtokoll,
+        daten: {'text': r'Lese \HOME\e.mustermann\klasse 9b\Abgaben\x.pdf'},
+        token: a.token,
+      );
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'Lese /home/e.mustermann/andere'}, token: a.token);
+
+      expect(mit.status, 200);
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: $protokollPlatzhalterPfad'));
+      expect(zeilen(), contains('[A] Plugin „Beispiel“: Lese /home/e.mustermann/andere'));
+      expect(zeilen().join('\n').toLowerCase(), isNot(contains('klasse 9b')));
+      expect(protokoll.eintraege.where((e) => e.art == Art.gesperrt), isEmpty);
+      expect(dialoge.aktuell, isNull);
+    });
+
+    test('die Pfade gelten nach dem Ende des Aufrufs und in jedem Profil, aber nur für dieses Plugin', () async {
+      protokoll.profilnamenZeigen = true;
+      adresse.pluginAnmelden('anderes', 'Anderes', _fremderSchluessel);
+      final a = _aufruf(kontext('A'));
+      final ende = adresse.aufrufAnmelden('beispiel', a).ende;
+      await melden(a.token, [ordner]);
+      ende();
+      final b = _aufruf(kontext('B'));
+      adresse.aufrufAnmelden('beispiel', b);
+      final fremd = _aufruf(kontext('C'));
+      adresse.aufrufAnmelden('anderes', fremd);
+
+      await _post(adresse.adresse, pfadProtokoll, daten: {'text': 'in $ordner'}, token: b.token);
+      await _post(
+        adresse.adresse,
+        pfadProtokoll,
+        daten: {'text': 'in $ordner'},
+        schluessel: _fremderSchluessel,
+        token: fremd.token,
+      );
+
+      expect(zeilen(), contains('[B] Plugin „Beispiel“: $protokollPlatzhalterPfad'));
+      expect(zeilen(), contains('[C] Plugin „Anderes“: in $ordner'));
+      expect(adresse.pruefung.pfadAnzahl('anderes'), 0);
+    });
+
+    test('ein Werkzeugaufruf mit dem Pfad wird abgelehnt, ohne Dialog und ohne den Pfad im Protokoll', () async {
+      final k = kontext('A');
+      final a = _aufruf(k);
+      adresse.aufrufAnmelden('beispiel', a);
+      await melden(a.token, [ordner]);
+
+      final r = await _post(
+        adresse.adresse,
+        pfadWerkzeug,
+        daten: {'name': 'status', 'argumente': {'x': 'siehe $ordner'}},
+        token: a.token,
+      );
+
+      expect(r.status, 422);
+      expect(k.aufgerufen, isEmpty);
+      expect(zeilen().join('\n'), isNot(contains('Abgaben')));
+      expect(dialoge.aktuell, isNull);
+    });
+
+    test('Grenzen: leer, zu viele, zu lang, kein Text, Wurzel und Laufwerk: abgelehnt, nichts aufgenommen, kein Pfad in der Meldung', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+
+      final antworten = {
+        'fehlt': await _post(adresse.adresse, pfadPfade, daten: <String, Object?>{}, token: a.token),
+        'leer': await melden(a.token, <String>[]),
+        'keine Liste': await melden(a.token, ordner),
+        'zu viele': await melden(a.token, [for (var i = 0; i <= pfadeJeAnfrageHoechstens; i++) '/home/x/$i']),
+        'zu lang': await melden(a.token, [ordner, '/home/${'x' * gemeldeterPfadHoechstens}']),
+        'kein Text': await melden(a.token, [ordner, 3]),
+        'Wurzel': await melden(a.token, [ordner, '/']),
+        'Laufwerk': await melden(a.token, [ordner, r'C:\']),
+        'ein Teil': await melden(a.token, [ordner, 'Abgaben']),
+      };
+
+      expect({for (final e in antworten.entries) e.key: e.value.status}, {
+        'fehlt': 400,
+        'leer': 400,
+        'keine Liste': 400,
+        'zu viele': 413,
+        'zu lang': 400,
+        'kein Text': 400,
+        'Wurzel': 400,
+        'Laufwerk': 400,
+        'ein Teil': 400,
+      });
+      expect(antworten['Wurzel']!.json['fehler'], contains('Nr. 2'));
+      expect(antworten.values.map((r) => jsonEncode(r.json)).join(), isNot(contains('Abgaben')));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), 0, reason: 'nichts, auch nicht teilweise');
+    });
+
+    test('je Plugin höchstens $pfadeJePluginHoechstens verschiedene Pfade; gleiche zählen einmal', () async {
+      final a = _aufruf(kontext('A'));
+      adresse.aufrufAnmelden('beispiel', a);
+      for (var i = 0; i < pfadeJePluginHoechstens - 1; i += pfadeJeAnfrageHoechstens) {
+        final bis = (i + pfadeJeAnfrageHoechstens).clamp(0, pfadeJePluginHoechstens - 1);
+        adresse.pruefung.pfadeHinzufuegen('beispiel', [for (var j = i; j < bis; j++) '/home/x/$j']);
+      }
+
+      final nochEiner = await melden(a.token, [ordner, ordner.toUpperCase(), ordner.replaceAll('/', r'\')]);
+      final zuViel = await melden(a.token, ['/home/y/zuviel']);
+
+      expect(nochEiner.status, 200);
+      expect(zuViel.status, 413);
+      expect(zuViel.json['fehler'], contains('höchstens $pfadeJePluginHoechstens'));
+      expect(adresse.pruefung.pfadAnzahl('beispiel'), pfadeJePluginHoechstens);
     });
   });
 

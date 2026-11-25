@@ -9,6 +9,8 @@ Mit diesen Werkzeugen sicherst du Teile eines Kurses oder den ganzen Kurs als Si
 | eine Sicherungsdatei zurückspielen | `wiederherstellen_datei` |
 | eine Auswahl in mehrere Kurse derselben Instanz bringen | `uebertragen` |
 | den Stand eines laufenden Vorgangs abfragen | `sicherung_status`, `wiederherstellung_status` |
+| fehlende oder abweichende Anhänge nach dem Wiederherstellen ergänzen | `anhaenge_reparieren` |
+| die Datei einer eigenen Sicherung in Moodle wieder löschen | `sicherung_loeschen` |
 
 ## Der Plan kommt zuerst
 
@@ -21,6 +23,14 @@ Jeder Schreibschritt, also das Sichern und je Ziel das Wiederherstellen, fragt d
 Eine Sicherung (`sichern_aktivitaet`) umfasst eine einzelne Aktivität, ohne Daten von Lernenden, und liegt als Datei im Sicherungsordner der App, nicht im Arbeitsordner. Sie ändert im Kurs nichts. Die Lehrkraft gibt sie vorher frei; nenne ihr Name und Nummer genau wie in `aktivitaet_lesen`.
 
 Mehrere Teile in einer Datei sichert `sichern_auswahl`: ausgewählte Aktivitäten, ganze Abschnitte oder den ganzen Kurs, auch nur mit den genannten Teilen, ebenfalls ohne Daten von Lernenden. Die Freigabe zeigt, was genau mitgeht; die Lehrkraft sieht dort auch, welche Inhalte fehlen, weil Lernende sie füllen. Das sag ihr auch selbst, bevor sie zustimmt. Eine Aktivität kommt nur mit, wenn ihr Abschnitt mitgeht; dieser Abschnitt ist dann ein Rahmen, und die Freigabe nennt ihn. Ob Moodle den Rahmen ohne seine übrigen Aktivitäten hält und wie Moodle den Kurs bei einer Auswahl benennt, prüft die Lehrkraft vor dem Einsatz.
+
+## Die Datei in Moodle wieder löschen
+
+Jede Sicherung lässt eine Datei im persönlichen Sicherungsbereich der Lehrkraft in Moodle zurück; die Kopie im Sicherungsordner der App ist davon unabhängig. Willst du die Datei in Moodle entfernen, weil die Lehrkraft es möchte, nimm `sicherung_loeschen` mit der Nummer der Sicherung und dem Dateinamen, den die Antwort der Sicherung nennt. Das geht nur für Sicherungen der App, nie für Dateien, die jemand anders dort abgelegt hat.
+
+- **Bevor du es anbietest, sag der Lehrkraft das Risiko.** Moodle schreibt beim Speichern den ganzen Bereich neu und hat keinen Papierkorb. Die App vergleicht den Bereich noch einmal unmittelbar vor dem Speichern und bricht bei einer Abweichung ab, aber eine Datei, die in diesem Augenblick aus einer anderen Sitzung (etwa einer Sicherung im Browser) dazukommt, kann trotzdem verloren gehen. Rate zu einem Zeitpunkt, an dem die Lehrkraft nirgends sonst sichert.
+- Läuft gerade eine Sicherung oder Wiederherstellung, lehnt das Werkzeug ab: erst mit `sicherung_status` abwarten.
+- Nach `verified: true` stimmt der Bereich: genau diese Datei fehlt und alle übrigen stehen noch unter ihrem Namen im Bereich (Inhalte werden nicht verglichen); lies nicht selbst nach. War es die einzige Datei, meldet die App „nicht geprüft“: Lass die Lehrkraft die Seite Wiederherstellen in Moodle ansehen. Meldet die Antwort `verified: false` oder eine Abweichung, gib sie der Lehrkraft unverändert weiter, nenne die fehlenden Dateien und wiederhole den Aufruf nicht von selbst.
 
 ## Die Antwortfrist: „läuft weiter“ ist kein Fehler
 
@@ -58,7 +68,17 @@ Dieselbe Datei für denselben Weg wird nicht ein zweites Mal gestartet, solange 
 
 ### Was der Bericht prüft
 
-Die Rückleseprobe liest den Zielkurs zurück und vergleicht ihn mit der Sicherungsdatei. Sie prüft auch Bilder und Anhänge der neuen Aktivitäten gegen die Datei (Inhalt, nicht Adresse). Ein zwischenzeitlich ausgetauschtes Archiv oder ein fehlender Startbezug bleibt eine ausdrückliche Prüflücke. Steht im Bericht „nicht vollständig verifiziert“, sag das so; die App repariert nichts von allein.
+Die Rückleseprobe liest den Zielkurs zurück und vergleicht ihn mit der Sicherungsdatei. Sie prüft auch Bilder und Anhänge der neuen Aktivitäten gegen die Datei (Inhalt, nicht Adresse). Ebenso vergleicht sie die Texte der Editorfelder (Beschreibung, Seiteninhalt, Aufgabentext) nach Abzug von Instanzadresse, Dateipfaden und neuen Kennungen in Links; Einstellungen vergleicht sie nicht, und Texte außerhalb dieser Felder (Buchkapitel, Wikiseiten, Boardkarten, Listenpunkte) sind eine Prüflücke. Ein zwischenzeitlich ausgetauschtes Archiv oder ein fehlender Startbezug bleibt eine ausdrückliche Prüflücke. Steht im Bericht „nicht vollständig verifiziert“, sag das so; die App repariert nichts von allein.
+
+### Anhänge reparieren
+
+Nennt der Bericht fehlende oder abweichende Anhänge, bietest du die Reparatur an, ohne sie zu beginnen: `anhaenge_reparieren` ist ein eigener Schreibschritt mit eigener Freigabe und läuft nur auf ausdrückliches Ja der Lehrkraft, mit dem Plan davor. Nenne im Plan je Datei Name, Ort (Text oder Dateibereich) und Aktion. So geht es:
+
+1. Lies die Aktivität mit `aktivitaet_lesen` frisch in einen Ordner.
+2. Die Dateien, die der Bericht nennt, legt die App selbst aus der Sicherungsdatei in diesen Ordner (im Text eingebundene nach `dateien/<name>`, Dateien im Dateimanager nach `bereiche/<feld>/<pfad>/<name>`) und prüft ihren Inhalt (SHA-1) gegen die Quellaufnahme. Entpacke die Sicherungsdatei nie selbst: In ihr stehen Namen von Autorinnen und Autoren. Nur wenn die App meldet, dass eine Datei in der Sicherung fehlt, legst du sie mit genau dem Inhalt der Quelle in den Ordner, etwa aus dem frisch gelesenen Quellkurs; passt etwas nicht, bricht die App ab und nennt, was fehlt.
+3. Rufe `anhaenge_reparieren` mit Kurs, Nummer, Name und Ordner auf; nenne die Nummer der Wiederherstellung als `vorgang`, wenn der Kurs mehrere hat.
+
+Du änderst dabei keinen Text und keine Einstellung im Ordner; die App lehnt es ab. Hat eine Datei in Moodle anderen Inhalt als die Quelle, fragt die App die Lehrkraft einzeln, ob sie ersetzt werden darf – auf jeder Stufe, weil sie seit der Wiederherstellung absichtlich geändert sein kann; erkläre das im Plan. Fremde, mehrdeutige oder nicht lesbare Ziele, leere Ordner und Dateien, auf die der Text im Ziel nicht verweist, bleiben eine Prüflücke: Nenne sie und gib die Arbeit an die Lehrkraft (Moodle-Oberfläche). Was das Werkzeug zurückliest und `verified: true` nennt, liest du nicht noch einmal selbst nach; bei `verified: false` oder einem Abbruch wiederholst du nichts, sondern gibst den Befund weiter.
 
 Enthält die Datei einen Test, vergleicht die App außerdem Fragenzahl und Fragennamen, auch bei späteren Statusabfragen. Gleiche Sachnummern in der angegebenen Zielsammlung belegen keine eigene Quellherkunft; das bleibt eine Prüflücke. Ermittle diese Sammlung auf der Zielinstanz. Bei geteilten Sammlungen erläuterst du vor dem Start die mögliche Abhängigkeit vom Quellkurs auf derselben Instanz und die mögliche neue geteilte Sammlung zwischen Instanzen; die Herkunft bleibt dabei unbestätigt. Unauflösbare Fragenversionen sind ebenfalls Prüflücken. Gib einen solchen Test als nicht vollständig verifiziert weiter.
 

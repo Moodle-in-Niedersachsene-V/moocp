@@ -69,8 +69,15 @@ void main() {
 
   group('KI-Werkzeuge unter macOS', () {
     late Directory tmp;
-    setUp(() => tmp = Directory.systemTemp.createTempSync('kiwerk'));
-    tearDown(() => tmp.deleteSync(recursive: true));
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('kiwerk');
+      // Nichts außerhalb des Testordners finden, auch kein Homebrew-claude des Rechners.
+      festeProgrammOrdner = const [];
+    });
+    tearDown(() {
+      festeProgrammOrdner = null;
+      tmp.deleteSync(recursive: true);
+    });
 
     void programm(String pfad) {
       File(pfad)
@@ -108,8 +115,7 @@ void main() {
 
       test('ohne Signatur von Anthropic nicht gefunden', () {
         claudeSigniertMac = (_) => false;
-        // Auf einem Rechner mit Homebrew-claude findet die Suche eine andere Datei; nie diese.
-        expect(claudeFinden({'HOME': heim, 'PATH': ''}), isNot(exe));
+        expect(claudeFinden({'HOME': heim, 'PATH': ''}), isNull);
       });
 
       test('die höchste Version gewinnt', () {

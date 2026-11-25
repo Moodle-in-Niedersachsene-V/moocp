@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/moodle/sperrliste.dart';
 import 'package:moocp/plugin/app_adresse.dart';
@@ -395,6 +396,15 @@ class _Kontext implements AufrufKontext {
     int? laufKurs,
   }) => throw StateError('Ein Plugin, das Moodle liest, bekommt nie einen Dialog.');
 
+  /// Die Adresse der App fragt nie die Lehrkraft; nur die laufenden Plugins
+  /// tun es (test/plugin_start_test.dart, test/plugin_datenschutz_test.dart).
+  @override
+  Future<DatenschutzAusgang> datenschutzwarnung({
+    required Datenschutzwarnung warnung,
+    required Future<void> abbruch,
+    required String aufrufer,
+  }) async => DatenschutzAusgang.sperren;
+
   @override
   String? get testDialogantworten => null;
 }
@@ -653,7 +663,7 @@ void main() {
 
     test('ein Pfad oder Parametername mit einem gesperrten Namen: 422, Moodle wird nicht gefragt, kein Name im Protokoll', () async {
       final a = aufruf();
-      adresse.sperre.namenHinzufuegen('beispiel', ['Erika Mustermann']);
+      adresse.pruefung.namenHinzufuegen('beispiel', ['Erika Mustermann']);
       for (final (f, pfad) in [
         (pfadMoodleLesen, '/pluginfile.php/55/mod_folder/content/0/Erika.pdf'),
         (pfadMoodleLesen, '/pluginfile.php/55/mod_folder/content/0/M%75stermann.pdf'),
@@ -668,7 +678,7 @@ void main() {
       final alle = zeilen();
       expect(alle, hasLength(4));
       expect(alle.toSet(), {
-        'gesperrt: Plugin „Beispiel“, Werkzeug beispiel_echo: Anfrage an Moodle gesperrt (letzte Sperre: könnte einen Namen enthalten)',
+        'gesperrt: Plugin „Beispiel“, Werkzeug beispiel_echo: Anfrage an Moodle abgelehnt (Datenschutzsperre: könnte personenbezogene Daten enthalten)',
       });
     });
 

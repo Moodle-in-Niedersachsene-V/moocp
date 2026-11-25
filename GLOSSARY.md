@@ -75,7 +75,7 @@ _Englisch_: bridge
 _Nicht zu verwechseln mit_: MCP-Server.
 
 **KI-Werkzeug**
-Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex CLI und Bionic (LM Studio).
+Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex (ChatGPT-App oder CLI) und Bionic (LM Studio).
 _Englisch_: AI tool
 
 **Freigabe**
@@ -172,7 +172,7 @@ Eine Seite der Moodle-Instanz, die ein Plugin über die Sperrliste der App hinau
 _Englisch_: additional address
 
 **Lauf**
-Die Zeit, in der ein Plugin während eines Aufrufs über seine Zusatzadressen mit „lesen“ liest oder herunterlädt, angemeldet mit der Aktivität, um die es geht. Die App ermittelt den Kurs selbst, lädt die Namen seiner Teilnehmenden in die letzte Sperre und lehnt jede Anfrage ab, die nicht zu Kurs und Aktivität passt. Er endet mit seinem Beenden oder dem Ende des Aufrufs und löscht dann, was er in den Ordner für Downloads geladen hat; die Namen bleiben gesperrt, bis die App endet.
+Die Zeit, in der ein Plugin während eines Aufrufs über seine Zusatzadressen mit „lesen“ liest oder herunterlädt, angemeldet mit der Aktivität, um die es geht. Die App ermittelt den Kurs selbst, lädt die Namen seiner Teilnehmenden für die Datenschutzprüfung und lehnt jede Anfrage ab, die nicht zu Kurs und Aktivität passt. Er endet mit seinem Beenden oder dem Ende des Aufrufs und löscht dann, was er in den Ordner für Downloads geladen hat; die Namen bleiben gesperrt, bis die App endet.
 _Englisch_: plugin run
 _Nicht zu verwechseln mit_: der Aufruf eines Werkzeugs (ein Lauf liegt in einem Aufruf, höchstens einer zugleich).
 
@@ -203,15 +203,34 @@ Ein zufälliges Geheimnis, das ein Plugin bekommt, wenn die Lehrkraft einen Schr
 _Englisch_: approval token
 _Nicht zu verwechseln mit_: Aufruf-Token (gilt für alles, was das Plugin während eines Aufrufs tut), Kennung eines Instanzprofils.
 
-**Letzte Sperre**
-Die Prüfung der App, die jede Antwort eines Plugins an die KI und jede Zeile, die es ins Protokoll schreibt, gegen alle Namen prüft, die sie seit ihrem Start für dieses Plugin geladen hat. Jeder Teil eines Namens sperrt für sich, als ganzes Wort; bei einem Treffer geht nichts hinaus, die KI erfährt nur, dass gesperrt wurde, und die Lehrkraft sieht das Wort. Gesperrtes lässt sich nicht doch senden.
-_Englisch_: final safeguard
-_Nicht zu verwechseln mit_: Sperrliste (sperrt Adressen in Moodle, nicht Wörter in Antworten).
-_Vermeiden_: Namensfilter, Schwärzen (geschwärzt wird nichts, die Antwort geht gar nicht hinaus)
+**Datenschutzwarnung**
+Das Fenster, das die App zeigt, wenn eine Antwort eines Plugins an die KI ein Wort enthält, das der Name einer Person sein könnte, oder den Pfad eines Ordners, in dem Daten von Personen liegen können. Es zeigt Plugin, Werkzeug, Herkunft und jeden Treffer in seiner Umgebung; die Lehrkraft entscheidet einmal für diese Antwort. Nichts wird gemerkt.
+_Englisch_: privacy warning
+_Nicht zu verwechseln mit_: Freigabe (sie betrifft einen Schreibvorgang in Moodle), Sperrliste (sperrt Adressen in Moodle).
+_Vermeiden_: Namensfilter, Schwärzen (geschwärzt wird nichts)
+
+**Datenschutzsperre**
+Das Ergebnis, wenn die Lehrkraft in der Datenschutzwarnung „Sperren“ wählt oder nicht entscheidet: Die Antwort geht nicht an die KI, auch nicht in Teilen; die KI erfährt nur, dass gesperrt wurde. Wählt die Lehrkraft „Kein Name – trotzdem an die KI geben“, gibt es keine Datenschutzsperre. Ohne Rückfrage gilt sie auch für den Aufruf eines eingebauten Werkzeugs und eine Anfrage an Moodle, in denen ein Treffer steht (Antwort 422), und für eine Protokollzeile eines Plugins (Platzhalter).
+_Englisch_: privacy block
 
 **Fragensammlung**
 Die Moodle-Aktivität, in der Fragen und ihre Kategorien liegen. Der Test verweist auf sie.
 _Englisch_: question bank
+
+**Fragenversion**
+Ein Stand einer Frage. Wer eine Frage ändert, legt eine neue Version an; die alten bleiben erhalten, und ein Test zieht die neueste, die bereit ist. Die Sachnummer bleibt über alle Versionen dieselbe.
+_Englisch_: question version
+_Vermeiden_: Kopie (eine Kopie ist eine neue Frage ohne gemeinsamen Verlauf)
+
+**Rundlaufprobe**
+Der Nachweis nach dem Import einer Frage, dass Moodle sie so gespeichert hat, wie sie eingegeben wurde, und dass sie sich bearbeiten und anzeigen lässt. Sie fällt im Werkzeug, nicht in der KI.
+_Englisch_: round-trip check
+_Nicht zu verwechseln mit_: Lauf (die Zeit, in der ein Plugin liest)
+
+**Fragetyp-Notiz**
+Das Wissen über einen Fragetyp: ein geprüftes Minimalbeispiel, was die Frage braucht und welche Stolpersteine es gibt. Notizen kommen mit dem Skill; eine Lehrkraft kann für ihre Instanz eigene haben, die dann gelten.
+_Englisch_: question type note
+_Vermeiden_: Lerndatei (klingt nach Lernenden)
 
 **Fortschrittsliste**
 Eine Moodle-Aktivität mit Einträgen, die man abhaken kann. Die App liest nur die Einträge, nie, wer sie abgehakt hat.

@@ -39,18 +39,28 @@ class WerkzeugAufrufe {
     List<String> pflicht = const [],
     bool nurLesen = false,
     bool zerstoerend = false,
-    required Future<String> Function(Map<String, dynamic> a) ausfuehren,
-  }) => _anmelden(
-    server,
-    name,
-    titel: titel,
-    beschreibung: beschreibung,
-    eingabeSchema: JsonSchema.object(properties: parameter, required: pflicht),
-    pflicht: pflicht,
-    nurLesen: nurLesen,
-    zerstoerend: zerstoerend,
-    ausfuehren: (a, _) => ausfuehren(a),
-  );
+    Future<String> Function(Map<String, dynamic> a)? ausfuehren,
+    Future<String> Function(Map<String, dynamic> a, Future<void> abbruch)? ausfuehrenMitAbbruch,
+  }) {
+    assert(
+      (ausfuehren == null) != (ausfuehrenMitAbbruch == null),
+      'Das Werkzeug „$name" braucht genau eines von ausfuehren und ausfuehrenMitAbbruch.',
+    );
+    // [ausfuehrenMitAbbruch] bekommt dazu, was sich erfüllt, wenn der Client
+    // abbricht: Ein lesendes Werkzeug schließt dann seine Anfrage an Moodle
+    // und gibt seine Sperren frei.
+    _anmelden(
+      server,
+      name,
+      titel: titel,
+      beschreibung: beschreibung,
+      eingabeSchema: JsonSchema.object(properties: parameter, required: pflicht),
+      pflicht: pflicht,
+      nurLesen: nurLesen,
+      zerstoerend: zerstoerend,
+      ausfuehren: ausfuehrenMitAbbruch ?? (a, _) => ausfuehren!(a),
+    );
+  }
 
   /// Ein Werkzeug, das nur mit Name, Beschreibung und fertigem JSON-Schema
   /// beschrieben ist (eine [WerkzeugQuelle]): dieselbe Hülle wie bei

@@ -31,7 +31,21 @@ void lizenzAnmelden() {
 /// Die Version, wie sie in pubspec.yaml steht („1.0.0+1"). Unter Windows liest
 /// package_info_plus sie aus der exe, in die Flutter sie beim Bauen schreibt;
 /// der Installer nimmt sie von dort (installer/moocp.nsi).
-String versionText(PackageInfo info) => info.buildNumber.isEmpty ? info.version : '${info.version}+${info.buildNumber}';
+///
+/// Eine Nightly heißt auf jeder Plattform gleich, „0.13.0.20261124.2+2", ohne
+/// „-nightly": macOS erlaubt in der Version der App nur Ziffern und Punkte, und
+/// Flutter macht dort aus „0.13.0-nightly.20261124.2" schon beim Bauen
+/// „0.13.0.20261124.2". Erkennbar ist die Nightly am Datum dahinter (E39).
+/// Für den Vergleich mit einem Release ist das gleich: [versionVergleich]
+/// erkennt die Nightly in beiden Formen.
+String versionText(PackageInfo info) {
+  final version = versionOhneBuild(info);
+  return info.buildNumber.isEmpty ? version : '$version+${info.buildNumber}';
+}
+
+/// Die Version ohne Buildnummer, auf jeder Plattform gleich geschrieben (siehe
+/// [versionText]); so steht sie im Protokoll und geht in die Update-Prüfung.
+String versionOhneBuild(PackageInfo info) => info.version.replaceFirst('-nightly.', '.');
 
 /// Zeigt den Dialog; „Lizenzen anzeigen" darin öffnet die Lizenzseite.
 Future<void> ueberZeigen(BuildContext context) async {

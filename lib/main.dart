@@ -1,4 +1,4 @@
-// moocp -- lokale App, über die ein KI-Werkzeug (Claude Code, Codex CLI,
+// moocp -- lokale App, über die ein KI-Werkzeug (Claude Code, Codex (ChatGPT-App oder CLI),
 // LM Studio) mit Moodle-Kursen arbeitet: ohne
 // Längengrenze, mit Sperr- und Positivliste im Code und einem Protokoll, das
 // die Lehrkraft sieht.
@@ -25,6 +25,7 @@ import 'einrichtung_dialog.dart';
 import 'einstellungen.dart';
 import 'einstellungen_dialog.dart';
 import 'einstellungen_ort.dart';
+import 'datenschutz_dialog.dart';
 import 'einzelstart.dart';
 import 'freigabe.dart';
 import 'installer/installer_start.dart';
@@ -34,6 +35,8 @@ import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
 import 'moodle/moodle_zugang.dart';
+import 'sperren_dialog.dart';
+import 'moodle/schreibvorgang.dart' show Schreibvorgang;
 import 'moodle/zeilenvergleich.dart';
 import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
@@ -166,7 +169,6 @@ Future<void> main(List<String> argumente) async {
   final laufendePlugins = LaufendePlugins(
     protokoll,
     dialoge: PluginDialoge(),
-    sperrHinweise: SperrHinweise(),
     downloads: downloads,
   );
   final instanzen = [
@@ -262,8 +264,19 @@ Instanz _instanzFuer(
       profil: pr,
       werkzeugquellen: _werkzeugquellen(plugins),
       schucuVorlagen: _schucuVorlagen,
+      fragetypNotizGeliefert: _fragetypNotizGeliefert,
     ),
   );
+}
+
+/// Die mit dem Skill moodle-fragen gelieferte Fragetyp-Notiz (pubspec.yaml,
+/// E38); null, wenn es zu dem Typ keine gibt.
+Future<String?> _fragetypNotizGeliefert(String typ) async {
+  try {
+    return await rootBundle.loadString('skills/moodle-fragen/fragetypen/$typ.md', cache: false);
+  } on FlutterError {
+    return null;
+  }
 }
 
 /// Die CD-Vorlagen der SchuCu-Tabelle für lernsituation_pruefen: Assets aus
@@ -837,7 +850,7 @@ class _HauptseiteState extends State<Hauptseite> {
   /// lässt, wird nicht angeboten.
   Future<String> _eigeneVersion() async {
     try {
-      return (await PackageInfo.fromPlatform()).version;
+      return versionOhneBuild(await PackageInfo.fromPlatform());
     } catch (e) {
       widget.protokoll.eintrag(
         Art.fehler,
@@ -882,6 +895,8 @@ class _HauptseiteState extends State<Hauptseite> {
         await _profilBearbeiten(neu: true);
       case EinstellungenErgebnis.plugins:
         await _pluginsVerwalten();
+      case EinstellungenErgebnis.sperren:
+        await showDialog<void>(context: context, builder: (_) => SperrenDialog(moodle: widget.moodle));
       case EinstellungenErgebnis.fertig:
       case null:
         break;
@@ -917,7 +932,7 @@ class _HauptseiteState extends State<Hauptseite> {
         content: Text(
           '„${profil.name}“ (${profil.mcpName}) wird aus moocp entfernt. '
           'Die Moodle-Anmeldung und gespeicherte Anmeldedaten dieses Profils werden gelöscht. '
-          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex CLI und LM Studio entfernt, '
+          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio entfernt, '
           'soweit er dort steht.',
         ),
         actions: [
@@ -967,6 +982,8 @@ class _HauptseiteState extends State<Hauptseite> {
       return;
     }
     await instanz.dienst.stoppen();
+    // Die Protokolle abgeschlossener Schreibvorgänge nennen Dateien dieser Instanz.
+    Schreibvorgang.abgeschlosseneLoeschen(instanz.moodle, dieserInstanz: true);
     instanz.moodle.abmelden();
     try {
       await Anmeldedaten.loeschen(
@@ -1694,14 +1711,6 @@ class _HauptseiteState extends State<Hauptseite> {
         if (widget.laufendePlugins?.dialoge case final dialoge?)
           PluginDialogAnzeige(
             dialoge: dialoge,
-            nachVorn: _fensterZeigen,
-            child: const SizedBox.shrink(),
-          ),
-        // Die Warnungen der letzten Sperre gegen Namen, ebenso für alle
-        // Profile zusammen.
-        if (widget.laufendePlugins?.sperrHinweise case final hinweise?)
-          SperrHinweisAnzeige(
-            hinweise: hinweise,
             nachVorn: _fensterZeigen,
             child: const SizedBox.shrink(),
           ),
@@ -2545,6 +2554,11 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Die Datenschutzwarnung sieht anders aus als jede Freigabe und hat
+    // eigene Knöpfe (datenschutz_dialog.dart); sonst gilt hier dasselbe.
+    if (anfrage.datenschutz != null) {
+      return DatenschutzwarnungDialog(anfrage, freigaben, profilname: profilname, mcpName: mcpName);
+    }
     const mono = TextStyle(fontFamily: 'Consolas', fontSize: 12);
     Widget zeile(Zeile z) {
       final (zeichen, farbe) = switch (z.art) {
@@ -2670,6 +2684,32 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
         ],
       ),
     );
+    // Die Haken zum Bestätigen; jeder bleibt anklickbar, solange der Bereich scrollt.
+    // Material statt DecoratedBox: Ein Hintergrund zwischen Material und ListTile
+    // verdeckte dessen Tintenwirkung (Flutter weist darauf hin).
+    Widget tickBox() => Material(
+      color: const Color(0x14B71C1C),
+      shape: const RoundedRectangleBorder(side: BorderSide(color: rot)),
+      child: Column(
+        children: [
+          for (final (i, text) in anfrage.abhaken.indexed)
+            CheckboxListTile(
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _abgehakt.contains(i),
+              title: Text(
+                text,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onChanged: !_abhakenFrei
+                  ? null
+                  : (an) => setState(
+                      () => an == true ? _abgehakt.add(i) : _abgehakt.remove(i),
+                    ),
+            ),
+        ],
+      ),
+    );
     // Entschieden wird nur mit der Maus (nur_maus.dart).
     return NurMaus(
       child: AlertDialog(
@@ -2717,9 +2757,12 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
           width: gross || knoepfe ? 900 : 620,
           // Die Übergabe kommt nur bei geändertem Text, also immer mit
           // Zeilenvergleich; der gibt den Schritten Platz ab.
+          // Mit Haken (ohne Übergabe) bekommt der Inhalt die volle Höhe, die das
+          // Fenster hergibt (SizedBox wird auf den freien Platz gekürzt): Punkte
+          // und Haken scrollen in einem eigenen Bereich über den Knöpfen.
           height: anfrage.bilder.isNotEmpty
               ? 680
-              : gross || knoepfe
+              : gross || knoepfe || bestaetigen
               ? 560
               : anfrage.vomPlugin != null
               ? 360
@@ -2773,7 +2816,26 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
               ],
               // Bei einer Sammelfreigabe viele Punkte: Sie scrollen für sich,
               // damit der Zeilenvergleich darunter sichtbar bleibt.
-              if (linksFuellen)
+              if (bestaetigen && anfrage.links.isEmpty)
+                // Punkte, Moodles Text und alle Haken scrollen zusammen; die
+                // Knöpfe darunter liegen nie darüber, und jeder Haken bleibt
+                // erreichbar, wie viele es auch sind.
+                Expanded(
+                  flex: anfrage.vergleich.isEmpty && anfrage.bilder.isEmpty
+                      ? 1
+                      : 2,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final p in anfrage.punkte) Text('•  $p'),
+                        const SizedBox(height: 8),
+                        tickBox(),
+                      ],
+                    ),
+                  ),
+                )
+              else if (linksFuellen)
                 Expanded(child: punkteUndLinks())
               else
                 ConstrainedBox(
@@ -2786,6 +2848,12 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                   ),
                   child: punkteUndLinks(),
                 ),
+              // Mit Verweisen stehen die Haken darunter, scrollen aber für sich,
+              // wenn es viele sind.
+              if (bestaetigen && anfrage.links.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Flexible(child: SingleChildScrollView(child: tickBox())),
+              ],
               if (knoepfe) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -2914,38 +2982,6 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                   ),
                 ),
               ],
-              if (bestaetigen) ...[
-                const SizedBox(height: 8),
-                // Material statt DecoratedBox: Ein Hintergrund zwischen Material und ListTile
-                // verdeckte dessen Tintenwirkung (Flutter weist darauf hin).
-                Material(
-                  color: const Color(0x14B71C1C),
-                  shape: const RoundedRectangleBorder(
-                    side: BorderSide(color: rot),
-                  ),
-                  child: Column(
-                    children: [
-                      for (final (i, text) in anfrage.abhaken.indexed)
-                        CheckboxListTile(
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          value: _abgehakt.contains(i),
-                          title: Text(
-                            text,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          onChanged: !_abhakenFrei
-                              ? null
-                              : (an) => setState(
-                                  () => an == true
-                                      ? _abgehakt.add(i)
-                                      : _abgehakt.remove(i),
-                                ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 12),
               if (anfrage.vergleich.isNotEmpty) ...[
                 Text(
@@ -2987,7 +3023,8 @@ class _FreigabeDialogState extends State<FreigabeDialog> {
                     ),
                   ),
                 ),
-              ] else if (!linksFuellen)
+              ] else if (!linksFuellen &&
+                  !(bestaetigen && anfrage.links.isEmpty))
                 const Spacer(),
               const SizedBox(height: 8),
               Text(
@@ -3146,8 +3183,16 @@ class _ProtokollAnsichtState extends State<ProtokollAnsicht> {
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
           child: Row(
             children: [
-              Text('Protokoll', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
+              // Die Spalte hat nur, was neben den festen 460 px der linken
+              // bleibt: Bei schmalem Fenster kürzt sich die Überschrift, der
+              // Knopf „Leeren“ bleibt ganz.
+              Expanded(
+                child: Text(
+                  'Protokoll',
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
               TextButton(
                 onPressed: widget.protokoll.leeren,
                 child: const Text('Leeren'),

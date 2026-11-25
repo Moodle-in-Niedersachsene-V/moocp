@@ -1061,11 +1061,13 @@ Grenzen: **`references/zeichnungen.md`**.
 
 ## Bestehende Fragen ändern
 
-### Warum nicht über XML
+### Das Formular oder eine neue Version aus XML
 
-Der Import **legt immer neu an**. Es gibt keinen Weg, ein XML als neue Version
-einer vorhandenen Frage einzuspielen. Wer eine Frage ändern will, muss durch ihr
-Bearbeitungsformular — das erledigt die App:
+Der Import **legt immer neu an**. Eine Frage als neue Version aus XML einzuspielen
+geht nur über das Moodle-Plugin „Import question as new version" und das Werkzeug
+`fragen_version_importieren` (SKILL.md, „Bestehende Fragen ändern"). Ohne das
+Plugin, und für kleine Änderungen, geht es durch das Bearbeitungsformular der
+Frage — das erledigt die App:
 
 ```
 frage_lesen(sammlung, frage)     -> frage-<id>\  (<feld>.html, dateien\, einstellungen.json, frage.xml)

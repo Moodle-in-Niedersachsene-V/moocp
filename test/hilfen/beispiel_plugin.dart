@@ -30,7 +30,7 @@ const beispielWerkzeuge = [
   'beispiel_lauf',
   'beispiel_download',
   'beispiel_namen',
-  'beispiel_namen_pruefen',
+  'beispiel_pfade',
 ];
 
 /// Der Projektordner des Beispiel-Plugins, relativ zur Wurzel des
@@ -77,6 +77,25 @@ Future<void> beispielUebersetzen(String exe) async {
     }
   } finally {
     projekt.deleteSync(recursive: true);
+  }
+}
+
+/// Löscht einen Temp-Ordner der Tests, auch wenn Windows ihn einen Augenblick
+/// länger festhält. Unter Windows verweigert das Löschen mit "Zugriff
+/// verweigert" (errno 5), solange das Programm eines eben beendeten Plugins
+/// noch in der Prozessverwaltung steht oder ein Virenscanner die Datei prüft;
+/// ein Wiederholen löst das, ein Fehler in der App ist es nicht. Nach
+/// höchstens etwa zehn Sekunden gilt der Fehler. Auf anderen Systemen ist es
+/// ein einfaches Löschen.
+Future<void> ordnerLoeschen(Directory ordner) async {
+  for (var versuch = 0;; versuch++) {
+    try {
+      if (ordner.existsSync()) ordner.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      if (!Platform.isWindows || versuch >= 50) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
   }
 }
 

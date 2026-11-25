@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../datenschutzwarnung.dart';
 import '../freigabe.dart';
 import '../moodle/formular_lesen.dart';
 import '../moodle/formular_schreiben.dart';
@@ -26,6 +27,45 @@ typedef _Probe = ({int kurs, String name, String modul, String hash});
 /// (Testzugang.datei) und gilt nur für dieses Profil; ihr Format steht in
 /// plugin/testantworten.dart.
 const pluginDialogantwortenDatei = 'plugin-dialoge.json';
+
+/// Die Art des Eintrags in [pluginDialogantwortenDatei], der die
+/// Datenschutzwarnung (E36) einer Antwort beantwortet:
+///
+///   {"plugin": "beispiel", "art": "datenschutz", "titel": "beispiel_echo",
+///    "antwort": {"ausgang": "senden"}}
+///
+/// `plugin` ist der Kurzname, `titel` der volle Name des Werkzeugs, dessen
+/// Antwort angehalten ist; `ausgang` ist „senden“ (die Antwort geht
+/// unverändert hinaus) oder „sperren“. Es gilt der erste passende Eintrag,
+/// bei jeder Warnung neu aus der Datei gelesen.
+const datenschutzAntwortArt = 'datenschutz';
+
+/// Wie der Testbetrieb die Datenschutzwarnung zur Antwort des Werkzeugs
+/// [werkzeug] des Plugins [kurzname] beantwortet (E20): „senden“ nur mit
+/// einem passenden Eintrag in [datei], der es sagt. Ohne Datei, ohne passenden
+/// Eintrag, bei jedem anderen Ausgang und bei einer Datei, die sich nicht
+/// lesen lässt, ist es „sperren“. Nie ein Dialog: Im Testbetrieb gibt es hier
+/// keinen.
+DatenschutzAusgang datenschutzAntwort(String datei, String kurzname, String? werkzeug) {
+  try {
+    final json = jsonDecode(File(datei).readAsStringSync());
+    final liste = json is Map ? json['antworten'] : null;
+    if (liste is List) {
+      for (final e in liste) {
+        if (e is! Map || e['plugin'] != kurzname || e['art'] != datenschutzAntwortArt || e['titel'] != werkzeug) continue;
+        final antwort = e['antwort'];
+        return antwort is Map && antwort['ausgang'] == 'senden'
+            ? DatenschutzAusgang.sendenAutomatisch
+            : DatenschutzAusgang.sperrenAutomatisch;
+      }
+    }
+  } on FormatException {
+    // Ungültig: gesperrt.
+  } on FileSystemException {
+    // Nicht lesbar oder nicht da: gesperrt.
+  }
+  return DatenschutzAusgang.sperrenAutomatisch;
+}
 
 class Testbetrieb {
   Testbetrieb(

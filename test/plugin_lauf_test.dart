@@ -15,7 +15,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/werkzeugquelle.dart';
-import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
+import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung, protokollPlatzhalterName;
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
 import 'package:moocp/plugin/app_adresse.dart';

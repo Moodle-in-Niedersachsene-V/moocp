@@ -169,8 +169,8 @@ abstract interface class AufrufKontext {
   /// Stufe, mit allen Regeln einer Freigabe (nur Maus, Wartezeit, Frist, ein
   /// Dialog nach dem anderen, Protokoll). Ohne Entscheidung, nach Ablauf der
   /// Frist und wenn sich [abbruch] erfüllt (der Client wartet nicht mehr),
-  /// gilt [DatenschutzAusgang.sperren]. Der Testbetrieb beantwortet sie nie
-  /// selbst.
+  /// gilt [DatenschutzAusgang.sperren]. Der Testbetrieb beantwortet sie aus
+  /// vorbereiteten Dialogantworten (E20).
   Future<DatenschutzAusgang> datenschutzwarnung({
     required Datenschutzwarnung warnung,
     required Future<void> abbruch,

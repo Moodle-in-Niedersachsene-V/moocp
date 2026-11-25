@@ -18,9 +18,6 @@ import 'freigabe.dart';
 import 'nur_maus.dart';
 import 'datenschutzwarnung.dart';
 
-/// So viele Treffer zeigt das Fenster einzeln; die übrigen zählt es nur.
-const datenschutzTrefferHoechstens = 20;
-
 const _rot = Color(0xFFB71C1C);
 
 /// Der Titel der Warnung: der für Namen, sobald einer getroffen hat, sonst der
@@ -100,8 +97,6 @@ class DatenschutzwarnungDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final w = warnung;
-    final gezeigt = w.funde.take(datenschutzTrefferHoechstens).toList();
-    final weitere = w.anzahl - gezeigt.length;
     // Entschieden wird nur mit der Maus (nur_maus.dart).
     return NurMaus(
       child: AlertDialog(
@@ -154,12 +149,9 @@ class DatenschutzwarnungDialog extends StatelessWidget {
                         ' – ${w.anzahl} ${w.anzahl == 1 ? 'Treffer' : 'Treffer'}',
                         style: theme.textTheme.titleSmall,
                       ),
-                      for (final (i, f) in gezeigt.indexed) _fund(context, f, i),
-                      if (weitere > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text('… und $weitere weitere Treffer.', style: theme.textTheme.bodySmall),
-                        ),
+                      // Alle Treffer, scrollbar: Die Lehrkraft sendet nie etwas,
+                      // das sie nicht gesehen hat.
+                      for (final (i, f) in w.funde.indexed) _fund(context, f, i),
                     ],
                   ),
                 ),

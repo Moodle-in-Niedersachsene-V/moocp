@@ -294,8 +294,8 @@ List<String> lehrkraftNamenIn(String html) {
 /// (`_protokolliere`). Aufrufer sind die eingebauten Werkzeuge der App, für
 /// die Sperrliste und Positivliste wie in E3 gelten, ein Plugin, das über die
 /// Adresse der App liest oder schreibt (plugin/moodle_lesen.dart,
-/// plugin/moodle_schreiben.dart), und die App selbst, wenn sie für die letzte
-/// Sperre die Namen der Teilnehmenden eines Kurses liest
+/// plugin/moodle_schreiben.dart), und die App selbst, wenn sie für die
+/// Datenschutzsperre die Namen der Teilnehmenden eines Kurses liest
 /// ([MoodleZugang.teilnehmendenseiteLesen]). Im Protokoll eines Plugins und
 /// der Datenschutzprüfung steht nie ein Wert (A4). Die Anmeldung stellt immer die
 /// App selbst, nie ein Plugin.

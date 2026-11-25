@@ -143,12 +143,6 @@ const gemeldeterPfadHoechstens = 1000;
 /// endet (Arbeitsspeicher, wie bei den Namen).
 const pfadeJePluginHoechstens = 10000;
 
-/// Was statt einer Protokollzeile eines Plugins mit einem möglichen Namen oder
-/// einem geschützten Pfad im Protokoll steht (E36). Immer derselbe Text: er
-/// verrät weder Länge noch Anfang der Zeile.
-const protokollPlatzhalterName = '[gesperrt: möglicher Name]';
-const protokollPlatzhalterPfad = '[gesperrt: Pfad]';
-
 /// So lang darf eine Protokollzeile eines Plugins höchstens werden; was
 /// darüber hinausgeht, schneidet die App ab.
 const protokollzeileHoechstens = 500;
@@ -1722,8 +1716,8 @@ class AppAdresse {
     if (args is! Map<String, Object?>) {
       return _fehler(HttpStatus.badRequest, 'argumente muss ein JSON-Objekt sein.');
     }
-    // Name und Argumente stehen im Protokoll der Hülle: nur, was die letzte
-    // Sperre durchlässt.
+    // Name und Argumente stehen im Protokoll der Hülle: nur, was die
+    // Datenschutzsperre durchlässt.
     if (a._gesperrt(plugin, aufruf, [name, ...texteIn(args)], 'Aufruf eines Werkzeugs von moocp', aufruf!.kontext.protokoll)) {
       return _sperrAntwort('Der Aufruf');
     }

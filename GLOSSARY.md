@@ -210,7 +210,7 @@ _Nicht zu verwechseln mit_: Freigabe (sie betrifft einen Schreibvorgang in Moodl
 _Vermeiden_: Namensfilter, Schwärzen (geschwärzt wird nichts)
 
 **Datenschutzsperre**
-Das Ergebnis, wenn die Lehrkraft in der Datenschutzwarnung „Sperren“ wählt oder nicht entscheidet: Die Antwort geht nicht an die KI, auch nicht in Teilen; die KI erfährt nur, dass gesperrt wurde. Wählt die Lehrkraft „Kein Name – trotzdem an die KI geben“, gibt es keine Datenschutzsperre.
+Das Ergebnis, wenn die Lehrkraft in der Datenschutzwarnung „Sperren“ wählt oder nicht entscheidet: Die Antwort geht nicht an die KI, auch nicht in Teilen; die KI erfährt nur, dass gesperrt wurde. Wählt die Lehrkraft „Kein Name – trotzdem an die KI geben“, gibt es keine Datenschutzsperre. Ohne Rückfrage gilt sie auch für den Aufruf eines eingebauten Werkzeugs und eine Anfrage an Moodle, in denen ein Treffer steht (Antwort 422), und für eine Protokollzeile eines Plugins (Platzhalter).
 _Englisch_: privacy block
 
 **Fragensammlung**

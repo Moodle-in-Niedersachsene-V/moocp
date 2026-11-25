@@ -20,7 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
-import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt;
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt, protokollPlatzhalterName, protokollPlatzhalterPfad;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
@@ -523,11 +523,6 @@ class McpDienst implements AufrufKontext {
     return ja ? DatenschutzAusgang.senden : DatenschutzAusgang.sperren;
   }
 
-  /// Die Platzhalter, die das Protokoll statt eines Treffers trägt, der nicht
-  /// aus dem Testkurs oder dem Testkonto stammt; gleich denen, die die Adresse
-  /// der App für Protokollzeilen eines Plugins setzt (ein Test sichert es).
-  static const platzhalterName = '[gesperrt: möglicher Name]';
-  static const platzhalterPfad = '[gesperrt: Pfad]';
 
   /// Die Datenschutzwarnung im Testbetrieb (E20): beantwortet aus der Datei
   /// [datei] ([datenschutzAntwort]), ohne Dialog; ohne Eintrag wird gesperrt.
@@ -551,7 +546,7 @@ class McpDienst implements AufrufKontext {
             _ => false,
           },
         );
-    final treffer = [for (final f in warnung.funde) testquelle(f) ? f.wort : (f.pfad ? platzhalterPfad : platzhalterName)];
+    final treffer = [for (final f in warnung.funde) testquelle(f) ? f.wort : (f.pfad ? protokollPlatzhalterPfad : protokollPlatzhalterName)];
     final gesendet = ausgang.gesendet;
     protokoll.eintrag(
       gesendet ? Art.info : Art.gesperrt,

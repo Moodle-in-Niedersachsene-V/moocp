@@ -12,6 +12,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/datenschutzwarnung.dart' show protokollPlatzhalterName, protokollPlatzhalterPfad;
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/werkzeug_aufrufe.dart';

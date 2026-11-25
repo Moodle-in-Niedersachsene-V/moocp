@@ -156,9 +156,8 @@ class FreigabeAnfrage {
   /// einer Freigabe die Treffer in ihrer Umgebung (main.dart,
   /// datenschutz_dialog.dart); [knopf] gibt die Antwort an die KI weiter,
   /// [ablehnen] sperrt sie. Null bei jeder anderen Anfrage. Die Warnung fragt
-  /// auf jeder Stufe ([ab] ist [Bestaetigungen.keine]); der Testbetrieb gibt
-  /// sie von selbst nie frei, weil sie weder Bildschirmfoto noch Schreiben über
-  /// eine Zusatzadresse ist.
+  /// auf jeder Stufe ([ab] ist [Bestaetigungen.keine]); der Testbetrieb beantwortet
+  /// sie nur aus vorbereiteten Dialogantworten (E20), nie von selbst.
   final Datenschutzwarnung? datenschutz;
 
   /// Der Name im Protokoll.

@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einstellungen.dart';
+import 'package:moocp/datenschutzwarnung.dart' show protokollPlatzhalterName, protokollPlatzhalterPfad;
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/mcp/testbetrieb.dart' show pluginDialogantwortenDatei;
@@ -928,17 +929,12 @@ void main() {
       );
 
       final zeile = zeilen().singleWhere((z) => z.startsWith('Testbetrieb, ohne Lehrkraft beantwortet'));
-      const n = '[gesperrt: möglicher Name]';
-      const pf = '[gesperrt: Pfad]';
+      const n = protokollPlatzhalterName;
+      const pf = protokollPlatzhalterPfad;
       expect(zeile, contains('9 Treffer (Anna, Berta, $n, $n, $n, $n, $pf, $pf, $n)'));
       for (final wort in ['Clara', 'Dora', 'Emma', 'Frieda', 'Gerda', 'Hanna', 'Ida']) {
         expect(zeilen().join('\n'), isNot(contains(wort)), reason: wort);
       }
-    });
-
-    test('die Platzhalter sind die der Protokollzeilen eines Plugins', () {
-      expect(McpDienst.platzhalterName, protokollPlatzhalterName);
-      expect(McpDienst.platzhalterPfad, protokollPlatzhalterPfad);
     });
 
     test('ohne Testbetrieb entscheidet die Lehrkraft: nicht gebundenes Profil, fremde Instanz, kein Bauschalter', () async {

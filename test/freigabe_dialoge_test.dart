@@ -884,15 +884,16 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('mehr als 20 Treffer: die ersten 20 einzeln, der Rest gezählt', (tester) async {
+    testWidgets('mehr als 20 Treffer: alle werden einzeln gezeigt, scrollbar', (tester) async {
       final f = Freigaben(Protokoll());
       await tester.pumpWidget(_fenster(f));
       unawaited(f.anfragen(anfrage(warnung(List.filled(25, 'Erika').join(' ')))));
       await tester.pumpAndSettle();
 
       final liste = find.byType(Scrollable).first;
-      await tester.scrollUntilVisible(find.text('… und 5 weitere Treffer.'), 200, scrollable: liste);
-      expect(find.text('… und 5 weitere Treffer.'), findsOneWidget);
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('datenschutz-fund-24')), 200, scrollable: liste);
+      expect(find.byKey(const ValueKey('datenschutz-fund-24')), findsOneWidget);
+      expect(find.textContaining('weitere Treffer'), findsNothing);
       expect(find.text('Plugin „Beispiel“, Werkzeug beispiel_echo – 25 Treffer'), findsOneWidget);
       f.entscheiden(false);
       await tester.pumpAndSettle();

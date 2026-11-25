@@ -2,8 +2,8 @@
 // gerade geht; erst dann liest es über seine Zusatzadressen mit der Art
 // „lesen“. Hinter jeder Zusatzadresse ist mit Namen zu rechnen, denn sie hebt
 // die Sperrliste auf. Darum ermittelt die App beim Beginn selbst den Kurs der
-// Aktivität, liest selbst die Namen seiner Teilnehmenden, nur für die letzte
-// Sperre (namenssperre.dart), und bindet jede Anfrage des Laufs an diesen
+// Aktivität, liest selbst die Namen seiner Teilnehmenden, nur für die
+// Datenschutzprüfung (namenssperre.dart), und bindet jede Anfrage des Laufs an diesen
 // Kurs und diese Aktivität ([laufBindungVerletzt]).
 //
 // Ein Lauf gehört zu einem Plugin, einem Instanzprofil und einem Aufruf; je
@@ -103,8 +103,8 @@ class Lauf {
 }
 
 /// Was der Beginn eines Laufs ermittelt hat: der Lauf und die Namen der
-/// Teilnehmenden für die Datenschutzprüfung. Die Namen gehen nur an die letzte
-/// Sperre, nie an das Plugin, in ein Protokoll oder eine Datei.
+/// Teilnehmenden für die Datenschutzprüfung. Die Namen gehen nur an die
+/// Datenschutzprüfung, nie an das Plugin, in ein Protokoll oder eine Datei.
 typedef LaufBeginn = ({Lauf lauf, List<String> namen});
 
 /// Beginnt einen Lauf für die Aktivität [cmid] mit der Sitzung von [moodle]:

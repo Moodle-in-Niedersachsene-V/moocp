@@ -9,6 +9,12 @@
 // Keine Klasse hier hat ein `toString`, das ein Wort, eine Umgebung oder einen
 // Pfad nennt.
 
+/// Was statt eines Treffers im Protokoll steht (E36): bei einer Zeile eines
+/// Plugins und beim Hinweis auf eine automatische Antwort des Testbetriebs.
+/// Immer derselbe Text: er verrät weder Länge noch Anfang.
+const protokollPlatzhalterName = '[gesperrt: möglicher Name]';
+const protokollPlatzhalterPfad = '[gesperrt: Pfad]';
+
 /// Woher ein Name oder Pfad stammt, den die App prüft; die Datenschutzwarnung
 /// nennt es der Lehrkraft (datenschutz.dart) und der Testbetrieb entscheidet
 /// danach, ob das Wort ins Protokoll darf (E20).

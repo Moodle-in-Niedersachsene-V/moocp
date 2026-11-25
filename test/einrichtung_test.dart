@@ -47,10 +47,12 @@ void main() {
     claudeSigniert = (_) => true;
     // Kein Programm außerhalb des Testordners: unabhängig vom Bestand des Rechners.
     festeProgrammOrdner = const [];
+    festeAppOrdner = const [];
   });
   tearDown(() {
     claudeSigniert = vonAnthropic;
     festeProgrammOrdner = null;
+    festeAppOrdner = null;
     tmp.deleteSync(recursive: true);
   });
 
@@ -436,6 +438,64 @@ void main() {
       expect(claudeFinden(u), isNull);
       expect(CodexCli(u).exe, isNull);
     }, skip: Platform.isWindows ? 'Die festen Programmordner gibt es nur auf Mac und Linux' : null);
+  });
+
+  group('Codex in der ChatGPT-App', () {
+    late String heim;
+    late Map<String, String> u;
+    setUp(() {
+      heim = p.join(tmp.path, 'heim');
+      u = {'USERPROFILE': heim, 'HOME': heim, 'PATH': ''};
+      festeAppOrdner = [p.join(tmp.path, 'Applications'), p.join(heim, 'Applications')];
+    });
+    tearDown(() => festeAppOrdner = null);
+    void app(String ort, {bool codex = true}) {
+      if (codex) {
+        datei('$ort/ChatGPT.app/Contents/Resources/codex-cli/bin/codex');
+      } else {
+        datei('$ort/ChatGPT.app/Contents/MacOS/ChatGPT');
+      }
+    }
+
+    test('App mit codex-cli ohne ~/.codex: gefunden, mit Hinweis, nichts angelegt', () {
+      app('Applications');
+      final c = CodexCli(u);
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, contains('einmal'));
+      expect(c.exe, isNull);
+      expect(Directory(p.join(heim, '.codex')).existsSync(), isFalse);
+    });
+
+    test('App im Benutzerordner ~/Applications wird auch gefunden', () {
+      app('heim/Applications');
+      expect(CodexCli(u).gefunden, isTrue);
+    });
+
+    test('App und ~/.codex: gefunden, kein Hinweis', () {
+      app('Applications');
+      Directory(p.join(heim, '.codex')).createSync(recursive: true);
+      final c = CodexCli(u);
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, isNull);
+    });
+
+    test('nur die CLI: wie bisher, kein Hinweis', () {
+      datei('bin/codex');
+      final c = CodexCli({...u, 'PATH': p.join(tmp.path, 'bin')});
+      expect(c.gefunden, isTrue);
+      expect(c.hinweis, isNull);
+    }, skip: Platform.isWindows ? 'Windows sucht codex.exe, .cmd und .bat' : null);
+
+    test('ChatGPT Classic ohne codex-cli: nicht gefunden', () {
+      app('Applications', codex: false);
+      final c = CodexCli(u);
+      expect(c.gefunden, isFalse);
+      expect(c.hinweis, isNull);
+    });
+
+    test('Name nennt App und CLI', () {
+      expect(CodexCli(u).name, 'Codex (ChatGPT-App oder CLI)');
+    });
   });
 
   group('gefunden', () {

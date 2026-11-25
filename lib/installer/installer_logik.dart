@@ -349,7 +349,7 @@ class EntfernenErgebnis {
     if (eintragBlieb) {
       z.add(
         '• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: im Terminal '
-        '„claude mcp remove moodle --scope user“. Codex CLI: den Abschnitt [mcp_servers.moodle] '
+        '„claude mcp remove moodle --scope user“. Codex (ChatGPT-App oder CLI): den Abschnitt [mcp_servers.moodle] '
         'in ~/.codex/config.toml löschen.',
       );
     }

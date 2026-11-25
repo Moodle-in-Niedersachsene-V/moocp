@@ -1,4 +1,4 @@
-// moocp -- lokale App, über die ein KI-Werkzeug (Claude Code, Codex CLI,
+// moocp -- lokale App, über die ein KI-Werkzeug (Claude Code, Codex (ChatGPT-App oder CLI),
 // LM Studio) mit Moodle-Kursen arbeitet: ohne
 // Längengrenze, mit Sperr- und Positivliste im Code und einem Protokoll, das
 // die Lehrkraft sieht.
@@ -929,7 +929,7 @@ class _HauptseiteState extends State<Hauptseite> {
         content: Text(
           '„${profil.name}“ (${profil.mcpName}) wird aus moocp entfernt. '
           'Die Moodle-Anmeldung und gespeicherte Anmeldedaten dieses Profils werden gelöscht. '
-          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex CLI und LM Studio entfernt, '
+          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio entfernt, '
           'soweit er dort steht.',
         ),
         actions: [

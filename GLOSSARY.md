@@ -75,7 +75,7 @@ _Englisch_: bridge
 _Nicht zu verwechseln mit_: MCP-Server.
 
 **KI-Werkzeug**
-Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex CLI und Bionic (LM Studio).
+Ein Programm, das die Werkzeuge der App für eine KI nutzbar macht. Unterstützt werden Claude Code, Codex (ChatGPT-App oder CLI) und Bionic (LM Studio).
 _Englisch_: AI tool
 
 **Freigabe**

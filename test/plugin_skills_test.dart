@@ -386,7 +386,7 @@ void main() {
       expect(codexStand.skills.map((x) => x.name), isNot(contains('beispiel')));
       expect(codexStand.entfernen, isEmpty);
       final konflikt = s.skillFehler.where((f) => f.contains('stammt nicht von moocp')).single;
-      expect(konflikt, allOf(contains('Codex CLI'), contains('beispiel'), contains('„Beispiel“')));
+      expect(konflikt, allOf(contains('Codex (ChatGPT-App oder CLI)'), contains('beispiel'), contains('„Beispiel“')));
       expect(s.einrichtbar, isTrue, reason: 'in LM Studio ist etwas zu tun');
 
       installieren(s);
@@ -418,7 +418,7 @@ void main() {
       final s = await pruefen(plugins);
       final codexStand = s.werkzeuge.firstWhere((w) => w.werkzeug.id == 'codex');
       expect(codexStand.skills.map((x) => x.name), isNot(contains('beispiel')));
-      expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')).single, contains('Codex CLI'));
+      expect(s.skillFehler.where((f) => f.contains('stammt nicht von moocp')).single, contains('Codex (ChatGPT-App oder CLI)'));
       installieren(s);
       expect(fremd.readAsStringSync(), 'später von jemand anderem');
       await pruefen(plugins);

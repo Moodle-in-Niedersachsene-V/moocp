@@ -20,8 +20,6 @@ import 'plattform/linux_schluesselbund.dart' show SchluesselbundFehler;
 import 'anmeldung.dart';
 import 'testzugang.dart';
 import 'arbeitsordner.dart';
-import 'plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
-import 'start_fehler.dart';
 import 'einrichtung.dart';
 import 'einrichtung_dialog.dart';
 import 'einstellungen.dart';
@@ -44,6 +42,7 @@ import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
 import 'plattform/kindprozess.dart';
 import 'plattform/plattform.dart' show benutzerordner;
+import 'plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
 import 'plattform/zwischenablage.dart';
 import 'plugin/dialoge.dart';
 import 'plugin/downloads.dart';
@@ -60,6 +59,7 @@ import 'ueber.dart';
 import 'update/update.dart';
 import 'testbetrieb_rahmen.dart';
 import 'testschalter.dart';
+import 'start_fehler.dart';
 import 'update/update_dialoge.dart';
 
 export 'anmeldung.dart'

@@ -25,6 +25,9 @@ class Arbeitsordner {
 
   final String pfad;
 
+  /// Wann geprüft wird (beim Einrichten und vor dem Leeren, nicht vor jedem
+  /// Schreiben) und warum das genügt, steht in plattform/privater_ordner.dart.
+  ///
   /// Prüft vor jedem Leeren, dass der Ordner noch der private des Benutzers
   /// ist (wirft [PrivaterOrdnerFehler]). Null, wo es keine Prüfung gibt
   /// (Windows, Mac und Tests ohne Linux-Prüfung).

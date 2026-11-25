@@ -39,6 +39,28 @@ class _System implements PrivatSystem {
 int _modus(String pfad) => FileStat.statSync(pfad).mode & 0xfff;
 
 void main() {
+  group('Ausgabe von stat', () {
+    test('Linux: Sonderbits stehen vorn und machen den Ordner unprivat', () {
+      expect(statAuswerten('1000:700\n', mac: false), (uid: 1000, modus: 448));
+      expect(statAuswerten('1000:1700\n', mac: false)!.modus, isNot(privaterModus), reason: 'Sticky');
+      expect(statAuswerten('1000:4700\n', mac: false)!.modus, isNot(privaterModus), reason: 'setuid');
+      expect(statAuswerten('1000:2700\n', mac: false)!.modus, isNot(privaterModus), reason: 'setgid');
+    });
+
+    test('Mac: Dateityp wird abgeschnitten, Sonderbits bleiben', () {
+      expect(statAuswerten('501:40700\n', mac: true), (uid: 501, modus: 448));
+      expect(statAuswerten('501:41700\n', mac: true)!.modus, isNot(privaterModus), reason: 'Sticky');
+      expect(statAuswerten('501:42700\n', mac: true)!.modus, isNot(privaterModus), reason: 'setgid');
+      expect(statAuswerten('501:40755\n', mac: true)!.modus, isNot(privaterModus));
+    });
+
+    test('Unbrauchbares: null (die Prüfung scheitert)', () {
+      for (final a in ['', 'x:y', '1000', '1000:89', 'stat: Fehler\n']) {
+        expect(statAuswerten(a, mac: false), isNull, reason: a);
+      }
+    });
+  });
+
   if (Platform.isWindows) return;
 
   late Directory tmp;
@@ -220,6 +242,7 @@ void main() {
         fail('hätte werfen müssen');
       } on PrivaterOrdnerFehler catch (e) {
         expect(e.meldung, contains('nicht privat'));
+        expect(e.meldung, contains('Administrator'), reason: 'ein fremd angelegter Ordner lässt sich nicht selbst entfernen');
         expect(e.meldung, isNot(contains(PluginDownloads.ordnername)));
       }
       Directory(grund).deleteSync(recursive: true);

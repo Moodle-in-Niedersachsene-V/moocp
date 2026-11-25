@@ -19,8 +19,14 @@
 // räumt ihn nicht auf; sie bricht mit einer klaren Meldung ab
 // ([PrivaterOrdnerFehler]), bevor etwas geschrieben oder gelöscht wird.
 //
-// Die Prüfung gilt dem Ordner, nicht dem Pfad davor: Ein fremdes Konto kann
-// im klebrigen /tmp keinen Ordner eines anderen umbenennen oder ersetzen.
+// Warum die Prüfung beim Einrichten, vor dem Leeren und vor einer neuen
+// Datei genügt und nicht vor jedem einzelnen Schreiben nötig ist: Der
+// Grundordner gehört dem Benutzer und hat Rechte 700, andere Konten kommen
+// weder hinein noch können sie darin etwas umbenennen oder ersetzen; im
+// klebrigen /tmp kann ein fremdes Konto einen Eintrag, der ihm nicht gehört,
+// nicht umbenennen oder löschen, und `$XDG_RUNTIME_DIR` ist selbst privat.
+// Ein Austausch unter einem bestehenden, geprüften Ordner ist so nur dem
+// eigenen Benutzer möglich, und der ist nicht Gegenstand dieser Prüfung.
 // Unter Windows gibt es das Problem nicht (das Temp-Verzeichnis gehört dem
 // Konto), dort wird diese Datei nicht benutzt.
 
@@ -31,6 +37,18 @@ import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
 import 'kindprozess.dart';
+
+/// Zieht aus der Ausgabe von `stat` Besitzer und Rechte: `<uid>:<Rechte>`, die
+/// Rechte oktal. Unter Linux (`%u:%a`) stehen Sonderbits (Sticky, setuid,
+/// setgid) vorn dabei, unter dem Mac (`%u:%p`) der Dateityp davor
+/// (`40700`); [mac] maskiert dort auf die unteren zwölf Bits, damit beide
+/// Plattformen dieselben Bits vergleichen. Null, wenn die Ausgabe nicht passt.
+({int uid, int modus})? statAuswerten(String ausgabe, {required bool mac}) {
+  final m = RegExp(r'^(\d+):([0-7]+)\s*$').firstMatch(ausgabe);
+  if (m == null) return null;
+  final modus = int.parse(m.group(2)!, radix: 8);
+  return (uid: int.parse(m.group(1)!), modus: mac ? modus & 4095 : modus);
+}
 
 /// Rechte, die ein privater Ordner genau haben muss: rwx für den Besitzer,
 /// nichts für Gruppe und andere, keine Sonderbits.
@@ -101,19 +119,19 @@ class UnixPrivatSystem implements PrivatSystem {
     // `stat` statt der Struktur `struct stat` über ffi: deren Aufbau ist je
     // Plattform und Architektur verschieden. Ohne -L folgt `stat` keiner
     // Verknüpfung; das Format ist unter GNU (-c) und BSD/Mac (-f) verschieden.
-    final r = Platform.isMacOS
-        ? prozessAusfuehrenSync('stat', ['-f', '%u:%Lp', pfad])
-        : prozessAusfuehrenSync('stat', ['-c', '%u:%a', '--', pfad]);
-    final m = RegExp(r'^(\d+):(\d+)\s*$').firstMatch('${r.stdout}');
-    if (r.exitCode != 0 || m == null) {
-      throw PrivaterOrdnerFehler('Die Rechte eines Ordners ließen sich nicht lesen.');
-    }
-    return DateiAngabe(
-      ordner: true,
-      verknuepfung: false,
-      uid: int.parse(m.group(1)!),
-      modus: int.parse(m.group(2)!, radix: 8),
-    );
+    // Der feste Pfad zuerst: Ein anderes `stat` im PATH soll hier nichts
+    // vortäuschen (es liefe nur mit den Rechten des Benutzers, aber die
+    // Prüfung soll nicht von der Umgebung abhängen). Die Ausgabe ist
+    // numerisch, die Sprache spielt keine Rolle; passt sie nicht, ist die
+    // Prüfung gescheitert.
+    final mac = Platform.isMacOS;
+    final programm = ['/usr/bin/stat', '/bin/stat'].firstWhere((f) => File(f).existsSync(), orElse: () => 'stat');
+    final r = mac
+        ? prozessAusfuehrenSync(programm, ['-f', '%u:%p', pfad])
+        : prozessAusfuehrenSync(programm, ['-c', '%u:%a', '--', pfad]);
+    final w = r.exitCode == 0 ? statAuswerten('${r.stdout}', mac: mac) : null;
+    if (w == null) throw PrivaterOrdnerFehler('Die Rechte eines Ordners ließen sich nicht lesen.');
+    return DateiAngabe(ordner: true, verknuepfung: false, uid: w.uid, modus: w.modus);
   }
 
   @override
@@ -147,13 +165,13 @@ void privaterOrdnerPruefen(String pfad, {PrivatSystem? system, String bezeichnun
       : !a.ordner
       ? 'dort liegt kein Ordner'
       : a.uid != s.uid
-      ? 'er gehört einem anderen Benutzer'
+      ? 'er wurde von einem anderen Benutzer angelegt; zum Entfernen sind vielleicht Administratorrechte nötig'
       : 'andere Benutzer dürfen darauf zugreifen oder er hat unerwartete Rechte';
   final wo = pfadNennen ? ' („$pfad“)' : '';
   throw PrivaterOrdnerFehler(
     '$bezeichnung$wo ist nicht privat: $grund. moocp benutzt ihn nicht und schreibt und löscht dort nichts, '
     'damit nichts aus Moodle für andere Benutzer dieses Rechners sichtbar wird. '
-    'Bitte den Ordner entfernen oder umbenennen und moocp neu starten.',
+    'Bitte den Ordner entfernen (gehört er einem anderen Benutzer, kann das nur dieser oder ein Administrator) und moocp neu starten.',
   );
 }
 

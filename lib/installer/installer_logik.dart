@@ -99,7 +99,9 @@ class InstallerOrte {
 
   /// Der private Grundordner der App mit Arbeitsordner und Ordner für
   /// Downloads (lib/plattform/privater_ordner.dart). Die Deinstallation
-  /// löscht ihn nur, wenn er dem Benutzer gehört und privat ist.
+  /// löscht ihn nur, wenn er dem Benutzer gehört und privat ist. Hat die
+  /// Umgebung der Deinstallation ein anderes `XDG_RUNTIME_DIR` als die App
+  /// hatte, bleibt deren Ordner stehen (er liegt dann unter dem anderen).
   String get arbeitsordner => privatesBasisPfad(umgebung: umgebung, temp: umgebung['TMPDIR']);
 }
 

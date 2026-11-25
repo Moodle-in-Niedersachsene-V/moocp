@@ -169,12 +169,18 @@ void arbeitsordnerTests() {
 
 // Der Zugriff auf den Schlüsselbund unter Linux: Ohne benutzbaren Bund wird gar
 // nicht erst libsecret gerufen, das die App anhielte (anmeldedaten.dart).
+const _adresse = 'https://moodle.schule.example';
+
 void schluesselbundTests() {
   group('Passwort im Schlüsselbund unter Linux', () {
     final aufrufe = <String>[];
     setUp(() {
       aufrufe.clear();
-      SharedPreferences.setMockInitialValues({'anmeldung.merken': true, 'anmeldung.benutzer': 'e.mustermann'});
+      SharedPreferences.setMockInitialValues({
+        'anmeldung.merken': true,
+        'anmeldung.benutzer': 'e.mustermann',
+        'anmeldung.herkunft': 'https://moodle.schule.example:443',
+      });
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
         (call) async {
@@ -194,8 +200,8 @@ void schluesselbundTests() {
 
     test('bereit: lesen und speichern gehen durch', () async {
       Anmeldedaten.schluesselbundPruefer = () async => Schluesselbund.bereit;
-      expect((await Anmeldedaten.laden()).passwort, 'geheim');
-      await Anmeldedaten.speichern('e.mustermann', 'pw');
+      expect((await Anmeldedaten.laden(adresse: _adresse)).passwort, 'geheim');
+      await Anmeldedaten.speichern('e.mustermann', 'pw', adresse: _adresse);
       expect(aufrufe, containsAll(['read', 'write']));
     });
 
@@ -204,11 +210,11 @@ void schluesselbundTests() {
         Anmeldedaten.schluesselbundPruefer = () async => zustand;
         // Bleibt der Bund nach dem Entsperrversuch gesperrt, ist er nicht benutzbar.
         Anmeldedaten.schluesselbundEntsperrer = () async => zustand;
-        final daten = await Anmeldedaten.laden();
+        final daten = await Anmeldedaten.laden(adresse: _adresse);
         expect(daten.passwort, isNull);
         expect(daten.benutzer, 'e.mustermann');
         expect(daten.speicherProblem, SchluesselbundFehler(zustand).meldung, reason: 'kein stilles Scheitern');
-        await expectLater(Anmeldedaten.speichern('e.mustermann', 'pw'), throwsA(isA<SchluesselbundFehler>()));
+        await expectLater(Anmeldedaten.speichern('e.mustermann', 'pw', adresse: _adresse), throwsA(isA<SchluesselbundFehler>()));
         expect(aufrufe, isEmpty, reason: 'kein Aufruf an den Schlüsselbund');
       });
     }
@@ -220,7 +226,7 @@ void schluesselbundTests() {
         entsperrt = true;
         return Schluesselbund.bereit;
       };
-      final daten = await Anmeldedaten.laden();
+      final daten = await Anmeldedaten.laden(adresse: _adresse);
       expect(daten.passwort, 'geheim');
       expect(daten.speicherProblem, isNull);
     });

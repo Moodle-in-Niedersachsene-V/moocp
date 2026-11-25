@@ -175,8 +175,10 @@ void main() {
 
   group('Der Ordner', () {
     test('liegt außerhalb des Arbeitsordners und wird beim Einrichten (Start) geleert', () {
-      final basis = p.join(wurzel.path, 'start');
-      final alt = File(p.join(basis, PluginDownloads.ordnername, 'beispiel', 'A', '1.csv'))
+      final basis = (Directory(p.join(wurzel.path, 'start'))..createSync()).path;
+      // Unter Linux liegt der Ordner im privaten Grundordner (privater_ordner.dart).
+      final (erster, _) = PluginDownloads.einrichten(basis: basis);
+      final alt = File(p.join(erster.wurzel, 'beispiel', 'A', '1.csv'))
         ..createSync(recursive: true)
         ..writeAsStringSync('vom letzten Lauf');
       final (d, geblieben) = PluginDownloads.einrichten(basis: basis);

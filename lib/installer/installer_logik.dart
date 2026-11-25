@@ -11,7 +11,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../arbeitsordner.dart';
+import '../plattform/privater_ordner.dart';
 import '../einstellungen_ort.dart';
 import '../plattform/kindprozess.dart';
 
@@ -97,11 +97,10 @@ class InstallerOrte {
   /// `path_provider`, Kennung aus linux/CMakeLists.txt).
   String get prefsOrdner => p.join(_datenOrdner, 'com.example.moocp');
 
-  /// Der Arbeitsordner im Temp-Verzeichnis (lib/arbeitsordner.dart).
-  String get arbeitsordner => p.join(
-    umgebung['TMPDIR'] ?? Directory.systemTemp.path,
-    Arbeitsordner.ordnername(umgebung, linux: true),
-  );
+  /// Der private Grundordner der App mit Arbeitsordner und Ordner für
+  /// Downloads (lib/plattform/privater_ordner.dart). Die Deinstallation
+  /// löscht ihn nur, wenn er dem Benutzer gehört und privat ist.
+  String get arbeitsordner => privatesBasisPfad(umgebung: umgebung, temp: umgebung['TMPDIR']);
 }
 
 /// Der Inhalt der `.desktop`-Datei für Startmenü und Schreibtisch. [exe] und
@@ -419,7 +418,15 @@ Future<EntfernenErgebnis> deinstallieren({
   sag('Entferne Einstellungen, Protokoll und Arbeitsordner …');
   for (final o in [orte.einstellungen, orte.prefsOrdner, orte.arbeitsordner]) {
     final d = Directory(o);
-    if (d.existsSync() && !FileSystemEntity.isLinkSync(o)) d.deleteSync(recursive: true);
+    if (!d.existsSync() || FileSystemEntity.isLinkSync(o)) continue;
+    if (o == orte.arbeitsordner) {
+      try {
+        privaterOrdnerPruefen(o);
+      } on PrivaterOrdnerFehler {
+        continue; // Gehört nicht der App: stehen lassen.
+      }
+    }
+    d.deleteSync(recursive: true);
   }
   return EntfernenErgebnis(code);
 }

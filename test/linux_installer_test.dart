@@ -176,6 +176,7 @@ void main() {
     File(p.join(w.ziel, 'fremd.txt')).writeAsStringSync('bleibt');
     for (final d in [w.orte.einstellungen, w.orte.prefsOrdner, w.orte.arbeitsordner]) {
       Directory(d).createSync(recursive: true);
+      if (d == w.orte.arbeitsordner) Process.runSync('chmod', ['700', d]); // privat wie von der App angelegt
       File(p.join(d, 'x')).writeAsStringSync('x');
     }
     var anmeldedatenGeloescht = false;

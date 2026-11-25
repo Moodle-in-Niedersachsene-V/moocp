@@ -20,6 +20,8 @@ import 'plattform/linux_schluesselbund.dart' show SchluesselbundFehler;
 import 'anmeldung.dart';
 import 'testzugang.dart';
 import 'arbeitsordner.dart';
+import 'plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
+import 'start_fehler.dart';
 import 'einrichtung.dart';
 import 'einrichtung_dialog.dart';
 import 'einstellungen.dart';
@@ -134,7 +136,20 @@ Future<void> main(List<String> argumente) async {
     return true;
   };
   protokoll.eintrag(Art.info, 'App gestartet');
-  final (arbeitsordner, geblieben) = Arbeitsordner.einrichten();
+  // Kein privater Ordner (Linux): Fehlermeldung statt Absturz ohne Fenster,
+  // und nichts wird geschrieben oder geleert (plattform/privater_ordner.dart).
+  final Arbeitsordner arbeitsordner;
+  final int geblieben;
+  final PluginDownloads downloads;
+  final int downloadsGeblieben;
+  try {
+    (arbeitsordner, geblieben) = Arbeitsordner.einrichten();
+    (downloads, downloadsGeblieben) = PluginDownloads.einrichten();
+  } on PrivaterOrdnerFehler catch (e) {
+    protokoll.eintrag(Art.fehler, 'Privater Ordner nicht benutzbar: Meldung im Fenster');
+    runApp(StartFehlerApp(e.meldung));
+    return;
+  }
   protokoll.eintrag(
     Art.info,
     geblieben == 0
@@ -159,7 +174,6 @@ Future<void> main(List<String> argumente) async {
   // Arbeitsordners (plugin/downloads.dart): beim Start geleert wie dieser,
   // beim Beenden von LaufendePlugins.beenden. Sein Pfad gehört in kein
   // Protokoll.
-  final (downloads, downloadsGeblieben) = PluginDownloads.einrichten();
   protokoll.eintrag(
     Art.info,
     downloadsGeblieben == 0

@@ -22,7 +22,7 @@ import 'package:moocp/plugin/app_adresse.dart';
 import 'package:moocp/plugin/dialoge.dart';
 import 'package:moocp/plugin/downloads.dart';
 import 'package:moocp/plugin/laufende_plugins.dart';
-import 'package:moocp/plugin/moodle_schreiben.dart' show testantwortenKennzeichnung, zusatzKennzeichnung;
+import 'package:moocp/plugin/moodle_schreiben.dart' show datenschutzAutomatischKennzeichnung, testantwortenKennzeichnung, zusatzKennzeichnung;
 import 'package:moocp/plugin/datenschutz.dart' show DatenschutzAusgang, Datenschutzwarnung;
 import 'package:moocp/plugin/plugins.dart';
 import 'package:moocp/plugin/verbindung.dart';
@@ -724,6 +724,97 @@ void main() {
         [for (final e in protokoll.eintraege) e.text],
         contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, trotzdem gesendet'),
       );
+    });
+
+    test('Testbetrieb: die Datenschutzwarnung aus der vorbereiteten Antwort, der Lauf geht nach einer Sperre weiter', () async {
+      final moodle = PluginTestMoodle();
+      await moodle.starten();
+      addTearDown(() => moodle.server.close(force: true));
+      final zugang = await MoodleZugang.fuerTest(protokoll, moodle.basis, benutzer: 'e.mustermann', passwort: 'geheim');
+      final profil = Profil(
+        kennung: 'standard',
+        name: 'moodle',
+        adresse: moodle.basis.toString(),
+        port: await freierPort(),
+        mcpName: 'moodle',
+        schluessel: 'test',
+      );
+      // Erfunden: Die Zugangsdatei selbst liest hier niemand, nur ihr Ordner zählt.
+      final testzugang = Testzugang(
+        kennung: 'standard',
+        datei: p.join(wurzel.path, 'testzugang.env'),
+        adresse: profil.adresse,
+        kurse: const {12},
+      );
+      void antwort(String? ausgang) => File(p.join(wurzel.path, pluginDialogantwortenDatei)).writeAsStringSync(
+        jsonEncode({
+          'antworten': [
+            if (ausgang != null)
+              {'plugin': 'beispiel', 'art': 'datenschutz', 'titel': 'beispiel_echo', 'antwort': {'ausgang': ausgang}},
+          ],
+        }),
+      );
+      final l = await starten(await beispielAngenommen([profil]));
+      final client = await verbinden(profil, l, moodle: zugang, testzugang: testzugang);
+      await client.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+      Future<Map> echo() async => (await client.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Abgabe von Erika'}}));
+      String text(Map r) => ((r['content'] as List).single as Map)['text'] as String;
+
+      antwort('sperren');
+      final gesperrt = await echo();
+      expect(gesperrt['isError'], true);
+      expect(text(gesperrt), '${datenschutzAutomatischKennzeichnung('Beispiel', gesendet: false)}\n\n${gesperrtText('Beispiel', 'beispiel_echo')}');
+      expect(text(gesperrt), isNot(contains('Erika')));
+
+      // Nach der Sperre läuft es weiter: Die nächste Antwort geht, mit „senden“ unverändert.
+      antwort('senden');
+      expect(
+        (await echo())['isError'],
+        isNot(true),
+      );
+      antwort('senden');
+      expect(
+        text(await echo()),
+        startsWith('${datenschutzAutomatischKennzeichnung('Beispiel', gesendet: true)}\n\nEcho: Abgabe von Erika'),
+      );
+
+      // Ohne vorbereitete Antwort: gesperrt, ohne dass die Lehrkraft gefragt wird.
+      antwort(null);
+      final ohne = await echo();
+      expect(ohne['isError'], true);
+      expect(text(ohne), contains(gesperrtText('Beispiel', 'beispiel_echo')));
+      expect(warnungen, isEmpty, reason: 'im Testbetrieb erscheint kein Dialog');
+
+      final zeilen = [for (final e in protokoll.eintraege) e.text];
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, gesperrt (automatisch, ohne Lehrkraft)'));
+      expect(zeilen, contains('Plugin „Beispiel“, Werkzeug beispiel_echo: Datenschutzwarnung, 1 Treffer, trotzdem gesendet (automatisch, ohne Lehrkraft)'));
+      expect(zeilen, contains(contains('Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von Plugin „Beispiel“')));
+      // Ein vom Plugin gemeldeter Name bleibt ein Platzhalter, auch im Testbetrieb.
+      expect(zeilen, contains(contains('1 Treffer ([gesperrt: möglicher Name]) -- gesperrt')));
+      final ohneArgumente = zeilen.where((z) => !z.startsWith('beispiel_echo({') && !z.startsWith('beispiel_echo: Echo:'));
+      expect(ohneArgumente.join('\n').toLowerCase(), isNot(contains('erika')));
+    });
+
+    test('ohne Testbetrieb (kein Testzugang) fragt die Lehrkraft, auch wenn eine Datei mit Antworten daliegt', () async {
+      File(p.join(wurzel.path, pluginDialogantwortenDatei)).writeAsStringSync(
+        jsonEncode({
+          'antworten': [
+            {'plugin': 'beispiel', 'art': 'datenschutz', 'titel': 'beispiel_echo', 'antwort': {'ausgang': 'senden'}},
+          ],
+        }),
+      );
+      final eins = beispielProfil('standard', 'moodle', await freierPort());
+      final l = await starten(await beispielAngenommen([eins]));
+      final a = await verbinden(eins, l);
+      await a.call('tools/call', {'name': 'beispiel_namen', 'arguments': <String, Object?>{}});
+      warnungen.clear();
+
+      final r = await a.call('tools/call', {'name': 'beispiel_echo', 'arguments': {'text': 'Erika'}});
+
+      expect(r['isError'], true);
+      expect(warnungen, hasLength(1));
+      expect(((r['content'] as List).single as Map)['text'], gesperrtText('Beispiel', 'beispiel_echo'));
     });
 
     test('Datenschutzwarnung: ohne Entscheidung bis zur Frist oder bei Abbruch des Clients wird gesperrt', () async {

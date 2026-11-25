@@ -229,6 +229,14 @@ String testantwortenKennzeichnung(String plugin, int anzahl) =>
     'Hinweis von moocp: Debug-Testbetrieb: ${anzahl == 1 ? 'Einen Dialog' : '$anzahl Dialoge'} des Plugins „$plugin“ '
     'hat moocp in diesem Aufruf aus vorbereiteten Antworten beantwortet, ohne die Lehrkraft.';
 
+/// Was moocp vor die Antwort eines Werkzeugs eines Plugins an die KI setzt,
+/// wenn der Testbetrieb die Datenschutzwarnung zu ihr aus einer vorbereiteten
+/// Antwort beantwortet hat (E20). Ein fester Satz ohne Wort und ohne Pfad.
+String datenschutzAutomatischKennzeichnung(String plugin, {required bool gesendet}) =>
+    'Hinweis von moocp: Debug-Testbetrieb: Die Datenschutzwarnung zu dieser Antwort des Plugins „$plugin“ '
+    'hat moocp aus einer vorbereiteten Antwort beantwortet, ohne die Lehrkraft: '
+    '${gesendet ? 'Die Antwort geht unverändert hinaus.' : 'Die Antwort ist gesperrt.'}';
+
 /// Ein Plugin, das über eine seiner Zusatzadressen schreibt, als Aufrufer des
 /// Moodle-Zugangs: der freigegebene POST ([umleitung] false) oder das GET auf
 /// ein Umleitungsziel danach ([umleitung] true). Regeln oben.

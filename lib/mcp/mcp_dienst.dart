@@ -20,7 +20,7 @@ import 'package:path/path.dart' as p;
 import '../einstellungen.dart';
 import '../einstellungen_ort.dart';
 import '../freigabe.dart';
-import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung;
+import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt;
 import '../profil.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
@@ -496,11 +496,16 @@ class McpDienst implements AufrufKontext {
   /// jeder Stufe (`ab: keine`), im Testbetrieb ohne automatische Freigabe.
   /// Das Protokoll nennt nur Plugin und Werkzeug, nie ein Wort (Freigaben
   /// schreibt den Titel mit).
+  ///
+  /// Testbetrieb (E20): Nennt [testDialogantworten] eine Datei, beantwortet
+  /// sie die Warnung stattdessen, ohne Dialog ([_automatischeWarnung]).
   Future<DatenschutzAusgang> _datenschutzwarnung(
     Datenschutzwarnung warnung,
     Future<void> abbruch,
     String aufrufer,
   ) async {
+    final datei = testDialogantworten;
+    if (datei != null) return _automatischeWarnung(warnung, datei, aufrufer);
     final a = FreigabeAnfrage(
       titel: 'Datenschutzwarnung',
       punkte: const [],
@@ -516,6 +521,44 @@ class McpDienst implements AufrufKontext {
       () => Freigaben.mitAbbruch(abbruch, () => freigaben.anfragen(a), aufrufer: aufrufer),
     );
     return ja ? DatenschutzAusgang.senden : DatenschutzAusgang.sperren;
+  }
+
+  /// Die Platzhalter, die das Protokoll statt eines Treffers trägt, der nicht
+  /// aus dem Testkurs oder dem Testkonto stammt; gleich denen, die die Adresse
+  /// der App für Protokollzeilen eines Plugins setzt (ein Test sichert es).
+  static const platzhalterName = '[gesperrt: möglicher Name]';
+  static const platzhalterPfad = '[gesperrt: Pfad]';
+
+  /// Die Datenschutzwarnung im Testbetrieb (E20): beantwortet aus der Datei
+  /// [datei] ([datenschutzAntwort]), ohne Dialog; ohne Eintrag wird gesperrt.
+  /// Das Protokoll sagt, dass nicht die Lehrkraft entschieden hat, und nennt
+  /// Plugin, Werkzeug, Zahl der Treffer und die Entscheidung. Das Wort eines
+  /// Treffers steht nur dort, wo er allein aus dem gebundenen Testkonto oder
+  /// aus den Teilnehmenden eines gebundenen Testkurses stammt; bei jedem
+  /// anderen Treffer, auch einem, den zugleich eine andere Quelle trifft,
+  /// und bei jedem Pfad steht der Platzhalter.
+  Future<DatenschutzAusgang> _automatischeWarnung(Datenschutzwarnung warnung, String datei, String aufrufer) async {
+    final ausgang = datenschutzAntwort(datei, warnung.kurzname ?? '', warnung.werkzeug);
+    final zugang = testzugang ?? Testzugang.fuer(profil);
+    bool testquelle(Fund f) =>
+        !f.pfad &&
+        f.herkunft.isNotEmpty &&
+        f.herkunft.every(
+          (h) => switch (h.art) {
+            // Das angemeldete Konto ist hier das gebundene Testkonto: Die Datei gibt es nur dafür.
+            HerkunftArt.lehrkraft => true,
+            HerkunftArt.teilnehmende => h.kurs != null && _testbetrieb.gebundenerTestkurs(profil, zugang, h.kurs!),
+            _ => false,
+          },
+        );
+    final treffer = [for (final f in warnung.funde) testquelle(f) ? f.wort : (f.pfad ? platzhalterPfad : platzhalterName)];
+    final gesendet = ausgang.gesendet;
+    protokoll.eintrag(
+      gesendet ? Art.info : Art.gesperrt,
+      'Testbetrieb, ohne Lehrkraft beantwortet: Datenschutzwarnung von $aufrufer, Werkzeug ${warnung.werkzeug}, '
+      '${treffer.length} Treffer (${treffer.join(', ')}) -- ${gesendet ? 'trotzdem gesendet' : 'gesperrt'}',
+    );
+    return ausgang;
   }
 
   @override

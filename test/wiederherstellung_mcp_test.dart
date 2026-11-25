@@ -314,6 +314,14 @@ void main() {
     'name': 'ZZ Kurs',
     'sichtbarkeit': 'wie_quelle',
   };
+  // Antwortfrist des Dienstes. Vorgabe ist eine lange Frist: Ein sofortiger
+  // Fehler (Archivprüfung, Prüfsumme) soll auch auf einer langsamen, emulierten
+  // Maschine noch in der Antwort ankommen, statt als „normale Antwortfrist
+  // erreicht" zu erscheinen. Nur Tests, die den Lauf mit `external.hold`
+  // anhalten, brauchen die kurze Frist, weil dort die Frist die Antwort auslöst.
+  const langeFrist = Duration(seconds: 60);
+  const kurzeFristDauer = Duration(seconds: 3);
+  var frist = langeFrist;
   Future<void> startService() async {
     final log = Protokoll();
     service = McpDienst(
@@ -325,14 +333,21 @@ void main() {
       profil: profile,
       sicherungsordner: folder.path,
       uebertragungsprotokollPfad: p.join(folder.path, 'uebertragungen.json'),
-      // Lang genug, dass ein sofortiger Fehler auch unter Last noch in der
-      // Antwort ankommt (Archivprüfung und Prüfsumme brauchen Zeit); Tests für
-      // „läuft weiter" halten das Moodle-Doppel ohnehin an (external.hold).
-      antwortfrist: const Duration(seconds: 3),
+      antwortfrist: frist,
     );
     await service.starten();
     client = McpTestClient(profile.port);
     await client.initialize();
+  }
+
+  /// Stellt vor einem Test, der das Moodle-Doppel anhält, die kurze Frist ein
+  /// (Neustart des Dienstes; vor dem ersten Aufruf des Tests aufrufen).
+  Future<void> kurzeFrist() async {
+    if (frist == kurzeFristDauer) return;
+    frist = kurzeFristDauer;
+    await service.stoppen();
+    client.http.close(force: true);
+    await startService();
   }
 
   void writeArchive({bool quiz = false, bool image = false, bool lokal = false, bool geteilt = false,
@@ -388,6 +403,7 @@ void main() {
   }
 
   setUp(() async {
+    frist = langeFrist;
     external = _Moodle();
     await external.start();
     folder = Directory.systemTemp.createTempSync('restore-mcp-');
@@ -488,6 +504,7 @@ void main() {
 
   for (final mitFortschritt in [true, false]) {
   test('aktive Abfrage nennt Phase und Stillstand, Fortschritt bekannt: $mitFortschritt', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final result = await client.tool('wiederherstellen_datei', arguments);
     final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(result)!.group(1)!;
@@ -549,6 +566,7 @@ void main() {
   });
 
   test('Start, Zeitlimit, Profilumbenennung und Neustart behalten Wiederholungsschutz', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final result = await client.tool('wiederherstellen_datei', arguments);
     expect(external.starts, 1, reason: result);
@@ -669,6 +687,7 @@ void main() {
     /// Fehler melden und liefert die Nummer und den Text der abschließenden Statusabfrage.
     Future<(String, String)> fehlerLauf(Map<String, Object?> fortschritt,
         {bool imKurs = false, List<String> weitere = const []}) async {
+      await kurzeFrist();
       external.hold = Completer<void>();
       final nummer = nummerAus(await client.tool('wiederherstellen_datei', arguments));
       external.progress = fortschritt;
@@ -757,6 +776,7 @@ void main() {
     });
   });
   test('Status-Zeitlimit nennt Werkzeug und Nummer; erneute Abfrage startet nichts', () async {
+    await kurzeFrist();
     external.progress = {'unexpected': true};
     final started = await client.tool('wiederherstellen_datei', arguments);
     final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(started)!.group(1)!;
@@ -988,6 +1008,7 @@ void main() {
   }
 
   test('Übertragungszeitlimit beim Sichern nennt Sicherungsnummer und Statuswerkzeug', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final result = await client.tool('uebertragen', {
       'sichtbarkeit': 'wie_quelle',
@@ -1009,6 +1030,7 @@ void main() {
   });
 
   test('Übertragungszeitlimit beim Wiederherstellen nennt Zielnummer und Statuswerkzeug', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final result = await client.tool('uebertragen', {
       'sichtbarkeit': 'wie_quelle',
@@ -1035,6 +1057,7 @@ void main() {
   });
 
   test('Sicherung: Zeitlimit und Neustart erlauben spätere Dateiabholung ohne neuen Start', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final started = await client.tool('sichern_auswahl', {
       'kurs': 12,
@@ -1326,6 +1349,7 @@ void main() {
     expect(external.writes, 0);
   });
   test('später Abfragefehler nach MCP-Zeitlimit bleibt als unklarer Vorgang gesperrt', () async {
+    await kurzeFrist();
     external.hold = Completer<void>();
     final started = await client.tool('wiederherstellen_datei', arguments);
     final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(started)!.group(1)!;
@@ -1387,7 +1411,10 @@ void main() {
       () async {
         writeArchive(image: true);
         external.progress = {'unexpected': true};
-        if (!restart) external.hold = Completer<void>();
+        if (!restart) {
+          await kurzeFrist();
+          external.hold = Completer<void>();
+        }
         final started = await client.tool('wiederherstellen_datei', arguments);
         final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(started)!.group(1)!;
         writeArchive();

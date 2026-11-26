@@ -156,10 +156,9 @@ void main() {
       adresse: moodle.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     return McpDienst(
-      Einstellungen(schluessel: 'test'),
+      Einstellungen(),
       moodle,
       protokoll,
       freigaben,
@@ -175,7 +174,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: 'beispiel_test',
       args: const {},
-      profil: Profil(kennung: 'test', name: 'Test', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'test', schluessel: 't'),
+      profil: Profil(kennung: 'test', name: 'Test', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'test'),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: kontext,
@@ -417,7 +416,7 @@ void main() {
       await d.starten();
       final client = McpTestClient(port);
       addTearDown(() async {
-        client.http.close(force: true);
+        client.schliessen();
         await d.stoppen();
       });
       await client.initialize();
@@ -519,7 +518,7 @@ void main() {
       await d.starten();
       final client = McpTestClient(port);
       addTearDown(() async {
-        client.http.close(force: true);
+        client.schliessen();
         await d.stoppen();
       });
       await client.initialize();
@@ -549,7 +548,7 @@ void main() {
       await d.starten();
       final client = McpTestClient(port);
       addTearDown(() async {
-        client.http.close(force: true);
+        client.schliessen();
         await d.stoppen();
       });
       await client.initialize();
@@ -582,7 +581,7 @@ void main() {
       await d.starten();
       final client = McpTestClient(port);
       addTearDown(() async {
-        client.http.close(force: true);
+        client.schliessen();
         await d.stoppen();
       });
       await client.initialize();
@@ -624,7 +623,7 @@ void main() {
       await d.starten();
       final client = McpTestClient(port);
       addTearDown(() async {
-        client.http.close(force: true);
+        client.schliessen();
         await d.stoppen();
       });
       await client.initialize();

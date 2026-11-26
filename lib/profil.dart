@@ -3,10 +3,12 @@
 // Anzeigenamen, die Adresse, einen eigenen Port und einen technischen
 // Servernamen.
 //
-// Je Profil läuft ein eigener MCP-Server (mcp/mcp_dienst.dart) auf eigenem Port
-// unter eigenem Namen (einrichtung.dart): Die KI-Werkzeuge sehen je Instanz
-// eine eigene Werkzeugfamilie, etwa `moodle_…` und `moodle-test_…`. Es gibt
-// keinen Parameter `instanz` (E31).
+// Je Profil läuft ein eigener MCP-Server (mcp/mcp_dienst.dart) mit eigenem
+// Endpunkt, nur für das Konto (mcp/kanal.dart), unter eigenem Namen
+// (einrichtung.dart): Die KI-Werkzeuge sehen je Instanz eine eigene
+// Werkzeugfamilie, etwa `moodle_…` und `moodle-test_…`. Es gibt keinen
+// Parameter `instanz` (E31). Der Name des Profils ist der Name des Endpunkts
+// und der Name des Eintrags in jedem KI-Werkzeug.
 //
 // Die Kennung ist der Schlüssel für alles, was je Instanz getrennt liegt:
 // Zugangsdaten (anmeldedaten.dart), Registry (moodle/instanzen.dart) und
@@ -16,13 +18,6 @@
 // einem Profil mit der Kennung `standard`, Servername `moodle`, altem Port
 // (Einstellungen.aus). Dessen Zugangsdaten liegen weiter unter den alten
 // Schlüsseln, damit niemand neu eingeben muss.
-//
-// Der Zugangsschlüssel des MCP-Servers (E6) ist je Profil verschieden: Wer
-// den Schlüssel eines Profils kennt, kommt nicht an die Werkzeuge eines
-// anderen, die auf eine andere Instanz schreiben. Eine Ausnahme ist das
-// Standardprofil: Es behält den globalen Schlüssel der Einstellungen
-// (Einstellungen.schluessel), weil die Einträge in den KI-Werkzeugen und die
-// Brücke für LM Studio (mcp/bruecke.dart) nur den einen kennen.
 
 import 'dart:math';
 
@@ -37,7 +32,6 @@ class Profil {
     required this.port,
     required this.mcpName,
     this.bestaetigungen = Bestaetigungen.vorgabe,
-    this.schluessel = '',
     this.unbekannteFelder = const {},
   });
 
@@ -52,8 +46,10 @@ class Profil {
   final String name;
   final String adresse;
 
-  /// Port des MCP-Servers dieses Profils (127.0.0.1). Je Profil verschieden.
-  /// Der Wert 0 heißt „noch nicht vergeben"; Einstellungen.aus setzt ihn.
+  /// Port des Profils, den der MCP-Server nicht mehr braucht (sein Kanal liegt
+  /// im Ordner des Kontos). Er bleibt je Profil verschieden in der Datei, damit
+  /// die Version, zu der die Lehrkraft zurückkehrt (E39), sie lesen kann. Der
+  /// Wert 0 heißt „noch nicht vergeben"; Einstellungen.aus setzt ihn.
   final int port;
 
   /// Technischer Servername für die KI-Werkzeuge, etwa `moodle-test`. Aus dem
@@ -64,26 +60,19 @@ class Profil {
   /// Freigabestufe für Schreibvorgänge auf dieser Moodle-Instanz (E20, E31).
   final Bestaetigungen bestaetigungen;
 
-  /// Eigener Zugangsschlüssel (Bearer) des MCP-Servers dieses Profils (E6).
-  /// Leer heißt „noch nicht vergeben"; Einstellungen vergibt ihn beim Laden.
-  /// Das Standardprofil hat keinen eigenen: Für es gilt der globale Schlüssel
-  /// (Einstellungen.schluesselFuer), und er steht nur dort in der Datei.
-  final String schluessel;
-
   /// Felder anderer Versionen, die dieses Profil nicht auswertet.
   final Map<String, Object?> unbekannteFelder;
 
   bool get istStandard => kennung == standardKennung;
 
   /// Ändert nur den Anzeigenamen, der Servername bleibt (siehe [mcpName]).
-  Profil copyWith({String? name, String? adresse, String? mcpName, int? port, String? schluessel}) => Profil(
+  Profil copyWith({String? name, String? adresse, String? mcpName, int? port}) => Profil(
         kennung: kennung,
         name: name ?? this.name,
         adresse: adresse ?? this.adresse,
         port: port ?? this.port,
         mcpName: mcpName ?? this.mcpName,
         bestaetigungen: bestaetigungen,
-        schluessel: schluessel ?? this.schluessel,
         unbekannteFelder: unbekannteFelder,
       );
 
@@ -94,7 +83,6 @@ class Profil {
         port: port,
         mcpName: mcpName,
         bestaetigungen: neu,
-        schluessel: schluessel,
         unbekannteFelder: unbekannteFelder,
       );
 
@@ -106,9 +94,6 @@ class Profil {
         'port': port,
         'mcpName': mcpName,
         'bestaetigungen': bestaetigungen.text,
-        // Der Schlüssel des Standardprofils steht schon oben in der Datei;
-        // ein zweites Mal gäbe es nur einen Ort mehr, an dem er veralten kann.
-        if (!istStandard && schluessel.isNotEmpty) 'schluessel': schluessel,
       };
 
   /// Null, wenn die Angabe unbrauchbar ist; die Einstellungen fallen dann auf
@@ -124,7 +109,6 @@ class Profil {
     if (adresse is! String) return null;
     final port = j['port'];
     final mcpName = j['mcpName'];
-    final schluessel = j['schluessel'];
     return Profil(
       kennung: kennung,
       name: name,
@@ -132,10 +116,9 @@ class Profil {
       port: port is int && port > 0 ? port : 0,
       mcpName: mcpName is String && mcpNameGueltig(mcpName) ? mcpName : mcpNameFuer(name, kennung),
       bestaetigungen: Bestaetigungen.ausText(j['bestaetigungen'] as String?),
-      schluessel: schluessel is String ? schluessel : '',
       unbekannteFelder: {
         for (final e in j.entries)
-          if (e.key is String && !const {'kennung', 'name', 'adresse', 'port', 'mcpName', 'bestaetigungen', 'schluessel'}.contains(e.key))
+          if (e.key is String && !const {'kennung', 'name', 'adresse', 'port', 'mcpName', 'bestaetigungen', 'schluessel' /* nur noch Altbestand */}.contains(e.key))
             e.key as String: e.value,
       },
     );

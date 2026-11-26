@@ -28,7 +28,7 @@ import 'package:path/path.dart' as p;
 final _beispiel = p.join('example', 'example-plugin');
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei() : super(schluessel: 'schluessel');
+  _EinstellungenOhneDatei() : super();
 
   @override
   Future<void> speichern() async {}
@@ -63,10 +63,15 @@ void main() {
     einstellungen = _EinstellungenOhneDatei();
     final heim = p.join(tmp.path, 'heim');
     umgebung = {'USERPROFILE': heim, 'HOME': heim};
+    final brueckenDatei = File(p.join(tmp.path, 'app', brueckeExe))..createSync(recursive: true);
+    festeBruecke = brueckenDatei.path;
     codex = CodexCli(umgebung);
-    lm = LmStudio(umgebung, bruecke: p.join(tmp.path, 'app', brueckeExe));
+    lm = LmStudio(umgebung, bruecke: brueckenDatei.path);
   });
-  tearDown(() => tmp.deleteSync(recursive: true));
+  tearDown(() {
+    festeBruecke = null;
+    tmp.deleteSync(recursive: true);
+  });
 
   /// Legt das Beispiel-Plugin unter `plugins/beispiel` an, mit seiner
   /// Beschreibungsdatei (verändert durch [manifest]) und seinen Skills.
@@ -101,8 +106,6 @@ void main() {
     final wahl = {...appWahlSkills, ...ps.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: umgebung,
-      port: 47811,
-      schluessel: 'abc',
       skills: ps.pakete,
       wahlSkills: wahl,
       abgewaehlt: abgewaehlt,
@@ -444,9 +447,7 @@ void main() {
       final ps = await pluginSkillsLesen(plugins, appNamen: _appNamen);
       Future<Einrichtungsstand> mit(Set<String> gesehen) => einrichtungPruefen(
         umgebung: umgebung,
-        port: 47811,
-        schluessel: 'abc',
-        skills: ps.pakete,
+          skills: ps.pakete,
         wahlSkills: {...appWahlSkills, ...ps.wahlSkills},
         gesehen: gesehen,
         gefunden: [codex, lm],
@@ -651,15 +652,13 @@ void main() {
       Future<Einrichtungsstand> stand({required bool neu, List<String> fehler = const ['Plugin „X“: kaputt']}) =>
           einrichtungPruefen(
             umgebung: umgebung,
-            port: 47811,
-            schluessel: 'abc',
-            skills: const [],
+                  skills: const [],
             wahlSkills: const {},
             skillFehler: fehler,
             skillFehlerNeu: neu,
             gefunden: [codex],
           );
-      await codex.eintragen(47811, 'abc');
+      await codex.eintragen();
       final gesehen = await stand(neu: false);
       expect((gesehen.brauchtEinrichtung, gesehen.brauchtEtwas), (false, false));
       final ungesehen = await stand(neu: true);
@@ -668,10 +667,10 @@ void main() {
     });
 
     test('gesehene Stände überstehen das Speichern', () {
-      final e = Einstellungen(schluessel: 'k', skillFehlerGesehen: {'ab', 'cd'});
+      final e = Einstellungen(skillFehlerGesehen: {'ab', 'cd'});
       final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
-      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).skillFehlerGesehen, {'ab', 'cd'});
-      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('skillFehlerGesehen'), isFalse);
+      expect(Einstellungen.aus(j, Einstellungen()).skillFehlerGesehen, {'ab', 'cd'});
+      expect(Einstellungen().zuJson().containsKey('skillFehlerGesehen'), isFalse);
     });
   });
 
@@ -692,16 +691,16 @@ void main() {
     });
 
     test('die gemerkten Ordner je Werkzeug überstehen das Speichern; was nicht Werkzeug/Skill ist, fällt weg', () {
-      final e = Einstellungen(schluessel: 'k', pluginSkillOrdner: {'lmstudio/beispiel', 'codex/beispiel-vorlage'});
+      final e = Einstellungen(pluginSkillOrdner: {'lmstudio/beispiel', 'codex/beispiel-vorlage'});
       final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
       expect(j['pluginSkillOrdner'], ['codex/beispiel-vorlage', 'lmstudio/beispiel']);
       expect(
-        Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkillOrdner,
+        Einstellungen.aus(j, Einstellungen()).pluginSkillOrdner,
         {'lmstudio/beispiel', 'codex/beispiel-vorlage'},
       );
       j['pluginSkillOrdner'] = ['codex/beispiel', 'codex/..', 'codex', 'a/b/c', '../beispiel', 'Codex/beispiel', 3];
-      expect(Einstellungen.aus(j, Einstellungen(schluessel: 'x')).pluginSkillOrdner, {'codex/beispiel'});
-      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('pluginSkillOrdner'), isFalse);
+      expect(Einstellungen.aus(j, Einstellungen()).pluginSkillOrdner, {'codex/beispiel'});
+      expect(Einstellungen().zuJson().containsKey('pluginSkillOrdner'), isFalse);
     });
 
     test('--claude-entfernen entfernt einen gemerkten Ordner nur in seinem Werkzeug', () async {
@@ -722,14 +721,14 @@ void main() {
     });
 
     test('die fremden Ordner überstehen das Speichern', () {
-      final e = Einstellungen(schluessel: 'k', fremdeSkillOrdner: {'codex/beispiel', 'claude/beispiel-vorlage'});
+      final e = Einstellungen(fremdeSkillOrdner: {'codex/beispiel', 'claude/beispiel-vorlage'});
       final j = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
       expect(j['fremdeSkillOrdner'], ['claude/beispiel-vorlage', 'codex/beispiel']);
       expect(
-        Einstellungen.aus(j, Einstellungen(schluessel: 'x')).fremdeSkillOrdner,
+        Einstellungen.aus(j, Einstellungen()).fremdeSkillOrdner,
         {'codex/beispiel', 'claude/beispiel-vorlage'},
       );
-      expect(Einstellungen(schluessel: 'k').zuJson().containsKey('fremdeSkillOrdner'), isFalse);
+      expect(Einstellungen().zuJson().containsKey('fremdeSkillOrdner'), isFalse);
     });
 
     test('Skill-Namen: wie die der App, nichts, was einen Pfad bildet', () {

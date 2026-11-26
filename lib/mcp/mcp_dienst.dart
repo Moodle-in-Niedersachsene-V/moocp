@@ -1,10 +1,12 @@
-// Der MCP-Server der App: Streamable HTTP auf 127.0.0.1.
+// Der MCP-Server der App: je Instanzprofil ein Endpunkt, den nur das eigene
+// Betriebssystem-Konto erreicht (mcp/kanal.dart), und darüber MCP als
+// JSON-RPC, eine Verbindung je Sitzung.
 //
-// Nur lokal erreichbar, und nur mit dem Zugangsschlüssel des Profils (je
-// Instanz ein eigener, E6; das Standardprofil hat den aus den Einstellungen).
-// Ein offener Port auf localhost wäre sonst auch für jede Webseite im Browser
-// erreichbar, die es darauf anlegt; dagegen helfen der Schlüssel und der
-// Schutz gegen DNS-Rebinding (Host- und Origin-Prüfung).
+// Es gibt keinen Port auf 127.0.0.1 und keinen Zugangsschlüssel: Ein Port sagt
+// nicht, wer ihn bedient, und ein Schlüssel, den ein KI-Werkzeug an die
+// Adresse schickt, die gerade lauscht, läge bei dem, der sie zuerst belegt
+// (E6). Wer verbunden ist, hat die Prüfung der Gegenstelle bestanden, bevor
+// irgendetwas von ihm gelesen wird.
 //
 // Die Werkzeuge sind die einzige Schnittstelle zu Moodle. Es gibt kein
 // Werkzeug, das beliebigen Code ausführt oder beliebige Adressen anfragt --
@@ -22,6 +24,7 @@ import '../einstellungen_ort.dart';
 import '../freigabe.dart';
 import '../datenschutzwarnung.dart' show DatenschutzAusgang, Datenschutzwarnung, Fund, HerkunftArt, protokollPlatzhalterName, protokollPlatzhalterPfad;
 import '../profil.dart';
+import 'kanal.dart';
 import 'werkzeug_aufrufe.dart';
 import 'werkzeugquelle.dart';
 import 'testbetrieb.dart';
@@ -125,9 +128,14 @@ class McpDienst implements AufrufKontext {
     this.notizenOrdner,
     this.fragenSicherungsOrdner,
     this.fragetypNotizGeliefert,
+    this.kanal,
   });
 
   final Einstellungen einstellungen;
+
+  /// Wo der Endpunkt dieses Servers liegt; ohne Angabe der des Systems
+  /// ([standardKanalOrt]), zum Zeitpunkt des Starts.
+  final KanalOrt? kanal;
   final Testzugang? testzugang;
 
   /// Das Instanzprofil dieses Servers (E31): Port, Name und Adresse kommen von dort.
@@ -218,31 +226,69 @@ class McpDienst implements AufrufKontext {
     ),
   );
 
-  StreamableMcpServer? _server;
+  KanalLauscher? _lauscher;
+  StreamSubscription<KanalVerbindung>? _annahme;
+  final _sitzungen = <({McpServer server, KanalVerbindung verbindung})>{};
 
   /// Ob der Server lauscht.
-  bool get laeuft => _server != null;
+  bool get laeuft => _lauscher != null;
+
+  /// Die Profile der gerade laufenden Server nach ihrem Port: eine Naht für
+  /// die Tests, die ihren Client mit der Nummer des Profils verbinden.
+  static final _laufendeNamen = <int, String>{};
+
+  /// Der Profilname des laufenden Servers, dessen Profil [port] hat; nur für
+  /// die Tests (test/mcp_client.dart).
+  static String? kanalNameFuerTest(int port) => _laufendeNamen[port];
 
   /// Startet den Server. Wann, entscheidet der Start der App: erst nach
   /// Einrichtung und Anmeldung (anmeldung.dart, mcpServerStarten; E13).
   Future<void> starten() async {
-    if (_server != null) return;
+    if (_lauscher != null) return;
     _testbetrieb.beginnen();
-    final s = StreamableMcpServer(
-      serverFactory: (sessionId) => _erzeugen(),
-      host: '127.0.0.1',
-      port: profil.port,
-      path: '/mcp',
-      enableJsonResponse: true,
-      allowedHosts: const {'127.0.0.1', 'localhost'},
-      authenticator: _pruefeSchluessel,
+    final name = profil.mcpName;
+    final l = await (kanal ?? standardKanalOrt).lauschen(
+      name,
+      abgewiesen: (grund) => protokoll.eintrag(Art.gesperrt, 'MCP-Verbindung abgewiesen: $grund'),
+      hinweis: (text) => protokoll.eintrag(Art.info, 'MCP-Kanal ($name): $text'),
     );
-    await s.start();
-    _server = s;
-    protokoll.eintrag(
-      Art.info,
-      'MCP-Server läuft auf http://127.0.0.1:${profil.port}/mcp (${profil.mcpName})',
+    _lauscher = l;
+    _laufendeNamen[profil.port] = name;
+    _annahme = l.verbindungen.listen(
+      _verbindungAufnehmen,
+      // Der Kanal kann nicht weiter lauschen (Windows: keine neue Pipe-Instanz):
+      // Der Server gilt als beendet, statt als laufend zu erscheinen.
+      onError: (Object e) {
+        protokoll.eintrag(Art.fehler, 'MCP-Kanal beendet (${profil.mcpName}): ${e is KanalFehler ? e.text : e.runtimeType}');
+        _lauscher = null;
+      },
     );
+    protokoll.eintrag(Art.info, 'MCP-Server läuft auf dem Kanal des Kontos ($name)');
+  }
+
+  /// Eine geprüfte Verbindung ist eine MCP-Sitzung mit eigenem Server (wie
+  /// vorher je Sitzung einer): Werkzeuge, Freigaben und Protokoll sind für
+  /// alle dieselben, die Verbindung bestimmt nur, wer gerade fragt. Endet sie,
+  /// bricht das laufende Aufrufe ab -- ein offener Freigabedialog schließt
+  /// sich (E4).
+  Future<void> _verbindungAufnehmen(KanalVerbindung v) async {
+    final server = _erzeugen();
+    final aus = StreamController<List<int>>();
+    final eintrag = (server: server, verbindung: v);
+    _sitzungen.add(eintrag);
+    aus.stream.listen(v.senden);
+    server.server.onclose = () {
+      _sitzungen.remove(eintrag);
+      unawaited(aus.close());
+      unawaited(v.schliessen());
+    };
+    try {
+      await server.connect(IOStreamTransport(stream: v.eingang, sink: aus.sink));
+    } catch (_) {
+      _sitzungen.remove(eintrag);
+      unawaited(aus.close());
+      await v.schliessen();
+    }
   }
 
   /// Die Werkzeugliste für die Brücke (bruecke.dart, Werkzeugliste;
@@ -327,31 +373,23 @@ class McpDienst implements AufrufKontext {
   Future<void> stoppen() async {
     _kartenKontexte.clear();
     _testbetrieb.beenden();
-    await _server?.stop();
-    _server = null;
-    protokoll.eintrag(Art.info, 'MCP-Server gestoppt');
-  }
-
-  // Das Paket tippt den Parameter als dynamic (es läuft auch im Web); auf
-  // Windows ist es ein HttpRequest aus dart:io.
-  //
-  // Jedes Profil prüft seinen eigenen Schlüssel (E6, Einstellungen.schluesselFuer):
-  // Der Server einer Instanz nimmt den Schlüssel einer anderen nicht an. Ein
-  // Profil ohne Schlüssel lässt niemanden herein, auch nicht mit leerem Kopf --
-  // ein Fehlen darf den Zugang nicht öffnen. Das Profil wird bei jeder Anfrage
-  // frisch gelesen, denn die Oberfläche tauscht es beim Bearbeiten aus.
-  bool _pruefeSchluessel(dynamic anfrage) {
-    final req = anfrage as HttpRequest;
-    final kopf = req.headers.value(HttpHeaders.authorizationHeader) ?? '';
-    final schluessel = einstellungen.schluesselFuer(profil);
-    final ok = schluessel.isNotEmpty && kopf == 'Bearer $schluessel';
-    if (!ok) {
-      protokoll.eintrag(
-        Art.gesperrt,
-        'MCP-Anfrage ohne gültigen Schlüssel abgewiesen',
-      );
+    _laufendeNamen.remove(profil.port);
+    await _annahme?.cancel();
+    _annahme = null;
+    final lauscher = _lauscher;
+    _lauscher = null;
+    try {
+      await lauscher?.schliessen();
+    } on KanalFehler catch (e) {
+      protokoll.eintrag(Art.fehler, 'MCP-Kanal: ${e.text}');
+    } finally {
+      for (final sitzung in [..._sitzungen]) {
+        await sitzung.server.close();
+        await sitzung.verbindung.schliessen();
+      }
+      _sitzungen.clear();
     }
-    return ok;
+    protokoll.eintrag(Art.info, 'MCP-Server gestoppt');
   }
 
   static Map<String, dynamic> _karte(Object? x) =>

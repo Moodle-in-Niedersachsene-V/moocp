@@ -133,7 +133,7 @@ void main() {
 
   tearDown(() async {
     for (final c in clients) {
-      c.http.close(force: true);
+      c.schliessen();
     }
     clients.clear();
     for (final d in dienste) {
@@ -487,7 +487,6 @@ void main() {
         adresse: moodle.basis.toString(),
         port: await freierPort(),
         mcpName: 'moodle',
-        schluessel: 'test',
       );
       // Erfunden: Die Zugangsdatei selbst liest hier niemand, nur ihr Ordner zählt.
       final testzugang = Testzugang(
@@ -538,7 +537,6 @@ void main() {
         adresse: moodle.basis.toString(),
         port: await freierPort(),
         mcpName: 'moodle',
-        schluessel: 'test',
       );
       // Erfunden: Die Zugangsdatei selbst liest hier niemand.
       final testzugang = Testzugang(
@@ -737,7 +735,6 @@ void main() {
         adresse: moodle.basis.toString(),
         port: await freierPort(),
         mcpName: 'moodle',
-        schluessel: 'test',
       );
       // Erfunden: Die Zugangsdatei selbst liest hier niemand, nur ihr Ordner zählt.
       final testzugang = Testzugang(
@@ -1584,7 +1581,7 @@ Future<void> main(List<String> a) async {
       await l.beenden();
       final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
       einstellungen = EinstellungenOhneDatei(profile: [profil])
-        ..plugins = Einstellungen.aus(json, Einstellungen(schluessel: 'x')).plugins;
+        ..plugins = Einstellungen.aus(json, Einstellungen()).plugins;
 
       final plugins = await Plugins.laden(einstellungen, protokoll, Directory(p.join(wurzel.path, 'plugins')));
       final neu = await starten(plugins);

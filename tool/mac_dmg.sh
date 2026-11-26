@@ -42,6 +42,13 @@ for arch in arm64 x86_64; do
   [[ "$ARCHS" == *" $arch "* ]] || { echo "Der Bau enthält $arch nicht (gefunden:$ARCHS)" >&2; exit 1; }
 done
 
+# Die Brücke für KI-Werkzeuge liegt in der App (tool/mac_bau.sh) und muss auf
+# jedem Mac laufen, auf dem die App läuft.
+BRUECKE_ARCHS=" $(lipo -archs "$APP/Contents/MacOS/moocp-bruecke") "
+for arch in arm64 x86_64; do
+  [[ "$BRUECKE_ARCHS" == *" $arch "* ]] || { echo "Die Brücke enthält $arch nicht (gefunden:$BRUECKE_ARCHS); MOOCP_BRUECKE_ANDERE_ARCH nennt die Brücke der anderen Architektur (tool/mac_bau.sh)" >&2; exit 1; }
+done
+
 mkdir -p installer
 "$WERKZEUG/bin/dmgbuild" -s installer/macos/dmg_einstellungen.py \
   -D app="$APP" -D hintergrund=installer/macos/hintergrund.png moocp "$AUS"

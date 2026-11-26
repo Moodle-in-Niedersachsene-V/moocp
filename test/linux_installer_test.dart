@@ -176,6 +176,7 @@ void main() {
     File(p.join(w.ziel, 'fremd.txt')).writeAsStringSync('bleibt');
     for (final d in [w.orte.einstellungen, w.orte.prefsOrdner, w.orte.arbeitsordner]) {
       Directory(d).createSync(recursive: true);
+      if (d == w.orte.arbeitsordner) Process.runSync('chmod', ['700', d]); // privat wie von der App angelegt
       File(p.join(d, 'x')).writeAsStringSync('x');
     }
     var anmeldedatenGeloescht = false;
@@ -196,6 +197,27 @@ void main() {
     for (final d in [w.orte.einstellungen, w.orte.prefsOrdner, w.orte.arbeitsordner]) {
       expect(Directory(d).existsSync(), isFalse, reason: d);
     }
+  });
+
+  test('deinstallieren lässt einen nicht privaten Grundordner samt Inhalt stehen', () async {
+    w = neu();
+    installieren(quelle: w.quelle.path, ziel: w.ziel, orte: w.orte, version: '1');
+    final d = Directory(w.orte.arbeitsordner)..createSync(recursive: true);
+    Process.runSync('chmod', ['755', d.path]); // für andere zugänglich: gehört nicht der App
+    final datei = File(p.join(d.path, 'x'))..writeAsStringSync('x');
+    await deinstallieren(ziel: w.ziel, orte: w.orte);
+    expect(datei.existsSync(), isTrue);
+    expect(File(p.join(w.ziel, 'moocp')).existsSync(), isFalse, reason: 'die Deinstallation läuft sonst zu Ende');
+  });
+
+  test('deinstallieren folgt keiner Verknüpfung an der Stelle des Grundordners', () async {
+    w = neu();
+    installieren(quelle: w.quelle.path, ziel: w.ziel, orte: w.orte, version: '1');
+    final fremd = Directory(p.join(w.wurzel.path, 'fremd'))..createSync();
+    final datei = File(p.join(fremd.path, 'x'))..writeAsStringSync('x');
+    Link(w.orte.arbeitsordner).createSync(fremd.path);
+    await deinstallieren(ziel: w.ziel, orte: w.orte);
+    expect(datei.existsSync(), isTrue);
   });
 
   test('deinstallieren ohne Marke und bei laufender App bricht ab, ohne etwas zu löschen', () async {

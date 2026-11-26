@@ -198,6 +198,9 @@ void main() {
     });
   });
 
+  // Diese Proben schreiben echte Dateien mit flush und lesen sie mit einem
+  // neuen Speicher zurück. Deren I/O-Frist berücksichtigt langsame Datenträger;
+  // die Zustands- und Identitätsprüfungen bleiben davon unabhängig.
   group('Vorgänge', () {
     late Directory ordner;
     setUp(() => ordner = Directory.systemTemp.createTempSync('sicherung_test'));
@@ -214,7 +217,7 @@ void main() {
       expect(neu.backupid, '42');
       expect(neu.kontext, 99);
       expect(File('${ordner.path}/vorgaenge.json.tmp').existsSync(), isFalse);
-    });
+    }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('Wiederherstellungsidentität bleibt für spätere Statusabfragen erhalten', () async {
       final v = Vorgaenge(ordner.path);
@@ -225,7 +228,7 @@ void main() {
       final neu = await Vorgaenge(ordner.path).finde(vg.id);
       expect(neu!.vorherCmids, [4]);
       expect(neu.wiederherstellungAktivitaeten, aktivitaeten);
-    });
+    }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('beschädigte Datei: Fehler, nichts überschrieben', () async {
       File('${ordner.path}/vorgaenge.json').writeAsStringSync('{kaputt');

@@ -84,6 +84,7 @@ import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart';
 import '../moodle/sperrliste.dart' show adresseOhneWerte;
 import '../moodle/wiederherstellung_regeln.dart' show archivGrenzeStandard;
+import '../plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
 import '../protokoll.dart';
 import 'beschreibung.dart' show Zusatzadresse, ZugriffsArt;
 import 'dialoge.dart';
@@ -1462,6 +1463,10 @@ class AppAdresse {
         HttpStatus.internalServerError,
         'Der Ordner für Downloads ließ sich nicht anlegen (${x.runtimeType}).',
       );
+    } on PrivaterOrdnerFehler {
+      // Nicht mehr privat (Linux): nichts schreiben. Die Meldung nennt keinen
+      // Pfad, die Antwort an das Plugin auch nicht.
+      return _fehler(HttpStatus.internalServerError, 'Der Ordner für Downloads ist nicht privat; moocp schreibt dort nichts.');
     }
     // Gemerkt, bevor geladen wird: Endet der Lauf, ist auch ein halber Teil
     // weg.

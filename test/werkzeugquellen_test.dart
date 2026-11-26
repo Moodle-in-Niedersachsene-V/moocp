@@ -148,7 +148,7 @@ void main() {
 
   tearDown(() async {
     for (final c in clients) {
-      c.http.close(force: true);
+      c.schliessen();
     }
     clients.clear();
     for (final d in dienste) {
@@ -163,11 +163,10 @@ void main() {
     adresse: 'https://moodle.schule.example',
     port: port,
     mcpName: 'test',
-    schluessel: 'test',
   );
 
   McpDienst dienstMit(List<WerkzeugQuelle> quellen, {Profil? p}) => McpDienst(
-    Einstellungen(schluessel: 'test'),
+    Einstellungen(),
     MoodleZugang(protokoll),
     protokoll,
     freigaben,
@@ -473,7 +472,7 @@ void main() {
       await client.notification('notifications/cancelled', {'requestId': client.id, 'reason': 'Testabbruch'});
 
       await aufruf.abbruch.timeout(const Duration(seconds: 10));
-      client.http.close(force: true);
+      client.schliessen();
       await verworfen;
     });
 
@@ -530,7 +529,7 @@ void main() {
       expect(texte, contains('Die KI wartet nicht mehr -- nicht gespeichert'));
       expect(texte, contains('probe_frage: abgelehnt'));
       expect(freigaben.aktuell, isNull);
-      client.http.close(force: true);
+      client.schliessen();
       await verworfen;
     });
   });

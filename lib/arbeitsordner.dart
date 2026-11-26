@@ -18,12 +18,24 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import 'plattform/kindprozess.dart';
+import 'plattform/privater_ordner.dart';
 
 class Arbeitsordner {
-  const Arbeitsordner(this.pfad);
+  const Arbeitsordner(this.pfad, {this.pruefen});
 
   final String pfad;
+
+  /// Wann geprüft wird (beim Einrichten und vor dem Leeren, nicht vor jedem
+  /// Schreiben) und warum das genügt, steht in plattform/privater_ordner.dart.
+  ///
+  /// Prüft vor jedem Leeren, dass der Ordner noch der private des Benutzers
+  /// ist (wirft [PrivaterOrdnerFehler]). Null, wo es keine Prüfung gibt
+  /// (Windows, Mac und Tests ohne Linux-Prüfung).
+  final void Function()? pruefen;
+
+  /// Der Name des Ordners; unter Linux liegt er im privaten Grundordner der
+  /// App (plattform/privater_ordner.dart), sonst im Temp-Verzeichnis.
+  static const ordnername = 'moocp_arbeitsordner';
 
   /// Legt den Ordner an und leert ihn. Liefert ihn mit der Zahl der Einträge,
   /// die sich nicht löschen ließen.
@@ -32,34 +44,33 @@ class Arbeitsordner {
   /// (C:\Users\LEHRKR~1\…). `status` soll die Form nennen, die Windows selbst
   /// anzeigt und Claude weiterverwendet.
   ///
-  /// Unter Linux teilen sich alle Benutzer /tmp: Der Name trägt den Benutzer
-  /// ([ordnername]), der Ordner gehört nur ihm (Rechte 700), und eine
-  /// Verknüpfung an seiner Stelle, die ein anderer Benutzer dort hinterlassen
-  /// hat, wird nicht benutzt. Sonst läse jeder auf dem Rechner mit, was die
-  /// App aus Moodle holt.
-  static (Arbeitsordner, int) einrichten({String? temp, bool? linux, Map<String, String>? umgebung}) {
+  /// Unter Linux teilen sich alle Benutzer /tmp: Der Ordner liegt deshalb in
+  /// einem privaten Grundordner des Benutzers ([privatesBasisverzeichnis]),
+  /// wird mit Rechten 700 angelegt und beim Einrichten und vor dem Leeren
+  /// geprüft (warum das reicht: [privaterOrdnerPruefen]). Besteht er die
+  /// Prüfung nicht, wirft das [PrivaterOrdnerFehler], bevor etwas
+  /// geschrieben oder gelöscht wird; sonst läse jeder auf dem Rechner mit,
+  /// was die App aus Moodle holt. Ältere Orte unter /tmp rührt die App nicht an.
+  static (Arbeitsordner, int) einrichten({
+    String? temp,
+    bool? linux,
+    Map<String, String>? umgebung,
+    PrivatSystem? system,
+  }) {
     final istLinux = linux ?? Platform.isLinux;
-    final pfad = p.join(
-      temp ?? Directory.systemTemp.path,
-      ordnername(umgebung ?? Platform.environment, linux: istLinux),
-    );
-    if (istLinux && FileSystemEntity.typeSync(pfad, followLinks: false) == FileSystemEntityType.link) {
-      throw StateError('Der Arbeitsordner ist eine Verknüpfung und wird nicht benutzt.');
+    if (istLinux) {
+      final s = system ?? UnixPrivatSystem();
+      final basis = privatesBasisverzeichnis(umgebung: umgebung, temp: temp, system: s);
+      final pfad = privaterOrdnerAnlegen(p.join(basis, ordnername), system: s, bezeichnung: 'Der Arbeitsordner');
+      final a = Arbeitsordner(
+        Directory(pfad).resolveSymbolicLinksSync(),
+        pruefen: () => privaterOrdnerPruefen(pfad, system: s, bezeichnung: 'Der Arbeitsordner'),
+      );
+      return (a, a.leeren());
     }
-    final d = Directory(pfad)..createSync(recursive: true);
-    if (istLinux) prozessAusfuehrenSync('chmod', ['700', d.path]);
+    final d = Directory(p.join(temp ?? Directory.systemTemp.path, ordnername))..createSync(recursive: true);
     final a = Arbeitsordner(d.resolveSymbolicLinksSync());
     return (a, a.leeren());
-  }
-
-  /// `moocp_arbeitsordner`, unter Linux mit dem Benutzer dahinter. Zeichen
-  /// außerhalb von Buchstaben, Ziffern, Punkt, Strich und Unterstrich fallen
-  /// weg: Der Name kommt aus der Umgebung und wird Teil eines Pfads.
-  static String ordnername(Map<String, String> umgebung, {required bool linux}) {
-    if (!linux) return 'moocp_arbeitsordner';
-    final roh = umgebung['USER'] ?? umgebung['LOGNAME'] ?? '';
-    final benutzer = roh.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '');
-    return benutzer.isEmpty ? 'moocp_arbeitsordner_benutzer' : 'moocp_arbeitsordner_$benutzer';
   }
 
   /// Löscht alles im Ordner, Eintrag für Eintrag: Was gerade in Benutzung ist
@@ -68,6 +79,7 @@ class Arbeitsordner {
   /// ohne ihrem Ziel zu folgen, auch in Unterordnern -- gemessen. Liefert die
   /// Zahl der Einträge, die stehen blieben.
   int leeren() {
+    pruefen?.call();
     final d = Directory(pfad);
     if (!d.existsSync()) return 0;
     var geblieben = 0;

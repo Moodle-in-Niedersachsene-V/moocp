@@ -447,7 +447,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: 'beispiel_echo',
       args: const {},
-      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil, schluessel: 't'),
+      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: _Kontext(z ?? zugang, ordner(profil)),

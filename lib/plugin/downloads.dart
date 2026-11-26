@@ -27,6 +27,8 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../plattform/privater_ordner.dart';
+
 /// Die Endungen, die eine heruntergeladene Datei tragen kann; alles andere
 /// heißt `bin`. Eine feste Liste, damit kein Teil eines Dateinamens aus
 /// Moodle in den Pfad kommt.
@@ -41,21 +43,48 @@ const endungen = {
 
 /// Der Ordner für Downloads der Plugins.
 class PluginDownloads {
-  PluginDownloads._(this.wurzel, this.pfadformen);
+  PluginDownloads._(this.wurzel, this.pfadformen, this._pruefen);
 
-  /// Der Name des Ordners im Temp-Verzeichnis.
+  /// Der Name des Ordners: im Temp-Verzeichnis, unter Linux im privaten
+  /// Grundordner der App (plattform/privater_ordner.dart), neben dem
+  /// Arbeitsordner und nie darin.
   static const ordnername = 'moocp_plugin_downloads';
 
   /// Legt den Ordner unter [basis] an (ohne Angabe im Temp-Verzeichnis) und
   /// leert ihn. Liefert ihn mit der Zahl der Einträge, die sich nicht löschen
   /// ließen. Der Pfad in langer Form wie beim Arbeitsordner (arbeitsordner.dart).
-  static (PluginDownloads, int) einrichten({String? basis}) {
+  ///
+  /// Unter Linux liegt er im privaten Grundordner des Benutzers, mit Rechten
+  /// 700 angelegt und vor jeder Benutzung und jedem Leeren geprüft; besteht er
+  /// die Prüfung nicht, wirft das [PrivaterOrdnerFehler], bevor etwas
+  /// geschrieben oder gelöscht wird. Die Meldung nennt seinen Pfad nicht (E36).
+  static (PluginDownloads, int) einrichten({
+    String? basis,
+    bool? linux,
+    Map<String, String>? umgebung,
+    PrivatSystem? system,
+  }) {
+    if (linux ?? Platform.isLinux) {
+      final s = system ?? UnixPrivatSystem();
+      final grund = privatesBasisverzeichnis(umgebung: umgebung, temp: basis, system: s);
+      const name = 'Der Ordner für Downloads von Plugins';
+      final roh = privaterOrdnerAnlegen(p.join(grund, ordnername), system: s, bezeichnung: name, pfadNennen: false);
+      final lang = Directory(roh).resolveSymbolicLinksSync();
+      final pd = PluginDownloads._(
+        lang,
+        {lang, roh},
+        () => privaterOrdnerPruefen(roh, system: s, bezeichnung: name, pfadNennen: false),
+      );
+      return (pd, pd.leeren());
+    }
     final roh = p.normalize(p.absolute(basis ?? Directory.systemTemp.path, ordnername));
     final d = Directory(roh)..createSync(recursive: true);
     final lang = d.resolveSymbolicLinksSync();
-    final pd = PluginDownloads._(lang, {lang, roh});
+    final pd = PluginDownloads._(lang, {lang, roh}, null);
     return (pd, pd.leeren());
   }
+
+  final void Function()? _pruefen;
 
   final String wurzel;
 
@@ -68,6 +97,7 @@ class PluginDownloads {
   /// Was gerade in Benutzung ist, bleibt stehen, der Rest geht trotzdem.
   /// Liefert die Zahl der Einträge, die stehen blieben.
   int leeren() {
+    _pruefen?.call();
     final d = Directory(wurzel);
     if (!d.existsSync()) return 0;
     var geblieben = 0;
@@ -94,8 +124,10 @@ class PluginDownloads {
 
   /// Eine neue Datei im Ordner des Plugins [kurzname] und des Profils
   /// [profil] für den Download von [uri]: laufende Nummer und [endungFuer].
-  /// Legt den Ordner an, nicht die Datei. Wirft [FileSystemException].
+  /// Legt den Ordner an, nicht die Datei. Wirft [FileSystemException] und,
+  /// wenn der Ordner nicht mehr privat ist, [PrivaterOrdnerFehler].
   File neueDatei(String kurzname, String profil, Uri uri) {
+    _pruefen?.call();
     final o = Directory(ordner(kurzname, profil))..createSync(recursive: true);
     final endung = endungFuer(uri);
     while (true) {

@@ -141,7 +141,7 @@ class _GitHub extends HttpOverrides {
 
 /// Speichert nicht: updateSchritt schriebe sonst in die echten Einstellungen.
 class _Einstellungen extends Einstellungen {
-  _Einstellungen() : super(schluessel: 'x', updatePruefen: true);
+  _Einstellungen() : super(updatePruefen: true);
 
   @override
   Future<void> speichern() async {}

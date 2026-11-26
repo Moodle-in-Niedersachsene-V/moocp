@@ -1,40 +1,67 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/mcp/kanal.dart';
+import 'package:moocp/mcp/mcp_dienst.dart';
 
+/// Ein MCP-Client wie eine Brücke: Er verbindet sich über den Kanal des
+/// laufenden Servers, dessen Profil [port] hat (die Nummer des Profils dient
+/// nur noch dazu, den Server zu finden), und spricht zeilenweises JSON-RPC.
+/// Eine Verbindung ist eine MCP-Sitzung.
 class McpTestClient {
   McpTestClient(this.port);
   final int port;
-  final http = HttpClient();
   int id = 0;
-  String? session;
+  KanalVerbindung? _verbindung;
+  final _antworten = <Object?, Completer<Map>>{};
+
+  Future<KanalVerbindung> _offen() async {
+    final bestehend = _verbindung;
+    if (bestehend != null) return bestehend;
+    final name = McpDienst.kanalNameFuerTest(port);
+    if (name == null) fail('Auf Profil-Nummer $port läuft kein MCP-Server.');
+    final v = await standardKanalOrt.verbinden(name);
+    v.eingang.transform(utf8.decoder).transform(const LineSplitter()).listen((zeile) {
+      final n = jsonDecode(zeile);
+      if (n is Map) _antworten.remove(n['id'])?.complete(n);
+    }, onDone: _abreissen);
+    return _verbindung = v;
+  }
+
+  /// Schließt die Verbindung, wie ein Client, der sich beendet.
+  Future<void> schliessen() async {
+    final v = _verbindung;
+    _verbindung = null;
+    await v?.schliessen();
+    _abreissen();
+  }
+
+  /// Wer noch auf eine Antwort wartet, bekommt nie mehr eine: Die Verbindung ist
+  /// zu (wie bei einem HTTP-Client, dessen Verbindung abgerissen wird).
+  void _abreissen() {
+    final offen = [..._antworten.values];
+    _antworten.clear();
+    for (final c in offen) {
+      c.completeError(const SocketException('Verbindung beendet'));
+    }
+  }
+
   Future<Map> call(String method, [Map<String, Object?>? params, int? fehlercode]) async {
-    final r = await http.postUrl(Uri.parse('http://127.0.0.1:$port/mcp'));
-    r.headers
-      ..set('Authorization', 'Bearer test')
-      ..set('Accept', 'application/json, text/event-stream')
-      ..contentType = ContentType.json;
-    if (session != null) r.headers.set('Mcp-Session-Id', session!);
-    r.write(
-      jsonEncode({
-        'jsonrpc': '2.0',
-        'id': ++id,
-        'method': method,
-        'params': ?params,
-      }),
+    final v = await _offen();
+    final nummer = ++id;
+    final antwort = _antworten[nummer] = Completer<Map>();
+    v.senden(
+      utf8.encode('${jsonEncode({'jsonrpc': '2.0', 'id': nummer, 'method': method, 'params': ?params})}\n'),
     );
-    final response = await r.close();
-    session ??= response.headers.value('mcp-session-id');
-    final body = await utf8.decoder.bind(response).join();
-    expect(response.statusCode, 200, reason: body);
-    final decoded = jsonDecode(body) as Map;
+    final decoded = await antwort.future.timeout(const Duration(seconds: 120));
     if (fehlercode != null) {
       final fehler = decoded['error'] as Map;
-      expect(fehler['code'], fehlercode, reason: body);
+      expect(fehler['code'], fehlercode, reason: jsonEncode(decoded));
       return fehler;
     }
-    expect(decoded['error'], isNull, reason: body);
+    expect(decoded['error'], isNull, reason: jsonEncode(decoded));
     return decoded['result'] as Map;
   }
 
@@ -48,14 +75,8 @@ class McpTestClient {
   }
 
   Future<void> notification(String method, [Map<String, Object?>? params]) async {
-    final r = await http.postUrl(Uri.parse('http://127.0.0.1:$port/mcp'));
-    r.headers
-      ..set('Authorization', 'Bearer test')
-      ..set('Accept', 'application/json, text/event-stream')
-      ..set('Mcp-Session-Id', session!)
-      ..contentType = ContentType.json;
-    r.write(jsonEncode({'jsonrpc': '2.0', 'method': method, 'params': ?params}));
-    await (await r.close()).drain<void>();
+    final v = await _offen();
+    v.senden(utf8.encode('${jsonEncode({'jsonrpc': '2.0', 'method': method, 'params': ?params})}\n'));
   }
 
   Future<String> tool(String name, Map<String, Object?> args) async {

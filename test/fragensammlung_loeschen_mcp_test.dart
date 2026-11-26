@@ -1,6 +1,7 @@
 // Das Löschen einer Fragensammlung durch den MCP-Dienst (E9, E20): Das Werkzeug `loeschen` bekommt den
 // dauerhaften Sicherungsordner des Dienstes, und `status` nennt auf der Stufe „keine" das Löschen von
 // Fragen und von Fragensammlungen unter dem, was weiter fragt. Nur Moodle ist ersetzt.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -38,13 +39,12 @@ void main() {
       adresse: moodle.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.keine);
     final zugang = await MoodleZugang.fuerTest(Protokoll(), moodle.basis,
         benutzer: FragenbankDoppel.benutzer, passwort: FragenbankDoppel.passwort, schreibvorgaengeOrdner: ordner.path);
     dienst = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profil]),
+      Einstellungen(profile: [profil]),
       zugang,
       Protokoll(),
       freigaben,
@@ -59,21 +59,39 @@ void main() {
 
   tearDown(() async {
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await moodle.stoppen();
     for (final d in [ordner, sicherungen]) {
       if (d.existsSync()) d.deleteSync(recursive: true);
     }
   });
 
+  // Echte dauerhaft geschriebene Dateien: Auch unter I/O-Last gilt die
+  // Antwortfrist des MCP-Testclients, statt der allgemeinen 30 Sekunden.
   test('loeschen einer Fragensammlung fragt auf Stufe „keine" mit Haken und sichert in den Ordner des Dienstes', () async {
-    final antwort = client.tool('loeschen', {'kurs': 12, 'cmid': FragenbankDoppel.sammlung, 'name': 'ZZ Bank'});
-    for (var i = 0; i < 400 && freigaben.aktuell == null; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+    final angefragt = Completer<FreigabeAnfrage>();
+    void freigabeGeaendert() {
+      final anfrage = freigaben.aktuell;
+      if (anfrage != null && !angefragt.isCompleted) angefragt.complete(anfrage);
     }
-    final anfrage = freigaben.aktuell!;
+    freigaben.addListener(freigabeGeaendert);
+    addTearDown(() => freigaben.removeListener(freigabeGeaendert));
+    final antwort = client.tool('loeschen', {'kurs': 12, 'cmid': FragenbankDoppel.sammlung, 'name': 'ZZ Bank'});
+    // Die Sicherung wird vor der Freigabe dauerhaft geschrieben. Auf deren
+    // Ereignis warten, statt aus zehn Sekunden auf ihr Vorliegen zu schließen.
+    // Endet der Aufruf vorher, muss dessen Fehler die Probe sofort beenden.
+    unawaited(antwort.then<void>((_) {
+      if (!angefragt.isCompleted) {
+        angefragt.completeError(StateError('Das Werkzeug endete ohne die erforderliche Freigabe.'));
+      }
+    }, onError: (Object fehler, StackTrace spur) {
+      if (!angefragt.isCompleted) angefragt.completeError(fehler, spur);
+    }));
+    final anfrage = await angefragt.future;
     expect(anfrage.ab, Bestaetigungen.keine);
     expect(anfrage.abhaken, isNotEmpty);
+    expect(sicherungen.listSync(recursive: true).whereType<File>(), hasLength(1),
+        reason: 'Die Sicherungsdatei muss vor der persönlichen Freigabe vorliegen.');
     freigaben.entscheiden(true);
     final text = await antwort;
     expect(text, contains('verified: true'));
@@ -81,7 +99,7 @@ void main() {
     expect(dateien, hasLength(1));
     expect(text, contains(dateien.single.path));
     expect(p.dirname(dateien.single.path), sicherungen.path);
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('status nennt auf Stufe „keine" das Löschen von Fragen und von Fragensammlungen', () async {
     final text = await client.tool('status', {});

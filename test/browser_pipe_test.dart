@@ -15,6 +15,8 @@ import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plattform/browser_start.dart';
 import 'package:moocp/plattform/browser_unix.dart';
 import 'package:moocp/plattform/browser_windows.dart';
+import 'package:moocp/plattform/datei_rechte.dart';
+import 'package:moocp/plattform/privater_ordner.dart';
 import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
@@ -556,47 +558,85 @@ void main() {
         FileSystemEntity.typeSync(d.path, followLinks: false),
         FileSystemEntityType.directory,
       );
-      await privatPruefen(d.path, benutzer: (await aktuelleBenutzerNummer())!);
+      privatPruefen(d.path);
     }, skip: !unix);
 
     test(
-      'Prüfung lehnt Verknüpfung, falsche Rechte und fremden Besitzer ab',
+      'Prüfung lehnt Verknüpfung, falsche Rechte, Sonderbits und fremden Besitzer ab',
       () async {
-        final uid = (await aktuelleBenutzerNummer())!;
         final echt = Directory(p.join(ordner.path, 'echt'))..createSync();
         await Process.run('chmod', ['700', echt.path]);
         Link(p.join(ordner.path, 'link')).createSync(echt.path);
-        await expectLater(
-          privatPruefen(p.join(ordner.path, 'link'), benutzer: uid),
-          throwsA(isA<BrowserStartFehler>()),
-        );
+        expect(() => privatPruefen(p.join(ordner.path, 'link')), throwsA(isA<BrowserStartFehler>()));
         await Process.run('chmod', ['755', echt.path]);
-        await expectLater(
-          privatPruefen(echt.path, benutzer: uid),
-          throwsA(isA<BrowserStartFehler>()),
-        );
-        await Process.run('chmod', ['700', echt.path]);
-        await expectLater(
-          privatPruefen(echt.path, benutzer: uid + 1),
-          throwsA(isA<BrowserStartFehler>()),
-        );
-        await expectLater(
-          privatPruefen(
-            echt.path,
-            benutzer: uid,
-            besitzer: (_) async => uid + 1,
-          ),
-          throwsA(isA<BrowserStartFehler>()),
-        );
+        expect(() => privatPruefen(echt.path), throwsA(isA<BrowserStartFehler>()));
+        // Sonderbits: mit der alten Maske auf die unteren neun Bit wäre 2700 durchgegangen.
+        await Process.run('chmod', ['2700', echt.path]);
+        expect(() => privatPruefen(echt.path), throwsA(isA<BrowserStartFehler>()), reason: 'setgid');
+        // Bei einem Ordner lässt `chmod 700` das setgid-Bit stehen.
+        await Process.run('chmod', ['g-s,u=rwx,go=', echt.path]);
+        privatPruefen(echt.path);
+        expect(() => privatPruefen(echt.path, system: _AnderesKonto()), throwsA(isA<BrowserStartFehler>()), reason: 'fremder Besitzer');
         // Eine Datei statt einer FIFO oder eines Ordners
         final datei = File(p.join(ordner.path, 'f'))..writeAsStringSync('x');
-        await expectLater(
-          privatPruefen(datei.path, benutzer: uid, fifo: true),
-          throwsA(isA<BrowserStartFehler>()),
-        );
+        expect(() => privatPruefen(datei.path, fifo: true), throwsA(isA<BrowserStartFehler>()));
+        expect(() => privatPruefen(datei.path), throwsA(isA<BrowserStartFehler>()));
+        expect(() => privatPruefen(p.join(ordner.path, 'gibt-es-nicht')), throwsA(isA<BrowserStartFehler>()));
       },
       skip: !unix,
     );
+
+    test('FIFO: genau 600, dem Benutzer, sonst Fehler', () async {
+      final fifo = p.join(ordner.path, 'fifo');
+      Process.runSync('mkfifo', ['-m', '600', fifo]);
+      privatPruefen(fifo, fifo: true);
+      Process.runSync('chmod', ['660', fifo]);
+      expect(() => privatPruefen(fifo, fifo: true), throwsA(isA<BrowserStartFehler>()), reason: 'Gruppe darf mit');
+      Process.runSync('chmod', ['600', fifo]);
+      expect(() => privatPruefen(fifo, system: _AnderesKonto(), fifo: true), throwsA(isA<BrowserStartFehler>()));
+    }, skip: !unix);
+
+    test('`stat` kommt von einem festen Ort, nie aus dem PATH', () {
+      final stat = statProgramm();
+      expect(stat, anyOf(isNull, '/usr/bin/stat', '/bin/stat'));
+      expect(stat != null, isTrue, reason: 'auf diesem Rechner gibt es eines');
+    }, skip: !unix);
+
+    test('ein Profil, das sich nicht anlegen lässt (mkdir scheitert): deutscher Fehler, bevor etwas von Moodle kommt', () async {
+      final geholt = <String>[];
+      final st = UnixBrowserStarter(system: _MkdirKaputt());
+      await expectLater(
+        aufnehmen(
+          basis: Uri.parse('https://moodle.schule.example/'),
+          holen: (methode, uri, {required seiten, rumpf, dokument = false}) async {
+            geholt.add('$methode $uri');
+            return Antwort(200, uri, Uint8List.fromList(utf8.encode('<html></html>')), 'text/html');
+          },
+          protokoll: Protokoll(),
+          adresse: Uri.parse('https://moodle.schule.example/mod/page/view.php?id=7'),
+          inhalt: ('#region-main .generalbox.center', null),
+          arbeitsordner: ordner.path,
+          starter: st,
+          browserWahl: ('Fake', '/fake/browser'),
+          hartBeenden: (_, _) async => 0,
+        ),
+        throwsA(
+          isA<MoodleFehler>().having(
+            (e) => '$e',
+            'Text',
+            allOf(contains('Profil des Browsers ließ sich nicht anlegen'), contains('ließ sich nicht anlegen. moocp schreibt dort nichts')),
+          ),
+        ),
+      );
+      expect(geholt, isEmpty);
+      expect(ordner.listSync(), isEmpty, reason: 'nichts bleibt liegen');
+    }, skip: !unix);
+
+    test('ein Profil mit fremdem Besitzer nach dem Anlegen wird nicht benutzt', () async {
+      final st = UnixBrowserStarter(system: _AnderesKonto());
+      await expectLater(st.profilAnlegen(ordner.path), throwsA(isA<BrowserStartFehler>()));
+      expect(ordner.listSync(), isEmpty, reason: 'der unbrauchbare Ordner wird entfernt');
+    }, skip: !unix);
 
     // Ein „Browser“, der an fd 3 liest und an fd 4 zurückschreibt: Er prüft
     // den Weg über die Shell und die FIFO.
@@ -693,6 +733,30 @@ void main() {
       expect(File('pwn2').existsSync(), isFalse);
     }, skip: !unix);
   });
+}
+
+/// Das echte Dateisystem, aber ein anderes Konto als Benutzer: Was dem
+/// Prozess gehört, gehört dann einem Fremden.
+class _AnderesKonto implements PrivatSystem {
+  final _echt = UnixPrivatSystem();
+
+  @override
+  int get uid => _echt.uid + 1;
+
+  @override
+  DateiAngabe? angabe(String pfad) => _echt.angabe(pfad);
+
+  @override
+  void anlegen(String pfad) => _echt.anlegen(pfad);
+}
+
+/// `mkdir` scheitert (etwa ein Arbeitsordner, der nicht beschreibbar ist).
+class _MkdirKaputt extends _AnderesKonto {
+  @override
+  int get uid => _echt.uid;
+
+  @override
+  void anlegen(String pfad) => throw FileSystemException('Ordner ließ sich nicht anlegen', pfad);
 }
 
 /// Ein nachgebauter Browser: spricht CDP über die Schnittstelle der Pipe.

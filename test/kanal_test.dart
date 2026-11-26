@@ -323,6 +323,19 @@ void main() {
       expect(await kanal.listeLesen('moodle'), isNull);
     });
 
+    test('Entfernen löscht genau die Liste des Profils; eine fremde Datei bleibt', () async {
+      await kanal.listeAblegen('moodle', liste);
+      await kanal.listeAblegen('moodle-test', liste);
+      await kanal.listeEntfernen('moodle-test');
+      expect(await kanal.listeLesen('moodle-test'), isNull);
+      expect(await kanal.listeLesen('moodle'), liste);
+      await kanal.listeEntfernen('moodle-test'); // gibt es nicht mehr: kein Fehler
+      await kanal.listeEntfernen('../x'); // ungültiger Name: nichts geschieht
+      final fremd = UnixKanal(ketten: () => [[ordner]], rechte: _FremderSocket());
+      await fremd.listeEntfernen('moodle');
+      expect(File(p.join(ordner, 'werkzeugliste-moodle.json')).existsSync(), isTrue, reason: 'Datei eines anderen Kontos');
+    }, skip: Platform.isWindows ? 'Windows fragt die exe' : null);
+
     test('je Profil eine eigene Liste: die Brücke liest nur die ihres Profils', () async {
       await kanal.listeAblegen('moodle', liste);
       await kanal.listeAblegen('moodle-test', liste.replaceAll('2025-06-18', '2025-03-26'));
@@ -355,6 +368,13 @@ void main() {
       final system = _AnderesKonto(); // erfundene Kennung: den Ordner gibt es nicht
       final ketten = kanalOrdnerKetten(const {}, macos: false, temp: '/t', system: system);
       expect(ketten, [['/t/moocp-${system.uid}', '/t/moocp-${system.uid}/kanal']]);
+    });
+
+    test('der Ort ohne Laufzeitordner ist fest /tmp, nie das TMPDIR eines Clients', () {
+      final system = _AnderesKonto();
+      final ketten = kanalOrdnerKetten(const {'TMPDIR': '/anderes/tmp'}, macos: false, system: system);
+      expect(ketten, [['/tmp/moocp-${system.uid}', '/tmp/moocp-${system.uid}/kanal']],
+          reason: 'App und Brücke finden sich, auch wenn ein Client die Brücke mit anderem TMPDIR startet');
     });
 
     test('auf dem Mac ein Ordner im Einstellungsordner, nie im Temp-Bereich', () {

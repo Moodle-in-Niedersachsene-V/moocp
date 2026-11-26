@@ -28,6 +28,18 @@ class DateiEintrag {
   final int modus;
 }
 
+/// Der absolute Pfad von `stat`: Besitzer und Rechte sagt ein Programm an einem
+/// festen Ort, nie eines, das ein anderer Eintrag im PATH vortäuschen könnte
+/// (die Prüfung soll nicht von der Umgebung abhängen). Null, wenn es dort keines
+/// gibt; wer `stat` braucht, behandelt das als nicht geprüft. Dieselbe Suche
+/// benutzt privater_ordner.dart.
+String? statProgramm() {
+  for (final f in ['/usr/bin/stat', '/bin/stat']) {
+    if (File(f).existsSync()) return f;
+  }
+  return null;
+}
+
 /// Die Naht zum Dateisystem; die Tests stellen damit fremde Besitzer nach.
 abstract interface class DateiRechte {
   /// Null, wenn es [pfad] nicht gibt.
@@ -44,9 +56,11 @@ class UnixDateiRechte implements DateiRechte {
     final art = FileSystemEntity.typeSync(pfad, followLinks: false);
     if (art == FileSystemEntityType.notFound) return null;
     if (art == FileSystemEntityType.link) return DateiEintrag(art: art, uid: -1, modus: 0x1ff);
+    final stat = statProgramm();
+    if (stat == null) return DateiEintrag(art: art, uid: -1, modus: 0x1ff);
     final r = Platform.isMacOS
-        ? prozessAusfuehrenSync('stat', ['-f', '%u:%Lp', pfad])
-        : prozessAusfuehrenSync('stat', ['-c', '%u:%a', '--', pfad]);
+        ? prozessAusfuehrenSync(stat, ['-f', '%u:%Lp', pfad])
+        : prozessAusfuehrenSync(stat, ['-c', '%u:%a', '--', pfad]);
     final m = RegExp(r'^(\d+):(\d+)\s*$').firstMatch('${r.stdout}');
     if (r.exitCode != 0 || m == null) return DateiEintrag(art: art, uid: -1, modus: 0x1ff);
     return DateiEintrag(art: art, uid: int.parse(m.group(1)!), modus: int.parse(m.group(2)!, radix: 8));
@@ -66,13 +80,17 @@ class UnixDateiRechte implements DateiRechte {
 }
 
 /// Setzt eine Datei auf 0600: nur das Konto liest und schreibt sie. Unter
-/// Windows ohne Wirkung (dort liegt alles im Benutzerprofil). Wirft nicht:
-/// Ein Fehler lässt die Datei, wie sie ist.
-void dateiPrivat(String pfad, {DateiRechte rechte = const UnixDateiRechte()}) {
-  if (Platform.isWindows) return;
+/// Windows ohne Wirkung (dort liegt alles im Benutzerprofil). Wirft nicht, und
+/// verschweigt nichts: Gelingt es nicht, ist die Antwort ein Satz für das
+/// Protokoll (mit Pfad und Art des Fehlers, nie Inhalten, E11), und die Datei
+/// bleibt, wie sie ist; null, wenn es gelang.
+String? dateiPrivat(String pfad, {DateiRechte rechte = const UnixDateiRechte()}) {
+  if (Platform.isWindows) return null;
   try {
     rechte.chmod(pfad, 0x180);
-  } catch (_) {
-    // Nichts weiter zu tun; der Aufrufer hat dazu nichts zu melden.
+    return null;
+  } catch (e) {
+    return 'Die Rechte von „$pfad“ ließen sich nicht auf „nur für dieses Konto“ setzen (${e.runtimeType}): '
+        'die Datei kann für andere Konten dieses Rechners lesbar sein.';
   }
 }

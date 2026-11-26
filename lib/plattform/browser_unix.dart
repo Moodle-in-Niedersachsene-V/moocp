@@ -25,114 +25,89 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import 'browser_start.dart';
+import 'datei_rechte.dart';
 import 'kindprozess.dart';
+import 'privater_ordner.dart';
 
-/// Die Rechte 700 und 600, wie `stat` sie liefert (nur die untersten neun Bit).
-const _rechteOrdner = 448; // 0700
+/// Die Rechte einer FIFO: genau 600, keine Sonderbits.
 const _rechteFifo = 384; // 0600
 
-/// Die Nummer des Benutzers dieses Prozesses (`id -u`), null, wenn sie sich
-/// nicht ermitteln lässt.
-Future<int?> aktuelleBenutzerNummer() async {
-  try {
-    final r = await prozessAusfuehren('id', ['-u']);
-    return int.tryParse('${r.stdout}'.trim());
-  } on ProcessException {
-    return null;
-  }
-}
-
-/// Der Besitzer von [pfad] (`stat`), ohne Verknüpfungen aufzulösen.
-Future<int?> besitzerVon(String pfad) async {
-  try {
-    final r = await prozessAusfuehren(
-      'stat',
-      Platform.isMacOS ? ['-f', '%u', pfad] : ['-c', '%u', pfad],
-    );
-    return r.exitCode == 0 ? int.tryParse('${r.stdout}'.trim()) : null;
-  } on ProcessException {
-    return null;
-  }
-}
-
 /// Prüft, dass [pfad] das ist, was wir angelegt haben: ein Ordner (oder mit
-/// [fifo] eine FIFO), keine Verknüpfung, mit den Rechten 700 (FIFO 600) und im
-/// Besitz von [benutzer]. Alles andere ist ein [BrowserStartFehler] -- dann
-/// startet kein Browser mit seinem Profil an diesem Ort.
-Future<void> privatPruefen(
+/// [fifo] eine FIFO), keine Verknüpfung, mit den Rechten genau 700 (FIFO 600,
+/// Sonderbits zählen mit) und im Besitz des Benutzers dieses Prozesses. Alles
+/// andere ist ein [BrowserStartFehler] -- dann startet kein Browser mit seinem
+/// Profil an diesem Ort.
+///
+/// Den Ordner prüft [privaterOrdnerPruefen] (privater_ordner.dart), dieselbe
+/// Prüfung wie für den Arbeitsordner und den Kanal; eine FIFO, die es dort nicht
+/// gibt, prüft diese Funktion mit demselben `stat` an festem Ort
+/// (datei_rechte.dart) und derselben Benutzernummer aus dem System, nie aus
+/// `id`.
+void privatPruefen(
   String pfad, {
-  required int benutzer,
+  PrivatSystem? system,
+  DateiRechte rechte = const UnixDateiRechte(),
   bool fifo = false,
-  Future<int?> Function(String) besitzer = besitzerVon,
-}) async {
-  final art = FileSystemEntity.typeSync(pfad, followLinks: false);
-  if (art !=
-      (fifo ? FileSystemEntityType.pipe : FileSystemEntityType.directory)) {
+}) {
+  final s = system ?? UnixPrivatSystem();
+  if (!fifo) {
+    try {
+      privaterOrdnerPruefen(pfad, system: s, bezeichnung: 'Das Profil des Browsers', pfadNennen: false);
+    } on PrivaterOrdnerFehler catch (x) {
+      throw BrowserStartFehler(x.meldung);
+    }
+    return;
+  }
+  final e = rechte.eintrag(pfad);
+  if (e == null || e.art != FileSystemEntityType.pipe) {
     throw BrowserStartFehler(
-      'Das Profil des Browsers ist nicht privat angelegt (falsche Art: $art).',
+      'Das Profil des Browsers ist nicht privat angelegt (falsche Art: ${e?.art ?? FileSystemEntityType.notFound}).',
     );
   }
-  final rechte = FileStat.statSync(pfad).mode & 511;
-  if (rechte != (fifo ? _rechteFifo : _rechteOrdner)) {
+  if (e.modus != _rechteFifo) {
     throw BrowserStartFehler(
-      'Das Profil des Browsers ist nicht privat angelegt (Rechte ${rechte.toRadixString(8)}).',
+      'Das Profil des Browsers ist nicht privat angelegt (Rechte ${e.modus.toRadixString(8)}).',
     );
   }
-  if (await besitzer(pfad) != benutzer) {
-    throw BrowserStartFehler(
-      'Das Profil des Browsers gehört nicht dem aktuellen Benutzer.',
-    );
+  if (e.uid != s.uid) {
+    throw BrowserStartFehler('Das Profil des Browsers gehört nicht dem aktuellen Benutzer.');
   }
 }
 
 class UnixBrowserStarter implements BrowserStarter {
-  /// [shell] und [mkfifo] sind für Tests austauschbar.
+  /// [shell], [mkfifo] und [system] sind für Tests austauschbar ([system] stellt
+  /// fremde Besitzer, Rechte und ein scheiterndes `mkdir` nach).
   UnixBrowserStarter({
     this.oeffnenGrenze = const Duration(seconds: 15),
     this.shell = '/bin/sh',
     this.mkfifo = 'mkfifo',
-  });
+    PrivatSystem? system,
+    this.rechte = const UnixDateiRechte(),
+  }) : system = system ?? UnixPrivatSystem();
 
   final String shell, mkfifo;
+  final PrivatSystem system;
+  final DateiRechte rechte;
 
   /// So lange darf es dauern, bis der Browser beide Enden seiner Pipe geöffnet hat.
   final Duration oeffnenGrenze;
 
   @override
   Future<Directory> profilAnlegen(String arbeitsordner) async {
-    final benutzer = await aktuelleBenutzerNummer();
-    if (benutzer == null) {
-      throw BrowserStartFehler(
-        'Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).',
-      );
-    }
     final zufall = math.Random.secure().nextInt(1 << 32).toRadixString(16);
     final pfad = p.join(
       arbeitsordner,
       '.browser-${DateTime.now().millisecondsSinceEpoch}-$zufall',
     );
-    // Ohne -p: scheitert, wenn es den Pfad schon gibt, auch als Verknüpfung.
-    final ProcessResult r;
+    // `mkdir` mit Rechten 700 im selben Aufruf (privater_ordner.dart): kein Moment
+    // mit den Rechten der umask, und kein Hilfsprogramm aus dem PATH.
     try {
-      r = await prozessAusfuehren('mkdir', ['-m', '700', '--', pfad]);
-    } on ProcessException {
-      throw BrowserStartFehler(
-        'Das Hilfsprogramm mkdir fehlt -- das Profil des Browsers ließ sich nicht privat anlegen.',
-      );
+      privaterOrdnerAnlegen(pfad, system: system, bezeichnung: 'Das Profil des Browsers', pfadNennen: false);
+    } on PrivaterOrdnerFehler catch (x) {
+      await _loeschen(Directory(pfad));
+      throw BrowserStartFehler(x.meldung);
     }
-    if (r.exitCode != 0) {
-      throw BrowserStartFehler(
-        'Das Profil des Browsers ließ sich nicht privat anlegen.',
-      );
-    }
-    final ordner = Directory(pfad);
-    try {
-      await privatPruefen(pfad, benutzer: benutzer);
-    } catch (_) {
-      await _loeschen(ordner);
-      rethrow;
-    }
-    return ordner;
+    return Directory(pfad);
   }
 
   @override
@@ -141,13 +116,7 @@ class UnixBrowserStarter implements BrowserStarter {
     List<String> argumente,
     Directory profil,
   ) async {
-    final benutzer = await aktuelleBenutzerNummer();
-    if (benutzer == null) {
-      throw BrowserStartFehler(
-        'Der Benutzer dieses Prozesses ließ sich nicht ermitteln (id -u).',
-      );
-    }
-    await privatPruefen(profil.path, benutzer: benutzer);
+    privatPruefen(profil.path, system: system);
     final ein = p.join(profil.path, 'cdp-ein'),
         aus = p.join(profil.path, 'cdp-aus');
     final ProcessResult fifo;
@@ -163,8 +132,8 @@ class UnixBrowserStarter implements BrowserStarter {
         'Die Pipe zum Browser ließ sich nicht anlegen (mkfifo).',
       );
     }
-    await privatPruefen(ein, benutzer: benutzer, fifo: true);
-    await privatPruefen(aus, benutzer: benutzer, fifo: true);
+    privatPruefen(ein, system: system, rechte: rechte, fifo: true);
+    privatPruefen(aus, system: system, rechte: rechte, fifo: true);
 
     final Process proz;
     try {

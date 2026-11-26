@@ -100,6 +100,11 @@ abstract class KanalOrt {
   Future<String?> listeLesen(String name) async => null;
 
   Future<void> listeAblegen(String name, String json) async {}
+
+  /// Löscht die abgelegte Liste des Profils [name], wenn es sie gibt: Ein
+  /// gelöschtes Profil soll keine Liste hinterlassen, die ein späteres Profil
+  /// mit demselben Namen erbte.
+  Future<void> listeEntfernen(String name) async {}
 }
 
 /// Der Kanal dieses Systems. Austauschbar für die Tests, die die App nicht
@@ -119,8 +124,9 @@ KanalOrt standardKanalOrt = Platform.isWindows ? WindowsKanal() : UnixKanal();
 /// an dem systemd ihn anlegt, `/run/user/<uid>`): `moocp/kanal`; er
 /// verschwindet beim Abmelden und kann nicht veralten. Der Laufzeitordner
 /// zählt nur, wenn er dem Konto allein gehört. Dahinter kommt der Ort ohne
-/// Laufzeitordner, `<temp>/moocp-<uid>/kanal` (dort schreibt der Arbeitsordner,
-/// E5). Wer die Brücke startet, hat die Variable vielleicht nicht, die App aber
+/// Laufzeitordner, `/tmp/moocp-<uid>/kanal`, unabhängig vom `TMPDIR` des
+/// Aufrufers (der Arbeitsordner liegt unter `<temp>/moocp-<uid>`, E5, und teilt
+/// den Ort nur, wo `TMPDIR` nicht gesetzt ist). Wer die Brücke startet, hat die Variable vielleicht nicht, die App aber
 /// schon (oder umgekehrt): Darum sucht die Brücke an allen Orten.
 /// Mac: `kanal` im Einstellungsordner. Ein anderer Ordner im Temp-Bereich
 /// kommt nie in Frage; die Kennung kommt vom System, nie aus $USER.
@@ -157,7 +163,9 @@ List<List<String>> kanalOrdnerKetten(
     if (umgebung['XDG_RUNTIME_DIR'] case final x? when p.posix.isAbsolute(x)) x,
     '/run/user/${s.uid}',
   };
-  final tempBasis = p.join(temp ?? Directory.systemTemp.path, 'moocp-${s.uid}');
+  // Fest /tmp, nicht Directory.systemTemp: Die App und die Brücke, die ein Client
+  // mit eigenem TMPDIR starten kann, müssen denselben Ort ableiten.
+  final tempBasis = p.join(temp ?? '/tmp', 'moocp-${s.uid}');
   return [
     for (final x in laufzeit)
       if (privat(x)) [x, p.join(x, 'moocp'), p.join(x, 'moocp', 'kanal')],
@@ -348,6 +356,31 @@ class UnixKanal extends KanalOrt {
       return;
     }
     throw KanalUnsicher('Die Werkzeugliste ließ sich nicht ablegen.');
+  }
+
+  /// Löscht die Liste in jeder Kette, in der Ordner und Datei dem Konto allein
+  /// gehören (wie beim Lesen); eine fremde Datei bleibt stehen.
+  @override
+  Future<void> listeEntfernen(String name) async {
+    if (!kanalNameGueltig(name)) return;
+    for (final kette in _kettenJetzt()) {
+      if (system.angabe(kette.first) == null) continue;
+      try {
+        for (final o in kette) {
+          privaterOrdnerPruefen(o, system: system, bezeichnung: 'Der Ordner für den Kanal', pfadNennen: false);
+        }
+      } on PrivaterOrdnerFehler {
+        continue;
+      }
+      final pfad = p.join(kette.last, _listeDatei(name));
+      final e = rechte.eintrag(pfad);
+      if (e == null || e.art != FileSystemEntityType.file || e.uid != system.uid) continue;
+      try {
+        File(pfad).deleteSync();
+      } on FileSystemException {
+        continue;
+      }
+    }
   }
 
   /// Liest die Liste, wenn Ordner und Datei dem Konto allein gehören.

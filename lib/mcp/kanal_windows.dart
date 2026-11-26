@@ -35,6 +35,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'kanal.dart';
+import 'schreiben_mit_frist.dart';
 
 /// Der Name der Pipe: SID des Kontos und Profilname. Die SID besteht nur aus
 /// `S`, Ziffern und Bindestrichen, der Profilname nur aus Kleinbuchstaben,
@@ -108,6 +109,8 @@ final _getOverlappedResult = _kernel32.lookupFunction<
   Int32 Function(IntPtr, Pointer, Pointer<Uint32>, Int32),
   int Function(int, Pointer, Pointer<Uint32>, int)
 >('GetOverlappedResult');
+final _waitForSingleObject =
+    _kernel32.lookupFunction<Uint32 Function(IntPtr, Uint32), int Function(int, int)>('WaitForSingleObject');
 final _cancelIoEx = _kernel32.lookupFunction<Int32 Function(IntPtr, Pointer), int Function(int, Pointer)>('CancelIoEx');
 final _getClientPid = _kernel32.lookupFunction<Int32 Function(IntPtr, Pointer<Uint32>), int Function(int, Pointer<Uint32>)>(
   'GetNamedPipeClientProcessId',
@@ -253,10 +256,22 @@ void _leser(List<Object> start) {
   }
 }
 
+/// Wie lange ein Schreiben höchstens auf die Gegenseite wartet, die nichts
+/// abnimmt (schreiben_mit_frist.dart). Die Gegenseite ist ein Prozess desselben
+/// Kontos, der eine Zeile in Sekundenbruchteilen liest; wer nach einer Minute
+/// nichts abgenommen hat, liest nicht mehr.
+const _schreibFrist = Duration(seconds: 60);
+
+const _waitObject0 = 0;
+
 /// Schreibt in einem eigenen Isolate, was es bekommt; `null` beendet es und
 /// meldet `'ende'`, sobald alles Vorherige geschrieben ist. Es hat die Pipe zuletzt
 /// benutzt: Erst nach dieser Meldung wird das Handle geschlossen, sonst ginge
 /// ein Rest an ein Handle, das schon eine andere Verbindung bekommen hat.
+/// Nimmt die Gegenseite binnen der Frist nichts ab oder scheitert das
+/// Schreiben, beendet es sich ebenso von selbst und meldet `'ende'`: Die
+/// Verbindung ist dann nicht zu retten, und das Handle darf nicht an einer
+/// Gegenseite hängen, die nie liest.
 void _schreiber(List<Object> start) {
   final handle = start[0] as int;
   final eingang = ReceivePort();
@@ -265,30 +280,47 @@ void _schreiber(List<Object> start) {
   final geschrieben = calloc<Uint32>();
   final ov = calloc<Uint8>(_overlappedGroesse);
   final ereignis = _createEvent(nullptr, 1, 0, nullptr);
+  var fertig = false;
+  void beenden() {
+    if (fertig) return;
+    fertig = true;
+    _closeHandle(ereignis);
+    calloc.free(ov);
+    calloc.free(geschrieben);
+    eingang.close();
+    haupt.send('ende');
+  }
+
   eingang.listen((m) {
+    if (fertig) return;
     if (m is! Uint8List) {
-      _closeHandle(ereignis);
-      calloc.free(ov);
-      calloc.free(geschrieben);
-      eingang.close();
-      haupt.send('ende');
+      beenden();
       return;
     }
     final daten = calloc<Uint8>(m.length);
     try {
       daten.asTypedList(m.length).setAll(0, m);
-      var offen = 0;
-      while (offen < m.length) {
-        ov.asTypedList(_overlappedGroesse).fillRange(0, _overlappedGroesse, 0);
-        Pointer<IntPtr>.fromAddress(ov.address + _overlappedEreignis).value = ereignis;
-        var ok = _writeFile(handle, daten + offen, m.length - offen, geschrieben, ov);
-        if (ok == 0) {
-          if (_getLastError() != _errorIoPending) return;
-          ok = _getOverlappedResult(handle, ov, geschrieben, 1);
-          if (ok == 0) return;
-        }
-        offen += geschrieben.value;
-      }
+      var sofort = false;
+      final urteil = schreibenMitFrist(
+        laenge: m.length,
+        frist: _schreibFrist,
+        beginnen: (offen) {
+          ov.asTypedList(_overlappedGroesse).fillRange(0, _overlappedGroesse, 0);
+          Pointer<IntPtr>.fromAddress(ov.address + _overlappedEreignis).value = ereignis;
+          final ok = _writeFile(handle, daten + offen, m.length - offen, geschrieben, ov);
+          sofort = ok != 0;
+          if (ok != 0) return SchreibStart.fertig;
+          return _getLastError() == _errorIoPending ? SchreibStart.ausstehend : SchreibStart.fehler;
+        },
+        warten: (frist) => _waitForSingleObject(ereignis, frist.inMilliseconds) == _waitObject0,
+        ergebnis: () {
+          if (sofort) return geschrieben.value;
+          // Nach einem Abbruch kehrt das hier sofort zurück (mit einem Fehler).
+          return _getOverlappedResult(handle, ov, geschrieben, 1) == 0 ? null : geschrieben.value;
+        },
+        abbrechen: () => _cancelIoEx(handle, ov),
+      );
+      if (urteil != SchreibUrteil.fertig) beenden();
     } finally {
       calloc.free(daten);
     }
@@ -321,6 +353,8 @@ class _PipeVerbindung implements KanalVerbindung {
       }
       await antworten.cancel();
       v._schreiberEnde = true;
+      // Auch wenn der Schreiber von selbst aufgegeben hat: Nichts mehr senden.
+      v._zu = true;
       v._handleSchliessen();
     }());
     await Isolate.spawn(_leser, [handle, leserPort.sendPort]);

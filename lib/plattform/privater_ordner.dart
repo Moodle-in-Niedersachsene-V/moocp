@@ -36,6 +36,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
+import 'datei_rechte.dart' show statProgramm;
 import 'kindprozess.dart';
 
 /// Zieht aus der Ausgabe von `stat` Besitzer und Rechte: `<uid>:<Rechte>`, die
@@ -119,13 +120,14 @@ class UnixPrivatSystem implements PrivatSystem {
     // `stat` statt der Struktur `struct stat` über ffi: deren Aufbau ist je
     // Plattform und Architektur verschieden. Ohne -L folgt `stat` keiner
     // Verknüpfung; das Format ist unter GNU (-c) und BSD/Mac (-f) verschieden.
-    // Der feste Pfad zuerst: Ein anderes `stat` im PATH soll hier nichts
-    // vortäuschen (es liefe nur mit den Rechten des Benutzers, aber die
-    // Prüfung soll nicht von der Umgebung abhängen). Die Ausgabe ist
-    // numerisch, die Sprache spielt keine Rolle; passt sie nicht, ist die
-    // Prüfung gescheitert.
+    // Nur ein `stat` an festem Ort (datei_rechte.dart, statProgramm): Ein
+    // anderes im PATH soll hier nichts vortäuschen, die Prüfung nicht von der
+    // Umgebung abhängen. Die Ausgabe ist numerisch, die Sprache spielt keine
+    // Rolle; passt sie nicht oder fehlt das Programm, ist die Prüfung
+    // gescheitert.
     final mac = Platform.isMacOS;
-    final programm = ['/usr/bin/stat', '/bin/stat'].firstWhere((f) => File(f).existsSync(), orElse: () => 'stat');
+    final programm = statProgramm();
+    if (programm == null) throw PrivaterOrdnerFehler('Die Rechte eines Ordners ließen sich nicht lesen.');
     final r = mac
         ? prozessAusfuehrenSync(programm, ['-f', '%u:%p', pfad])
         : prozessAusfuehrenSync(programm, ['-c', '%u:%a', '--', pfad]);

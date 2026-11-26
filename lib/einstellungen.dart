@@ -206,10 +206,11 @@ class Einstellungen {
   /// Eine Version vor dem Kanal (E6) erzeugte ohne `schluessel` bei jedem
   /// Start einen neuen und trüge ihn in die Einträge der KI-Werkzeuge ein, die
   /// dann bei jedem Start veralteten. Mit den Platzhaltern bleibt der Wert
-  /// stabil. **Sie sind kein Zugangsschlüssel**: Dieser Stand kennt keinen, kein
-  /// Kanal und kein Server liest sie, und sie gewähren nichts; ein Wert aus einer
-  /// früheren Datei wird nie übernommen, sondern ersetzt (bei der Rückkehr zu
-  /// einer älteren Version gilt dann der Platzhalter, nicht ein alter Schlüssel).
+  /// stabil. **Sie sind kein Zugangsschlüssel**: Kein Kanal und kein Server liest
+  /// sie, und sie gewähren nichts. Der Wert hat keine Wirkung und kann einer
+  /// sein, den eine ältere Version erzeugt hat (sie schreibt ihn bei jedem
+  /// Speichern zurück); eine Datei ohne die Marke `schluesselPlatzhalter` bekommt
+  /// beim Laden neue Werte.
   /// Der Schlüssel `''` ist der globale, sonst die Kennung des Profils.
   final Map<String, String> _platzhalter = {};
 
@@ -235,9 +236,9 @@ class Einstellungen {
       if (await quelle.exists()) {
         final j = jsonDecode(await quelle.readAsString()) as Map<String, dynamic>;
         final e = Einstellungen.aus(j, standard);
-        // Zugangsschlüssel von früher (global und je Profil) gelten nicht mehr:
-        // Die Datei wird mit neuen Platzhaltern geschrieben ([_platzhalter]), damit
-        // die alten nirgends mehr gelten (E6). Auch eine Datei, die schon stimmt,
+        // Eine Datei ohne die Marke wird mit neuen Platzhaltern geschrieben
+        // ([_platzhalter]): Ein Zugangsschlüssel aus einer Datei ohne Marke bleibt
+        // nirgends stehen (E6). Auch eine Datei, die schon stimmt,
         // bekommt die Rechte, die ihr zustehen.
         if (schluesselErneuern(j)) {
           try {
@@ -271,15 +272,49 @@ class Einstellungen {
 
   /// Nur das Konto liest und schreibt die Datei und betritt ihren Ordner:
   /// 0600 und 0700 auf Linux und Mac (unter Windows liegt alles im
-  /// Benutzerprofil). Ein Fehler lässt die Rechte, wie sie sind.
-  static void dateiRechteSetzen(File ziel, {DateiRechte? rechte}) {
-    if (Platform.isWindows) return;
+  /// Benutzerprofil). Gelingt das nicht, bleiben die Rechte, wie sie sind, und
+  /// das Protokoll nennt es ([rechteMelder]): Die Datei kann dann für andere
+  /// Konten lesbar sein, und das soll die Lehrkraft nicht erst bemerken, wenn
+  /// etwas geschieht. Die Antwort sind die Sätze dazu (leer: alles gesetzt).
+  static List<String> dateiRechteSetzen(File ziel, {DateiRechte? rechte}) {
+    if (Platform.isWindows) return const [];
     final r = rechte ?? const UnixDateiRechte();
-    dateiPrivat(ziel.path, rechte: r);
+    final meldungen = <String>[];
+    final datei = dateiPrivat(ziel.path, rechte: r);
+    if (datei != null) meldungen.add(datei);
     try {
       r.chmod(ziel.parent.path, 0x1c0);
-    } catch (_) {
-      // s. o.
+    } catch (e) {
+      meldungen.add(
+        'Die Rechte des Ordners „${ziel.parent.path}“ ließen sich nicht auf „nur für dieses Konto“ setzen '
+        '(${e.runtimeType}): Er kann für andere Konten dieses Rechners betretbar sein.',
+      );
+    }
+    meldungen.forEach(_rechteMelden);
+    return meldungen;
+  }
+
+  /// Wohin die Sätze aus [dateiRechteSetzen] kommen (das Protokoll). Die
+  /// Einstellungen werden geladen, bevor es das Protokoll gibt: Was bis dahin
+  /// gemeldet wurde, geht an den Melder, sobald er gesetzt ist.
+  static set rechteMelder(void Function(String)? melder) {
+    _rechteMelder = melder;
+    if (melder == null) return;
+    for (final m in _rechteVorher) {
+      melder(m);
+    }
+    _rechteVorher.clear();
+  }
+
+  static void Function(String)? _rechteMelder;
+  static final List<String> _rechteVorher = [];
+
+  static void _rechteMelden(String m) {
+    final melder = _rechteMelder;
+    if (melder == null) {
+      _rechteVorher.add(m);
+    } else {
+      melder(m);
     }
   }
 

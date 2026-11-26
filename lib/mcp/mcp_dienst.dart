@@ -376,13 +376,19 @@ class McpDienst implements AufrufKontext {
     _laufendeNamen.remove(profil.port);
     await _annahme?.cancel();
     _annahme = null;
-    await _lauscher?.schliessen();
+    final lauscher = _lauscher;
     _lauscher = null;
-    for (final sitzung in [..._sitzungen]) {
-      await sitzung.server.close();
-      await sitzung.verbindung.schliessen();
+    try {
+      await lauscher?.schliessen();
+    } on KanalFehler catch (e) {
+      protokoll.eintrag(Art.fehler, 'MCP-Kanal: ${e.text}');
+    } finally {
+      for (final sitzung in [..._sitzungen]) {
+        await sitzung.server.close();
+        await sitzung.verbindung.schliessen();
+      }
+      _sitzungen.clear();
     }
-    _sitzungen.clear();
     protokoll.eintrag(Art.info, 'MCP-Server gestoppt');
   }
 

@@ -21,13 +21,14 @@ class _Roh {
     _createFile = k.lookupFunction<
       IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Pointer, Uint32, Uint32, IntPtr),
       int Function(Pointer<Utf16>, int, int, Pointer, int, int, int)
-    >('CreateFileW');
+    >('CreateFileW', isLeaf: true);
     _close = k.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
-    _getLastError = k.lookupFunction<Uint32 Function(), int Function()>('GetLastError');
+    _getLastError = k.lookupFunction<Uint32 Function(), int Function()>('GetLastError', isLeaf: true);
   }
   late final int Function(Pointer<Utf16>, int, int, Pointer, int, int, int) _createFile;
   late final int Function(int) _close;
   late final int Function() _getLastError;
+  int letzterFehler = 0;
 
   /// Öffnet die Pipe; -1 bei einem Fehler (etwa „beschäftigt“, wenn gerade
   /// keine Instanz frei ist: dann kurz warten und noch einmal).
@@ -36,8 +37,9 @@ class _Roh {
     try {
       for (var i = 0; i < 100; i++) {
         final h = _createFile(n, 0x80000000 | 0x40000000, 0, nullptr, 3, 0, 0);
+        letzterFehler = h == -1 ? _getLastError() : 0;
         if (h != -1) return h;
-        if (_getLastError() != 231) return -1;
+        if (letzterFehler != 231) return -1;
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
       return -1;
@@ -104,7 +106,7 @@ void main() {
       final roh = _Roh();
       for (var i = 0; i < 60; i++) {
         final h = await roh.oeffnen(pipe);
-        expect(h, isNot(-1), reason: 'Verbindung $i');
+        expect(h, isNot(-1), reason: 'Verbindung $i, Windows-Fehler ${roh.letzterFehler}');
         roh.schliessen(h);
       }
       // Einer verbindet sich und schweigt.

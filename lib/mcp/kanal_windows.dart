@@ -82,6 +82,33 @@ KanalFehler? verbindungsFehlerFuer(int code) => switch (code) {
   _ => null,
 };
 
+/// Ein Öffnungsversuch an der Win32-Grenze: Fehler unmittelbar beim Öffnen
+/// erfassen, bevor der Rückgabewert in Dart weiterverarbeitet wird.
+typedef PipeOeffnungsVersuch = ({int handle, int fehler}) Function();
+
+/// Öffnet eine freie Instanz; die Prüfung der Gegenseite folgt im Kanal.
+/// Nur „alle Instanzen belegt“ darf erneut versucht werden. Ein fehlender
+/// oder unsicherer Endpunkt wird sofort gemeldet, ohne etwas zu senden.
+Future<int> pipeOeffnenMitWarten(
+  PipeOeffnungsVersuch oeffnen, {
+  int maxVersuche = 250,
+  Duration pause = const Duration(milliseconds: 20),
+}) async {
+  for (var i = 0; i < maxVersuche; i++) {
+    final ergebnis = oeffnen();
+    if (ergebnis.handle != _invalidHandle) return ergebnis.handle;
+    if (ergebnis.fehler != _errorPipeBusy) {
+      throw verbindungsFehlerFuer(ergebnis.fehler) ??
+          KanalFehler('moocp nicht erreichbar (Windows-Fehler ${ergebnis.fehler}).');
+    }
+    // Auch der Lauscher kann in diesem Isolate laufen. Er muss den bereits
+    // angenommenen Client verarbeiten und eine neue Instanz bereitstellen
+    // können; ein synchrones WaitNamedPipe hielte ihn dabei selbst auf.
+    if (i + 1 < maxVersuche) await Future<void>.delayed(pause);
+  }
+  throw KanalFehler('Alle Instanzen des Kanals sind weiterhin belegt (Windows-Fehler 231).');
+}
+
 // ---------------------------------------------------------------------------
 // Die Windows-Aufrufe
 // ---------------------------------------------------------------------------
@@ -89,7 +116,7 @@ KanalFehler? verbindungsFehlerFuer(int code) => switch (code) {
 final _kernel32 = DynamicLibrary.open('kernel32.dll');
 final _advapi32 = DynamicLibrary.open('advapi32.dll');
 
-final _getLastError = _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetLastError');
+final _getLastError = _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetLastError', isLeaf: true);
 final _closeHandle = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
 final _getCurrentProcess = _kernel32.lookupFunction<IntPtr Function(), int Function()>('GetCurrentProcess');
 final _openProcess = _kernel32.lookupFunction<IntPtr Function(Uint32, Int32, Uint32), int Function(int, int, int)>(
@@ -105,13 +132,14 @@ final _createNamedPipe = _kernel32.lookupFunction<
   int Function(Pointer<Utf16>, int, int, int, int, int, int, Pointer)
 >('CreateNamedPipeW');
 final _disconnectNamedPipe = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('DisconnectNamedPipe');
+// Lokales CreateFileW(..., OPEN_EXISTING, ...) auf einer Named Pipe kehrt
+// sofort zurück (bei belegten Instanzen mit ERROR_PIPE_BUSY). Mit isLeaf: true
+// liegt kein Dart-Safepoint zwischen CreateFileW und GetLastError, der den
+// Thread-Fehlercode überschreiben könnte.
 final _createFile = _kernel32.lookupFunction<
   IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Pointer, Uint32, Uint32, IntPtr),
   int Function(Pointer<Utf16>, int, int, Pointer, int, int, int)
->('CreateFileW');
-final _waitNamedPipe = _kernel32.lookupFunction<Int32 Function(Pointer<Utf16>, Uint32), int Function(Pointer<Utf16>, int)>(
-  'WaitNamedPipeW',
-);
+>('CreateFileW', isLeaf: true);
 final _ntdll = DynamicLibrary.open('ntdll.dll');
 final _ntReadFile = _ntdll.lookupFunction<
   Int32 Function(IntPtr, IntPtr, Pointer, Pointer, Pointer, Pointer<Uint8>, Uint32, Pointer, Pointer),
@@ -473,7 +501,14 @@ class _PipeVerbindung implements KanalVerbindung {
   static Future<_PipeVerbindung> oeffnen(int handle, {required bool server, void Function(String)? hinweis}) async {
     final leserPort = ReceivePort();
     final schreiberPort = ReceivePort();
-    await Isolate.spawn(_schreiber, [handle, schreiberPort.sendPort]);
+    try {
+      await Isolate.spawn(_schreiber, [handle, schreiberPort.sendPort]);
+    } catch (_) {
+      leserPort.close();
+      schreiberPort.close();
+      _closeHandle(handle);
+      rethrow;
+    }
     final antworten = StreamIterator(schreiberPort);
     await antworten.moveNext();
     final senden = antworten.current as SendPort;
@@ -747,8 +782,11 @@ class _PipeLauscher implements KanalLauscher {
     if (!_frei) _stopp.value = 1;
     if (!_neu.isClosed) unawaited(_neu.close());
     // Die Freigabe geschieht in [_annehmen], sobald der wartende Isolate
-    // zurück ist (höchstens ein paar Zehntelsekunden).
-    await _ende.future.timeout(const Duration(seconds: 5), onTimeout: () {});
+    // zurück ist. Der native Abbruch darf selbst fünf Sekunden brauchen,
+    // zuzüglich Abfrageschritt und Rückmeldung; ohne Abschluss nie Erfolg melden.
+    await _ende.future.timeout(const Duration(seconds: 6), onTimeout: () {
+      throw KanalFehler('Das Schließen des Kanals ist noch nicht bestätigt.');
+    });
   }
 }
 
@@ -798,10 +836,14 @@ class WindowsKanal extends KanalOrt {
     if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');
     final sid = eigeneSid();
     final pipe = pipeName(sid, name);
+    // Top-Level-Bindungen sind lazy. Insbesondere GetLastError schon VOR
+    // CreateFile auflösen: GetProcAddress danach könnte den Fehler ersetzen.
+    final dateiOeffnen = _createFile;
+    final fehlerLesen = _getLastError;
     final n = pipe.toNativeUtf16();
     try {
-      for (var versuch = 0; versuch < 5; versuch++) {
-        final h = _createFile(
+      final h = await pipeOeffnenMitWarten(() {
+        final handle = dateiOeffnen(
           n,
           _genericRead | _genericWrite,
           0,
@@ -810,32 +852,29 @@ class WindowsKanal extends KanalOrt {
           _fileFlagOverlapped | _securitySqosPresent | _securityIdentification,
           0,
         );
-        if (h != _invalidHandle) {
-          final pid = calloc<Uint32>();
-          final serverSid = _getServerPid(h, pid) == 0 ? null : _sidVonPid(pid.value);
+        final fehler = handle == _invalidHandle ? fehlerLesen() : 0;
+        return (handle: handle, fehler: fehler);
+      });
+      try {
+        final pid = calloc<Uint32>();
+        final String? serverSid;
+        try {
+          serverSid = _getServerPid(h, pid) == 0 ? null : _sidVonPid(pid.value);
+        } finally {
           calloc.free(pid);
-          if (serverSid != sid) {
-            _closeHandle(h);
-            // Ein Prozess mit höheren Rechten (die App „als Administrator“) lässt sein
-            // Token nicht lesen: Das ist nicht dasselbe wie ein fremdes Konto, die
-            // Verbindung wird aber in beiden Fällen nicht benutzt.
-            throw KanalUnsicher(serverSid == null
-                ? 'Das Konto, das den Kanal bedient, ließ sich nicht feststellen (läuft moocp mit anderen Rechten?).'
-                : 'Der Kanal wird von einem anderen Konto bedient.');
-          }
-          return await _PipeVerbindung.oeffnen(h, server: false);
         }
-        // Die Fehlernummer dient nur der Meldung (und dem Warten bei „Pipe
-        // beschäftigt“): Liest sie sich falsch, bleibt es bei einer Meldung
-        // `KanalFehler`, nie bei einem Vorgang, dessen Speicher frei würde.
-        final fehler = _getLastError();
-        if (fehler == _errorPipeBusy) {
-          _waitNamedPipe(n, 1000);
-          continue;
+        if (serverSid != sid) {
+          // Ein Prozess mit höheren Rechten lässt sein Token eventuell nicht
+          // lesen. Auch dann fließt vor der Prüfung kein Werkzeugbyte.
+          throw KanalUnsicher(serverSid == null
+              ? 'Das Konto, das den Kanal bedient, ließ sich nicht feststellen (läuft moocp mit anderen Rechten?).'
+              : 'Der Kanal wird von einem anderen Konto bedient.');
         }
-        throw verbindungsFehlerFuer(fehler) ?? KanalFehler('moocp nicht erreichbar.');
+      } catch (_) {
+        _closeHandle(h);
+        rethrow;
       }
-      throw KanalNichtDa();
+      return await _PipeVerbindung.oeffnen(h, server: false);
     } finally {
       malloc.free(n);
     }

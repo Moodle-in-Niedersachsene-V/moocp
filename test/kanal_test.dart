@@ -64,6 +64,55 @@ Future<List<String>> _zeilen(KanalVerbindung v, int anzahl) async {
 int _zaehler = 0;
 
 void main() {
+  group('Öffnen einer Windows-Pipe über die native Grenze', () {
+    test('belegte Instanz: der Ereignisloop kann die nächste bereitstellen', () async {
+      var bereit = false;
+      var versuche = 0;
+      scheduleMicrotask(() => bereit = true);
+      final handle = await pipeOeffnenMitWarten(() {
+        versuche++;
+        return bereit ? (handle: 42, fehler: 0) : (handle: -1, fehler: 231);
+      });
+      expect(handle, 42);
+      expect(versuche, 2);
+    });
+
+    test('fehlender oder verwehrter Endpunkt wird nicht erneut geöffnet', () async {
+      for (final code in [2, 3, 5]) {
+        var versuche = 0;
+        await expectLater(pipeOeffnenMitWarten(() {
+          versuche++;
+          return (handle: -1, fehler: code);
+        }), throwsA(code == 5 ? isA<KanalUnsicher>() : isA<KanalNichtDa>()));
+        expect(versuche, 1);
+      }
+    });
+
+    test('unerwarteter Fehler nennt nur seine Nummer und wird nicht wiederholt', () async {
+      var versuche = 0;
+      await expectLater(pipeOeffnenMitWarten(() {
+        versuche++;
+        return (handle: -1, fehler: 233);
+      }), throwsA(isA<KanalFehler>().having((e) => e.text, 'Fehlernummer', contains('233'))));
+      expect(versuche, 1);
+    });
+
+    test('dauerhaft belegter Endpunkt endet begrenzt und gilt nicht als abwesend', () async {
+      var versuche = 0;
+      await expectLater(
+        pipeOeffnenMitWarten(
+          () {
+            versuche++;
+            return (handle: -1, fehler: 231);
+          },
+          maxVersuche: 3,
+          pause: Duration.zero,
+        ),
+        throwsA(isA<KanalFehler>().having((e) => e is KanalNichtDa, 'abwesend', isFalse)),
+      );
+      expect(versuche, 3);
+    });
+  });
   // Unter Windows gilt kein Unix-Socket, keine Kennung und kein POSIX-Recht.
   final String? posix = Platform.isWindows ? 'POSIX: Unix-Socket, Kennung, Dateirechte' : null;
   late Directory wurzel;

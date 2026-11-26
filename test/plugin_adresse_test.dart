@@ -38,7 +38,6 @@ Profil _profil(String kennung, String name) => Profil(
   adresse: 'https://$kennung.moodle.schule.example',
   port: 1,
   mcpName: name.toLowerCase(),
-  schluessel: 'test',
 );
 
 /// Ein Profil, wie es die Adresse sieht: Protokoll, Arbeitsordner und
@@ -456,7 +455,7 @@ void main() {
       moodle = MoodleZugang(ansicht);
       freigaben = Freigaben(ansicht);
       dienst = McpDienst(
-        Einstellungen(schluessel: 'test'),
+        Einstellungen(),
         moodle,
         ansicht,
         freigaben,
@@ -547,7 +546,7 @@ void main() {
       );
       addTearDown(moodle.abmelden);
       dienst = McpDienst(
-        Einstellungen(schluessel: 'test'),
+        Einstellungen(),
         moodle,
         ansicht,
         freigaben,
@@ -558,7 +557,6 @@ void main() {
           adresse: extern.basis.toString(),
           port: 1,
           mcpName: 'test',
-          schluessel: 'test',
         ),
       );
     });
@@ -964,7 +962,7 @@ void main() {
     late McpDienst dienst;
 
     McpDienst dienstMit(Freigaben f) => McpDienst(
-      Einstellungen(schluessel: 'test'),
+      Einstellungen(),
       MoodleZugang(ansicht),
       ansicht,
       f,

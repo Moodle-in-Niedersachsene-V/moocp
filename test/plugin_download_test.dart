@@ -144,7 +144,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: '${kurzname}_download',
       args: const {},
-      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil, schluessel: 't'),
+      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: _Kontext(
@@ -369,7 +369,7 @@ void main() {
       final a = WerkzeugAufruf(
         name: 'beispiel_download',
         args: const {},
-        profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A', schluessel: 't'),
+        profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A'),
         token: aufrufToken(),
         abbruch: Completer<void>().future,
         kontext: _Kontext(zugang, wurzel.path),

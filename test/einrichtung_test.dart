@@ -15,6 +15,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/freigabe.dart';
+import 'package:moocp/mcp/bruecke.dart' show moocpDatei;
 import 'package:moocp/plattform/signatur_windows.dart';
 import 'package:path/path.dart' as p;
 
@@ -48,11 +49,13 @@ void main() {
     // Kein Programm außerhalb des Testordners: unabhängig vom Bestand des Rechners.
     festeProgrammOrdner = const [];
     festeAppOrdner = const [];
+    festeBruecke = datei('app/$brueckeExe').path;
   });
   tearDown(() {
     claudeSigniert = vonAnthropic;
     festeProgrammOrdner = null;
     festeAppOrdner = null;
+    festeBruecke = null;
     tmp.deleteSync(recursive: true);
   });
 
@@ -158,13 +161,28 @@ void main() {
     expect(versionVergleichen([2, 1], [2, 1, 0]), 0);
   });
 
-  Map eintrag(String url, String schluessel, {String? typ = 'http', int? timeout}) => {
+  /// Der Eintrag, wie ihn die App schreibt: die Brücke als lokaler Befehl mit
+  /// dem Profil als Argument, kein Port und kein Schlüssel.
+  Map eintrag({String name = 'moodle', String? typ = 'stdio', Object? timeout = 'wie eingetragen', String? befehl}) => {
         'mcpServers': {
-          'moodle': {
+          name: {
             'type': ?typ,
-            'url': url,
-            'headers': {'Authorization': 'Bearer $schluessel'},
-            'timeout': timeout ?? clientZeitlimit.inMilliseconds,
+            'command': befehl ?? festeBruecke,
+            'args': ['--profil', name],
+            'env': {},
+            if (timeout != null) 'timeout': timeout == 'wie eingetragen' ? clientZeitlimit.inMilliseconds : timeout,
+          },
+        },
+      };
+
+  /// Ein Eintrag aus früheren Versionen: Adresse und Schlüssel.
+  Map alterEintrag({String name = 'moodle'}) => {
+        'mcpServers': {
+          name: {
+            'type': 'http',
+            'url': 'http://127.0.0.1:47811/mcp',
+            'headers': {'Authorization': 'Bearer alt'},
+            'timeout': clientZeitlimit.inMilliseconds,
           },
         },
       };
@@ -174,32 +192,94 @@ void main() {
     File konfig(Object inhalt) => datei('.claude.json', inhalt is String ? inhalt : jsonEncode(inhalt));
 
     test('aktuell, veraltet, fehlt, unlesbar', () {
-      expect(claude().verbindung(47811, 'abc'), Verbindung.fehlt);
+      expect(claude().verbindung(), Verbindung.fehlt);
       konfig({'mcpServers': {}});
-      expect(claude().verbindung(47811, 'abc'), Verbindung.fehlt);
-      konfig(eintrag('http://127.0.0.1:47811/mcp', 'abc'));
-      expect(claude().verbindung(47811, 'abc'), Verbindung.aktuell);
-      konfig(eintrag('http://127.0.0.1:47811/mcp', 'alt'));
-      expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
-      konfig(eintrag('http://127.0.0.1:47812/mcp', 'abc'));
-      expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
+      expect(claude().verbindung(), Verbindung.fehlt);
+      konfig(eintrag());
+      expect(claude().verbindung(), Verbindung.aktuell);
+      konfig(eintrag(name: 'moodle-test'));
+      expect(claude().verbindung(name: 'moodle-test'), Verbindung.aktuell);
+      expect(claude().verbindung(), Verbindung.fehlt, reason: 'der Eintrag eines anderen Profils ist nicht der dieses');
       konfig('{"mcpServers": {"moodle": ');
-      expect(claude().verbindung(47811, 'abc'), Verbindung.unlesbar);
+      expect(claude().verbindung(), Verbindung.unlesbar);
+    });
+
+    test('ein Eintrag mit Adresse und Schlüssel ist veraltet: Er schickte an einen Port, den jedes Konto belegen kann', () {
+      konfig(alterEintrag());
+      expect(claude().verbindung(), Verbindung.veraltet);
+      final e = eintrag();
+      (e['mcpServers']['moodle'] as Map)['url'] = 'http://127.0.0.1:47811/mcp';
+      konfig(e);
+      expect(claude().verbindung(), Verbindung.veraltet, reason: 'eine Adresse neben dem Befehl');
+    });
+
+    test('Profil als Argument, Brücke und Zeitlimit müssen stimmen', () {
+      konfig(eintrag(befehl: p.join(tmp.path, 'weg', brueckeExe)));
+      expect(claude().verbindung(), Verbindung.veraltet, reason: 'die Brücke gibt es dort nicht mehr');
+      konfig(eintrag(befehl: datei('app/anderes').path));
+      expect(claude().verbindung(), Verbindung.veraltet, reason: 'der Befehl ist nicht die Brücke');
+      final e = eintrag();
+      (e['mcpServers']['moodle'] as Map)['args'] = ['--profil', 'moodle-test'];
+      konfig(e);
+      expect(claude().verbindung(), Verbindung.veraltet, reason: 'das Profil der Brücke ist ein anderes');
+      (e['mcpServers']['moodle'] as Map)['args'] = <String>[];
+      konfig(e);
+      expect(claude().verbindung(), Verbindung.veraltet);
+      konfig(eintrag(typ: 'http'));
+      expect(claude().verbindung(), Verbindung.veraltet);
     });
 
     test('ohne Zeitlimit veraltet: Claude Code bräche jede Freigabe nach 60 Sekunden ab', () {
-      final e = eintrag('http://127.0.0.1:47811/mcp', 'abc');
-      (e['mcpServers']['moodle'] as Map).remove('timeout');
-      konfig(e);
-      expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
-      konfig(eintrag('http://127.0.0.1:47811/mcp', 'abc', timeout: 60000));
-      expect(claude().verbindung(47811, 'abc'), Verbindung.veraltet);
+      konfig(eintrag(timeout: null));
+      expect(claude().verbindung(), Verbindung.veraltet);
+      konfig(eintrag(timeout: 60000));
+      expect(claude().verbindung(), Verbindung.veraltet);
     });
 
-    test('der Eintrag geht als ein JSON-Argument an claude mcp add-json', () {
-      final a = claude().addArgumente(47811, 'abc');
+    test('der Eintrag geht als ein JSON-Argument an claude mcp add-json, ohne Adresse und Schlüssel', () {
+      final a = claude().addArgumente();
       expect(a.sublist(0, a.length - 1), ['mcp', 'add-json', '--scope', 'user', 'moodle']);
-      expect(jsonDecode(a.last), (eintrag('http://127.0.0.1:47811/mcp', 'abc')['mcpServers'] as Map)['moodle']);
+      expect(jsonDecode(a.last), (eintrag()['mcpServers'] as Map)['moodle']);
+      expect(a.last, isNot(contains('http')));
+      expect(a.last, isNot(contains('Bearer')));
+      final b = claude().addArgumente('moodle-test');
+      expect(jsonDecode(b.last), (eintrag(name: 'moodle-test')['mcpServers'] as Map)['moodle-test']);
+    });
+
+    test('Umstellung: nur der eigene Eintrag wird ersetzt, die Konfiguration schreibt allein claude', () async {
+      final heim = p.join(tmp.path, 'heim');
+      datei(claudeOrt);
+      final fremd = {'type': 'stdio', 'command': 'npx', 'args': ['-y', 'foo']};
+      final alt = alterEintrag();
+      (alt['mcpServers'] as Map)['anderer'] = fremd;
+      final f = datei('heim/.claude.json', jsonEncode(alt));
+      final vorher = f.readAsStringSync();
+      final aufrufe = <List<String>>[];
+      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim})
+        ..ausfuehren = (programm, argumente) async {
+          aufrufe.add(argumente);
+          return 0;
+        };
+      expect(c.verbindung(), Verbindung.veraltet);
+      expect(await c.eintragen(), isNull);
+      expect(aufrufe, [
+        ['mcp', 'remove', 'moodle', '--scope', 'user'],
+        c.addArgumente(),
+      ], reason: 'nur der eigene Name, der Eintrag „anderer" wird nie angefasst');
+      expect(f.readAsStringSync(), vorher, reason: 'die Datei gehört Claude Code; die App schreibt nicht hinein');
+    });
+
+    test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
+      final heim = p.join(tmp.path, 'heim');
+      datei(claudeOrt);
+      final aufrufe = <List<String>>[];
+      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim}, bruecke: p.join(tmp.path, 'weg', brueckeExe))
+        ..ausfuehren = (_, a) async {
+          aufrufe.add(a);
+          return 0;
+        };
+      expect(await c.eintragen(), contains('$brueckeExe fehlt'));
+      expect(aufrufe, isEmpty);
     });
 
     test('Zeitlimit: länger als die Frist einer Freigabe', () {
@@ -217,41 +297,43 @@ void main() {
   });
 
   group('Codex CLI: der Block in config.toml', () {
-    const url = 'http://127.0.0.1:47811/mcp';
-    const kopf = 'Bearer abc';
-    const unser =
-        '[mcp_servers.moodle]\nurl = "$url"\nhttp_headers = { Authorization = "$kopf" }\ntool_timeout_sec = 2100\n';
+    String bruecke() => festeBruecke!;
+    String unser([String name = 'moodle']) =>
+        "[mcp_servers.$name]\ncommand = '${bruecke()}'\nargs = ['--profil', '$name']\ntool_timeout_sec = 2100\n";
+    const alterBlock =
+        '[mcp_servers.moodle]\nurl = "http://127.0.0.1:47811/mcp"\nhttp_headers = { Authorization = "Bearer alt" }\ntool_timeout_sec = 2100\n';
 
     test('in eine leere oder fehlende Datei', () {
-      expect(tomlBlockSetzen('', 'moodle', url, kopf), unser);
-      expect(tomlBlockSetzen('\n\n', 'moodle', url, kopf), unser);
+      expect(tomlBlockSetzen('', 'moodle', bruecke(), ['--profil', 'moodle']), unser());
+      expect(tomlBlockSetzen('\n\n', 'moodle', bruecke(), ['--profil', 'moodle']), unser());
     });
 
     test('angehängt: alles andere bleibt Zeichen für Zeichen', () {
       const alt = 'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
-      final neu = tomlBlockSetzen(alt, 'moodle', url, kopf);
-      expect(neu, '$alt\n$unser');
+      final neu = tomlBlockSetzen(alt, 'moodle', bruecke(), ['--profil', 'moodle']);
+      expect(neu, '$alt\n${unser()}');
       expect(tomlBlockEntfernen(neu, 'moodle'), alt);
     });
 
-    test('ersetzt samt Unterblock; Kommentar über dem nächsten Block bleibt', () {
+    test('ein alter Block mit Adresse und Schlüssel wird ersetzt, auch samt Unterblock; Fremdes bleibt', () {
       const alt = 'model = "gpt-5"\n\n'
           '[mcp_servers.moodle]\nurl = "http://127.0.0.1:1/mcp"\n'
           '[mcp_servers.moodle.http_headers]\nAuthorization = "Bearer alt"\n\n'
-          '# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
-      final neu = tomlBlockSetzen(alt, 'moodle', url, kopf);
+          '# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\ntoken = "x"\n';
+      final neu = tomlBlockSetzen(alt, 'moodle', bruecke(), ['--profil', 'moodle']);
       expect(
           neu,
-          'model = "gpt-5"\n\n$unser\n'
-          '# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n');
+          'model = "gpt-5"\n\n${unser()}\n'
+          '# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\ntoken = "x"\n');
+      expect(neu, isNot(contains('Bearer')));
       expect(tomlBlockEntfernen(neu, 'moodle'),
-          'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n');
+          'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\ntoken = "x"\n');
     });
 
     test('ein Server mit ähnlichem Namen bleibt unberührt', () {
       const alt = '[mcp_servers.moodle2]\nurl = "x"\n';
       expect(tomlBlock(alt, 'moodle'), isNull);
-      expect(tomlBlockSetzen(alt, 'moodle', url, kopf), '$alt\n$unser');
+      expect(tomlBlockSetzen(alt, 'moodle', bruecke(), ['--profil', 'moodle']), '$alt\n${unser()}');
       expect(tomlBlockEntfernen(alt, 'moodle'), alt);
     });
 
@@ -261,62 +343,92 @@ void main() {
 
     test('CRLF bleibt CRLF', () {
       const alt = 'model = "gpt-5"\r\n';
-      final neu = tomlBlockSetzen(alt, 'moodle', url, kopf);
-      expect(neu, 'model = "gpt-5"\r\n\r\n${unser.replaceAll('\n', '\r\n')}');
+      final neu = tomlBlockSetzen(alt, 'moodle', bruecke(), ['--profil', 'moodle']);
+      expect(neu, 'model = "gpt-5"\r\n\r\n${unser().replaceAll('\n', '\r\n')}');
       expect(neu.replaceAll('\r\n', ''), isNot(contains('\n')));
       expect(tomlBlockEntfernen(neu, 'moodle'), alt);
     });
 
-    test('Block allein entfernt ergibt eine leere Datei', () {
-      expect(tomlBlockEntfernen(unser, 'moodle'), '');
+    test('ein Pfad mit Hochkomma oder Backslash wird richtig geschrieben und gelesen', () async {
+      for (final name in ["o'brien", r'C:\Users\x y\moocp-bruecke.exe']) {
+        final neu = tomlBlockSetzen('', 'moodle', name, ['--profil', 'moodle']);
+        final block = tomlBlock(neu, 'moodle')!;
+        expect(block, contains('command = '));
+        // Schreiben und Lesen sind Gegenstücke: Die Verbindung erkennt den Befehl wieder.
+        final dir = Directory(p.join(tmp.path, 'x'))..createSync();
+        final bin = File(p.join(dir.path, brueckeExe))..writeAsStringSync('x');
+        final codex = CodexCli({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: bin.path);
+        expect(await codex.eintragen(), isNull);
+        expect(codex.verbindung(), Verbindung.aktuell);
+        dir.deleteSync(recursive: true);
+        codex.konfiguration.deleteSync();
+      }
     });
 
-    test('Verbindung: fehlt, aktuell, veraltet, Unterblock, token_url ist nicht url', () async {
+    test('Block allein entfernt ergibt eine leere Datei', () {
+      expect(tomlBlockEntfernen(unser(), 'moodle'), '');
+    });
+
+    test('Verbindung: fehlt, aktuell, veraltet, Adresse und Kopf, Profil, Zeitlimit', () async {
       final codex = CodexCli({'USERPROFILE': tmp.path, 'HOME': tmp.path});
-      expect(codex.verbindung(47811, 'abc'), Verbindung.fehlt);
-      expect(await codex.eintragen(47811, 'abc'), isNull);
-      expect(codex.verbindung(47811, 'abc'), Verbindung.aktuell);
-      expect(codex.verbindung(47811, 'neu'), Verbindung.veraltet);
-      expect(codex.verbindung(47812, 'abc'), Verbindung.veraltet);
+      expect(codex.verbindung(), Verbindung.fehlt);
+      expect(await codex.eintragen(), isNull);
+      expect(codex.verbindung(), Verbindung.aktuell);
+      expect(File(codex.konfiguration.path).readAsStringSync(), unser());
 
-      codex.konfiguration.writeAsStringSync('[mcp_servers.moodle]\nurl = "$url"\ntool_timeout_sec = 2100.0\n'
-          '[mcp_servers.moodle.http_headers]\nAuthorization = "$kopf"\n');
-      expect(codex.verbindung(47811, 'abc'), Verbindung.aktuell);
+      codex.konfiguration.writeAsStringSync(alterBlock);
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'Adresse und Schlüssel von früher');
+      codex.konfiguration.writeAsStringSync('${unser()}url = "http://127.0.0.1:47811/mcp"\n');
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'eine Adresse neben dem Befehl');
+      codex.konfiguration.writeAsStringSync('${unser()}http_headers = { Authorization = "Bearer x" }\n');
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'ein Kopf neben dem Befehl');
 
-      // Ohne Zeitlimit bräche Codex jede Freigabe nach 60 Sekunden ab.
-      codex.konfiguration.writeAsStringSync('[mcp_servers.moodle]\nurl = "$url"\nhttp_headers = { Authorization = "$kopf" }\n');
-      expect(codex.verbindung(47811, 'abc'), Verbindung.veraltet);
-      codex.konfiguration.writeAsStringSync(unser.replaceAll('2100', '60'));
-      expect(codex.verbindung(47811, 'abc'), Verbindung.veraltet);
-      codex.konfiguration.writeAsStringSync(unser.replaceAll('2100', '21000'));
-      expect(codex.verbindung(47811, 'abc'), Verbindung.veraltet);
+      codex.konfiguration.writeAsStringSync(unser().replaceAll("'--profil', 'moodle'", "'--profil', 'anderes'"));
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'ein anderes Profil');
+      codex.konfiguration.writeAsStringSync(unser().replaceAll('2100', '60'));
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'Codex bräche jede Freigabe nach 60 Sekunden ab');
+      codex.konfiguration.writeAsStringSync(unser().replaceAll('2100', '21000'));
+      expect(codex.verbindung(), Verbindung.veraltet);
+      codex.konfiguration.writeAsStringSync(unser().replaceAll('2100', '2100.0'));
+      expect(codex.verbindung(), Verbindung.aktuell);
+      codex.konfiguration.writeAsStringSync(unser().replaceAll(RegExp(r"command = '[^']*'"), "command = '${p.join(tmp.path, 'weg', brueckeExe)}'"));
+      expect(codex.verbindung(), Verbindung.veraltet, reason: 'die Brücke gibt es dort nicht mehr');
 
-      codex.konfiguration.writeAsStringSync('[mcp_servers.moodle]\ntoken_url = "$url"\n');
-      expect(codex.verbindung(47811, 'abc'), Verbindung.veraltet);
+      codex.konfiguration.writeAsStringSync('[mcp_servers.moodle]\ntoken_url = "http://x"\n');
+      expect(codex.verbindung(), Verbindung.veraltet);
 
       expect(await codex.austragen(), isNull);
-      expect(codex.verbindung(47811, 'abc'), Verbindung.fehlt);
+      expect(codex.verbindung(), Verbindung.fehlt);
     });
 
-    test('je Profil ein eigener Schlüssel: der eines anderen Profils gilt als veraltet, „Installieren" erneuert ihn', () async {
+    test('Umstellung: nur der eigene Block ändert sich, Fremdes bleibt Zeichen für Zeichen', () async {
       final codex = CodexCli({'USERPROFILE': tmp.path, 'HOME': tmp.path});
-      // Standardprofil mit dem globalen Schlüssel, ein weiteres mit eigenem Port und Schlüssel (E6).
-      expect(await codex.eintragen(47811, 'global'), isNull);
-      expect(await codex.eintragen(47812, 'eigener', name: 'moodle-test'), isNull);
-      expect(codex.verbindung(47811, 'global'), Verbindung.aktuell);
-      expect(codex.verbindung(47812, 'eigener', name: 'moodle-test'), Verbindung.aktuell);
+      const vorn = 'model = "gpt-5"\n\n# mein Server\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n\n';
+      const hinten = '\n[mcp_servers.moodle2]\nurl = "x"\n\n[projects."/home/x"]\ntrust_level = "trusted"\n';
+      codex.konfiguration
+        ..createSync(recursive: true)
+        ..writeAsStringSync('$vorn$alterBlock$hinten');
+      expect(codex.verbindung(), Verbindung.veraltet);
+      expect(await codex.eintragen(), isNull);
+      expect(codex.konfiguration.readAsStringSync(), '$vorn${unser()}$hinten');
+      expect(codex.verbindung(), Verbindung.aktuell);
+    });
 
-      // Ein Eintrag aus der Zeit vor dem eigenen Schlüssel trägt noch den globalen.
-      expect(codex.verbindung(47812, 'global', name: 'moodle-test'), Verbindung.veraltet,
-          reason: 'der Server von moodle-test nähme den globalen Schlüssel nicht mehr an');
-      expect(await codex.eintragen(47812, 'global', name: 'moodle-test'), isNull);
-      expect(codex.verbindung(47812, 'eigener', name: 'moodle-test'), Verbindung.veraltet);
-      expect(await codex.eintragen(47812, 'eigener', name: 'moodle-test'), isNull);
-      expect(codex.verbindung(47812, 'eigener', name: 'moodle-test'), Verbindung.aktuell);
+    test('je Profil ein eigener Block mit seinem Profil als Argument; der des Standardprofils bleibt', () async {
+      final codex = CodexCli({'USERPROFILE': tmp.path, 'HOME': tmp.path});
+      expect(await codex.eintragen(), isNull);
+      expect(await codex.eintragen(name: 'moodle-test'), isNull);
+      expect(codex.verbindung(), Verbindung.aktuell);
+      expect(codex.verbindung(name: 'moodle-test'), Verbindung.aktuell);
+      expect(codex.konfiguration.readAsStringSync(), '${unser()}\n${unser('moodle-test')}');
+      expect(await codex.austragen(name: 'moodle-test'), isNull);
+      expect(codex.konfiguration.readAsStringSync(), unser());
+    });
 
-      // Der Eintrag des Standardprofils bleibt dabei, wie er ist.
-      expect(codex.verbindung(47811, 'global'), Verbindung.aktuell);
-      expect(codex.verbindung(47811, 'eigener'), Verbindung.veraltet);
+    test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
+      final codex = CodexCli({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', brueckeExe));
+      expect(await codex.eintragen(), contains('$brueckeExe fehlt'));
+      expect(codex.konfiguration.existsSync(), isFalse);
     });
 
     test('CODEX_HOME verlegt Konfiguration und Skills', () {
@@ -329,7 +441,7 @@ void main() {
 
   group('LM Studio (Bionic): die Brücke in Bionics Liste', () {
     late String exe;
-    setUp(() => exe = datei('app/moocp-bruecke.exe').path);
+    setUp(() => exe = datei('app/$brueckeExe').path);
     const pfad = '.lmstudio/apps/bionic/.internal/ng-mcp.json';
     File liste(List<Map<String, Object?>> server, {Map<String, Object?> mehr = const {}}) =>
         datei(pfad, jsonEncode({'servers': server, ...mehr}));
@@ -352,38 +464,42 @@ void main() {
     LmStudio lm() => LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: exe);
 
     test('fehlt, aktuell, veraltet, unlesbar', () {
-      expect(lm().verbindung(0, ''), Verbindung.fehlt);
+      expect(lm().verbindung(), Verbindung.fehlt);
       liste([server('cmd', ['/c', 'uvx', 'blender-mcp'], name: 'blender')]);
-      expect(lm().verbindung(0, ''), Verbindung.fehlt, reason: 'nur ein fremder Server');
-      liste([server(exe, [])]);
-      expect(lm().verbindung(0, ''), Verbindung.aktuell);
+      expect(lm().verbindung(), Verbindung.fehlt, reason: 'nur ein fremder Server');
+      liste([server(exe, ['--profil', 'moodle'])]);
+      expect(lm().verbindung(), Verbindung.aktuell);
       liste([server(datei('app/moocp.exe').path, ['--mcp-stdio'])]);
-      expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'die App selbst ist nicht die Brücke');
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'die App selbst ist nicht die Brücke');
       liste([server('cmd', ['/c', 'npx', '-y', 'mcp-remote', 'http://127.0.0.1:47811/mcp'])]);
-      expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'moodle, aber nicht über die Brücke');
-      liste([server(p.join(tmp.path, 'weg', 'moocp-bruecke.exe'), [])]);
-      expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'die Brücke gibt es dort nicht mehr');
-      liste([server(exe, [], timeoutMs: null)]);
-      expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'ohne Zeitlimit: Bionics 60 Sekunden');
-      liste([server(exe, [], timeoutMs: 120000)]);
-      expect(lm().verbindung(0, ''), Verbindung.veraltet, reason: 'ein anderes Zeitlimit');
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'moodle, aber nicht über die Brücke');
+      liste([server(p.join(tmp.path, 'weg', brueckeExe), ['--profil', 'moodle'])]);
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'die Brücke gibt es dort nicht mehr');
+      liste([server(exe, [], timeoutMs: 'wie eingetragen')]);
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'ohne das Profil als Argument');
+      liste([server(exe, ['--profil', 'anderes'])]);
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'das Profil der Brücke ist ein anderes');
+      liste([server(exe, ['--profil', 'moodle'], timeoutMs: null)]);
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'ohne Zeitlimit: Bionics 60 Sekunden');
+      liste([server(exe, ['--profil', 'moodle'], timeoutMs: 120000)]);
+      expect(lm().verbindung(), Verbindung.veraltet, reason: 'ein anderes Zeitlimit');
       datei(pfad, '{"servers": [');
-      expect(lm().verbindung(0, ''), Verbindung.unlesbar);
+      expect(lm().verbindung(), Verbindung.unlesbar);
     });
 
     test('eintragen: neue Liste, Brücke ohne Schlüssel, keine Zwischendatei übrig', () async {
-      expect(await lm().eintragen(47811, 'geheim'), isNull);
-      expect(lm().verbindung(0, ''), Verbindung.aktuell);
+      expect(await lm().eintragen(), isNull);
+      expect(lm().verbindung(), Verbindung.aktuell);
       final e = gelesen().single as Map;
       expect(e['id'], matches(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')));
       expect(e['connection'], {
         'type': 'stdio',
         'command': exe,
-        'args': [],
+        'args': ['--profil', 'moodle'],
         'env': {},
         'timeoutMs': zeitlimit,
       });
-      expect(File(p.join(tmp.path, pfad)).readAsStringSync(), isNot(contains('geheim')));
+      expect(File(p.join(tmp.path, pfad)).readAsStringSync(), isNot(contains('Bearer')));
       expect(File(p.join(tmp.path, '$pfad.moocp')).existsSync(), isFalse);
     });
 
@@ -392,36 +508,124 @@ void main() {
         server('cmd', ['/c', 'uvx', 'blender-mcp'], name: 'blender', id: 'b'),
         server('cmd', ['/c', 'npx', 'mcp-remote'], id: 'alt'),
       ], mehr: {'version': 3});
-      expect(await lm().eintragen(47811, 'abc'), isNull);
+      expect(await lm().eintragen(), isNull);
       final s = gelesen();
       expect(s.map((e) => (e as Map)['name']), ['blender', 'moodle']);
       expect((s.last as Map)['id'], 'alt');
       expect((s.first as Map)['connection'], (jsonDecode(jsonEncode(server('cmd', ['/c', 'uvx', 'blender-mcp']))) as Map)['connection']);
       expect((jsonDecode(File(p.join(tmp.path, pfad)).readAsStringSync()) as Map)['version'], 3);
-      expect(lm().verbindung(0, ''), Verbindung.aktuell);
+      expect(lm().verbindung(), Verbindung.aktuell);
+    });
+
+    test('je Profil ein Eintrag mit seinem Profil als Argument; der des Standardprofils bleibt', () async {
+      expect(await lm().eintragen(), isNull);
+      expect(await lm().eintragen(name: 'moodle-test'), isNull);
+      final s = gelesen().cast<Map>();
+      expect(s.map((e) => e['name']), ['moodle', 'moodle-test']);
+      expect((s.last['connection'] as Map)['args'], ['--profil', 'moodle-test']);
+      expect(lm().verbindung(), Verbindung.aktuell);
+      expect(lm().verbindung(name: 'moodle-test'), Verbindung.aktuell);
+      expect(await lm().austragen(name: 'moodle-test'), isNull);
+      expect(gelesen().cast<Map>().map((e) => e['name']), ['moodle']);
     });
 
     test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
-      final ohne = LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', 'moocp-bruecke.exe'));
-      expect(await ohne.eintragen(47811, 'abc'), contains('moocp-bruecke.exe fehlt'));
+      final ohne = LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', brueckeExe));
+      expect(await ohne.eintragen(), contains('$brueckeExe fehlt'));
       expect(File(p.join(tmp.path, pfad)).existsSync(), isFalse);
     });
 
     test('eine unlesbare Liste wird nicht überschrieben', () async {
       final f = datei(pfad, '{"servers": [');
-      expect(await lm().eintragen(47811, 'abc'), contains('nicht angefasst'));
+      expect(await lm().eintragen(), contains('nicht angefasst'));
       expect(await lm().austragen(), contains('nicht angefasst'));
       expect(f.readAsStringSync(), '{"servers": [');
     });
 
     test('austragen: nur „moodle" geht, Fremdes bleibt', () async {
       expect(await lm().austragen(), isNull, reason: 'keine Liste, nichts zu tun');
-      liste([server('cmd', ['/c', 'uvx', 'blender-mcp'], name: 'blender'), server(exe, [])]);
+      liste([server('cmd', ['/c', 'uvx', 'blender-mcp'], name: 'blender'), server(exe, ['--profil', 'moodle'])]);
       expect(await lm().austragen(), isNull);
       expect(gelesen().map((e) => (e as Map)['name']), ['blender']);
-      expect(lm().verbindung(0, ''), Verbindung.fehlt);
+      expect(lm().verbindung(), Verbindung.fehlt);
     });
-  }, skip: Platform.isWindows ? null : 'Windows-Annahme: claude.exe, MSIX, VS Code, Bionic gibt es nur unter Windows');
+  });
+
+  group('Brücke im AppImage', () {
+    test('ohne AppImage liegt die Brücke neben der App', () {
+      expect(imAppImage(const {}), isFalse);
+      expect(brueckenOrt(umgebung: const {}), p.join(p.dirname(Platform.resolvedExecutable), brueckeExe));
+    });
+
+    test('im AppImage zeigt der Eintrag auf eine Kopie im Einstellungsordner, nicht in den Einhängepunkt', () {
+      final u = {'APPIMAGE': '/home/erika/moocp.AppImage'};
+      expect(imAppImage(u), Platform.isLinux);
+      if (!Platform.isLinux) return;
+      expect(brueckenOrt(umgebung: u, einstellungen: '/e/moocp'), p.join('/e/moocp', 'bruecke', brueckeExe));
+    });
+
+    test('bereitstellen kopiert die Brücke aus dem Einhängepunkt, ausführbar, und ersetzt eine ältere', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null; // setUp setzt sie für die übrigen Tests
+      final quelle = datei('mount/usr/bin/$brueckeExe', 'neu');
+      final ziel = p.join(tmp.path, 'einstellungen', 'bruecke', brueckeExe);
+      datei('einstellungen/bruecke/$brueckeExe', 'alt');
+      expect(brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': '/home/erika/moocp.AppImage'}, quelle: quelle.path), isNull);
+      final hinweis = File(p.join(p.dirname(ziel), appImageHinweis));
+      expect(hinweis.readAsStringSync(), '/home/erika/moocp.AppImage');
+      expect(FileStat.statSync(hinweis.path).mode & 0x1ff, 0x180);
+      expect(File(ziel).readAsStringSync(), 'neu');
+      expect(FileStat.statSync(ziel).mode & 0x1ff, 0x1ed);
+      expect(File('$ziel.neu').existsSync(), isFalse);
+    });
+
+    test('Größe und Inhalt der Kopie entscheiden, nicht ihr Vorhandensein', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final u = {'APPIMAGE': '/x.AppImage'};
+      final einst = p.join(tmp.path, 'einstellungen');
+      final ziel = brueckenOrt(umgebung: u, einstellungen: einst);
+      final quelle = datei('mount/usr/bin/$brueckeExe', 'neue Brücke');
+      final kopie = datei(p.relative(ziel, from: tmp.path), 'neue Brücke');
+      bool aktuell() => brueckeAktuell(ziel, umgebung: u, quelle: quelle.path, einstellungen: einst);
+      expect(aktuell(), isTrue);
+      kopie.writeAsStringSync('alte Brücke');
+      expect(aktuell(), isFalse, reason: 'gleiche Größe, anderer Inhalt');
+      kopie.writeAsStringSync('neue Brücke und mehr');
+      expect(aktuell(), isFalse, reason: 'andere Größe');
+      expect(brueckeAktuell('/anderer/Ort/$brueckeExe', umgebung: u, quelle: quelle.path, einstellungen: einst), isTrue,
+          reason: 'nur die Kopie der Einrichtung wird verglichen');
+      expect(brueckeAktuell(ziel, umgebung: const {}, quelle: quelle.path, einstellungen: einst), isTrue, reason: 'ohne AppImage');
+    });
+
+    test('der Pfad des AppImage steht neben der Kopie, und die Brücke startet damit die App', () {
+      if (!Platform.isLinux) return;
+      final ordner = p.join(tmp.path, 'bruecke');
+      Directory(ordner).createSync();
+      // Neben der Brücke liegt keine App: das AppImage aus dem Hinweis.
+      final appImage = datei('home/moocp.AppImage', 'x');
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync(appImage.path);
+      expect(moocpDatei(ordner).path, appImage.path);
+      // Ein Hinweis auf etwas, das es nicht gibt oder nicht absolut ist: nichts davon wird gestartet.
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync('relativ/moocp.AppImage');
+      expect(moocpDatei(ordner).path, p.join(ordner, 'moocp'));
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync(p.join(tmp.path, 'weg.AppImage'));
+      expect(moocpDatei(ordner).path, p.join(ordner, 'moocp'));
+      // Liegt die App neben der Brücke, gilt sie.
+      final neben = datei('bruecke/moocp', 'x');
+      expect(moocpDatei(ordner).path, neben.path);
+    });
+
+    test('ohne Brücke weder im AppImage noch am Ziel: ein Satz, warum', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final ziel = p.join(tmp.path, 'einstellungen', 'bruecke', brueckeExe);
+      expect(
+        brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': 'x'}, quelle: p.join(tmp.path, 'weg')),
+        contains('$brueckeExe fehlt'),
+      );
+    });
+  });
 
   group('feste Programmordner: von außen vorgegeben', () {
     test('claude und codex werden nur in den vorgegebenen Ordnern gefunden', () {
@@ -591,12 +795,10 @@ void main() {
       heim = p.join(tmp.path, 'heim');
       u = {'USERPROFILE': heim, 'HOME': heim, 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
     });
-    void claudeEintrag() => datei('heim/.claude.json', jsonEncode(eintrag('http://127.0.0.1:47811/mcp', 'abc')));
+    void claudeEintrag() => datei('heim/.claude.json', jsonEncode(eintrag()));
     Directory skills(String werkzeug, String name) => Directory(p.join(heim, werkzeug, 'skills', name));
     Future<Einrichtungsstand> pruefen({Set<String> abgewaehlt = const {}}) => einrichtungPruefen(
         umgebung: u,
-        port: 47811,
-        schluessel: 'abc',
         skills: [paket],
         wahlSkills: appWahlSkills,
         abgewaehlt: abgewaehlt);
@@ -658,7 +860,7 @@ void main() {
 
       // Eingerichtet: auch nichts.
       final codex = s.werkzeuge.last.werkzeug;
-      expect(await codex.eintragen(47811, 'abc'), isNull);
+      expect(await codex.eintragen(), isNull);
       skillInstallieren(paket, skills('.codex', 'moodle'));
       s = await pruefen();
       expect(s.werkzeuge.every((w) => w.fertig), isTrue);
@@ -669,7 +871,7 @@ void main() {
       claudeEintrag();
       skillInstallieren(paket, skills('.claude', 'moodle'));
       final codex = CodexCli(u);
-      expect(await codex.eintragen(47811, 'abc'), isNull);
+      expect(await codex.eintragen(), isNull);
       skillInstallieren(paket, skills('.codex', 'moodle'));
 
       var s = await pruefen(abgewaehlt: {'codex'});
@@ -688,7 +890,7 @@ void main() {
     test('LM Studio abgewählt: Eintrag und Skills werden geräumt', () async {
       claudeEintrag();
       skillInstallieren(paket, skills('.claude', 'moodle'));
-      final exe = datei('app/moocp-bruecke.exe').path;
+      final exe = datei('app/$brueckeExe').path;
       datei('heim/.lmstudio/apps/bionic/.internal/ng-mcp.json', jsonEncode({
         'servers': [
           {
@@ -727,7 +929,7 @@ void main() {
 
   test('Wählbare Skills: nur gewählt installiert, abgewählt entfernt, Vorgabe aus dem Bestand', () async {
     final heim = p.join(tmp.path, 'heim');
-    datei('heim/.claude.json', jsonEncode(eintrag('http://127.0.0.1:47811/mcp', 'abc')));
+    datei('heim/.claude.json', jsonEncode(eintrag()));
     final u = {'USERPROFILE': heim, 'HOME': heim};
     final claude = ClaudeCode(u);
     final moodle = SkillPaket('moodle', {'SKILL.md': utf8.encode('Kurs')}, herkunft: SkillHerkunft.app);
@@ -735,8 +937,6 @@ void main() {
     Directory ziel(String n) => Directory(p.join(claude.skillOrdner.path, n));
     Future<Einrichtungsstand> pruefen(Set<String> gewaehlt) => einrichtungPruefen(
         umgebung: u,
-        port: 47811,
-        schluessel: 'abc',
         skills: [moodle, ls],
         wahlSkills: appWahlSkills,
         gewaehlt: gewaehlt);
@@ -792,9 +992,7 @@ void main() {
     test('gewollt ist alles außer dem Wählbaren, das nicht gewählt ist; Abgewähltes wird entfernt', () async {
       Future<Einrichtungsstand> pruefen(Set<String> gewaehlt) => einrichtungPruefen(
           umgebung: u,
-          port: 47811,
-          schluessel: 'abc',
-          skills: [fest, zusatz],
+            skills: [fest, zusatz],
           wahlSkills: wahl,
           gewaehlt: gewaehlt,
           gefunden: [codex]);
@@ -911,7 +1109,7 @@ void main() {
     test('Codex und LM Studio: Einträge und Skills weg, Fremdes bleibt', () async {
       konfig.writeAsStringSync(jsonEncode({'mcpServers': {}}));
       final toml = datei('heim/.codex/config.toml', 'model = "gpt-5"\n');
-      await CodexCli(umgebung).eintragen(47811, 'abc');
+      await CodexCli(umgebung).eintragen();
       datei('heim/.codex/skills/moodle/SKILL.md');
       final liste = datei('heim/.lmstudio/apps/bionic/.internal/ng-mcp.json', jsonEncode({
         'servers': [
@@ -920,7 +1118,7 @@ void main() {
             'name': 'moodle',
             'connection': {
               'type': 'stdio',
-              'command': datei('app/moocp-bruecke.exe').path,
+              'command': datei('app/$brueckeExe').path,
               'args': [],
             },
           },
@@ -963,8 +1161,8 @@ void main() {
             },
           }));
       toml = datei('heim/.codex/config.toml', 'model = "gpt-5"\n');
-      await CodexCli(umgebung).eintragen(47811, 'abc', name: 'moodle');
-      await CodexCli(umgebung).eintragen(47812, 'def', name: 'moodle-test');
+      await CodexCli(umgebung).eintragen(name: 'moodle');
+      await CodexCli(umgebung).eintragen(name: 'moodle-test');
     });
 
     // Tut, was `claude mcp remove <name>` tut: nimmt genau den Namen heraus.

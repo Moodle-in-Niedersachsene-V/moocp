@@ -31,6 +31,8 @@ import 'freigabe.dart';
 import 'installer/installer_start.dart';
 import 'profile_dialog.dart';
 import 'log.dart';
+import 'mcp/bruecke.dart' show profilAusArgumenten;
+import 'mcp/kanal.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
@@ -101,7 +103,7 @@ Future<void> main(List<String> argumente) async {
   if (argumente.contains(claudeEntfernenSchalter)) {
     exit(await _claudeEntfernen());
   }
-  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste());
+  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste(argumente.contains('--profil') ? (profilAusArgumenten(argumente) ?? '') : null));
   if (argumente.contains(versionSchalter)) exit(await _version());
   lizenzAnmelden();
   // Die fertige Windows-App hat keine Konsole; print ginge dort ins Leere und
@@ -156,8 +158,12 @@ Future<void> main(List<String> argumente) async {
         ? 'Arbeitsordner geleert: ${arbeitsordner.pfad}'
         : 'Arbeitsordner: ${arbeitsordner.pfad} -- $geblieben Einträge in Benutzung, nicht gelöscht',
   );
+  // Die Brücke erreicht die App über den Kanal des Kontos und liest die
+  // Werkzeugliste aus einer Datei darin, solange die App nicht läuft
+  // (mcp/kanal.dart); unter Windows fragt sie die exe.
+  unawaited(werkzeuglisteAblegen(protokoll, einstellungen.profile.isEmpty ? [Profil.migriert('')] : einstellungen.profile));
   // Je Instanzprofil ein Zugang, eine Freigabe und ein MCP-Server mit eigenem
-  // Port und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
+  // Endpunkt und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
   // Anmeldung die Oberfläche zeigt.
   final profile = einstellungen.profile.isEmpty
       ? [Profil.migriert('')]
@@ -350,7 +356,7 @@ Future<Einstellungen?> _gespeicherteEinstellungen() async {
     ) as Map<String, dynamic>;
     return Einstellungen.aus(
       j,
-      Einstellungen(moodleAdresse: '', schluessel: ''),
+      Einstellungen(moodleAdresse: ''),
     );
   } catch (_) {
     return null;
@@ -373,7 +379,7 @@ List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) =>
 /// läuft. Eine Ausnahme von E11 wie die Brücke selbst: Auf stdout stehen nur
 /// Namen, Beschreibungen und Parameter der Werkzeuge. Meldungen von mcp_dart
 /// gehen an den Logger, und dem hört hier niemand zu.
-Future<int> _werkzeugliste() async {
+Future<int> _werkzeugliste(String? profilName) async {
   try {
     mcpLogsUmleiten();
     stdout.writeln(
@@ -381,6 +387,7 @@ Future<int> _werkzeugliste() async {
         await werkzeuglisteFuerBruecke(
           einstellungen: () => einstellungenDatei,
           plugins: () => Directory(pluginsOrdner),
+          profilName: profilName,
         ),
       ),
     );
@@ -388,6 +395,26 @@ Future<int> _werkzeugliste() async {
     return 0;
   } catch (_) {
     return 1;
+  }
+}
+
+/// Legt die Werkzeugliste für die Brücke jedes Profils ab (nur Linux und Mac,
+/// siehe KanalOrt.listeLesen): je Profil dasselbe, was `--werkzeugliste
+/// --profil Name` ausgibt. Ein Fehler dabei ändert nichts am Start; die
+/// Brücke sagt dann, dass sie keine Liste hat.
+Future<void> werkzeuglisteAblegen(Protokoll protokoll, Iterable<Profil> profile) async {
+  if (Platform.isWindows) return;
+  for (final profil in profile) {
+    try {
+      final liste = await werkzeuglisteFuerBruecke(
+        einstellungen: () => einstellungenDatei,
+        plugins: () => Directory(pluginsOrdner),
+        profilName: profil.mcpName,
+      );
+      await standardKanalOrt.listeAblegen(profil.mcpName, jsonEncode(liste));
+    } catch (e) {
+      protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
+    }
   }
 }
 
@@ -864,6 +891,8 @@ class _HauptseiteState extends State<Hauptseite> {
       await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
     }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
+    // Die Werkzeuge der Plugins stehen jetzt in den Einstellungen.
+    unawaited(werkzeuglisteAblegen(widget.protokoll, _alleProfile));
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -894,9 +923,8 @@ class _HauptseiteState extends State<Hauptseite> {
         sitzungLaeuft: _dienst.laeuft,
         profilname: _profilnameAnzeige,
         mcpName: _mehrere ? _profil.mcpName : null,
-        // Das Standardprofil bleibt: An ihm hängen der globale Schlüssel, den
-        // die Brücke für Bionic liest, und der Eintrag „moodle" in den
-        // KI-Werkzeugen (E6, E21).
+        // Das Standardprofil bleibt: An ihm hängen der Eintrag „moodle" in den
+        // KI-Werkzeugen und `--werkzeugliste` der Brücke (E21).
         profilLoeschenMoeglich: _mehrere && !_profil.istStandard,
         weitereInstanzMoeglich: widget.instanzErstellen != null,
         plugins: _plugins,
@@ -1174,8 +1202,6 @@ class _HauptseiteState extends State<Hauptseite> {
         pruefen: _einrichtungsstand,
         einstellungen: widget.einstellungen,
         protokoll: widget.protokoll,
-        port: _dienst.profil.port,
-        schluessel: widget.einstellungen.schluesselFuer(_dienst.profil),
         servername: _dienst.profil.mcpName,
         profilname: _profilnameAnzeige,
       ),
@@ -1243,9 +1269,7 @@ class _HauptseiteState extends State<Hauptseite> {
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
-      port: _dienst.profil.port,
       name: _dienst.profil.mcpName,
-      schluessel: e.schluesselFuer(_dienst.profil),
       skills: [...app, ...plugins.pakete],
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
@@ -1829,7 +1853,7 @@ class _HauptseiteState extends State<Hauptseite> {
                   size: 18,
                 ),
                 _dienst.laeuft
-                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} auf 127.0.0.1:${_profil.port}'
+                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} läuft (nur dieses Konto)'
                     : _mcpVersucht
                     ? 'MCP-Server läuft nicht'
                     : 'MCP startet nach der Anmeldung',

@@ -1,6 +1,5 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'einstellungen.dart';
 import 'freigabe.dart';
 import 'profil.dart';
 
@@ -40,9 +39,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
               port: widget.port,
               mcpName: Profil.mcpNameFuer(_name.text.trim(), kennung),
               bestaetigungen: Bestaetigungen.vorgabe,
-              // Jeder MCP-Server hat seinen eigenen Zugangsschlüssel (E6),
-              // gleich beim Anlegen -- nicht erst beim nächsten Laden.
-              schluessel: Einstellungen.neuerSchluessel(),
             )
           : alt.copyWith(
               name: _name.text.trim(),

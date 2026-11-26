@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'anmeldedaten.dart';
 import 'freigabe.dart';
+import 'mcp/kanal.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/moodle_zugang.dart';
 import 'profil.dart';
@@ -111,8 +112,9 @@ Future<void> mcpServerStarten(
     } catch (e) {
       protokoll.eintrag(
         Art.fehler,
-        'MCP-Server (${i.dienst.profil.name}) startet nicht auf Port '
-        '${i.dienst.profil.port}: ${e.runtimeType}',
+        'MCP-Server (${i.dienst.profil.name}) startet nicht: '
+        // Die Meldungen des Kanals nennen nie einen Pfad (kanal.dart).
+        '${e is KanalFehler ? e.text : e.runtimeType}',
       );
     }
   }
@@ -248,7 +250,7 @@ Future<void> testprofileStarten(
         StateError() => 'Zugangsdatei unvollständig; TEACHER_USERNAME und TEACHER_PASSWORD müssen gesetzt sein',
         MoodleNichtErreichbar() => 'Moodle nicht erreichbar; Instanzadresse und Netzwerkzugang prüfen',
         MoodleFehler() => 'Moodle-Anmeldung abgelehnt; Dateizugang und Anmeldemöglichkeit prüfen',
-        SocketException() => 'MCP-Port nicht verfügbar; Portbelegung prüfen',
+        KanalFehler() || SocketException() => 'MCP-Kanal nicht verfügbar; ${e is KanalFehler ? e.text : 'Ordner des Kanals prüfen'}',
         _ => 'Startvoraussetzung fehlgeschlagen (${e.runtimeType})',
       };
       protokoll.eintrag(Art.fehler, 'Testprofil „${profil.name}“ nicht bereit: $grund');

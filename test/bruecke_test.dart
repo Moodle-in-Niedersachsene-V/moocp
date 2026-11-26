@@ -1,95 +1,107 @@
 // Offline prüfbar: die Brücke für stdio-Clients (lib/mcp/bruecke.dart)
-// gegen einen nachgebauten MCP-Server -- Sitzung und Kopfzeilen, Nachrichten
-// nebeneinander, falscher Schlüssel, Neustart der App, SSE; initialize und
+// gegen eine nachgebaute App im Speicher -- Anmeldung auf der Verbindung,
+// Nachrichten nebeneinander, Neustart der App (der laufende Aufruf wird nie
+// wiederholt), ein Kanal, dem die Brücke nicht traut; initialize und
 // tools/list aus der Werkzeugliste, ob die App läuft oder nicht; Start der
 // App erst beim Werkzeugaufruf, und kein Aufruf, den der Client abgebrochen
-// hat, während die Brücke auf die App wartete.
+// hat, während die Brücke auf die App wartete. Die Verbindung selbst, ihre
+// Prüfungen und den Weg über ein echtes Socket prüft test/kanal_test.dart und
+// test/bruecke_kanal_test.dart.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/mcp/bruecke.dart';
+import 'package:moocp/mcp/kanal.dart';
 
-/// Ein MCP-Server, wie ihn die App über HTTP anbietet, so weit die Brücke ihn
-/// braucht. Merkt sich jede Anfrage.
-class Attrappe {
-  late HttpServer _server;
-  final anfragen = <(String methode, String? rpc, Map<String, String?> kopf)>[];
+/// Die eine Seite einer Verbindung im Speicher.
+class _Seite implements KanalVerbindung {
+  _Seite(this.eingangQuelle);
+  final StreamController<List<int>> eingangQuelle;
+  late _Seite gegenueber;
+  bool zu = false;
 
-  /// Die Werkzeuge, die ein `tools/call` beim Server aufrief.
-  final aufgerufen = <String?>[];
-  final sitzungen = <String>{};
-  var _naechste = 0;
+  @override
+  Stream<List<int>> get eingang => eingangQuelle.stream;
 
-  Uri get adresse => Uri.parse('http://127.0.0.1:${_server.port}/mcp');
-
-  Future<void> starten({int port = 0}) async {
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    _server.listen(_antworten);
+  @override
+  void senden(List<int> daten) {
+    if (!gegenueber.zu && !gegenueber.eingangQuelle.isClosed) gegenueber.eingangQuelle.add(daten);
   }
 
-  Future<void> stoppen() => _server.close(force: true);
+  @override
+  Future<void> schliessen() async {
+    if (zu) return;
+    zu = true;
+    unawaited(eingangQuelle.close());
+    if (!gegenueber.eingangQuelle.isClosed) unawaited(gegenueber.eingangQuelle.close());
+  }
+}
 
-  Future<void> _antworten(HttpRequest req) async {
-    final r = req.response;
-    final kopf = {
-      'sitzung': req.headers.value('mcp-session-id'),
-      'version': req.headers.value('mcp-protocol-version'),
-      'schluessel': req.headers.value(HttpHeaders.authorizationHeader),
-    };
-    if (req.method == 'DELETE') {
-      anfragen.add(('DELETE', null, kopf));
-      sitzungen.remove(kopf['sitzung']);
-      r.statusCode = 200;
-      return r.close();
+/// Eine App, wie die Brücke sie über den Kanal erlebt, so weit sie sie
+/// braucht. Merkt sich jede Nachricht, die ankommt.
+class Attrappe {
+  /// Was bei der App ankommt, je Verbindung eine Liste.
+  final verbindungen = <List<Map>>[];
+  final _seiten = <_Seite>[];
+
+  /// Die Werkzeuge, die ein `tools/call` aufrief.
+  final aufgerufen = <String?>[];
+
+  /// Ob jemand lauscht.
+  bool laeuft = true;
+
+  /// Gibt [verbinden] stattdessen [KanalUnsicher] zurück (Ordner, Socket oder
+  /// Gegenstelle gehören einem anderen Konto).
+  String? unsicher;
+
+  /// Die Anfragen, die nie beantwortet werden (die App wird mitten im Aufruf
+  /// beendet).
+  final unbeantwortet = <String>{};
+
+  Future<KanalVerbindung> verbinden() async {
+    final u = unsicher;
+    if (u != null) throw KanalUnsicher(u);
+    if (!laeuft) throw KanalNichtDa();
+    final brueckenSeite = _Seite(StreamController<List<int>>());
+    final appSeite = _Seite(StreamController<List<int>>());
+    brueckenSeite.gegenueber = appSeite;
+    appSeite.gegenueber = brueckenSeite;
+    final empfangen = <Map>[];
+    verbindungen.add(empfangen);
+    _seiten.add(appSeite);
+    appSeite.eingang.transform(utf8.decoder).transform(const LineSplitter()).listen((z) => _antworten(appSeite, empfangen, z));
+    return brueckenSeite;
+  }
+
+  /// Beendet die App: Alle Verbindungen enden.
+  void beenden() {
+    laeuft = false;
+    for (final s in _seiten) {
+      unawaited(s.schliessen());
     }
-    final n = jsonDecode(await utf8.decodeStream(req)) as Map;
-    anfragen.add(('POST', n['method'] as String?, kopf));
+    _seiten.clear();
+  }
+
+  Future<void> _antworten(_Seite s, List<Map> empfangen, String zeile) async {
+    final n = jsonDecode(zeile) as Map;
+    empfangen.add(n);
     if (n['method'] == 'tools/call') aufgerufen.add((n['params'] as Map?)?['name'] as String?);
-    if (kopf['schluessel'] != 'Bearer abc') {
-      r.statusCode = 401;
-      return r.close();
-    }
     final id = n['id'];
+    if (id == null) return;
     if (n['method'] == 'initialize') {
-      final s = 's${_naechste++}';
-      sitzungen.add(s);
-      r.headers.set('mcp-session-id', s);
-      return _json(r, {
-        'jsonrpc': '2.0',
-        'id': id,
-        'result': {'protocolVersion': '2025-06-18'},
-      });
+      _senden(s, {'jsonrpc': '2.0', 'id': id, 'result': {'protocolVersion': '2025-06-18'}});
+      return;
     }
-    if (!sitzungen.contains(kopf['sitzung'])) {
-      r.statusCode = 404;
-      return _json(r, {
-        'jsonrpc': '2.0',
-        'id': id,
-        'error': {'code': -32000, 'message': 'Session not found'},
-      });
-    }
-    if (id == null) {
-      r.statusCode = 202;
-      return r.close();
+    if (unbeantwortet.contains(n['method'])) {
+      Timer(const Duration(milliseconds: 100), beenden);
+      return;
     }
     if (n['method'] == 'langsam') await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (n['method'] == 'sse') {
-      r.headers.contentType = ContentType('text', 'event-stream');
-      r.write('event: message\ndata: ${jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': 'per SSE'})}\n\n');
-      return r.close();
-    }
-    // Mit Zeilenumbrüchen, wie ein Server sie schicken dürfte: Die Brücke
-    // muss sie für stdio entfernen.
-    return _json(r, {'jsonrpc': '2.0', 'id': id, 'result': n['method']}, eingerueckt: true);
+    _senden(s, {'jsonrpc': '2.0', 'id': id, 'result': n['method']});
   }
 
-  Future<void> _json(HttpResponse r, Object daten, {bool eingerueckt = false}) {
-    r.headers.contentType = ContentType.json;
-    r.write(eingerueckt ? const JsonEncoder.withIndent('  ').convert(daten) : jsonEncode(daten));
-    return r.close();
-  }
+  void _senden(_Seite s, Object daten) => s.senden(utf8.encode('${jsonEncode(daten)}\n'));
 }
 
 String zeile(Object n) => '${jsonEncode(n)}\n';
@@ -125,19 +137,13 @@ Werkzeugliste werkzeugliste([List<Map<String, Object?>>? tools]) => Werkzeuglist
 
 void main() {
   late Attrappe app;
-  setUp(() async {
-    app = Attrappe();
-    await app.starten();
-  });
-  tearDown(() => app.stoppen());
+  setUp(() => app = Attrappe());
 
   /// Lässt die Brücke über [eingaben] laufen; wartet zwischen zwei Eingaben
   /// kurz, damit ihre Reihenfolge feststeht. Eine Funktion unter den Eingaben
   /// wird an ihrer Stelle ausgeführt. Liefert, was der Client bekommt.
   Future<List<Map>> laufen(
     List<Object> eingaben, {
-    String? schluessel = 'abc',
-    Uri? adresse,
     Future<Werkzeugliste?> Function()? listeHolen,
     Future<bool> Function()? appStarten,
     Duration aufAppWarten = const Duration(seconds: 5),
@@ -145,8 +151,7 @@ void main() {
     final aus = <Map>[];
     final ein = StreamController<List<int>>();
     final b = Bruecke(
-      adresse: adresse ?? app.adresse,
-      schluessel: schluessel,
+      verbinden: app.verbinden,
       listeHolen: listeHolen ?? () async => werkzeugliste(),
       appStarten: appStarten ?? () async => fail('die App darf hier nicht starten'),
       aufAppWarten: aufAppWarten,
@@ -169,27 +174,36 @@ void main() {
     return aus;
   }
 
+  /// Die Methoden, die bei der App ankamen, je Verbindung.
+  List<List<Object?>> methoden() => [
+    for (final v in app.verbindungen) [for (final n in v) n['method']],
+  ];
+
+  group('Profil als Argument', () {
+    test('ohne Angabe das Standardprofil', () => expect(profilAusArgumenten(const []), 'moodle'));
+    test('--profil nennt das Profil', () {
+      expect(profilAusArgumenten(const ['--profil', 'moodle-test']), 'moodle-test');
+    });
+    test('fehlender oder ungeeigneter Name: null, nichts wird verbunden', () {
+      expect(profilAusArgumenten(const ['--profil']), isNull);
+      expect(profilAusArgumenten(const ['--profil', '../x']), isNull);
+      expect(profilAusArgumenten(const ['--profil', 'A b']), isNull);
+      expect(profilAusArgumenten(const ['--profil', '']), isNull);
+    });
+  });
+
   group('App läuft', () {
-    test(
-      'initialize und tools/list aus der Liste, der Werkzeugaufruf mit Sitzung und Version, am Ende DELETE',
-      () async {
-        final aus = await laufen([anmelden(1), initialisiert, anfrage(2, 'tools/list'), anfrage(3, 'tools/call')]);
-        expect(aus.map((n) => n['id']), [1, 2, 3]);
-        expect(aus[1]['result'], werkzeugliste().tools);
-        expect(aus[2]['result'], 'tools/call');
-        expect(app.anfragen.map((a) => a.$2), [
-          'initialize',
-          'notifications/initialized',
-          'tools/call',
-          null,
-        ], reason: 'die App nur für den Werkzeugaufruf, angemeldet von der Brücke');
-        final aufruf = app.anfragen.firstWhere((a) => a.$2 == 'tools/call');
-        expect(aufruf.$3['sitzung'], 's0');
-        expect(aufruf.$3['version'], '2025-06-18');
-        expect(app.anfragen.last.$1, 'DELETE');
-        expect(app.anfragen.last.$3['sitzung'], 's0');
-      },
-    );
+    test('initialize und tools/list aus der Liste, die App nur für den Werkzeugaufruf, angemeldet von der Brücke', () async {
+      final aus = await laufen([anmelden(1), initialisiert, anfrage(2, 'tools/list'), anfrage(3, 'tools/call')]);
+      expect(aus.map((n) => n['id']), [1, 2, 3]);
+      expect(aus[1]['result'], werkzeugliste().tools);
+      expect(aus[2]['result'], 'tools/call');
+      expect(methoden(), [
+        ['initialize', 'notifications/initialized', 'tools/call'],
+      ]);
+      expect(app.verbindungen.single.first['id'], 'moocp-bruecke-anmeldung');
+      expect(app.verbindungen.single.first['params']['clientInfo']['name'], 'test', reason: 'das initialize des Clients');
+    });
 
     test('Nachrichten laufen nebeneinander: eine lange hält keine kurze auf', () async {
       final aus = await laufen([anmelden(1), anfrage(2, 'langsam'), anfrage(3, 'schnell')]);
@@ -199,41 +213,46 @@ void main() {
     test('ping beantwortet die Brücke selbst', () async {
       final aus = await laufen([anmelden(1), anfrage(2, 'ping')]);
       expect(aus.last, {'jsonrpc': '2.0', 'id': 2, 'result': {}});
-      expect(app.anfragen.where((a) => a.$2 == 'ping'), isEmpty);
+      expect(app.verbindungen, isEmpty, reason: 'die App wurde nicht einmal angesprochen');
     });
 
-    test('falscher Schlüssel: das sagt das Ergebnis des Werkzeugs', () async {
-      final aus = await laufen([anmelden(1), anfrage(7, 'tools/call')], schluessel: 'falsch');
-      expect(aus.last['id'], 7);
-      expect(aus.last['result']['isError'], isTrue);
-      expect(aus.last['result']['content'].single['text'], contains('lehnt den Schlüssel ab'));
+    test('die Verbindung endet mit dem Client', () async {
+      final aus = await laufen([anmelden(1), anfrage(2, 'tools/call')]);
+      expect(aus.last['id'], 2);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // Die Seite der App sieht das Ende ihres Eingangs.
+      expect(app.verbindungen, hasLength(1));
     });
 
-    test('nicht eingerichtet: Fehler, ohne die App anzufragen', () async {
-      final aus = await laufen([anmelden(1)], schluessel: null);
-      expect(aus.single['error']['message'], contains('nicht eingerichtet'));
-      expect(app.anfragen, isEmpty);
-    });
-
-    test('App neu gestartet: neu anmelden und wiederholen, der Client merkt nichts', () async {
+    test('App neu gestartet: neu anmelden, der Client merkt davon bei der nächsten Anfrage nichts', () async {
       final aus = await laufen([
         anmelden(1),
         initialisiert,
         anfrage(2, 'tools/call'),
-        // Neustart: Die App kennt keine Sitzung mehr.
-        () => app.sitzungen.clear(),
+        // Neustart: Die Verbindung endet, die neue App lauscht gleich wieder.
+        () {
+          app.beenden();
+          app.laeuft = true;
+        },
         anfrage(3, 'tools/call'),
       ]);
       expect(aus.map((n) => n['id']), [1, 2, 3]);
       expect(aus.last['result'], 'tools/call');
-      expect(app.anfragen.where((a) => a.$2 == 'initialize'), hasLength(2));
-      final dritte = app.anfragen.lastWhere((a) => a.$2 == 'tools/call');
-      expect(dritte.$3['sitzung'], 's1');
+      expect(methoden().map((m) => m.first), ['initialize', 'initialize'], reason: 'neu angemeldet');
+      expect(methoden().last, ['initialize', 'notifications/initialized', 'tools/call']);
     });
 
-    test('Antwort als SSE wird weitergegeben', () async {
-      final aus = await laufen([anmelden(1), anfrage(2, 'sse')]);
-      expect(aus.last, {'jsonrpc': '2.0', 'id': 2, 'result': 'per SSE'});
+    test('App endet mitten im Aufruf: Fehlerantwort, der Aufruf wird nie wiederholt', () async {
+      app.unbeantwortet.add('tools/call');
+      final aus = await laufen([
+        anmelden(1),
+        anfrage(2, 'tools/call', {'name': 'aendern'}),
+        () => Future<void>.delayed(const Duration(milliseconds: 400)),
+      ]);
+      expect(aus.last['id'], 2);
+      expect(aus.last['error']['message'], contains('abgerissen'));
+      expect(app.aufgerufen, ['aendern'], reason: 'genau einmal bei der App, nie ein zweites Mal');
+      expect(methoden(), hasLength(1), reason: 'auch keine neue Verbindung dafür');
     });
 
     test('kaputte Zeile: Parse-Fehler ohne id', () async {
@@ -243,18 +262,51 @@ void main() {
     });
   });
 
-  group('App läuft nicht', () {
-    late Uri aus;
-    setUp(() async {
-      aus = app.adresse;
-      await app.stoppen();
+  group('Ein Kanal, dem die Brücke nicht traut', () {
+    test('Werkzeugaufruf: der Grund als Ergebnis, es wurde nichts gesendet, die App nicht gestartet', () async {
+      app.unsicher = 'Der Ordner für den Kanal gehört einem anderen Konto.';
+      final aus = await laufen([anmelden(1), anfrage(2, 'tools/call', {'name': 'aendern', 'arguments': {'x': 1}})]);
+      expect(aus.last['id'], 2);
+      expect(aus.last['result']['isError'], isTrue);
+      final text = aus.last['result']['content'].single['text'] as String;
+      expect(text, contains('nicht sicher'));
+      expect(text, contains('nichts gesendet'));
+      expect(app.verbindungen, isEmpty);
+      expect(app.aufgerufen, isEmpty);
     });
+
+    test('auch die Anmeldung geht nicht hinaus: kein initialize bei der App', () async {
+      app.unsicher = 'Die Gegenseite gehört einem anderen Konto.';
+      await laufen([anmelden(1), initialisiert, anfrage(2, 'tools/call')]);
+      expect(app.verbindungen, isEmpty);
+    });
+
+    test('ein ungültiges Profil: jede Anfrage bekommt den Grund, nichts wird verbunden', () async {
+      final aus = <Map>[];
+      final ein = StreamController<List<int>>();
+      final b = Bruecke(
+        verbinden: () async => throw KanalFehler('Der Profilname der Brücke (--profil) ist ungültig.'),
+        listeHolen: () async => werkzeugliste(),
+        appStarten: () async => fail('nicht starten'),
+        ausgabe: (z) => aus.add(jsonDecode(z) as Map),
+      );
+      final fertig = b.laufen(ein.stream);
+      ein.add(utf8.encode(zeile(anmelden(1))));
+      ein.add(utf8.encode(zeile(anfrage(2, 'tools/call'))));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await ein.close();
+      await fertig;
+      expect(aus.last['result']['content'].single['text'], contains('ungültig'));
+    });
+  });
+
+  group('App läuft nicht', () {
+    setUp(() => app.laeuft = false);
 
     test('initialize, tools/list und ping kommen von der Brücke, ohne die App zu starten', () async {
       var geholt = 0;
       final r = await laufen(
         [anmelden(1), initialisiert, anfrage(2, 'ping'), anfrage(3, 'tools/list')],
-        adresse: aus,
         listeHolen: () async {
           geholt++;
           return werkzeugliste();
@@ -273,12 +325,12 @@ void main() {
     });
 
     test('eine Version, die die App nicht kann: ihre erste', () async {
-      final r = await laufen([anmelden(1, version: '2099-01-01')], adresse: aus);
+      final r = await laufen([anmelden(1, version: '2099-01-01')]);
       expect(r.single['result']['protocolVersion'], '2025-11-25');
     });
 
-    test('ohne Werkzeugliste (moocp.exe fehlt): Fehler statt Schweigen', () async {
-      final r = await laufen([anmelden(1)], adresse: aus, listeHolen: () async => null);
+    test('ohne Werkzeugliste (moocp fehlt): Fehler statt Schweigen', () async {
+      final r = await laufen([anmelden(1)], listeHolen: () async => null);
       expect(r.single['error']['message'], contains('gibt seine Werkzeuge nicht heraus'));
     });
 
@@ -286,16 +338,15 @@ void main() {
       var gestartet = 0;
       final r = await laufen(
         [anmelden(1), initialisiert, anfrage(2, 'tools/list'), anfrage(3, 'tools/call')],
-        adresse: aus,
         appStarten: () async {
           gestartet++;
-          Timer(const Duration(milliseconds: 300), () => app.starten(port: aus.port));
+          Timer(const Duration(milliseconds: 300), () => app.laeuft = true);
           return true;
         },
       );
       expect(gestartet, 1);
       expect(r.last, {'jsonrpc': '2.0', 'id': 3, 'result': 'tools/call'});
-      expect(app.anfragen.map((a) => a.$2), containsAllInOrder(['initialize', 'notifications/initialized']));
+      expect(methoden().single, containsAllInOrder(['initialize', 'notifications/initialized']));
     });
 
     test('ein Werkzeug eines Plugins steht in der Liste, auch wenn die App zu ist; der Aufruf geht an die App, sobald sie läuft', () async {
@@ -315,14 +366,13 @@ void main() {
             'arguments': {'text': 'Hallo'},
           }),
         ],
-        adresse: aus,
         listeHolen: () async => werkzeugliste([
           {'name': 'status'},
           echo,
         ]),
         appStarten: () async {
           gestartet++;
-          Timer(const Duration(milliseconds: 300), () => app.starten(port: aus.port));
+          Timer(const Duration(milliseconds: 300), () => app.laeuft = true);
           return true;
         },
       );
@@ -349,21 +399,19 @@ void main() {
             'params': {'requestId': 2, 'reason': 'Zeitlimit'},
           },
         ],
-        adresse: aus,
         appStarten: () async {
-          Timer(const Duration(milliseconds: 300), () => app.starten(port: aus.port));
+          Timer(const Duration(milliseconds: 300), () => app.laeuft = true);
           return true;
         },
       );
       expect(r.map((n) => n['id']), [1], reason: 'keine Antwort auf den abgebrochenen Aufruf');
-      expect(app.anfragen.map((a) => a.$2), contains('initialize'), reason: 'die App ist gestartet und verbunden');
-      expect(app.anfragen.map((a) => a.$2), isNot(contains('tools/call')), reason: 'der Aufruf ging nicht hinaus');
+      expect(methoden().expand((m) => m), contains('initialize'), reason: 'die App ist gestartet und verbunden');
+      expect(methoden().expand((m) => m), isNot(contains('tools/call')), reason: 'der Aufruf ging nicht hinaus');
     });
 
     test('Werkzeugaufruf, die App wird nicht bereit: der Grund als Ergebnis des Werkzeugs', () async {
       final r = await laufen(
         [anmelden(1), anfrage(2, 'tools/call')],
-        adresse: aus,
         appStarten: () async => true,
         aufAppWarten: const Duration(milliseconds: 400),
       );
@@ -373,13 +421,13 @@ void main() {
     });
 
     test('Werkzeugaufruf, moocp lässt sich nicht starten: das sagt das Ergebnis', () async {
-      final r = await laufen([anmelden(1), anfrage(2, 'tools/call')], adresse: aus, appStarten: () async => false);
+      final r = await laufen([anmelden(1), anfrage(2, 'tools/call')], appStarten: () async => false);
       expect(r.last['result']['isError'], isTrue);
       expect(r.last['result']['content'].single['text'], contains('ließ sich nicht starten'));
     });
 
     test('andere Anfragen starten die App nicht', () async {
-      final r = await laufen([anmelden(1), anfrage(2, 'resources/list')], adresse: aus);
+      final r = await laufen([anmelden(1), anfrage(2, 'resources/list')]);
       expect(r.last['error']['message'], contains('läuft nicht'));
     });
 

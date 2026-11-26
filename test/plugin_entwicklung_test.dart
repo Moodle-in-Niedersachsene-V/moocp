@@ -177,7 +177,7 @@ void main() {
 
     tearDown(() async {
       for (final c in clients) {
-        c.http.close(force: true);
+        c.schliessen();
       }
       clients.clear();
       for (final d in dienste) {

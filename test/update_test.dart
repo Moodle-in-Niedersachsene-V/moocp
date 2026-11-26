@@ -174,7 +174,7 @@ void main() {
     });
 
     test('heute schon geprüft', () {
-      final e = Einstellungen(schluessel: 'x');
+      final e = Einstellungen();
       final jetzt = DateTime(2026, 10, 3, 18);
       expect(heuteSchonGeprueft(e, jetzt), isFalse);
       e.updateZuletzt = '2026-10-03';

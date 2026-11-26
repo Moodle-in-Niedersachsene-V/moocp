@@ -231,7 +231,7 @@ void main() {
         return Instanz(
           moodle,
           freigaben,
-          McpDienst(Einstellungen(schluessel: 'test'), moodle, protokoll, freigaben, 'test-arbeitsordner', profil: profil),
+          McpDienst(Einstellungen(), moodle, protokoll, freigaben, 'test-arbeitsordner', profil: profil),
         );
       }
 

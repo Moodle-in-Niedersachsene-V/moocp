@@ -317,7 +317,7 @@ void main() {
   Future<void> startService() async {
     final log = Protokoll();
     service = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profile]),
+      Einstellungen(profile: [profile]),
       moodle,
       log,
       approvals,
@@ -401,7 +401,6 @@ void main() {
       adresse: external.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     final log = Protokoll();
     approvals = Freigaben(log, stufe: Bestaetigungen.keine);
@@ -411,7 +410,7 @@ void main() {
   tearDown(() async {
     external.hold?.complete();
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await external.server.close(force: true);
     // Unter Windows kann ein Hintergrundlauf (Übertragung, Statusabfrage) eine
     // Datei im Ordner noch kurz offen halten, wenn der Test schon fertig ist;
@@ -563,7 +562,7 @@ void main() {
     external.hold = null;
     await client.waitStatus('wiederherstellung_status', number, (t) => t.contains('Moodle meldet einen Fehler'));
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     profile = profile.copyWith(name: 'Nachher');
     await startService();
     final duplicate = await client.tool('wiederherstellen_datei', arguments);
@@ -578,7 +577,7 @@ void main() {
       final gestartet = await client.tool('wiederherstellen_datei', {...arguments, 'sichtbarkeit': wahl});
       final nummer = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(gestartet)!.group(1)!;
       await service.stoppen();
-      client.http.close(force: true);
+      client.schliessen();
       await startService();
       external.completed = true;
       external.progress = {'progress': 1, 'status': 1000};
@@ -624,7 +623,7 @@ void main() {
     final gestartet = await client.tool('wiederherstellen_datei', arguments);
     final nummer = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(gestartet)!.group(1)!;
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     final datei = File(p.join(folder.path, 'vorgaenge.json'));
     final alt = (jsonDecode(await datei.readAsString()) as List).cast<Map>();
     for (final v in alt) { v.remove('sichtbarkeit'); }
@@ -641,23 +640,15 @@ void main() {
   test('ungültige Sichtbarkeitswahl startet weder Wiederherstellung noch Übertragung', () async {
     final vorher = external.requests;
     for (final werkzeug in ['wiederherstellen_datei', 'uebertragen']) {
-      final request = await client.http.postUrl(Uri.parse('http://127.0.0.1:${profile.port}/mcp'));
-      request.headers
-        ..set('Authorization', 'Bearer test')
-        ..set('Accept', 'application/json, text/event-stream')
-        ..set('Mcp-Session-Id', client.session!)
-        ..contentType = ContentType.json;
-      request.write(jsonEncode({
-        'jsonrpc': '2.0', 'id': ++client.id, 'method': 'tools/call',
-        'params': {'name': werkzeug, 'arguments': {
+      final fehler = await client.call('tools/call', {
+        'name': werkzeug,
+        'arguments': {
           ...arguments,
           'sichtbarkeit': 'sichtbar',
           'ziele': [{'kurs': 12, 'name': 'ZZ Kurs', 'weg': 'aktueller_kurs_verschmelzen'}],
-        }},
-      }));
-      final result = jsonDecode(await utf8.decoder.bind(await request.close()).join()) as Map;
-      expect(result['error']['code'], -32602);
-      expect(result['error']['message'], contains('sichtbarkeit'));
+        },
+      }, -32602);
+      expect(fehler['message'], contains('sichtbarkeit'));
     }
     expect(external.requests, vorher);
     expect(external.writes, 0);
@@ -802,7 +793,7 @@ void main() {
 
   test('zwei MCP-Sitzungen sehen dieselben Vorgänge', () async {
     final other = McpTestClient(profile.port);
-    addTearDown(() => other.http.close(force: true));
+    addTearDown(() => other.schliessen());
     await other.initialize();
     await other.tool('sicherung_status', {});
     external.progress = {'unexpected': true};
@@ -818,14 +809,13 @@ void main() {
     final started = await client.tool('wiederherstellen_datei', arguments);
     final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(started)!.group(1)!;
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     profile = Profil(
       kennung: 'anderes',
       name: 'Anderes Profil',
       adresse: external.basis.toString(),
       port: profile.port,
       mcpName: 'anderes',
-      schluessel: 'test',
     );
     await startService();
     external.progress = {'progress': 1, 'status': 1000};
@@ -844,7 +834,7 @@ void main() {
     final started = await client.tool('wiederherstellen_datei', arguments);
     final number = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(started)!.group(1)!;
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await startService();
     external.progress = {'progress': 1, 'status': 1000};
     external.completed = true;
@@ -1049,7 +1039,7 @@ void main() {
     external.hold = null;
     await client.waitStatus('sicherung_status', number, (t) => t.contains('Unklar'));
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await startService();
     external.progress = {'progress': 1, 'status': 1000};
     external.hold = Completer<void>();
@@ -1341,7 +1331,7 @@ void main() {
     expect(overview, contains('unklar'));
     expect(overview, contains('wiederherstellung_status $number'));
     await service.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await startService();
     final duplicate = await client.tool('wiederherstellen_datei', arguments);
     expect(duplicate, contains(number));
@@ -1361,7 +1351,7 @@ void main() {
         });
         final backupId = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(backed)!.group(1)!;
         await service.stoppen();
-        client.http.close(force: true);
+        client.schliessen();
         final target = otherInstallationPath ? external : _Moodle();
         if (!otherInstallationPath) {
           await target.start();
@@ -1395,7 +1385,7 @@ void main() {
         external.progress = {'progress': 1, 'status': 1000};
         if (restart) {
           await service.stoppen();
-          client.http.close(force: true);
+          client.schliessen();
           await startService();
         } else {
           external.hold!.complete();
@@ -1673,7 +1663,7 @@ void main() {
       final gestartet = await client.tool('wiederherstellen_datei', ersetzen);
       final nummer = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(gestartet)!.group(1)!;
       await service.stoppen();
-      client.http.close(force: true);
+      client.schliessen();
       final datei = File(p.join(folder.path, 'vorgaenge.json'));
       final liste = (jsonDecode(await datei.readAsString()) as List).cast<Map>();
       for (final v in liste) {
@@ -1695,7 +1685,7 @@ void main() {
       final gestartet = await client.tool('wiederherstellen_datei', ersetzen);
       final nummer = RegExp(r'Nummer ([a-z0-9]+)').firstMatch(gestartet)!.group(1)!;
       await service.stoppen();
-      client.http.close(force: true);
+      client.schliessen();
       await startService();
       external.completed = true;
       external.progress = {'progress': 1, 'status': 1000};

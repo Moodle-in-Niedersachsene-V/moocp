@@ -672,7 +672,7 @@ void main() {
 
   Future<void> dienstStarten() async {
     dienst = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profil]),
+      Einstellungen(profile: [profil]),
       zugang,
       Protokoll(),
       freigaben,
@@ -709,7 +709,6 @@ void main() {
       adresse: moodle.basis.toString(),
       port: port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     // Mittlere Stufe: Übertragung, Sicherung, Wiederherstellung und jede Kartenänderung fragen.
     freigaben = Freigaben(Protokoll(), stufe: Bestaetigungen.mittel);
@@ -748,7 +747,7 @@ void main() {
 
   tearDown(() async {
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await moodle.server.close(force: true);
     ordner.deleteSync(recursive: true);
   });
@@ -951,7 +950,6 @@ void main() {
         adresse: profil.adresse,
         port: profil.port,
         mcpName: 'fremd',
-        schluessel: 'test',
       );
       final ergebnis = await kandidatSetzen(kontext, moodle.seiteB.cmid);
       expect(ergebnis, contains('Profil oder Instanz'));
@@ -962,7 +960,7 @@ void main() {
   test('Neustart verwirft alte Kandidatenbelege', () async {
     final kontext = await zielkontext(kandidaten: [moodle.seiteB.cmid]);
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await dienstStarten();
     final ergebnis = await kandidatSetzen(kontext, moodle.seiteB.cmid);
     expect(ergebnis, contains('Zielkontext fehlt'));
@@ -1239,7 +1237,7 @@ void main() {
 
     // Nach einem Neustart der App: derselbe Schutz aus der gespeicherten Datei.
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await dienstStarten();
     final nachNeustart = await client.tool('uebertragen', auftrag());
     expect(nachNeustart, contains('schon einmal übertragen'));
@@ -1263,7 +1261,7 @@ void main() {
       onError: (Object _) {},
     );
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     await dienstStarten();
     moodle.backupVariation++;
 
@@ -1463,7 +1461,6 @@ void main() {
           adresse: moodle.basis.toString(),
           port: profil.port,
           mcpName: 'anderes',
-          schluessel: 'test',
         );
       });
       final ergebnis = await client.tool('uebertragen', auftrag(ziele: [31]));
@@ -1588,7 +1585,7 @@ void main() {
   });
   test('gebundener Testbetrieb verteilt nur eigene ZZ-Proben und übernimmt ihre belegten Kopien für Folgeaktionen', () async {
     await dienst.stoppen();
-    client.http.close(force: true);
+    client.schliessen();
     testbindung = true;
     normaleFreigabe = false;
     freigaben.stufe = Bestaetigungen.alle;
@@ -1783,7 +1780,6 @@ void main() {
       adresse: moodle.basis.toString(),
       port: socket.port,
       mcpName: 'zweites',
-      schluessel: 'test',
     );
     await socket.close();
     final freigaben2 = Freigaben(
@@ -1792,7 +1788,7 @@ void main() {
       frist: const Duration(milliseconds: 150),
     );
     final dienst2 = McpDienst(
-      Einstellungen(schluessel: 'test', profile: [profil2]),
+      Einstellungen(profile: [profil2]),
       zugang,
       Protokoll(),
       freigaben2,
@@ -1932,7 +1928,7 @@ void main() {
       );
     } finally {
       await dienst2.stoppen();
-      client2.http.close(force: true);
+      client2.schliessen();
     }
   });
 }

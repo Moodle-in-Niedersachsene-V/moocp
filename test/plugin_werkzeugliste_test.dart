@@ -23,7 +23,7 @@ import 'package:moocp/protokoll.dart';
 import 'package:path/path.dart' as p;
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei() : super(schluessel: 'schluessel');
+  _EinstellungenOhneDatei() : super();
   int gespeichert = 0;
   bool speichernScheitert = false;
 
@@ -148,7 +148,7 @@ void main() {
       await annehmen(plugins, 'beispiel', werkzeuge: [eins, zwei]);
 
       final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
-      final neu = Einstellungen.aus(json, Einstellungen(schluessel: 'x'));
+      final neu = Einstellungen.aus(json, Einstellungen());
 
       final liste = neu.plugins['beispiel']!.werkzeuge!;
       expect(liste, hasLength(2));
@@ -345,7 +345,6 @@ void main() {
   group('In der Einstellungsdatei', () {
     test('ohne gemerkte Liste steht kein Schlüssel `werkzeuge` in der Datei', () {
       final e = Einstellungen(
-        schluessel: 'x',
         plugins: {'eins': const PluginEntscheidung(version: '1', pruefsumme: 'aa', zugestimmt: true)},
       );
       expect((e.zuJson()['plugins'] as Map)['eins'], isNot(contains('werkzeuge')));
@@ -388,7 +387,7 @@ void main() {
         },
       };
 
-      final neu = Einstellungen.aus(j, Einstellungen(schluessel: 'x'));
+      final neu = Einstellungen.aus(j, Einstellungen());
 
       for (final k in ['text', 'keinName', 'leererName', 'schemaText', 'schemaKeinObjekt', 'titelKeinText', 'eineKaputte']) {
         expect(neu.plugins[k], isNotNull, reason: k);
@@ -408,7 +407,7 @@ void main() {
     void speichern() => datei.writeAsStringSync(jsonEncode(einstellungen.zuJson()));
 
     McpDienst dienst(List<WerkzeugQuelle> quellen) => McpDienst(
-      Einstellungen(schluessel: ''),
+      Einstellungen(),
       MoodleZugang(protokoll),
       protokoll,
       Freigaben(protokoll),
@@ -492,6 +491,43 @@ void main() {
       await gemerkt('beispiel', [_werkzeug('beispiel_echo')], profile: {'standard', 'k2'});
 
       expect(_namen(await liste()), contains('beispiel_echo'));
+    });
+
+    group('je Profil die eigene Liste (--profil)', () {
+      /// Die Einstellungsdatei mit zwei Profilen und dem, was die Plugins gemerkt haben.
+      void zweiProfile() {
+        final j = einstellungen.zuJson();
+        j['profile'] = [
+          {'kennung': 'standard', 'name': 'Moodle', 'adresse': 'https://a.schule.example', 'port': 47811, 'mcpName': 'moodle'},
+          {'kennung': 'k2', 'name': 'Moodle Test', 'adresse': 'https://b.schule.example', 'port': 47812, 'mcpName': 'moodle-test'},
+        ];
+        datei.writeAsStringSync(jsonEncode(j));
+      }
+
+      Future<List<String>> fuer(String? name) async => _namen(
+        await werkzeuglisteFuerBruecke(einstellungen: () => datei, plugins: () => pluginOrdner, profilName: name),
+      );
+
+      test('ein Plugin nur im zweiten Profil steht nur dort, eines nur im Standardprofil nur dort', () async {
+        await gemerkt('eins', [_werkzeug('eins_x')], kurzname: 'eins', profile: {'standard'});
+        await gemerkt('zwei', [_werkzeug('zwei_x')], kurzname: 'zwei', profile: {'k2'});
+        zweiProfile();
+
+        final standard = await fuer('moodle');
+        final test = await fuer('moodle-test');
+        expect(standard, contains('eins_x'));
+        expect(standard, isNot(contains('zwei_x')));
+        expect(test, contains('zwei_x'));
+        expect(test, isNot(contains('eins_x')));
+        expect(await fuer(null), standard, reason: 'ohne Angabe das Standardprofil');
+      });
+
+      test('ein Profil, das es nicht gibt, bekommt die eingebauten Werkzeuge und kein Plugin', () async {
+        await gemerkt('eins', [_werkzeug('eins_x')], kurzname: 'eins', profile: {'standard', 'k2'});
+        zweiProfile();
+
+        expect(await fuer('gibt-es-nicht'), await eingebaut());
+      });
     });
 
     test('weicht die Prüfsumme ab, fehlt das Plugin, die eingebauten bleiben', () async {
@@ -619,7 +655,6 @@ void main() {
       final zeile = jsonEncode(await liste());
 
       expect(zeile, isNot(contains('\n')));
-      expect(zeile, isNot(contains(einstellungen.schluessel)));
       expect(zeile, isNot(contains(einstellungen.plugins['beispiel']!.pruefsumme)));
     });
 

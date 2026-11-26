@@ -126,3 +126,15 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Die Brücke moocp-bruecke für KI-Werkzeuge (lib/mcp/bruecke.dart) neben die
+# App: ein eigenes Dart-Programm ohne Flutter, bei jedem Bau neu übersetzt
+# (bruecke.cmake). Das Dart von Flutter, damit es dieselbe Version ist, mit der
+# die App gebaut wird. Ohne sie läuft kein KI-Werkzeug mit der App (E21).
+get_directory_property(FLUTTER_ROOT DIRECTORY flutter DEFINITION FLUTTER_ROOT)
+install(CODE "
+  set(BRUECKE_DART \"${FLUTTER_ROOT}/bin/cache/dart-sdk/bin/dart\")
+  set(BRUECKE_PROJEKT \"${CMAKE_CURRENT_SOURCE_DIR}/..\")
+  set(BRUECKE_ORDNER \"${CMAKE_INSTALL_PREFIX}\")
+  " COMPONENT Runtime)
+install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/bruecke.cmake" COMPONENT Runtime)

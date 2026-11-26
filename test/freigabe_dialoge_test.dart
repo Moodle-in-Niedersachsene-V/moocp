@@ -699,7 +699,7 @@ void main() {
       final protokoll = Protokoll();
       freigaben = Freigaben(protokoll);
       dienst = McpDienst(
-        Einstellungen(schluessel: 'test'),
+        Einstellungen(),
         MoodleZugang(protokoll),
         protokoll,
         freigaben,

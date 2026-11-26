@@ -48,6 +48,7 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -235,6 +236,8 @@ const _wartenNachAbbruch = Duration(seconds: 5);
 bool _ereignisAbwarten(int ereignis, Duration frist) =>
     _waitForSingleObject(ereignis, frist.inMilliseconds) == _waitObject0;
 
+const _verwaistMeldung = 'Ein Kanalvorgang ließ sich nicht beenden; sein nativer Speicher bleibt aus Sicherheitsgründen reserviert.';
+
 /// Wartet auf einen Vorgang, der STATUS_PENDING lieferte, und holt ihn ab: Erst
 /// wenn diese Funktion mit etwas anderem als [_verwaist] zurückkehrt, gehört
 /// der Speicher wieder dem Aufrufer. Das Ereignis wird in Schritten abgefragt;
@@ -357,6 +360,7 @@ void _leser(List<Object> start) {
       aus.send(Uint8List.fromList(puffer.asTypedList(n)));
     }
   } finally {
+    if (verwaist) aus.send(KanalFehler(_verwaistMeldung));
     aus.send(null);
     // Hier läuft kein Vorgang mehr: Jeder Weg aus der Schleife hat ihn
     // abgeholt oder gar nicht erst gestartet -- außer bei [_verwaist].
@@ -399,6 +403,7 @@ void _schreiber(List<Object> start) {
       calloc.free(iosb);
     }
     eingang.close();
+    if (verwaist) haupt.send(KanalFehler(_verwaistMeldung));
     haupt.send('ende');
   }
 
@@ -448,32 +453,35 @@ void _schreiber(List<Object> start) {
 }
 
 class _PipeVerbindung implements KanalVerbindung {
-  _PipeVerbindung._(this._handle, this._server, this._schreiberPort);
+  _PipeVerbindung._(this._handle, this._server, this._schreiberPort, this._hinweis);
 
   final int _handle;
   final bool _server;
   final SendPort _schreiberPort;
+  final void Function(String)? _hinweis;
   final _eingang = StreamController<List<int>>();
   bool _zu = false;
   bool _leserEnde = false;
   bool _schreiberEnde = false;
   bool _geschlossen = false;
+  final _ende = Completer<void>();
 
   /// Zahl im nativen Speicher, mit der die Verbindung dem Leser sagt, dass er
   /// aufhören soll. Sie wird erst frei, wenn der Leser sein Ende gemeldet hat.
   final Pointer<Uint32> _stopp = calloc<Uint32>();
 
-  static Future<_PipeVerbindung> oeffnen(int handle, {required bool server}) async {
+  static Future<_PipeVerbindung> oeffnen(int handle, {required bool server, void Function(String)? hinweis}) async {
     final leserPort = ReceivePort();
     final schreiberPort = ReceivePort();
     await Isolate.spawn(_schreiber, [handle, schreiberPort.sendPort]);
     final antworten = StreamIterator(schreiberPort);
     await antworten.moveNext();
     final senden = antworten.current as SendPort;
-    final v = _PipeVerbindung._(handle, server, senden);
+    final v = _PipeVerbindung._(handle, server, senden, hinweis);
     unawaited(() async {
       while (await antworten.moveNext()) {
         if (antworten.current == 'ende') break;
+        if (antworten.current case final KanalFehler x) v._diagnose(x);
       }
       await antworten.cancel();
       v._schreiberEnde = true;
@@ -495,6 +503,8 @@ class _PipeVerbindung implements KanalVerbindung {
     leserPort.listen((m) {
       if (m is Uint8List) {
         if (!v._eingang.isClosed) v._eingang.add(m);
+      } else if (m is KanalFehler) {
+        v._diagnose(m);
       } else {
         leserPort.close();
         v._leserEnde = true;
@@ -505,6 +515,18 @@ class _PipeVerbindung implements KanalVerbindung {
       }
     });
     return v;
+  }
+
+  void _diagnose(KanalFehler fehler) {
+    // Ein Streamfehler allein würde vom MCP-Transport ohne Protokolleintrag
+    // geschlossen. Die App bekommt deshalb ihren Kanalhinweis; die Brücke
+    // schreibt auf stderr, getrennt vom MCP-Datenstrom auf stdout.
+    final hinweis = _hinweis;
+    if (hinweis != null) {
+      hinweis(fehler.text);
+    } else {
+      stderr.writeln(fehler.text);
+    }
   }
 
   @override
@@ -518,8 +540,10 @@ class _PipeVerbindung implements KanalVerbindung {
 
   @override
   Future<void> schliessen() async {
-    if (_zu) return;
     _beenden();
+    // Erst zurückkehren, wenn beide Arbeiter fertig und das Handle geschlossen
+    // sind. Auch ein zweites Schließen wartet auf denselben Abschluss.
+    await _ende.future;
   }
 
   /// Beendet die Verbindung in der Reihenfolge, die das Handle schützt: Erst
@@ -546,6 +570,7 @@ class _PipeVerbindung implements KanalVerbindung {
     _geschlossen = true;
     if (_server) _disconnectNamedPipe(_handle);
     _closeHandle(_handle);
+    _ende.complete();
   }
 }
 
@@ -554,13 +579,14 @@ class _PipeVerbindung implements KanalVerbindung {
 // ---------------------------------------------------------------------------
 
 class _PipeLauscher implements KanalLauscher {
-  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._sa, this._beschreibung, this._erste) {
+  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._hinweis, this._sa, this._beschreibung, this._erste) {
     unawaited(_annehmen(_erste));
   }
 
   final String _name;
   final String _sid;
   final void Function(String)? _abgewiesen;
+  final void Function(String)? _hinweis;
   final Pointer _sa;
   final Pointer _beschreibung;
   final int _erste;
@@ -617,7 +643,7 @@ class _PipeLauscher implements KanalLauscher {
         final pid = verbunden ? _clientPid(eigenes) : null;
         final sid = pid == null ? null : _sidVonPid(pid);
         if (verbunden && sid == _sid) {
-          final v = await _PipeVerbindung.oeffnen(eigenes, server: true);
+          final v = await _PipeVerbindung.oeffnen(eigenes, server: true, hinweis: _hinweis);
           if (_neu.isClosed) {
             unawaited(v.schliessen());
           } else {
@@ -638,6 +664,16 @@ class _PipeLauscher implements KanalLauscher {
           }
           return;
         }
+      }
+    } on KanalFehler catch (x) {
+      if (_hinweis != null) {
+        _hinweis(x.text);
+      } else {
+        stderr.writeln(x.text);
+      }
+      if (!_neu.isClosed) {
+        _neu.addError(x);
+        unawaited(_neu.close());
       }
     } finally {
       if (aktuell != 0) _closeHandle(aktuell);
@@ -683,7 +719,7 @@ class _PipeLauscher implements KanalLauscher {
           final n = _abholen(handle, iosb, ereignis, stopp);
           if (n == _verwaist) {
             verwaist = true;
-            return false;
+            throw KanalFehler(_verwaistMeldung);
           }
           return ntListenVerbunden(_iosbStatus(iosb));
       }
@@ -754,7 +790,7 @@ class WindowsKanal extends KanalOrt {
     }
     final b = beschreibung.value;
     calloc.free(beschreibung);
-    return _PipeLauscher(pipe, sid, abgewiesen, sa, b, erste);
+    return _PipeLauscher(pipe, sid, abgewiesen, hinweis, sa, b, erste);
   }
 
   @override

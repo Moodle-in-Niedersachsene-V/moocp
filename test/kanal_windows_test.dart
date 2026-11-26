@@ -143,17 +143,22 @@ void main() {
       await echoGeht();
     });
 
-    test('schreibt die App an einen Client, der schon weg ist, endet die Verbindung (kein Hängen im Schreiben)', () async {
+    test('ein Schreiben an einen nicht lesenden Client endet nach dessen Abbruch vollständig', () async {
       final roh = _Roh();
       final h = await roh.oeffnen(pipeName(eigeneSid(), name));
       expect(h, isNot(-1));
       await bisAngenommen(1);
+      // Mehr als der Pipe-Puffer: Der Client liest nie, also bleibt der
+      // Schreiber beschäftigt. Vor dem Trennen senden, solange der Leser die
+      // Verbindung noch nicht geschlossen haben kann.
+      angenommen.first.senden(List<int>.filled(8 * 1024 * 1024, 120));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       roh.schliessen(h);
-      // Zwei Zeilen, damit auch ein erstes Schreiben, das noch durchgeht, die
-      // Verbindung nicht offen hält.
-      angenommen.first.senden(utf8.encode('x\n'));
-      angenommen.first.senden(utf8.encode('y\n'));
+      // Schließen bestätigt das Ende beider Arbeiter und des nativen Handles,
+      // nicht bloß das unabhängig davon eintreffende Ende des Eingangs.
+      await angenommen.first.schliessen().timeout(const Duration(seconds: 10));
       await enden.first.future.timeout(const Duration(seconds: 5));
+      expect(enden.first.isCompleted, isTrue);
       await echoGeht();
     });
 

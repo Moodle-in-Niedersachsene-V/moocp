@@ -15,9 +15,9 @@
 // Ausgegeben wird die Liste eines Plugins nur, wenn
 //   - ihm zugestimmt ist, für genau den Stand, den der Plugin-Ordner jetzt hat
 //     (Version und Prüfsumme, wie beim Start der App), und
-//   - es im Standardprofil eingeschaltet ist: `--werkzeugliste` gibt die Liste
-//     des Standardprofils (E31) aus, auch für die Brücke eines anderen
-//     Profils, und
+//   - es in dem Profil eingeschaltet ist, für das die Liste gilt
+//     (`--werkzeugliste --profil <Name>`, ohne Angabe das Standardprofil, E31):
+//     Jede Brücke antwortet mit den Werkzeugen ihres eigenen Profils, und
 //   - seine Werkzeugnamen den Regeln genügen, wie beim Start der App (Kurzname
 //     davor, kein Name eines eingebauten Werkzeugs oder eines früheren
 //     Plugins). Ein einzelnes Werkzeug, dessen Name mit `mcp__<Profil>__`
@@ -57,9 +57,10 @@ import 'verbindung.dart' show werkzeugnameZuLang, werkzeugnamenPruefen;
 Future<Map<String, dynamic>> werkzeuglisteFuerBruecke({
   required File Function() einstellungen,
   required Directory Function() plugins,
+  String? profilName,
 }) async {
   final protokoll = Protokoll();
-  final profil = Profil.migriert('');
+  final profil = _profilFuer(einstellungen, profilName);
   McpDienst dienst(List<WerkzeugQuelle> quellen) => McpDienst(
     Einstellungen(),
     MoodleZugang(protokoll),
@@ -88,6 +89,31 @@ Future<Map<String, dynamic>> werkzeuglisteFuerBruecke({
     // ihnen.
   }
   return dienst(const []).werkzeugliste();
+}
+
+/// Das Profil mit dem technischen Namen [name] aus der Einstellungsdatei (nur
+/// gelesen); ohne Namen das Standardprofil. Gibt es den Namen nicht, ist es ein
+/// Profil ohne Plugins mit diesem Namen: Die Brücke bekommt dann die eingebauten
+/// Werkzeuge, nie die eines anderen Profils.
+Profil _profilFuer(File Function() datei, String? name) {
+  final standard = Profil.migriert('');
+  if (name == null || name == standard.mcpName) {
+    // Das Standardprofil kann in der Datei einen anderen Servernamen tragen;
+    // der gespeicherte gilt, sonst `moodle`.
+    return _profile(datei).where((p) => p.istStandard).firstOrNull ?? standard;
+  }
+  return _profile(datei).where((p) => p.mcpName == name).firstOrNull ??
+      Profil(kennung: 'unbekannt-$name', name: name, adresse: '', port: 0, mcpName: name);
+}
+
+List<Profil> _profile(File Function() datei) {
+  try {
+    final j = jsonDecode(datei().readAsStringSync());
+    final l = j is Map ? j['profile'] : null;
+    return l is List ? [for (final e in l) ?Profil.ausJson(e)] : const [];
+  } catch (_) {
+    return const [];
+  }
 }
 
 /// Der Abschnitt `plugins` der Einstellungsdatei [datei], nur gelesen. Eine

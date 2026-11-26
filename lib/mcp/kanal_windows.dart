@@ -253,11 +253,15 @@ void _leser(List<Object> start) {
   }
 }
 
-/// Schreibt in einem eigenen Isolate, was es bekommt; `null` beendet es.
+/// Schreibt in einem eigenen Isolate, was es bekommt; `null` beendet es und
+/// meldet `'ende'`, sobald alles Vorherige geschrieben ist. Es hat die Pipe zuletzt
+/// benutzt: Erst nach dieser Meldung wird das Handle geschlossen, sonst ginge
+/// ein Rest an ein Handle, das schon eine andere Verbindung bekommen hat.
 void _schreiber(List<Object> start) {
   final handle = start[0] as int;
   final eingang = ReceivePort();
-  (start[1] as SendPort).send(eingang.sendPort);
+  final haupt = start[1] as SendPort;
+  haupt.send(eingang.sendPort);
   final geschrieben = calloc<Uint32>();
   final ov = calloc<Uint8>(_overlappedGroesse);
   final ereignis = _createEvent(nullptr, 1, 0, nullptr);
@@ -267,6 +271,7 @@ void _schreiber(List<Object> start) {
       calloc.free(ov);
       calloc.free(geschrieben);
       eingang.close();
+      haupt.send('ende');
       return;
     }
     final daten = calloc<Uint8>(m.length);
@@ -298,20 +303,36 @@ class _PipeVerbindung implements KanalVerbindung {
   final SendPort _schreiberPort;
   final _eingang = StreamController<List<int>>();
   bool _zu = false;
+  bool _leserEnde = false;
+  bool _schreiberEnde = false;
+  bool _geschlossen = false;
 
   static Future<_PipeVerbindung> oeffnen(int handle, {required bool server}) async {
     final leserPort = ReceivePort();
     final schreiberPort = ReceivePort();
     await Isolate.spawn(_schreiber, [handle, schreiberPort.sendPort]);
-    final senden = await schreiberPort.first as SendPort;
+    final antworten = StreamIterator(schreiberPort);
+    await antworten.moveNext();
+    final senden = antworten.current as SendPort;
     final v = _PipeVerbindung._(handle, server, senden);
+    unawaited(() async {
+      while (await antworten.moveNext()) {
+        if (antworten.current == 'ende') break;
+      }
+      await antworten.cancel();
+      v._schreiberEnde = true;
+      v._handleSchliessen();
+    }());
     await Isolate.spawn(_leser, [handle, leserPort.sendPort]);
     leserPort.listen((m) {
       if (m is Uint8List) {
         if (!v._eingang.isClosed) v._eingang.add(m);
       } else {
         leserPort.close();
-        v._abschliessen();
+        v._leserEnde = true;
+        if (!v._eingang.isClosed) unawaited(v._eingang.close());
+        v._beenden();
+        if (v._schreiberEnde) v._handleSchliessen();
       }
     });
     return v;
@@ -329,20 +350,30 @@ class _PipeVerbindung implements KanalVerbindung {
   @override
   Future<void> schliessen() async {
     if (_zu) return;
-    _zu = true;
-    _schreiberPort.send(null);
-    _cancelIoEx(_handle, nullptr);
+    _beenden();
   }
 
-  /// Das Lesen ist zu Ende (die Gegenseite ist weg oder wir haben geschlossen).
-  void _abschliessen() {
-    if (!_eingang.isClosed) unawaited(_eingang.close());
-    if (_handle != 0) {
-      _zu = true;
-      _schreiberPort.send(null);
-      if (_server) _disconnectNamedPipe(_handle);
-      _closeHandle(_handle);
+  /// Beendet die Verbindung in der Reihenfolge, die das Handle schützt: Erst
+  /// schreibt der Schreiber zu Ende (und meldet es), dann bricht das Lesen ab,
+  /// und das Handle wird erst geschlossen, wenn beide Isolate es nicht mehr
+  /// brauchen ([_handleSchliessen]).
+  void _beenden() {
+    if (_zu) return;
+    _zu = true;
+    _schreiberPort.send(null);
+  }
+
+  /// Wird gerufen, wenn der Schreiber fertig ist: Das Lesen ist dann der einzige
+  /// Rest, und `CancelIoEx` trifft kein Schreiben mehr.
+  void _handleSchliessen() {
+    if (_geschlossen) return;
+    if (!_leserEnde) {
+      _cancelIoEx(_handle, nullptr);
+      return; // der Leser meldet sein Ende, danach geht es hier weiter
     }
+    _geschlossen = true;
+    if (_server) _disconnectNamedPipe(_handle);
+    _closeHandle(_handle);
   }
 }
 
@@ -351,7 +382,7 @@ class _PipeVerbindung implements KanalVerbindung {
 // ---------------------------------------------------------------------------
 
 class _PipeLauscher implements KanalLauscher {
-  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._sa, this._erste) {
+  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._sa, this._beschreibung, this._erste) {
     unawaited(_annehmen(_erste));
   }
 
@@ -359,6 +390,7 @@ class _PipeLauscher implements KanalLauscher {
   final String _sid;
   final void Function(String)? _abgewiesen;
   final Pointer _sa;
+  final Pointer _beschreibung;
   final int _erste;
   final _neu = StreamController<KanalVerbindung>();
   bool _zu = false;
@@ -407,7 +439,14 @@ class _PipeLauscher implements KanalLauscher {
         _closeHandle(handle);
       }
       if (naechste == _invalidHandle) {
+        // Niemand kann sich mehr verbinden: Der Server meldet es, statt weiter
+        // so zu tun, als lausche er.
         _abgewiesen?.call('Der Kanal ließ sich nicht neu öffnen.');
+        if (!_neu.isClosed) {
+          _neu.addError(KanalFehler('Der Kanal ließ sich nicht neu öffnen.'));
+          unawaited(_neu.close());
+        }
+        _freigeben();
         return;
       }
       handle = naechste;
@@ -443,11 +482,23 @@ class _PipeLauscher implements KanalLauscher {
     }
   }
 
+  bool _frei = false;
+
+  /// Gibt die Zugriffsliste frei, mit der die Instanzen angelegt wurden; danach
+  /// legt niemand mehr eine an.
+  void _freigeben() {
+    if (_frei) return;
+    _frei = true;
+    _localFree(_beschreibung);
+    calloc.free(_sa);
+  }
+
   @override
   Future<void> schliessen() async {
     _zu = true;
     if (_warten != 0) _cancelIoEx(_warten, nullptr);
-    await _neu.close();
+    if (!_neu.isClosed) unawaited(_neu.close());
+    _freigeben();
   }
 }
 
@@ -484,7 +535,9 @@ class WindowsKanal extends KanalOrt {
     if (erste == _invalidHandle) {
       throw KanalFehler('Der Kanal ist schon belegt: moocp läuft in diesem Konto schon, oder ein anderes Konto hat den Namen belegt.');
     }
-    return _PipeLauscher(pipe, sid, abgewiesen, sa, erste);
+    final b = beschreibung.value;
+    calloc.free(beschreibung);
+    return _PipeLauscher(pipe, sid, abgewiesen, sa, b, erste);
   }
 
   @override
@@ -510,7 +563,12 @@ class WindowsKanal extends KanalOrt {
           calloc.free(pid);
           if (serverSid != sid) {
             _closeHandle(h);
-            throw KanalUnsicher('Der Kanal wird von einem anderen Konto bedient.');
+            // Ein Prozess mit höheren Rechten (die App „als Administrator“) lässt sein
+            // Token nicht lesen: Das ist nicht dasselbe wie ein fremdes Konto, die
+            // Verbindung wird aber in beiden Fällen nicht benutzt.
+            throw KanalUnsicher(serverSid == null
+                ? 'Das Konto, das den Kanal bedient, ließ sich nicht feststellen (läuft moocp mit anderen Rechten?).'
+                : 'Der Kanal wird von einem anderen Konto bedient.');
           }
           return await _PipeVerbindung.oeffnen(h, server: false);
         }

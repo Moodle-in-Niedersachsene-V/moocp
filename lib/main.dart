@@ -31,6 +31,7 @@ import 'freigabe.dart';
 import 'installer/installer_start.dart';
 import 'profile_dialog.dart';
 import 'log.dart';
+import 'mcp/bruecke.dart' show profilAusArgumenten;
 import 'mcp/kanal.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
@@ -100,7 +101,7 @@ Future<void> main(List<String> argumente) async {
   if (argumente.contains(claudeEntfernenSchalter)) {
     exit(await _claudeEntfernen());
   }
-  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste());
+  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste(argumente.contains('--profil') ? (profilAusArgumenten(argumente) ?? '') : null));
   if (argumente.contains(versionSchalter)) exit(await _version());
   lizenzAnmelden();
   // Die fertige Windows-App hat keine Konsole; print ginge dort ins Leere und
@@ -145,7 +146,7 @@ Future<void> main(List<String> argumente) async {
   // Die Brücke erreicht die App über den Kanal des Kontos und liest die
   // Werkzeugliste aus einer Datei darin, solange die App nicht läuft
   // (mcp/kanal.dart); unter Windows fragt sie die exe.
-  unawaited(werkzeuglisteAblegen(protokoll));
+  unawaited(werkzeuglisteAblegen(protokoll, einstellungen.profile.isEmpty ? [Profil.migriert('')] : einstellungen.profile));
   // Je Instanzprofil ein Zugang, eine Freigabe und ein MCP-Server mit eigenem
   // Endpunkt und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
   // Anmeldung die Oberfläche zeigt.
@@ -364,7 +365,7 @@ List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) =>
 /// läuft. Eine Ausnahme von E11 wie die Brücke selbst: Auf stdout stehen nur
 /// Namen, Beschreibungen und Parameter der Werkzeuge. Meldungen von mcp_dart
 /// gehen an den Logger, und dem hört hier niemand zu.
-Future<int> _werkzeugliste() async {
+Future<int> _werkzeugliste(String? profilName) async {
   try {
     mcpLogsUmleiten();
     stdout.writeln(
@@ -372,6 +373,7 @@ Future<int> _werkzeugliste() async {
         await werkzeuglisteFuerBruecke(
           einstellungen: () => einstellungenDatei,
           plugins: () => Directory(pluginsOrdner),
+          profilName: profilName,
         ),
       ),
     );
@@ -382,19 +384,23 @@ Future<int> _werkzeugliste() async {
   }
 }
 
-/// Legt die Werkzeugliste für die Brücke ab (nur Linux und Mac, siehe
-/// KanalOrt.listeLesen): dasselbe, was `--werkzeugliste` ausgibt. Ein Fehler
-/// dabei ändert nichts am Start; die Brücke sagt dann, dass sie keine Liste hat.
-Future<void> werkzeuglisteAblegen(Protokoll protokoll) async {
+/// Legt die Werkzeugliste für die Brücke jedes Profils ab (nur Linux und Mac,
+/// siehe KanalOrt.listeLesen): je Profil dasselbe, was `--werkzeugliste
+/// --profil Name` ausgibt. Ein Fehler dabei ändert nichts am Start; die
+/// Brücke sagt dann, dass sie keine Liste hat.
+Future<void> werkzeuglisteAblegen(Protokoll protokoll, Iterable<Profil> profile) async {
   if (Platform.isWindows) return;
-  try {
-    final liste = await werkzeuglisteFuerBruecke(
-      einstellungen: () => einstellungenDatei,
-      plugins: () => Directory(pluginsOrdner),
-    );
-    await standardKanalOrt.listeAblegen(jsonEncode(liste));
-  } catch (e) {
-    protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
+  for (final profil in profile) {
+    try {
+      final liste = await werkzeuglisteFuerBruecke(
+        einstellungen: () => einstellungenDatei,
+        plugins: () => Directory(pluginsOrdner),
+        profilName: profil.mcpName,
+      );
+      await standardKanalOrt.listeAblegen(profil.mcpName, jsonEncode(liste));
+    } catch (e) {
+      protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
+    }
   }
 }
 
@@ -866,7 +872,7 @@ class _HauptseiteState extends State<Hauptseite> {
     }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
     // Die Werkzeuge der Plugins stehen jetzt in den Einstellungen.
-    unawaited(werkzeuglisteAblegen(widget.protokoll));
+    unawaited(werkzeuglisteAblegen(widget.protokoll, _alleProfile));
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen

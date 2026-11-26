@@ -253,7 +253,15 @@ class McpDienst implements AufrufKontext {
     );
     _lauscher = l;
     _laufendeNamen[profil.port] = name;
-    _annahme = l.verbindungen.listen(_verbindungAufnehmen);
+    _annahme = l.verbindungen.listen(
+      _verbindungAufnehmen,
+      // Der Kanal kann nicht weiter lauschen (Windows: keine neue Pipe-Instanz):
+      // Der Server gilt als beendet, statt als laufend zu erscheinen.
+      onError: (Object e) {
+        protokoll.eintrag(Art.fehler, 'MCP-Kanal beendet (${profil.mcpName}): ${e is KanalFehler ? e.text : e.runtimeType}');
+        _lauscher = null;
+      },
+    );
     protokoll.eintrag(Art.info, 'MCP-Server läuft auf dem Kanal des Kontos ($name)');
   }
 

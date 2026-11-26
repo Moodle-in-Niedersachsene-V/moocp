@@ -97,9 +97,9 @@ abstract class KanalOrt {
   /// Fenster aufgeht (`moocp --werkzeugliste` startet die Oberfläche), und eine
   /// Datei im Ordner des Kontos kann sie lesen, ohne dass moocp läuft. Unter
   /// Windows fragt die Brücke `moocp.exe --werkzeugliste`.
-  Future<String?> listeLesen() async => null;
+  Future<String?> listeLesen(String name) async => null;
 
-  Future<void> listeAblegen(String json) async {}
+  Future<void> listeAblegen(String name, String json) async {}
 }
 
 /// Der Kanal dieses Systems. Austauschbar für die Tests, die die App nicht
@@ -129,13 +129,19 @@ List<List<String>> kanalOrdnerKetten(
   bool? macos,
   PrivatSystem? system,
   String? temp,
+  String? kurzesTemp,
   String? einstellungen,
 }) {
   final s = system ?? UnixPrivatSystem();
   final mac = macos ?? Platform.isMacOS;
   if (mac) {
+    // Der Pfad eines Unix-Sockets hat nur gut 100 Zeichen Platz; unter einem langen
+    // Benutzernamen und mit einem langen Profilnamen reicht der Einstellungsordner
+    // nicht. Dann gilt der kurze Ort, ebenso geprüft wie unter Linux.
+    final kurz = p.join(kurzesTemp ?? '/tmp', 'moocp-${s.uid}');
     return [
       [p.join(einstellungen ?? einstellungenOrdnerFuer(umgebung, macos: true), 'kanal')],
+      [kurz, p.join(kurz, 'kanal')],
     ];
   }
   bool privat(String x) {
@@ -221,6 +227,10 @@ class UnixKanal extends KanalOrt {
     String? ordner;
     String? grund;
     for (final kette in _kettenJetzt()) {
+      if (_socket(kette.last, name).length > _socketPfadHoechstens) {
+        grund ??= 'Der Pfad des Kanals ist zu lang für einen Unix-Socket.';
+        continue;
+      }
       try {
         for (final o in kette) {
           privaterOrdnerAnlegen(o, system: system, bezeichnung: 'Der Ordner für den Kanal', pfadNennen: false);
@@ -233,9 +243,6 @@ class UnixKanal extends KanalOrt {
     }
     if (ordner == null) throw KanalUnsicher(grund ?? 'Es gibt keinen Ordner für den Kanal.');
     final pfad = _socket(ordner, name);
-    if (pfad.length > _socketPfadHoechstens) {
-      throw KanalFehler('Der Pfad des Kanals ist zu lang für einen Unix-Socket.');
-    }
     await _alteEntfernen(pfad);
     final server = await ServerSocket.bind(_adresse(pfad), 0);
     try {
@@ -272,7 +279,7 @@ class UnixKanal extends KanalOrt {
     for (final kette in _kettenJetzt()) {
       // Eine Kette, die es nicht gibt, ist nur ein Ort, an dem die App nicht
       // lauscht; eine, die es gibt und nicht dem Konto gehört, ist ein Fehler.
-      if (system.angabe(kette.first) == null) continue;
+      if (system.angabe(kette.first) == null || _socket(kette.last, name).length > _socketPfadHoechstens) continue;
       try {
         for (final o in kette) {
           privaterOrdnerPruefen(o, system: system, bezeichnung: 'Der Ordner für den Kanal', pfadNennen: false);
@@ -314,7 +321,8 @@ class UnixKanal extends KanalOrt {
     throw unsicher != null ? KanalUnsicher(unsicher) : KanalNichtDa();
   }
 
-  static const _listeDatei = 'werkzeugliste.json';
+  /// Je Profil eine Datei: Die Werkzeuge eines Plugins hängen am Profil (E35).
+  static String _listeDatei(String name) => 'werkzeugliste-$name.json';
 
   /// Höchstens so viel liest die Brücke von der Liste.
   static const _listeHoechstens = 8 * 1024 * 1024;
@@ -322,7 +330,8 @@ class UnixKanal extends KanalOrt {
   /// Schreibt die Liste in den Kanalordner des Kontos, über eine Zwischendatei
   /// und mit 0600; der Ordner ist derselbe, in dem [lauschen] den Socket anlegt.
   @override
-  Future<void> listeAblegen(String json) async {
+  Future<void> listeAblegen(String name, String json) async {
+    if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');
     for (final kette in _kettenJetzt()) {
       try {
         for (final o in kette) {
@@ -331,7 +340,7 @@ class UnixKanal extends KanalOrt {
       } on PrivaterOrdnerFehler {
         continue;
       }
-      final ziel = p.join(kette.last, _listeDatei);
+      final ziel = p.join(kette.last, _listeDatei(name));
       final zwischen = File('$ziel.neu');
       zwischen.writeAsStringSync(json, flush: true);
       rechte.chmod(zwischen.path, 0x180);
@@ -343,7 +352,8 @@ class UnixKanal extends KanalOrt {
 
   /// Liest die Liste, wenn Ordner und Datei dem Konto allein gehören.
   @override
-  Future<String?> listeLesen() async {
+  Future<String?> listeLesen(String name) async {
+    if (!kanalNameGueltig(name)) return null;
     for (final kette in _kettenJetzt()) {
       if (system.angabe(kette.first) == null) continue;
       try {
@@ -353,7 +363,7 @@ class UnixKanal extends KanalOrt {
       } on PrivaterOrdnerFehler {
         continue;
       }
-      final pfad = p.join(kette.last, _listeDatei);
+      final pfad = p.join(kette.last, _listeDatei(name));
       final e = rechte.eintrag(pfad);
       if (e == null || e.art != FileSystemEntityType.file || e.uid != system.uid || e.modus & 0x3f != 0) continue;
       try {

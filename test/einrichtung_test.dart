@@ -15,6 +15,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/freigabe.dart';
+import 'package:moocp/mcp/bruecke.dart' show moocpDatei;
 import 'package:moocp/plattform/signatur_windows.dart';
 import 'package:path/path.dart' as p;
 
@@ -569,10 +570,50 @@ void main() {
       final quelle = datei('mount/usr/bin/$brueckeExe', 'neu');
       final ziel = p.join(tmp.path, 'einstellungen', 'bruecke', brueckeExe);
       datei('einstellungen/bruecke/$brueckeExe', 'alt');
-      expect(brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': 'x'}, quelle: quelle.path), isNull);
+      expect(brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': '/home/erika/moocp.AppImage'}, quelle: quelle.path), isNull);
+      final hinweis = File(p.join(p.dirname(ziel), appImageHinweis));
+      expect(hinweis.readAsStringSync(), '/home/erika/moocp.AppImage');
+      expect(FileStat.statSync(hinweis.path).mode & 0x1ff, 0x180);
       expect(File(ziel).readAsStringSync(), 'neu');
       expect(FileStat.statSync(ziel).mode & 0x1ff, 0x1ed);
       expect(File('$ziel.neu').existsSync(), isFalse);
+    });
+
+    test('Größe und Inhalt der Kopie entscheiden, nicht ihr Vorhandensein', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final u = {'APPIMAGE': '/x.AppImage'};
+      final einst = p.join(tmp.path, 'einstellungen');
+      final ziel = brueckenOrt(umgebung: u, einstellungen: einst);
+      final quelle = datei('mount/usr/bin/$brueckeExe', 'neue Brücke');
+      final kopie = datei(p.relative(ziel, from: tmp.path), 'neue Brücke');
+      bool aktuell() => brueckeAktuell(ziel, umgebung: u, quelle: quelle.path, einstellungen: einst);
+      expect(aktuell(), isTrue);
+      kopie.writeAsStringSync('alte Brücke');
+      expect(aktuell(), isFalse, reason: 'gleiche Größe, anderer Inhalt');
+      kopie.writeAsStringSync('neue Brücke und mehr');
+      expect(aktuell(), isFalse, reason: 'andere Größe');
+      expect(brueckeAktuell('/anderer/Ort/$brueckeExe', umgebung: u, quelle: quelle.path, einstellungen: einst), isTrue,
+          reason: 'nur die Kopie der Einrichtung wird verglichen');
+      expect(brueckeAktuell(ziel, umgebung: const {}, quelle: quelle.path, einstellungen: einst), isTrue, reason: 'ohne AppImage');
+    });
+
+    test('der Pfad des AppImage steht neben der Kopie, und die Brücke startet damit die App', () {
+      if (!Platform.isLinux) return;
+      final ordner = p.join(tmp.path, 'bruecke');
+      Directory(ordner).createSync();
+      // Neben der Brücke liegt keine App: das AppImage aus dem Hinweis.
+      final appImage = datei('home/moocp.AppImage', 'x');
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync(appImage.path);
+      expect(moocpDatei(ordner).path, appImage.path);
+      // Ein Hinweis auf etwas, das es nicht gibt oder nicht absolut ist: nichts davon wird gestartet.
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync('relativ/moocp.AppImage');
+      expect(moocpDatei(ordner).path, p.join(ordner, 'moocp'));
+      File(p.join(ordner, appImageHinweis)).writeAsStringSync(p.join(tmp.path, 'weg.AppImage'));
+      expect(moocpDatei(ordner).path, p.join(ordner, 'moocp'));
+      // Liegt die App neben der Brücke, gilt sie.
+      final neben = datei('bruecke/moocp', 'x');
+      expect(moocpDatei(ordner).path, neben.path);
     });
 
     test('ohne Brücke weder im AppImage noch am Ziel: ein Satz, warum', () {

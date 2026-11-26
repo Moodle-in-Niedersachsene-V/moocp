@@ -225,59 +225,71 @@ void main() {
     });
   });
 
-  group('Kein Zugangsschlüssel mehr (E6)', () {
-    test('Schlüssel aus früheren Versionen werden beim Lesen verworfen und nicht wieder geschrieben', () {
-      final j = {
-        'schluessel': 'global',
-        'profile': [
-          {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'schluessel': 'eigener'},
-        ],
-      };
-      expect(Einstellungen.schluesselVonFrueher(j), isTrue);
-      final e = Einstellungen.aus(j, _standard());
-      final text = jsonEncode(e.zuJson());
-      expect(text, isNot(contains('schluessel')));
-      expect(text, isNot(contains('global')));
+  group('Kein Zugangsschlüssel für den Kanal (E6); Platzhalter für ältere Versionen (E39)', () {
+    final profile = [
+      {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
+      {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'schluessel': 'eigener'},
+    ];
+
+    test('Schlüssel aus früheren Dateien gelten nicht mehr: beim Schreiben stehen andere', () {
+      final e = Einstellungen.aus({'schluessel': 'global', 'profile': profile}, _standard());
+      final j = e.zuJson();
+      expect(j['schluessel'], isNot('global'));
+      expect(((j['profile']! as List)[1] as Map)['schluessel'], isNot('eigener'));
+      final text = jsonEncode(j);
+      expect(text, isNot(contains('"global"')));
       expect(text, isNot(contains('eigener')));
-      expect(Einstellungen.schluesselVonFrueher(e.zuJson()), isFalse);
     });
 
-    test('schluesselVonFrueher: ein Schlüssel an einer der beiden Stellen genügt', () {
-      expect(Einstellungen.schluesselVonFrueher({}), isFalse);
-      expect(Einstellungen.schluesselVonFrueher({'schluessel': 'x'}), isTrue);
-      expect(Einstellungen.schluesselVonFrueher({
-        'profile': [
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'schluessel': 'abc'},
-        ],
-      }), isTrue);
-      expect(Einstellungen.schluesselVonFrueher({
-        'profile': [
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'},
-        ],
-      }), isFalse);
+    test('ein Platzhalter für ein Profil ohne Schlüssel und für die Datei, je zufällig und verschieden', () {
+      final e = Einstellungen.aus({'profile': profile}, _standard());
+      final j = e.zuJson();
+      final global = j['schluessel'] as String;
+      final zwei = ((j['profile']! as List)[1] as Map)['schluessel'] as String;
+      expect(global, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(zwei, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(zwei, isNot(global));
+      expect(((j['profile']! as List)[0] as Map).containsKey('schluessel'), isFalse, reason: 'das Standardprofil nutzt den globalen');
     });
 
-    test('laden schreibt die Datei ohne die alten Schlüssel neu', () async {
+    test('ein geschriebener Platzhalter bleibt über Speichern und Laden gleich: eine ältere Version erzeugt keinen neuen', () {
+      final e = Einstellungen.aus({'profile': profile}, _standard());
+      final j = e.zuJson();
+      expect(Einstellungen.schluesselErneuern(j), isFalse);
+      final zurueck = Einstellungen.aus(jsonDecode(jsonEncode(j)) as Map<String, dynamic>, _standard());
+      expect(zurueck.zuJson()['schluessel'], j['schluessel']);
+      expect(((zurueck.zuJson()['profile']! as List)[1] as Map)['schluessel'], ((j['profile']! as List)[1] as Map)['schluessel']);
+    });
+
+    test('schluesselErneuern: Schlüssel ohne die Marke, fehlende Platzhalter', () {
+      expect(Einstellungen.schluesselErneuern({}), isTrue);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x'}), isTrue);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x', 'schluesselPlatzhalter': true, 'profile': [profile[0]]}), isFalse);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x', 'schluesselPlatzhalter': true, 'profile': [profile[0], {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'}]}), isTrue,
+          reason: 'das zweite Profil hat noch keinen Platzhalter');
+    });
+
+    test('laden schreibt die Datei mit neuen Platzhaltern, die alten Werte stehen nicht mehr darin', () async {
       final ordner = await Directory.systemTemp.createTemp('moocp_einstellungen_test_');
       addTearDown(() => ordner.delete(recursive: true));
       final datei = File('${ordner.path}/einstellungen.json');
       await datei.writeAsString(jsonEncode({
         'schluessel': 'alter-globaler-schluessel',
-        'moodleAdresse': 'https://moodle.schule.example',
         'profile': [
           {'kennung': 'standard', 'name': 'Moodle', 'adresse': 'https://moodle.schule.example', 'port': 47811, 'mcpName': 'moodle'},
           {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'port': 47812, 'mcpName': 'zwei', 'schluessel': 'alter-profilschluessel'},
         ],
         'zukunft': {'bleibt': true},
       }));
-      final geladen = await Einstellungen.laden(datei: datei);
-      expect(geladen.profile, hasLength(2));
+      await Einstellungen.laden(datei: datei);
       final text = await datei.readAsString();
       expect(text, isNot(contains('alter-globaler-schluessel')));
       expect(text, isNot(contains('alter-profilschluessel')));
       expect(text, contains('zukunft'), reason: 'Unbekanntes bleibt (E39)');
-      expect(text, contains('"port": 47812'), reason: 'der Port bleibt für die Rückkehr zu einer älteren Version');
+      expect(text, contains('"port": 47812'));
+      final erster = jsonDecode(text) as Map;
+      await Einstellungen.laden(datei: datei);
+      expect((jsonDecode(await datei.readAsString()) as Map)['schluessel'], erster['schluessel'], reason: 'beim zweiten Laden unverändert');
     });
 
     test('ändern am Profil (Name, Adresse, Stufe) behält Port und Servernamen', () {

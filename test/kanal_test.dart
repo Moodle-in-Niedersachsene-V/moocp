@@ -134,6 +134,20 @@ void main() {
     await (await kanal.verbinden('moodle')).schliessen();
   });
 
+  test('ein Pfad, der für einen Unix-Socket zu lang ist, weicht auf die nächste Kette aus; die Brücke findet sie', () async {
+    final lang = p.join(wurzel.path, 'x' * 60, 'kanal');
+    Directory(p.dirname(lang)).createSync(recursive: true);
+    Process.runSync('chmod', ['700', p.dirname(lang)]);
+    final zwei = UnixKanal(ketten: () => [[p.dirname(lang), lang], [ordner]]);
+    final l = await zwei.lauschen('moodle-mit-langem-namen');
+    addTearDown(l.schliessen);
+    expect(File(p.join(ordner, 'moodle-mit-langem-namen.sock')).existsSync(), isTrue);
+    await (await zwei.verbinden('moodle-mit-langem-namen')).schliessen();
+    // Nur lange Ketten: Der Start meldet es, statt ohne Kanal zu laufen.
+    final nurLang = UnixKanal(ketten: () => [[p.dirname(lang), lang]]);
+    await expectLater(nurLang.lauschen('moodle-mit-langem-namen'), throwsA(isA<KanalUnsicher>()));
+  }, skip: Platform.isWindows ? 'POSIX' : null);
+
   test('ein Profilname mit Pfadanteilen bildet keinen Endpunkt', () async {
     await expectLater(kanal.lauschen('../x'), throwsA(isA<KanalFehler>()));
     await expectLater(kanal.verbinden('a/b'), throwsA(isA<KanalFehler>()));
@@ -286,31 +300,40 @@ void main() {
     });
 
     test('abgelegt im Ordner des Kontos mit 0600, von dort gelesen', () async {
-      expect(await kanal.listeLesen(), isNull, reason: 'noch nichts abgelegt');
-      await kanal.listeAblegen(liste);
-      expect(FileStat.statSync(p.join(ordner, 'werkzeugliste.json')).mode & 0x1ff, 0x180);
-      expect(File(p.join(ordner, 'werkzeugliste.json.neu')).existsSync(), isFalse, reason: 'keine Zwischendatei übrig');
-      expect(await kanal.listeLesen(), liste);
-      final bruecke = await werkzeuglisteFuerStart(File('moocp'), ort: kanal);
+      expect(await kanal.listeLesen('moodle'), isNull, reason: 'noch nichts abgelegt');
+      await kanal.listeAblegen('moodle', liste);
+      expect(FileStat.statSync(p.join(ordner, 'werkzeugliste-moodle.json')).mode & 0x1ff, 0x180);
+      expect(File(p.join(ordner, 'werkzeugliste-moodle.json.neu')).existsSync(), isFalse, reason: 'keine Zwischendatei übrig');
+      expect(await kanal.listeLesen('moodle'), liste);
+      final bruecke = await werkzeuglisteFuerStart(File('moocp'), 'moodle', ort: kanal);
       expect(bruecke?.versionen, ['2025-06-18']);
     }, skip: Platform.isWindows ? 'Windows fragt die exe' : null);
 
     test('eine Datei eines anderen Kontos oder mit offenen Rechten wird nicht gelesen', () async {
-      await kanal.listeAblegen(liste);
+      await kanal.listeAblegen('moodle', liste);
       final fremd = UnixKanal(ketten: () => [[ordner]], rechte: _FremderSocket());
-      expect(await fremd.listeLesen(), isNull);
-      Process.runSync('chmod', ['644', p.join(ordner, 'werkzeugliste.json')]);
-      expect(await kanal.listeLesen(), isNull);
+      expect(await fremd.listeLesen('moodle'), isNull);
+      Process.runSync('chmod', ['644', p.join(ordner, 'werkzeugliste-moodle.json')]);
+      expect(await kanal.listeLesen('moodle'), isNull);
     });
 
     test('ein Ordner, der nicht dem Konto allein gehört, liefert keine Liste', () async {
-      await kanal.listeAblegen(liste);
+      await kanal.listeAblegen('moodle', liste);
       Process.runSync('chmod', ['755', ordner]);
-      expect(await kanal.listeLesen(), isNull);
+      expect(await kanal.listeLesen('moodle'), isNull);
     });
 
+    test('je Profil eine eigene Liste: die Brücke liest nur die ihres Profils', () async {
+      await kanal.listeAblegen('moodle', liste);
+      await kanal.listeAblegen('moodle-test', liste.replaceAll('2025-06-18', '2025-03-26'));
+      expect((await werkzeuglisteFuerStart(File('moocp'), 'moodle', ort: kanal))?.versionen, ['2025-06-18']);
+      expect((await werkzeuglisteFuerStart(File('moocp'), 'moodle-test', ort: kanal))?.versionen, ['2025-03-26']);
+      expect(await werkzeuglisteFuerStart(File('moocp'), 'anderes', ort: kanal), isNull);
+      expect(await kanal.listeLesen('../x'), isNull);
+    }, skip: Platform.isWindows ? 'Windows fragt die exe' : null);
+
     test('ohne Datei keine Liste: die Brücke sagt es', () async {
-      expect(await werkzeuglisteFuerStart(File('moocp'), ort: kanal), isNull);
+      expect(await werkzeuglisteFuerStart(File('moocp'), 'moodle', ort: kanal), isNull);
     });
   });
 
@@ -335,7 +358,11 @@ void main() {
     });
 
     test('auf dem Mac ein Ordner im Einstellungsordner, nie im Temp-Bereich', () {
-      expect(kanalOrdnerKetten(const {}, macos: true, einstellungen: '/e/moocp'), [['/e/moocp/kanal']]);
+      final uid = UnixPrivatSystem().uid;
+      expect(kanalOrdnerKetten(const {}, macos: true, einstellungen: '/e/moocp'), [
+        ['/e/moocp/kanal'],
+        ['/tmp/moocp-$uid', '/tmp/moocp-$uid/kanal'],
+      ], reason: 'dahinter der kurze Ort, für lange Benutzer- und Profilnamen');
     });
   });
 

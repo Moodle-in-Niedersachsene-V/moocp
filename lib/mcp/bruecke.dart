@@ -66,21 +66,21 @@ String? profilAusArgumenten(List<String> argumente) {
 /// Aufruf aus bin/moocp_bruecke.dart.
 Future<int> brueckeStarten(List<String> argumente) async {
   final profil = profilAusArgumenten(argumente);
-  final exe = File(p.join(p.dirname(Platform.resolvedExecutable), _moocpDatei));
+  final exe = moocpDatei(p.dirname(Platform.resolvedExecutable));
   final Bruecke bruecke;
   if (profil == null) {
     // Ein falscher Aufruf des KI-Werkzeugs: Jede Anfrage bekommt den Grund.
     bruecke = Bruecke(
       verbinden: () async => throw KanalFehler('Der Profilname der Brücke (--profil) ist ungültig.'),
       ausgabe: stdout.writeln,
-      listeHolen: () => werkzeuglisteFuerStart(exe),
+      listeHolen: () => werkzeuglisteFuerStart(exe, standardProfilName),
       appStarten: () async => false,
     );
   } else {
     bruecke = Bruecke(
       verbinden: () => standardKanalOrt.verbinden(profil),
       ausgabe: stdout.writeln,
-      listeHolen: () => werkzeuglisteFuerStart(exe),
+      listeHolen: () => werkzeuglisteFuerStart(exe, profil),
       appStarten: () => moocpStarten(exe),
     );
   }
@@ -92,6 +92,21 @@ Future<int> brueckeStarten(List<String> argumente) async {
 /// Die Programmdatei der App neben der Brücke: `moocp.exe` unter Windows,
 /// `moocp` auf dem Mac und unter Linux.
 String get _moocpDatei => Platform.isWindows ? 'moocp.exe' : 'moocp';
+
+/// Die App, die die Brücke startet: `moocp` neben ihr, sonst -- bei der Kopie
+/// aus einem AppImage, neben der keine App liegt -- das AppImage, dessen Pfad
+/// `appimage` im selben Ordner nennt (einrichtung.dart, brueckeBereitstellen).
+File moocpDatei(String ordner) {
+  final neben = File(p.join(ordner, _moocpDatei));
+  if (neben.existsSync()) return neben;
+  try {
+    final pfad = File(p.join(ordner, appImageHinweis)).readAsStringSync().trim();
+    if (pfad.isNotEmpty && p.isAbsolute(pfad) && File(pfad).existsSync()) return File(pfad);
+  } on FileSystemException {
+    // kein Hinweis: bleibt die Datei neben der Brücke, die es nicht gibt
+  }
+  return neben;
+}
 
 /// Startet moocp losgelöst von der Brücke: ohne ihre Rohre zum Client, und
 /// so, dass die App weiterläuft, wenn die Brücke endet. Läuft moocp schon,
@@ -112,10 +127,10 @@ Future<bool> moocpStarten(File exe) async {
 /// Datei, die die App im Ordner des Kontos ablegt (kanal.dart, listeLesen) --
 /// die Oberfläche der App öffnet sich dort mit jedem Start, auch mit
 /// `--werkzeugliste`. Null, wenn es sie nicht gibt.
-Future<Werkzeugliste?> werkzeuglisteFuerStart(File exe, {KanalOrt? ort}) async {
-  if (Platform.isWindows) return werkzeuglisteHolen(exe);
+Future<Werkzeugliste?> werkzeuglisteFuerStart(File exe, String profil, {KanalOrt? ort}) async {
+  if (Platform.isWindows) return werkzeuglisteHolen(exe, profil);
   try {
-    final text = await (ort ?? standardKanalOrt).listeLesen();
+    final text = await (ort ?? standardKanalOrt).listeLesen(profil);
     return text == null ? null : Werkzeugliste.ausJson(jsonDecode(text));
   } catch (_) {
     return null;
@@ -124,11 +139,13 @@ Future<Werkzeugliste?> werkzeuglisteFuerStart(File exe, {KanalOrt? ort}) async {
 
 /// Fragt die moocp.exe neben der Brücke nach ihrer Werkzeugliste
 /// (`--werkzeugliste`, main.dart). Null, wenn das nicht geht.
-Future<Werkzeugliste?> werkzeuglisteHolen(File exe) async {
+Future<Werkzeugliste?> werkzeuglisteHolen(File exe, [String profil = standardProfilName]) async {
   if (!exe.existsSync()) return null;
   try {
-    final r = await prozessAusfuehren(exe.path, const [
+    final r = await prozessAusfuehren(exe.path, [
       werkzeuglisteSchalter,
+      '--profil',
+      profil,
     ], stdoutEncoding: utf8).timeout(const Duration(seconds: 30));
     if (r.exitCode != 0) return null;
     // Eine Zeile JSON. Eine Entwicklerversion schreibt davor noch die

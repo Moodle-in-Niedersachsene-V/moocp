@@ -13,6 +13,8 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
 import 'einrichtung.dart' show werkzeugSkillGueltig;
 import 'einstellungen_ort.dart';
 import 'freigabe.dart';
@@ -22,9 +24,9 @@ import 'profil.dart';
 
 class Einstellungen {
   static const _bekannt = {
-    // `schluessel` steht hier nur, damit ein Wert aus früheren Versionen nicht
-    // als unbekanntes Feld erhalten bleibt (laden).
-    'moodleAdresse', 'profile', 'port', 'schluessel', 'bestaetigungen',
+    // `schluessel` und `schluesselPlatzhalter` gehören [_platzhalter]: kein
+    // unbekanntes Feld, das beim Speichern unverändert zurückkäme.
+    'moodleAdresse', 'profile', 'port', 'schluessel', 'schluesselPlatzhalter', 'bestaetigungen',
     'wahlSkills', 'werkzeugeAbgewaehlt', 'updatePruefen', 'updateZuletzt',
     'updateErwartet', 'plugins', 'pluginUpdates', 'pluginSkillOrdner',
     'fremdeSkillOrdner', 'skillFehlerGesehen', 'schnittstelleGesehen',
@@ -200,6 +202,32 @@ class Einstellungen {
 
   static File get _datei => einstellungenDatei;
 
+  /// Zufallswerte, die nur für ältere Versionen in der Datei stehen (E39):
+  /// Eine Version vor dem Kanal (E6) erzeugte ohne `schluessel` bei jedem
+  /// Start einen neuen und trüge ihn in die Einträge der KI-Werkzeuge ein, die
+  /// dann bei jedem Start veralteten. Mit den Platzhaltern bleibt der Wert
+  /// stabil. **Sie sind kein Zugangsschlüssel**: Dieser Stand kennt keinen, kein
+  /// Kanal und kein Server liest sie, und sie gewähren nichts; ein Wert aus einer
+  /// früheren Datei wird nie übernommen, sondern ersetzt (bei der Rückkehr zu
+  /// einer älteren Version gilt dann der Platzhalter, nicht ein alter Schlüssel).
+  /// Der Schlüssel `''` ist der globale, sonst die Kennung des Profils.
+  final Map<String, String> _platzhalter = {};
+
+  static String _zufall() {
+    final r = Random.secure();
+    return List.generate(32, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Ergänzt fehlende Platzhalter und verwirft die von Profilen, die es nicht gibt.
+  void _platzhalterErgaenzen() {
+    _platzhalter.putIfAbsent('', _zufall);
+    final kennungen = {for (final p in profile) if (!p.istStandard) p.kennung};
+    _platzhalter.removeWhere((k, _) => k.isNotEmpty && !kennungen.contains(k));
+    for (final k in kennungen) {
+      _platzhalter.putIfAbsent(k, _zufall);
+    }
+  }
+
   static Future<Einstellungen> laden({File? datei}) async {
     final quelle = datei ?? _datei;
     final standard = Einstellungen(moodleAdresse: '');
@@ -207,11 +235,11 @@ class Einstellungen {
       if (await quelle.exists()) {
         final j = jsonDecode(await quelle.readAsString()) as Map<String, dynamic>;
         final e = Einstellungen.aus(j, standard);
-        // Zugangsschlüssel von früher (global und je Profil) stehen nicht mehr
-        // in der Datei: Sie wird ohne sie neu geschrieben, damit sie nirgends
-        // mehr gelten (E6). Auch eine Datei ohne sie bekommt die Rechte, die
-        // ihr zustehen.
-        if (schluesselVonFrueher(j)) {
+        // Zugangsschlüssel von früher (global und je Profil) gelten nicht mehr:
+        // Die Datei wird mit neuen Platzhaltern geschrieben ([_platzhalter]), damit
+        // die alten nirgends mehr gelten (E6). Auch eine Datei, die schon stimmt,
+        // bekommt die Rechte, die ihr zustehen.
+        if (schluesselErneuern(j)) {
           try {
             await e._speichern(quelle);
           } catch (_) {
@@ -229,12 +257,16 @@ class Einstellungen {
     return standard;
   }
 
-  /// Ob in der Datei ein Zugangsschlüssel der früheren Versionen steht, im
-  /// Ganzen oder in einem Profil.
-  static bool schluesselVonFrueher(Map<String, dynamic> j) {
-    if (j.containsKey('schluessel')) return true;
+  /// Ob die Datei neu geschrieben werden muss, damit die Werte für ältere
+  /// Versionen stimmen: Ohne die Marke `schluesselPlatzhalter` stammt ein
+  /// Schlüssel aus einer früheren Version, und es fehlt der globale oder der
+  /// eines nicht-Standard-Profils.
+  static bool schluesselErneuern(Map<String, dynamic> j) {
+    if (j['schluesselPlatzhalter'] != true || j['schluessel'] is! String) return true;
     final liste = j['profile'];
-    return liste is List && liste.any((e) => e is Map && e.containsKey('schluessel'));
+    if (liste is! List) return false;
+    return liste.any((e) =>
+        e is Map && e['kennung'] != Profil.standardKennung && e['kennung'] is String && e['schluessel'] is! String);
   }
 
   /// Nur das Konto liest und schreibt die Datei und betritt ihren Ordner:
@@ -289,6 +321,14 @@ class Einstellungen {
       skillFehlerGesehen: (j['skillFehlerGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
       schnittstelleGesehen: (j['schnittstelleGesehen'] as List?)?.whereType<String>().toSet() ?? const {},
     );
+    if (!schluesselErneuern(j)) {
+      ergebnis._platzhalter['' ] = j['schluessel'] as String;
+      for (final e in (j['profile'] as List? ?? const [])) {
+        if (e is Map && e['kennung'] is String && e['schluessel'] is String) {
+          ergebnis._platzhalter[e['kennung'] as String] = e['schluessel'] as String;
+        }
+      }
+    }
     ergebnis._unbekannt = _rest(j, _bekannt);
     ergebnis._unbekanntePlugins = _resteJeEintrag(j['plugins'], _pluginFelder);
     ergebnis._unbekannteUpdates = _resteJeEintrag(j['pluginUpdates'], _updateFelder);
@@ -296,11 +336,20 @@ class Einstellungen {
   }
 
   /// Der Inhalt der Datei, wie ihn [speichern] schreibt.
-  Map<String, Object?> zuJson() => {
+  Map<String, Object?> zuJson() {
+    _platzhalterErgaenzen();
+    return _json();
+  }
+
+  Map<String, Object?> _json() => {
         ..._unbekannt,
         'moodleAdresse': moodleAdresse,
-        'profile': [for (final p in profile) p.toJson()],
+        'profile': [
+          for (final p in profile) {...p.toJson(), if (!p.istStandard) 'schluessel': _platzhalter[p.kennung]},
+        ],
         'port': port,
+        'schluessel': _platzhalter[''],
+        'schluesselPlatzhalter': true,
         'bestaetigungen': bestaetigungen.text,
         if (wahlSkills != null) 'wahlSkills': (wahlSkills!.toList()..sort()),
         if (werkzeugeAbgewaehlt.isNotEmpty) 'werkzeugeAbgewaehlt': (werkzeugeAbgewaehlt.toList()..sort()),

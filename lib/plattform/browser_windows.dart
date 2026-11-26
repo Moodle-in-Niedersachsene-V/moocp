@@ -489,6 +489,11 @@ class WindowsBrowserStarter implements BrowserStarter {
       final proz = pi.ref.hProcess;
       // Der Browser läuft schon: Scheitert der Rest des Aufbaus, wird er
       // beendet und alles geschlossen, sonst bliebe er ohne Besitzer.
+      // Läuft das Lese-Isolate schon, gehört ihm appLesen: Es schließt das
+      // Handle selbst nach dem Ende des Kanals (der beendete Browser liefert
+      // es). Ein zweites Schließen träfe sonst womöglich ein neu vergebenes
+      // Handle.
+      var leserLaeuft = false;
       return await beiFehlerAufraeumen(
         () => _WindowsProzess.start(
           k,
@@ -496,12 +501,13 @@ class WindowsBrowserStarter implements BrowserStarter {
           pi.ref.dwProcessId,
           appSchreiben,
           appLesen,
+          leserGestartet: () => leserLaeuft = true,
         ),
         () {
           k.terminate(proz, 1);
           zu(proz);
           zu(appSchreiben);
-          zu(appLesen);
+          if (!leserLaeuft) zu(appLesen);
         },
       );
     } finally {
@@ -587,11 +593,13 @@ class _WindowsProzess implements BrowserProzess {
     Pointer<Void> proz,
     int pid,
     Pointer<Void> appSchreiben,
-    Pointer<Void> appLesen,
-  ) async {
+    Pointer<Void> appLesen, {
+    required void Function() leserGestartet,
+  }) async {
     final lese = ReceivePort(), schreibe = ReceivePort();
     final ein = StreamController<List<int>>();
     await Isolate.spawn(_lesen, (lese.sendPort, appLesen.address));
+    leserGestartet();
     await Isolate.spawn(_schreiben, (schreibe.sendPort, appSchreiben.address));
     final an = Completer<SendPort>();
     schreibe.listen((m) {
@@ -605,7 +613,10 @@ class _WindowsProzess implements BrowserProzess {
         if (!ein.isClosed) unawaited(ein.close());
       }
     });
-    return _WindowsProzess._(k, proz, pid, await an.future, ein);
+    // Stirbt das Schreib-Isolate, bevor es seinen Port schickt, hinge der
+    // Aufbau sonst für immer, und das Aufräumen liefe nie.
+    final port = await an.future.timeout(const Duration(seconds: 10));
+    return _WindowsProzess._(k, proz, pid, port, ein);
   }
 
   final _Kernel32 _k;

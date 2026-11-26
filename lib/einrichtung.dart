@@ -1038,11 +1038,24 @@ bool _brueckePasst(Object? befehl) =>
 
 /// Ob die Kopie der Brücke im Einstellungsordner ([brueckeBereitstellen]) mit der
 /// Brücke im laufenden AppImage übereinstimmt (Größe und Inhalt); eine Kopie
-/// aus einer älteren App gilt als veraltet, damit „Aktualisieren“ sie ersetzt.
+/// aus einer älteren App gilt als veraltet, damit „Aktualisieren“ sie ersetzt;
+/// ebenso eine, deren Hinweis auf das AppImage ([appImageHinweis]) auf einen
+/// anderen Ort zeigt als das laufende.
 /// Außerhalb eines AppImage und ohne die Brücke dort zum Vergleichen: ja.
 bool brueckeAktuell(String kopie, {Map<String, String>? umgebung, String? quelle, String? einstellungen}) {
   if (!imAppImage(umgebung) || festeBruecke != null) return true;
   if (kopie != brueckenOrt(umgebung: umgebung, einstellungen: einstellungen)) return true;
+  // Der Hinweis auf das AppImage gehört zur Kopie: Zeigt er auf einen anderen
+  // Ort als den jetzigen, würde die Brücke die App dort suchen, wo sie nicht
+  // mehr liegt.
+  try {
+    final hinweis = File(p.join(p.dirname(kopie), appImageHinweis));
+    if (!hinweis.existsSync() || hinweis.readAsStringSync() != (_v(umgebung ?? Platform.environment, 'APPIMAGE') ?? '')) {
+      return false;
+    }
+  } on FileSystemException {
+    return false;
+  }
   final von = File(quelle ?? p.join(p.dirname(Platform.resolvedExecutable), brueckeExe));
   if (!von.existsSync()) return true;
   try {
@@ -1351,16 +1364,39 @@ String? brueckeBereitstellen(String ziel, {Map<String, String>? umgebung, String
         von.copySync(zwischen.path);
         const UnixDateiRechte().chmod(zwischen.path, 0x1ed);
         zwischen.renameSync(ziel);
-        // Wo das AppImage liegt, damit die Brücke die App starten kann.
-        final hinweis = File(p.join(p.dirname(ziel), appImageHinweis))
-          ..writeAsStringSync(_v(umgebung ?? Platform.environment, 'APPIMAGE') ?? '', flush: true);
-        const UnixDateiRechte().chmod(hinweis.path, 0x180);
+        _appImageHinweisSchreiben(ziel, umgebung);
       } on FileSystemException {
         return 'Die Brücke ließ sich nicht an ihren dauerhaften Ort kopieren.';
       }
     }
   }
   return File(ziel).existsSync() ? null : '$brueckeExe fehlt neben moocp: moocp neu installieren.';
+}
+
+/// Wo das AppImage liegt, neben die Kopie der Brücke [ziel] geschrieben, damit
+/// die Brücke die App starten kann (bruecke.dart, moocpStarten).
+void _appImageHinweisSchreiben(String ziel, Map<String, String>? umgebung) {
+  final hinweis = File(p.join(p.dirname(ziel), appImageHinweis))
+    ..writeAsStringSync(_v(umgebung ?? Platform.environment, 'APPIMAGE') ?? '', flush: true);
+  const UnixDateiRechte().chmod(hinweis.path, 0x180);
+}
+
+/// Schreibt bei jedem Start im AppImage den Hinweis auf den jetzigen Ort neu,
+/// auch wenn die Brücke selbst gleich geblieben ist: Dasselbe AppImage kann
+/// unter einem anderen Namen oder an einem anderen Ort liegen, und das alte
+/// wird vielleicht gelöscht. Nur wenn es die Kopie der Brücke gibt, auf die
+/// der Hinweis gehört. Null, wenn nichts zu tun war oder es gelang; sonst ein
+/// Satz, warum nicht (die Brücke fände die App dann nicht).
+String? appImageHinweisAktualisieren({Map<String, String>? umgebung, String? einstellungen}) {
+  if (festeBruecke != null || !imAppImage(umgebung)) return null;
+  final ziel = brueckenOrt(umgebung: umgebung, einstellungen: einstellungen);
+  if (!File(ziel).existsSync()) return null;
+  try {
+    _appImageHinweisSchreiben(ziel, umgebung);
+    return null;
+  } on FileSystemException {
+    return 'Der Ort des AppImage ließ sich nicht neben der Brücke festhalten.';
+  }
 }
 
 /// Was nach dem Entfernen noch da ist.

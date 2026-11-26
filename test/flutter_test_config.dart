@@ -12,9 +12,39 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/anmeldedaten.dart';
 import 'package:moocp/mcp/kanal.dart';
+import 'package:moocp/mcp/kanal_windows.dart';
 import 'package:moocp/plattform/linux_schluesselbund.dart';
 import 'package:moocp/testschalter.dart';
 import 'package:path/path.dart' as p;
+
+/// Unter Windows gehört der Name einer Pipe dem ganzen Rechner: Zwei Testdateien
+/// mit demselben Profilnamen (`test`, `moodle`) oder eine laufende moocp würden
+/// einander den Namen wegnehmen. Jede Testdatei läuft in einem eigenen Prozess;
+/// ihr Präfix `zz<pid>-` macht die Namen eindeutig, die Namen der App bleiben
+/// unberührt.
+class _PipesMitPraefix extends KanalOrt {
+  _PipesMitPraefix(this._innen, this._praefix);
+  final KanalOrt _innen;
+  final String _praefix;
+
+  String _n(String name) => '$_praefix$name';
+
+  @override
+  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen, void Function(String text)? hinweis}) =>
+      _innen.lauschen(_n(name), abgewiesen: abgewiesen, hinweis: hinweis);
+
+  @override
+  Future<KanalVerbindung> verbinden(String name) => _innen.verbinden(_n(name));
+
+  @override
+  Future<String?> listeLesen(String name) => _innen.listeLesen(_n(name));
+
+  @override
+  Future<void> listeAblegen(String name, String json) => _innen.listeAblegen(_n(name), json);
+
+  @override
+  Future<void> listeEntfernen(String name) => _innen.listeEntfernen(_n(name));
+}
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   testbetriebFuerTestsSetzen(true);
@@ -29,6 +59,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   if (kanalWurzel != null) {
     standardKanalOrt = UnixKanal(ketten: () => [[p.join(kanalWurzel.path, 'k')]]);
   }
+  if (Platform.isWindows) standardKanalOrt = _PipesMitPraefix(WindowsKanal(), 'zz$pid-');
   await testMain();
   // Nach den Tests der Datei: Der Lauf beginnt erst, wenn dies hier zurückkehrt.
   tearDownAll(() {

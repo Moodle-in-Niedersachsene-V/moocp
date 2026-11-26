@@ -248,6 +248,7 @@ void main() {
 
     test('Umstellung: nur der eigene Eintrag wird ersetzt, die Konfiguration schreibt allein claude', () async {
       final heim = p.join(tmp.path, 'heim');
+      final umgebung = {'USERPROFILE': heim, 'HOME': heim, 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
       datei(claudeOrt);
       final fremd = {'type': 'stdio', 'command': 'npx', 'args': ['-y', 'foo']};
       final alt = alterEintrag();
@@ -255,7 +256,7 @@ void main() {
       final f = datei('heim/.claude.json', jsonEncode(alt));
       final vorher = f.readAsStringSync();
       final aufrufe = <List<String>>[];
-      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim})
+      final c = ClaudeCode(umgebung)
         ..ausfuehren = (programm, argumente) async {
           aufrufe.add(argumente);
           return 0;
@@ -273,7 +274,8 @@ void main() {
       final heim = p.join(tmp.path, 'heim');
       datei(claudeOrt);
       final aufrufe = <List<String>>[];
-      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim}, bruecke: p.join(tmp.path, 'weg', brueckeExe))
+      // LOCALAPPDATA: Unter Windows liegt claudeOrt in der Ablage von Claude Desktop.
+      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim, 'LOCALAPPDATA': p.join(tmp.path, 'lokal')}, bruecke: p.join(tmp.path, 'weg', brueckeExe))
         ..ausfuehren = (_, a) async {
           aufrufe.add(a);
           return 0;
@@ -587,6 +589,7 @@ void main() {
       final ziel = brueckenOrt(umgebung: u, einstellungen: einst);
       final quelle = datei('mount/usr/bin/$brueckeExe', 'neue Brücke');
       final kopie = datei(p.relative(ziel, from: tmp.path), 'neue Brücke');
+      File(p.join(p.dirname(ziel), appImageHinweis)).writeAsStringSync('/x.AppImage');
       bool aktuell() => brueckeAktuell(ziel, umgebung: u, quelle: quelle.path, einstellungen: einst);
       expect(aktuell(), isTrue);
       kopie.writeAsStringSync('alte Brücke');
@@ -596,6 +599,47 @@ void main() {
       expect(brueckeAktuell('/anderer/Ort/$brueckeExe', umgebung: u, quelle: quelle.path, einstellungen: einst), isTrue,
           reason: 'nur die Kopie der Einrichtung wird verglichen');
       expect(brueckeAktuell(ziel, umgebung: const {}, quelle: quelle.path, einstellungen: einst), isTrue, reason: 'ohne AppImage');
+    });
+
+    test('ein anderer Ort des AppImage macht den Eintrag veraltet, auch bei gleicher Brücke', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final u = {'APPIMAGE': '/neu/moocp-2.AppImage'};
+      final einst = p.join(tmp.path, 'einstellungen');
+      final ziel = brueckenOrt(umgebung: u, einstellungen: einst);
+      final quelle = datei('mount/usr/bin/$brueckeExe', 'dieselbe Brücke');
+      datei(p.relative(ziel, from: tmp.path), 'dieselbe Brücke');
+      final hinweis = File(p.join(p.dirname(ziel), appImageHinweis));
+      bool aktuell() => brueckeAktuell(ziel, umgebung: u, quelle: quelle.path, einstellungen: einst);
+      expect(aktuell(), isFalse, reason: 'kein Hinweis');
+      hinweis.writeAsStringSync('/alt/moocp-1.AppImage');
+      expect(aktuell(), isFalse, reason: 'der Hinweis nennt ein anderes AppImage');
+      hinweis.writeAsStringSync('/neu/moocp-2.AppImage');
+      expect(aktuell(), isTrue);
+    });
+
+    test('der Start im AppImage schreibt den Hinweis neu, ohne die Brücke zu kopieren', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final u = {'APPIMAGE': '/neu/moocp-2.AppImage'};
+      final einst = p.join(tmp.path, 'einstellungen');
+      final ziel = brueckenOrt(umgebung: u, einstellungen: einst);
+      // Ohne Kopie der Brücke gibt es nichts, worauf der Hinweis zeigen könnte.
+      expect(appImageHinweisAktualisieren(umgebung: u, einstellungen: einst), isNull);
+      expect(File(p.join(p.dirname(ziel), appImageHinweis)).existsSync(), isFalse);
+
+      final kopie = datei(p.relative(ziel, from: tmp.path), 'alte Brücke');
+      File(p.join(p.dirname(ziel), appImageHinweis)).writeAsStringSync('/alt/moocp-1.AppImage');
+      expect(appImageHinweisAktualisieren(umgebung: u, einstellungen: einst), isNull);
+      final hinweis = File(p.join(p.dirname(ziel), appImageHinweis));
+      expect(hinweis.readAsStringSync(), '/neu/moocp-2.AppImage');
+      expect(FileStat.statSync(hinweis.path).mode & 0x1ff, 0x180);
+      expect(kopie.readAsStringSync(), 'alte Brücke', reason: 'die Brücke selbst ersetzt nur „Aktualisieren“');
+
+      // Außerhalb eines AppImage geschieht nichts.
+      hinweis.writeAsStringSync('unberührt');
+      expect(appImageHinweisAktualisieren(umgebung: const {}, einstellungen: einst), isNull);
+      expect(hinweis.readAsStringSync(), 'unberührt');
     });
 
     test('der Pfad des AppImage steht neben der Kopie, und die Brücke startet damit die App', () {
@@ -898,7 +942,7 @@ void main() {
             'connection': {
               'type': 'stdio',
               'command': exe,
-              'args': [],
+              'args': ['--profil', 'moodle'],
               'timeoutMs': clientZeitlimit.inMilliseconds,
             },
           },

@@ -67,7 +67,12 @@ void main() {
   late _System sys;
   late String grund;
   setUp(() {
-    tmp = Directory.systemTemp.createTempSync('zz_privat_');
+    // Der Pfad in aufgelöster Form: Auf dem Mac ist /var eine Verknüpfung auf
+    // /private/var. Der Code prüft den Pfad, wie er ihn bekommt, und liefert
+    // den Arbeitsordner aufgelöst zurück; die Überschreibungen von [_System]
+    // sind nach Pfad verschlüsselt und träfen sonst den falschen Schlüssel.
+    final roh = Directory.systemTemp.createTempSync('zz_privat_');
+    tmp = Directory(roh.resolveSymbolicLinksSync());
     sys = _System();
     grund = p.join(tmp.path, 'moocp-${sys.uid}');
   });

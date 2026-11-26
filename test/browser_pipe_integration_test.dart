@@ -40,7 +40,13 @@ void main() {
       expect((e['result'] as Map)['value'], 42);
       // Kein DevTools-Port: weder Datei noch hörender Socket des Browsers.
       expect(File(p.join(profil.path, 'DevToolsActivePort')).existsSync(), isFalse);
-      final cmd = File('/proc/${proz.pid}/cmdline').readAsStringSync();
+      // Kommandozeile des Browsers: unter Linux aus /proc (NUL-getrennt), auf
+      // dem Mac gibt es kein /proc, dort liefert `ps` sie. Unter Windows
+      // läuft dieser Test nicht (UnixBrowserStarter).
+      final cmd = Platform.isMacOS
+          ? '${Process.runSync('ps', ['-o', 'command=', '-p', '${proz.pid}']).stdout}'
+          : File('/proc/${proz.pid}/cmdline').readAsStringSync();
+      expect(cmd, contains('--remote-debugging-pipe'));
       expect(cmd, isNot(contains('remote-debugging-port')));
       await pipe.senden('Browser.close').timeout(const Duration(seconds: 10)).catchError((_) => <String, dynamic>{});
     } finally {
@@ -54,7 +60,10 @@ void main() {
         }
       }
     }
-  }, skip: browser == null ? 'MOOCP_BROWSER_PIPE nicht gesetzt' : false, timeout: const Timeout(Duration(minutes: 2)));
+  }, skip: browser == null
+      ? 'MOOCP_BROWSER_PIPE nicht gesetzt'
+      : (Platform.isWindows ? 'POSIX: UnixBrowserStarter (unter Windows prüft der zweite Test den WindowsBrowserStarter)' : false),
+      timeout: const Timeout(Duration(minutes: 2)));
   test('ganze Aufnahme mit echtem Browser: Seite kommt über die App, Fremdes bleibt draußen', () async {
     final ordner = Directory.systemTemp.createTempSync('moocp_echt2_');
     addTearDown(() => ordner.deleteSync(recursive: true));

@@ -126,6 +126,9 @@ Future<void> main(List<String> argumente) async {
   final protokoll = Protokoll(
     datei: File(p.join(einstellungenOrdner, 'protokoll.log')),
   );
+  // Rechte der Einstellungsdatei, die sich nicht setzen ließen, gehören ins
+  // Protokoll (auch die vom Laden, das vor dem Protokoll geschah).
+  Einstellungen.rechteMelder = (m) => protokoll.eintrag(Art.fehler, m);
   FlutterError.onError = (d) => protokoll.eintrag(
     Art.fehler,
     'Fehler in der Oberfläche: ${fehlerBeschreibung(d.exception, d.stack)}',
@@ -158,6 +161,10 @@ Future<void> main(List<String> argumente) async {
         ? 'Arbeitsordner geleert: ${arbeitsordner.pfad}'
         : 'Arbeitsordner: ${arbeitsordner.pfad} -- $geblieben Einträge in Benutzung, nicht gelöscht',
   );
+  // Im AppImage steht der Ort der Datei neben der Kopie der Brücke; er stimmt
+  // nur, solange das AppImage dort liegt.
+  final hinweisFehler = appImageHinweisAktualisieren();
+  if (hinweisFehler != null) protokoll.eintrag(Art.fehler, hinweisFehler);
   // Die Brücke erreicht die App über den Kanal des Kontos und liest die
   // Werkzeugliste aus einer Datei darin, solange die App nicht läuft
   // (mcp/kanal.dart); unter Windows fragt sie die exe.
@@ -398,23 +405,57 @@ Future<int> _werkzeugliste(String? profilName) async {
   }
 }
 
+/// Wohin die App die Werkzeugliste für die Brücke ablegt und woraus sie sie
+/// bildet; die Tests setzen eigene Orte ein, damit keiner die Einstellungen
+/// oder den Kanal des Kontos berührt.
+class WerkzeuglisteOrt {
+  const WerkzeuglisteOrt({this.kanal, this.einstellungen, this.plugins});
+
+  /// Ohne Angabe der Kanal dieses Systems.
+  final KanalOrt? kanal;
+  final File Function()? einstellungen;
+  final Directory Function()? plugins;
+}
+
 /// Legt die Werkzeugliste für die Brücke jedes Profils ab (nur Linux und Mac,
 /// siehe KanalOrt.listeLesen): je Profil dasselbe, was `--werkzeugliste
-/// --profil Name` ausgibt. Ein Fehler dabei ändert nichts am Start; die
-/// Brücke sagt dann, dass sie keine Liste hat.
-Future<void> werkzeuglisteAblegen(Protokoll protokoll, Iterable<Profil> profile) async {
+/// --profil Name` ausgibt. Sie wird aus der gespeicherten Einstellungsdatei
+/// gebildet, gilt also erst, nachdem gespeichert ist. Neu abgelegt wird sie
+/// bei jeder Änderung, die in die Liste eingeht: Start, Start der Plugins,
+/// neues Profil, Plugin ein- oder ausgeschaltet oder angenommen. Ein Fehler
+/// dabei ändert nichts am Start; die Brücke sagt dann, dass sie keine Liste
+/// hat.
+Future<void> werkzeuglisteAblegen(
+  Protokoll protokoll,
+  Iterable<Profil> profile, {
+  WerkzeuglisteOrt ort = const WerkzeuglisteOrt(),
+}) async {
   if (Platform.isWindows) return;
   for (final profil in profile) {
     try {
       final liste = await werkzeuglisteFuerBruecke(
-        einstellungen: () => einstellungenDatei,
-        plugins: () => Directory(pluginsOrdner),
+        einstellungen: ort.einstellungen ?? () => einstellungenDatei,
+        plugins: ort.plugins ?? () => Directory(pluginsOrdner),
         profilName: profil.mcpName,
       );
-      await standardKanalOrt.listeAblegen(profil.mcpName, jsonEncode(liste));
+      await (ort.kanal ?? standardKanalOrt).listeAblegen(profil.mcpName, jsonEncode(liste));
     } catch (e) {
       protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
     }
+  }
+}
+
+/// Löscht die Liste eines gelöschten Profils (siehe [werkzeuglisteAblegen]).
+Future<void> werkzeuglisteEntfernen(
+  Protokoll protokoll,
+  Profil profil, {
+  WerkzeuglisteOrt ort = const WerkzeuglisteOrt(),
+}) async {
+  if (Platform.isWindows) return;
+  try {
+    await (ort.kanal ?? standardKanalOrt).listeEntfernen(profil.mcpName);
+  } catch (e) {
+    protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht gelöscht (${e.runtimeType})');
   }
 }
 
@@ -450,6 +491,7 @@ class MoocpApp extends StatelessWidget {
     this.laufendePlugins,
     this.entwicklungVorbereiten,
     this.fokus,
+    this.werkzeuglisteOrt = const WerkzeuglisteOrt(),
     super.key,
   });
   final Einstellungen einstellungen;
@@ -499,6 +541,9 @@ class MoocpApp extends StatelessWidget {
   /// Wenn eine zweite Anmeldung das Fenster verlangt (einzelstart.dart).
   final Stream<void>? fokus;
 
+  /// Wohin die Werkzeugliste für die Brücke kommt; Tests setzen eigene Orte.
+  final WerkzeuglisteOrt werkzeuglisteOrt;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -531,6 +576,7 @@ class MoocpApp extends StatelessWidget {
         laufendePlugins: laufendePlugins,
         entwicklungVorbereiten: entwicklungVorbereiten,
         fokus: fokus,
+        werkzeuglisteOrt: werkzeuglisteOrt,
       ),
     );
   }
@@ -554,6 +600,7 @@ class Hauptseite extends StatefulWidget {
     this.laufendePlugins,
     this.entwicklungVorbereiten,
     this.fokus,
+    this.werkzeuglisteOrt = const WerkzeuglisteOrt(),
     super.key,
   });
   final Einstellungen einstellungen;
@@ -572,6 +619,9 @@ class Hauptseite extends StatefulWidget {
   final UpdatePaket? updatePaket;
   final Future<Plugins> Function()? pluginsLaden;
   final Stream<void>? fokus;
+
+  /// Wohin die Werkzeugliste für die Brücke kommt; Tests setzen eigene Orte.
+  final WerkzeuglisteOrt werkzeuglisteOrt;
 
   @override
   State<Hauptseite> createState() => _HauptseiteState();
@@ -811,7 +861,11 @@ class _HauptseiteState extends State<Hauptseite> {
     if (laden == null) return false;
     Future<Plugins?> lesen() async {
       try {
-        return await laden();
+        final geladen = await laden();
+        // Ein- und Ausschalten und Zustimmen ändert die Werkzeuge, die die
+        // Brücke anbietet (E35, E21).
+        geladen.geaendert = _listeAblegen;
+        return geladen;
       } catch (e) {
         widget.protokoll.eintrag(
           Art.fehler,
@@ -877,6 +931,20 @@ class _HauptseiteState extends State<Hauptseite> {
     );
   }
 
+  /// Legt die Werkzeugliste der Profile für die Brücke neu ab, nachdem sich
+  /// etwas geändert hat, das in sie eingeht (gespeichert muss schon sein).
+  ///
+  /// Die Aufrufe laufen nacheinander, denn zwei zugleich schrieben dieselbe
+  /// Zwischendatei. Niemand wartet darauf: Die Liste liegt längst da, wenn die
+  /// Lehrkraft in der Einrichtung auf „Installieren“ klickt.
+  Future<void> _listeKette = Future.value();
+  void _listeAblegen() {
+    final profile = _alleProfile.toList();
+    _listeKette = _listeKette.then(
+      (_) => werkzeuglisteAblegen(widget.protokoll, profile, ort: widget.werkzeuglisteOrt),
+    );
+  }
+
   /// Startet die Plugins, denen die Lehrkraft zugestimmt hat
   /// (plugin/laufende_plugins.dart), einmal je App. Was nicht startet, steht
   /// mit dem Grund im Protokoll und im Dialog „Plugins“. Ein angenommenes
@@ -892,7 +960,7 @@ class _HauptseiteState extends State<Hauptseite> {
     }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
     // Die Werkzeuge der Plugins stehen jetzt in den Einstellungen.
-    unawaited(werkzeuglisteAblegen(widget.protokoll, _alleProfile));
+    _listeAblegen();
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -1030,6 +1098,9 @@ class _HauptseiteState extends State<Hauptseite> {
       return;
     }
     await instanz.dienst.stoppen();
+    _listeKette = _listeKette.then(
+      (_) => werkzeuglisteEntfernen(widget.protokoll, profil, ort: widget.werkzeuglisteOrt),
+    );
     // Die Protokolle abgeschlossener Schreibvorgänge nennen Dateien dieser Instanz.
     Schreibvorgang.abgeschlosseneLoeschen(instanz.moodle, dieserInstanz: true);
     instanz.moodle.abmelden();
@@ -1585,6 +1656,9 @@ class _HauptseiteState extends State<Hauptseite> {
         'Einstellungen nicht gespeichert (${e.runtimeType})',
       );
     }
+    // Die Brücke eines neuen Profils braucht seine Liste, wenn die Einrichtung
+    // den Eintrag setzt.
+    if (hinzugefuegt) _listeAblegen();
     setState(() {
       _adresse.text = _profil.adresse;
       _meldung = null;

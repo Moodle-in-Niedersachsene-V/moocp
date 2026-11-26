@@ -23,18 +23,38 @@
 // Ein- und Ausgabe: Auf einer Pipe ohne sie wartete ein Schreiben, solange ein
 // Lesen auf demselben Handle hängt.
 //
-// Nur die reine Logik (Namen, Zugriffsliste, Fehlernummern) lässt sich ohne
-// Windows prüfen (test/kanal_test.dart); alles andere ist nur hier umgesetzt.
+// Speicher einer überlappenden Ein- oder Ausgabe (Statusblock, Ereignis,
+// Puffer) gehört dem Kernel, solange der Vorgang läuft. Ob er läuft, sagt nie
+// `GetLastError` (Dart garantiert nicht, dass der Fehlerwert des Threads
+// zwischen zwei FFI-Aufrufen erhalten bleibt) und nie `OVERLAPPED.Internal`
+// (der Kernel setzt es vor dem Aufruf auf STATUS_PENDING; scheitert der Aufruf
+// gleich, schreibt er weder den Statusblock noch setzt er das Ereignis, und ein
+// Warten darauf wäre endlos). Darum ruft diese Datei `NtReadFile`, `NtWriteFile`
+// und `NtFsControlFile` (ntdll) mit einem eigenen IO_STATUS_BLOCK selbst auf:
+// Der NTSTATUS als Rückgabewert entscheidet ([ntVorgang]) -- STATUS_PENDING heißt
+// „läuft, abholen“, jeder andere Wert „fertig“ oder „gescheitert, nichts läuft“.
+// Ein laufender Vorgang wird immer abgeholt (Ereignis abwarten, dann
+// Statusblock lesen), bevor sein Speicher frei wird; ein Abbruch (`CancelIoEx`)
+// ersetzt das nie. Kommt das Ereignis auch nach dem Abbruch nicht, bleibt der
+// Speicher absichtlich liegen ([_verwaist]): Ein Leck von wenigen Bytes ist
+// besser als ein Schreiben des Kernels in freigegebenen Speicher.
+//
+// Nur die reine Logik (Namen, Zugriffsliste, Fehlernummern, Auswertung des
+// NTSTATUS) lässt sich ohne Windows prüfen (test/kanal_test.dart); alles
+// andere ist nur hier umgesetzt (test/kanal_windows_test.dart, nur unter
+// Windows).
 // Ohne Flutter: Die Brücke (mcp/bruecke.dart) bindet diese Datei ein.
 
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'kanal.dart';
+import 'schreiben_mit_frist.dart';
 
 /// Der Name der Pipe: SID des Kontos und Profilname. Die SID besteht nur aus
 /// `S`, Ziffern und Bindestrichen, der Profilname nur aus Kleinbuchstaben,
@@ -84,10 +104,6 @@ final _createNamedPipe = _kernel32.lookupFunction<
   IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Uint32, Uint32, Uint32, Uint32, Pointer),
   int Function(Pointer<Utf16>, int, int, int, int, int, int, Pointer)
 >('CreateNamedPipeW');
-final _connectNamedPipe = _kernel32.lookupFunction<
-  Int32 Function(IntPtr, Pointer),
-  int Function(int, Pointer)
->('ConnectNamedPipe');
 final _disconnectNamedPipe = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('DisconnectNamedPipe');
 final _createFile = _kernel32.lookupFunction<
   IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Pointer, Uint32, Uint32, IntPtr),
@@ -96,18 +112,22 @@ final _createFile = _kernel32.lookupFunction<
 final _waitNamedPipe = _kernel32.lookupFunction<Int32 Function(Pointer<Utf16>, Uint32), int Function(Pointer<Utf16>, int)>(
   'WaitNamedPipeW',
 );
-final _readFile = _kernel32.lookupFunction<
-  Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer),
-  int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer)
->('ReadFile');
-final _writeFile = _kernel32.lookupFunction<
-  Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer),
-  int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer)
->('WriteFile');
-final _getOverlappedResult = _kernel32.lookupFunction<
-  Int32 Function(IntPtr, Pointer, Pointer<Uint32>, Int32),
-  int Function(int, Pointer, Pointer<Uint32>, int)
->('GetOverlappedResult');
+final _ntdll = DynamicLibrary.open('ntdll.dll');
+final _ntReadFile = _ntdll.lookupFunction<
+  Int32 Function(IntPtr, IntPtr, Pointer, Pointer, Pointer, Pointer<Uint8>, Uint32, Pointer, Pointer),
+  int Function(int, int, Pointer, Pointer, Pointer, Pointer<Uint8>, int, Pointer, Pointer)
+>('NtReadFile');
+final _ntWriteFile = _ntdll.lookupFunction<
+  Int32 Function(IntPtr, IntPtr, Pointer, Pointer, Pointer, Pointer<Uint8>, Uint32, Pointer, Pointer),
+  int Function(int, int, Pointer, Pointer, Pointer, Pointer<Uint8>, int, Pointer, Pointer)
+>('NtWriteFile');
+final _ntFsControlFile = _ntdll.lookupFunction<
+  Int32 Function(IntPtr, IntPtr, Pointer, Pointer, Pointer, Uint32, Pointer, Uint32, Pointer, Uint32),
+  int Function(int, int, Pointer, Pointer, Pointer, int, Pointer, int, Pointer, int)
+>('NtFsControlFile');
+final _resetEvent = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('ResetEvent');
+final _waitForSingleObject =
+    _kernel32.lookupFunction<Uint32 Function(IntPtr, Uint32), int Function(int, int)>('WaitForSingleObject');
 final _cancelIoEx = _kernel32.lookupFunction<Int32 Function(IntPtr, Pointer), int Function(int, Pointer)>('CancelIoEx');
 final _getClientPid = _kernel32.lookupFunction<Int32 Function(IntPtr, Pointer<Uint32>), int Function(int, Pointer<Uint32>)>(
   'GetNamedPipeClientProcessId',
@@ -146,15 +166,108 @@ const _pipeUnlimitedInstances = 255;
 const _tokenQuery = 8;
 const _tokenUser = 1;
 const _processQueryLimitedInformation = 0x1000;
-const _errorIoPending = 997;
-const _errorPipeConnected = 535;
 const _errorPipeBusy = 231;
 const _pufferGroesse = 64 * 1024;
 
-/// OVERLAPPED hat auf 64-Bit-Windows 32 Bytes: Internal, InternalHigh,
-/// Offset/OffsetHigh (oder Pointer) und das Ereignis.
-const _overlappedGroesse = 32;
-const _overlappedEreignis = 24;
+/// IO_STATUS_BLOCK auf 64-Bit-Windows: Status (NTSTATUS, in einer 8 Byte
+/// breiten Union) und Information (Zahl der Bytes).
+const _iosbGroesse = 16;
+const _iosbInformation = 8;
+
+/// FSCTL_PIPE_LISTEN: auf einen Client warten (was `ConnectNamedPipe` tut).
+const _fsctlPipeListen = 0x00110008;
+
+const _statusPending = 0x103;
+const _statusPipeConnected = 0xC00000B2;
+
+/// Wie ein Vorgang nach dem Aufruf von `Nt…File` dasteht.
+enum NtVorgang {
+  /// STATUS_PENDING: läuft; abholen, bevor der Speicher frei wird.
+  ausstehend,
+
+  /// Schon erfolgreich beendet; die Bytes stehen im Statusblock.
+  fertig,
+
+  /// Gescheitert, bevor etwas lief: Der Speicher ist frei, kein Warten.
+  fehler,
+}
+
+/// Wertet den NTSTATUS (untere 32 Bit) aus, den `NtReadFile`, `NtWriteFile`
+/// oder `NtFsControlFile` zurückgeben.
+NtVorgang ntVorgang(int status) {
+  final s = status & 0xFFFFFFFF;
+  if (s == _statusPending) return NtVorgang.ausstehend;
+  return s < 0x80000000 ? NtVorgang.fertig : NtVorgang.fehler;
+}
+
+/// Ob ein Status von FSCTL_PIPE_LISTEN (sofort oder nach dem Warten) heißt,
+/// dass ein Client verbunden ist: Erfolg, oder STATUS_PIPE_CONNECTED (er war
+/// schon da, bevor gewartet wurde). Alles andere (etwa STATUS_PIPE_CLOSING: er
+/// ist schon wieder weg, oder STATUS_CANCELLED) ist keine Verbindung.
+bool ntListenVerbunden(int status) {
+  final s = status & 0xFFFFFFFF;
+  return s == _statusPipeConnected || (s != _statusPending && s < 0x80000000);
+}
+
+int _iosbStatus(Pointer iosb) => Pointer<Uint32>.fromAddress(iosb.address).value;
+int _iosbBytes(Pointer iosb) => Pointer<IntPtr>.fromAddress(iosb.address + _iosbInformation).value;
+
+/// Vor jedem Vorgang: Ereignis zurücksetzen und Statusblock leeren.
+void _vorbereiten(Pointer iosb, int ereignis) {
+  _resetEvent(ereignis);
+  Pointer<Uint8>.fromAddress(iosb.address).asTypedList(_iosbGroesse).fillRange(0, _iosbGroesse, 0);
+}
+
+const _waitTimeout = 0x102;
+const _waitObject0 = 0;
+
+/// Ergebnis von [_abholen], wenn der Vorgang scheiterte oder abgebrochen wurde.
+const _gescheitert = -1;
+
+/// Ergebnis von [_abholen], wenn das Ereignis nie kam: Der Kernel könnte noch in
+/// den Speicher des Vorgangs schreiben, darum gibt der Aufrufer ihn nie frei.
+const _verwaist = -2;
+
+/// Wie lange nach einem Abbruch noch auf das Ereignis gewartet wird.
+const _wartenNachAbbruch = Duration(seconds: 5);
+
+/// Wartet auf ein Ereignis, bis höchstens [frist] vorbei ist; false, wenn es
+/// nicht kam.
+bool _ereignisAbwarten(int ereignis, Duration frist) =>
+    _waitForSingleObject(ereignis, frist.inMilliseconds) == _waitObject0;
+
+const _verwaistMeldung = 'Ein Kanalvorgang ließ sich nicht beenden; sein nativer Speicher bleibt aus Sicherheitsgründen reserviert.';
+
+/// Wartet auf einen Vorgang, der STATUS_PENDING lieferte, und holt ihn ab: Erst
+/// wenn diese Funktion mit etwas anderem als [_verwaist] zurückkehrt, gehört
+/// der Speicher wieder dem Aufrufer. Das Ereignis wird in Schritten abgefragt;
+/// setzt jemand [stopp] (eine Zahl im nativen Speicher, 0 = weiterlaufen),
+/// wird der Vorgang abgebrochen und trotzdem abgeholt. Das ersetzt ein
+/// `CancelIoEx` von außen, das ins Leere ginge, solange der Vorgang noch nicht
+/// gestartet ist. Liefert die Zahl der Bytes ([Statusblock]), [_gescheitert]
+/// oder [_verwaist].
+int _abholen(int handle, Pointer iosb, int ereignis, Pointer<Uint32>? stopp) {
+  var abgebrochen = false;
+  var nachAbbruch = Duration.zero;
+  const schritt = Duration(milliseconds: 100);
+  while (true) {
+    final w = _waitForSingleObject(ereignis, schritt.inMilliseconds);
+    if (w == _waitObject0) break;
+    if (w != _waitTimeout) return _verwaist; // WAIT_FAILED: nicht zu klären
+    if (abgebrochen) {
+      nachAbbruch += schritt;
+      if (nachAbbruch >= _wartenNachAbbruch) return _verwaist;
+    } else if (stopp != null && stopp.value != 0) {
+      abgebrochen = true;
+      _cancelIoEx(handle, iosb);
+    }
+  }
+  return _iosbAuswerten(iosb);
+}
+
+/// Die Bytes eines beendeten Vorgangs aus seinem Statusblock, oder
+/// [_gescheitert].
+int _iosbAuswerten(Pointer iosb) => _iosbStatus(iosb) < 0x80000000 ? _iosbBytes(iosb) : _gescheitert;
 
 /// Die SID (als Text) zu einem Token-Handle; null, wenn sie sich nicht lesen lässt.
 String? _sidVonToken(int token) {
@@ -224,118 +337,196 @@ String? _sidVonPid(int pid) {
 // ---------------------------------------------------------------------------
 
 /// Liest in einem eigenen Isolate und meldet jeden Block, am Ende `null`.
+/// `start[2]` ist die Adresse einer Zahl im nativen Speicher, die der Besitzer
+/// der Verbindung auf 1 setzt, um das Lesen zu beenden; sie bleibt gültig, bis
+/// dieser Isolate sein Ende gemeldet hat.
 void _leser(List<Object> start) {
   final handle = start[0] as int;
   final aus = start[1] as SendPort;
+  final stopp = Pointer<Uint32>.fromAddress(start[2] as int);
   final puffer = calloc<Uint8>(_pufferGroesse);
-  final gelesen = calloc<Uint32>();
-  final ov = calloc<Uint8>(_overlappedGroesse);
+  final iosb = calloc<Uint8>(_iosbGroesse);
   final ereignis = _createEvent(nullptr, 1, 0, nullptr);
+  var verwaist = false;
   try {
-    while (true) {
-      ov.cast<Uint8>().asTypedList(_overlappedGroesse).fillRange(0, _overlappedGroesse, 0);
-      Pointer<IntPtr>.fromAddress(ov.address + _overlappedEreignis).value = ereignis;
-      var ok = _readFile(handle, puffer, _pufferGroesse, gelesen, ov);
-      if (ok == 0) {
-        if (_getLastError() != _errorIoPending) break;
-        ok = _getOverlappedResult(handle, ov, gelesen, 1);
-        if (ok == 0) break;
-      }
-      if (gelesen.value == 0) break;
-      aus.send(Uint8List.fromList(puffer.asTypedList(gelesen.value)));
+    while (stopp.value == 0) {
+      _vorbereiten(iosb, ereignis);
+      final status = _ntReadFile(handle, ereignis, nullptr, nullptr, iosb, puffer, _pufferGroesse, nullptr, nullptr);
+      final vorgang = ntVorgang(status);
+      if (vorgang == NtVorgang.fehler) break; // etwa STATUS_PIPE_BROKEN: die Gegenseite ist weg
+      final n = vorgang == NtVorgang.fertig ? _iosbAuswerten(iosb) : _abholen(handle, iosb, ereignis, stopp);
+      if (n == _verwaist) verwaist = true;
+      if (n <= 0) break; // 0: Ende des Stroms
+      aus.send(Uint8List.fromList(puffer.asTypedList(n)));
     }
   } finally {
+    if (verwaist) aus.send(KanalFehler(_verwaistMeldung));
     aus.send(null);
-    _closeHandle(ereignis);
-    calloc.free(ov);
-    calloc.free(gelesen);
-    calloc.free(puffer);
+    // Hier läuft kein Vorgang mehr: Jeder Weg aus der Schleife hat ihn
+    // abgeholt oder gar nicht erst gestartet -- außer bei [_verwaist].
+    if (!verwaist) {
+      _closeHandle(ereignis);
+      calloc.free(iosb);
+      calloc.free(puffer);
+    }
   }
 }
+
+/// Wie lange ein Schreiben höchstens auf die Gegenseite wartet, die nichts
+/// abnimmt (schreiben_mit_frist.dart). Die Gegenseite ist ein Prozess desselben
+/// Kontos, der eine Zeile in Sekundenbruchteilen liest; wer nach einer Minute
+/// nichts abgenommen hat, liest nicht mehr.
+const _schreibFrist = Duration(seconds: 60);
 
 /// Schreibt in einem eigenen Isolate, was es bekommt; `null` beendet es und
 /// meldet `'ende'`, sobald alles Vorherige geschrieben ist. Es hat die Pipe zuletzt
 /// benutzt: Erst nach dieser Meldung wird das Handle geschlossen, sonst ginge
 /// ein Rest an ein Handle, das schon eine andere Verbindung bekommen hat.
+/// Nimmt die Gegenseite binnen der Frist nichts ab oder scheitert das
+/// Schreiben, beendet es sich ebenso von selbst und meldet `'ende'`: Die
+/// Verbindung ist dann nicht zu retten, und das Handle darf nicht an einer
+/// Gegenseite hängen, die nie liest.
 void _schreiber(List<Object> start) {
   final handle = start[0] as int;
   final eingang = ReceivePort();
   final haupt = start[1] as SendPort;
   haupt.send(eingang.sendPort);
-  final geschrieben = calloc<Uint32>();
-  final ov = calloc<Uint8>(_overlappedGroesse);
+  final iosb = calloc<Uint8>(_iosbGroesse);
   final ereignis = _createEvent(nullptr, 1, 0, nullptr);
-  eingang.listen((m) {
-    if (m is! Uint8List) {
+  var fertig = false;
+  var verwaist = false;
+  void beenden() {
+    if (fertig) return;
+    fertig = true;
+    if (!verwaist) {
       _closeHandle(ereignis);
-      calloc.free(ov);
-      calloc.free(geschrieben);
-      eingang.close();
-      haupt.send('ende');
+      calloc.free(iosb);
+    }
+    eingang.close();
+    if (verwaist) haupt.send(KanalFehler(_verwaistMeldung));
+    haupt.send('ende');
+  }
+
+  eingang.listen((m) {
+    if (fertig) return;
+    if (m is! Uint8List) {
+      beenden();
       return;
     }
     final daten = calloc<Uint8>(m.length);
     try {
       daten.asTypedList(m.length).setAll(0, m);
-      var offen = 0;
-      while (offen < m.length) {
-        ov.asTypedList(_overlappedGroesse).fillRange(0, _overlappedGroesse, 0);
-        Pointer<IntPtr>.fromAddress(ov.address + _overlappedEreignis).value = ereignis;
-        var ok = _writeFile(handle, daten + offen, m.length - offen, geschrieben, ov);
-        if (ok == 0) {
-          if (_getLastError() != _errorIoPending) return;
-          ok = _getOverlappedResult(handle, ov, geschrieben, 1);
-          if (ok == 0) return;
-        }
-        offen += geschrieben.value;
-      }
+      var sofort = false;
+      final urteil = schreibenMitFrist(
+        laenge: m.length,
+        frist: _schreibFrist,
+        beginnen: (offen) {
+          _vorbereiten(iosb, ereignis);
+          final status = _ntWriteFile(handle, ereignis, nullptr, nullptr, iosb, daten + offen, m.length - offen, nullptr, nullptr);
+          final vorgang = ntVorgang(status);
+          sofort = vorgang == NtVorgang.fertig;
+          return switch (vorgang) {
+            NtVorgang.ausstehend => SchreibStart.ausstehend,
+            NtVorgang.fertig => SchreibStart.fertig,
+            NtVorgang.fehler => SchreibStart.fehler,
+          };
+        },
+        warten: (frist) => _ereignisAbwarten(ereignis, frist),
+        ergebnis: () {
+          // Nach einem Abbruch kommt das Ereignis mit dem Status „abgebrochen“;
+          // bleibt es aus, bleibt der Speicher liegen.
+          if (!sofort && !_ereignisAbwarten(ereignis, _wartenNachAbbruch)) {
+            verwaist = true;
+            return null;
+          }
+          final n = _iosbAuswerten(iosb);
+          return n < 0 ? null : n;
+        },
+        abbrechen: () => _cancelIoEx(handle, iosb),
+      );
+      if (urteil != SchreibUrteil.fertig) beenden();
     } finally {
-      calloc.free(daten);
+      // Bei einem verwaisten Vorgang gehört auch der Puffer noch dem Kernel.
+      if (!verwaist) calloc.free(daten);
     }
   });
 }
 
 class _PipeVerbindung implements KanalVerbindung {
-  _PipeVerbindung._(this._handle, this._server, this._schreiberPort);
+  _PipeVerbindung._(this._handle, this._server, this._schreiberPort, this._hinweis);
 
   final int _handle;
   final bool _server;
   final SendPort _schreiberPort;
+  final void Function(String)? _hinweis;
   final _eingang = StreamController<List<int>>();
   bool _zu = false;
   bool _leserEnde = false;
   bool _schreiberEnde = false;
   bool _geschlossen = false;
+  final _ende = Completer<void>();
 
-  static Future<_PipeVerbindung> oeffnen(int handle, {required bool server}) async {
+  /// Zahl im nativen Speicher, mit der die Verbindung dem Leser sagt, dass er
+  /// aufhören soll. Sie wird erst frei, wenn der Leser sein Ende gemeldet hat.
+  final Pointer<Uint32> _stopp = calloc<Uint32>();
+
+  static Future<_PipeVerbindung> oeffnen(int handle, {required bool server, void Function(String)? hinweis}) async {
     final leserPort = ReceivePort();
     final schreiberPort = ReceivePort();
     await Isolate.spawn(_schreiber, [handle, schreiberPort.sendPort]);
     final antworten = StreamIterator(schreiberPort);
     await antworten.moveNext();
     final senden = antworten.current as SendPort;
-    final v = _PipeVerbindung._(handle, server, senden);
+    final v = _PipeVerbindung._(handle, server, senden, hinweis);
     unawaited(() async {
       while (await antworten.moveNext()) {
         if (antworten.current == 'ende') break;
+        if (antworten.current case final KanalFehler x) v._diagnose(x);
       }
       await antworten.cancel();
       v._schreiberEnde = true;
+      // Auch wenn der Schreiber von selbst aufgegeben hat: Nichts mehr senden.
+      v._zu = true;
       v._handleSchliessen();
     }());
-    await Isolate.spawn(_leser, [handle, leserPort.sendPort]);
+    try {
+      await Isolate.spawn(_leser, [handle, leserPort.sendPort, v._stopp.address]);
+    } catch (_) {
+      // Kein Leser, der sein Ende melden könnte: Schreiber beenden, der danach
+      // das Handle schließt, und den Fehler weitergeben.
+      leserPort.close();
+      v._leserEnde = true;
+      calloc.free(v._stopp);
+      v._beenden();
+      rethrow;
+    }
     leserPort.listen((m) {
       if (m is Uint8List) {
         if (!v._eingang.isClosed) v._eingang.add(m);
+      } else if (m is KanalFehler) {
+        v._diagnose(m);
       } else {
         leserPort.close();
         v._leserEnde = true;
+        calloc.free(v._stopp);
         if (!v._eingang.isClosed) unawaited(v._eingang.close());
         v._beenden();
         if (v._schreiberEnde) v._handleSchliessen();
       }
     });
     return v;
+  }
+
+  void _diagnose(KanalFehler fehler) {
+    // Ein Streamfehler allein würde vom MCP-Transport ohne Protokolleintrag
+    // geschlossen. Die App bekommt deshalb ihren Kanalhinweis; die Brücke
+    // schreibt auf stderr, getrennt vom MCP-Datenstrom auf stdout.
+    final hinweis = _hinweis;
+    if (hinweis != null) {
+      hinweis(fehler.text);
+    } else {
+      stderr.writeln(fehler.text);
+    }
   }
 
   @override
@@ -349,8 +540,10 @@ class _PipeVerbindung implements KanalVerbindung {
 
   @override
   Future<void> schliessen() async {
-    if (_zu) return;
     _beenden();
+    // Erst zurückkehren, wenn beide Arbeiter fertig und das Handle geschlossen
+    // sind. Auch ein zweites Schließen wartet auf denselben Abschluss.
+    await _ende.future;
   }
 
   /// Beendet die Verbindung in der Reihenfolge, die das Handle schützt: Erst
@@ -368,12 +561,16 @@ class _PipeVerbindung implements KanalVerbindung {
   void _handleSchliessen() {
     if (_geschlossen) return;
     if (!_leserEnde) {
+      // Der Leser fragt die Zahl regelmäßig ab und bricht dann selbst ab, auch
+      // wenn er sein Lesen noch gar nicht begonnen hatte; das `CancelIoEx` beschleunigt es.
+      _stopp.value = 1;
       _cancelIoEx(_handle, nullptr);
       return; // der Leser meldet sein Ende, danach geht es hier weiter
     }
     _geschlossen = true;
     if (_server) _disconnectNamedPipe(_handle);
     _closeHandle(_handle);
+    _ende.complete();
   }
 }
 
@@ -382,29 +579,37 @@ class _PipeVerbindung implements KanalVerbindung {
 // ---------------------------------------------------------------------------
 
 class _PipeLauscher implements KanalLauscher {
-  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._sa, this._beschreibung, this._erste) {
+  _PipeLauscher(this._name, this._sid, this._abgewiesen, this._hinweis, this._sa, this._beschreibung, this._erste) {
     unawaited(_annehmen(_erste));
   }
 
   final String _name;
   final String _sid;
   final void Function(String)? _abgewiesen;
+  final void Function(String)? _hinweis;
   final Pointer _sa;
   final Pointer _beschreibung;
   final int _erste;
   final _neu = StreamController<KanalVerbindung>();
+  final _ende = Completer<void>();
+
+  /// Zahl im nativen Speicher, mit der [schliessen] dem wartenden Isolate sagt,
+  /// dass er aufgeben soll ([_abholen]).
+  final Pointer<Uint32> _stopp = calloc<Uint32>();
   bool _zu = false;
-  int _warten = 0;
+  bool _frei = false;
 
   @override
   Stream<KanalVerbindung> get verbindungen => _neu.stream;
 
-  int _instanz({bool erste = false}) {
+  /// Nur von [_annehmen] aus und nur, solange [_frei] nicht gesetzt ist: Die
+  /// Zugriffsliste lebt, bis die Schleife dort zu Ende ist.
+  int _instanz() {
     final n = _name.toNativeUtf16();
     try {
       return _createNamedPipe(
         n,
-        _pipeAccessDuplex | _fileFlagOverlapped | (erste ? _fileFlagFirstPipeInstance : 0),
+        _pipeAccessDuplex | _fileFlagOverlapped,
         _pipeRejectRemoteClients,
         _pipeUnlimitedInstances,
         _pufferGroesse,
@@ -418,38 +623,62 @@ class _PipeLauscher implements KanalLauscher {
   }
 
   /// Wartet in einem Isolate auf einen Client, prüft ihn und legt vorher schon
-  /// die nächste Instanz an.
+  /// die nächste Instanz an. Diese Schleife ist die einzige, die Handles der
+  /// Instanzen schließt und die Zugriffsliste freigibt, und zwar erst, wenn
+  /// kein Isolate mehr auf einer Instanz wartet.
   Future<void> _annehmen(int handle) async {
-    while (!_zu) {
-      _warten = handle;
-      final verbunden = await Isolate.run(() => _auf(handle));
-      _warten = 0;
-      if (_zu) {
-        _closeHandle(handle);
-        return;
-      }
-      final naechste = _instanz();
-      final pid = verbunden ? _clientPid(handle) : null;
-      final sid = pid == null ? null : _sidVonPid(pid);
-      if (verbunden && sid == _sid) {
-        _neu.add(await _PipeVerbindung.oeffnen(handle, server: true));
-      } else {
-        if (verbunden) _abgewiesen?.call('Die Gegenseite gehört einem anderen Konto oder ihr Konto ließ sich nicht feststellen.');
-        _disconnectNamedPipe(handle);
-        _closeHandle(handle);
-      }
-      if (naechste == _invalidHandle) {
-        // Niemand kann sich mehr verbinden: Der Server meldet es, statt weiter
-        // so zu tun, als lausche er.
-        _abgewiesen?.call('Der Kanal ließ sich nicht neu öffnen.');
-        if (!_neu.isClosed) {
-          _neu.addError(KanalFehler('Der Kanal ließ sich nicht neu öffnen.'));
-          unawaited(_neu.close());
+    // 0: kein Handle in der Hand (schon geschlossen oder weitergereicht).
+    var aktuell = handle;
+    try {
+      while (!_zu) {
+        final verbunden = await _warteAuf(aktuell, _stopp.address);
+        if (_zu) {
+          _closeHandle(aktuell);
+          aktuell = 0;
+          return;
         }
-        _freigeben();
-        return;
+        final eigenes = aktuell;
+        final naechste = _instanz();
+        aktuell = naechste == _invalidHandle ? 0 : naechste;
+        final pid = verbunden ? _clientPid(eigenes) : null;
+        final sid = pid == null ? null : _sidVonPid(pid);
+        if (verbunden && sid == _sid) {
+          final v = await _PipeVerbindung.oeffnen(eigenes, server: true, hinweis: _hinweis);
+          if (_neu.isClosed) {
+            unawaited(v.schliessen());
+          } else {
+            _neu.add(v);
+          }
+        } else {
+          if (verbunden) _abgewiesen?.call('Die Gegenseite gehört einem anderen Konto oder ihr Konto ließ sich nicht feststellen.');
+          _disconnectNamedPipe(eigenes);
+          _closeHandle(eigenes);
+        }
+        if (naechste == _invalidHandle) {
+          // Niemand kann sich mehr verbinden: Der Server meldet es, statt weiter
+          // so zu tun, als lausche er.
+          _abgewiesen?.call('Der Kanal ließ sich nicht neu öffnen.');
+          if (!_neu.isClosed) {
+            _neu.addError(KanalFehler('Der Kanal ließ sich nicht neu öffnen.'));
+            unawaited(_neu.close());
+          }
+          return;
+        }
       }
-      handle = naechste;
+    } on KanalFehler catch (x) {
+      if (_hinweis != null) {
+        _hinweis(x.text);
+      } else {
+        stderr.writeln(x.text);
+      }
+      if (!_neu.isClosed) {
+        _neu.addError(x);
+        unawaited(_neu.close());
+      }
+    } finally {
+      if (aktuell != 0) _closeHandle(aktuell);
+      _freigeben();
+      if (!_ende.isCompleted) _ende.complete();
     }
   }
 
@@ -462,49 +691,70 @@ class _PipeLauscher implements KanalLauscher {
     }
   }
 
+  /// `Isolate.run` in einer statischen Funktion, damit der Rückruf nichts außer
+  /// den beiden Zahlen mitnimmt (nie `this` mit Handles und Zugriffsliste).
+  static Future<bool> _warteAuf(int handle, int stoppAdresse) => Isolate.run(() => _auf(handle, stoppAdresse));
+
   /// Blockiert, bis sich ein Client verbindet; false, wenn das Warten
-  /// abgebrochen wurde.
-  static bool _auf(int handle) {
-    final ov = calloc<Uint8>(_overlappedGroesse);
+  /// abgebrochen wurde oder sich keiner verbunden hat. Kehrt erst zurück, wenn
+  /// der Vorgang vorbei ist: Danach darf der Aufrufer das Handle schließen.
+  static bool _auf(int handle, int stoppAdresse) {
+    final iosb = calloc<Uint8>(_iosbGroesse);
     final ereignis = _createEvent(nullptr, 1, 0, nullptr);
-    final n = calloc<Uint32>();
+    final stopp = Pointer<Uint32>.fromAddress(stoppAdresse);
+    var verwaist = false;
     try {
-      Pointer<IntPtr>.fromAddress(ov.address + _overlappedEreignis).value = ereignis;
-      if (_connectNamedPipe(handle, ov) != 0) return true;
-      final fehler = _getLastError();
-      if (fehler == _errorPipeConnected) return true;
-      if (fehler != _errorIoPending) return false;
-      return _getOverlappedResult(handle, ov, n, 1) != 0;
+      if (stopp.value != 0) return false;
+      _vorbereiten(iosb, ereignis);
+      final status = _ntFsControlFile(handle, ereignis, nullptr, nullptr, iosb, _fsctlPipeListen, nullptr, 0, nullptr, 0);
+      switch (ntVorgang(status)) {
+        case NtVorgang.fertig:
+          return true;
+        case NtVorgang.fehler:
+          // Nichts läuft. STATUS_PIPE_CONNECTED: ein Client war schon da, bevor
+          // gewartet wurde (er hat sich zwischen dem Anlegen der Instanz und
+          // diesem Aufruf verbunden); die Prüfung seines Kontos folgt ohnehin.
+          return ntListenVerbunden(status);
+        case NtVorgang.ausstehend:
+          final n = _abholen(handle, iosb, ereignis, stopp);
+          if (n == _verwaist) {
+            verwaist = true;
+            throw KanalFehler(_verwaistMeldung);
+          }
+          return ntListenVerbunden(_iosbStatus(iosb));
+      }
     } finally {
-      _closeHandle(ereignis);
-      calloc.free(n);
-      calloc.free(ov);
+      if (!verwaist) {
+        _closeHandle(ereignis);
+        calloc.free(iosb);
+      }
     }
   }
 
-  bool _frei = false;
-
-  /// Gibt die Zugriffsliste frei, mit der die Instanzen angelegt wurden; danach
-  /// legt niemand mehr eine an.
+  /// Gibt die Zugriffsliste frei, mit der die Instanzen angelegt wurden, und die
+  /// Stopp-Zahl; danach legt niemand mehr eine Instanz an. Nur aus [_annehmen].
   void _freigeben() {
     if (_frei) return;
     _frei = true;
     _localFree(_beschreibung);
     calloc.free(_sa);
+    calloc.free(_stopp);
   }
 
   @override
   Future<void> schliessen() async {
     _zu = true;
-    if (_warten != 0) _cancelIoEx(_warten, nullptr);
+    if (!_frei) _stopp.value = 1;
     if (!_neu.isClosed) unawaited(_neu.close());
-    _freigeben();
+    // Die Freigabe geschieht in [_annehmen], sobald der wartende Isolate
+    // zurück ist (höchstens ein paar Zehntelsekunden).
+    await _ende.future.timeout(const Duration(seconds: 5), onTimeout: () {});
   }
 }
 
 class WindowsKanal extends KanalOrt {
   @override
-  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen}) async {
+  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen, void Function(String text)? hinweis}) async {
     if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');
     final sid = eigeneSid();
     final pipe = pipeName(sid, name);
@@ -533,11 +783,14 @@ class WindowsKanal extends KanalOrt {
     );
     malloc.free(n);
     if (erste == _invalidHandle) {
+      _localFree(beschreibung.value);
+      calloc.free(beschreibung);
+      calloc.free(sa);
       throw KanalFehler('Der Kanal ist schon belegt: moocp läuft in diesem Konto schon, oder ein anderes Konto hat den Namen belegt.');
     }
     final b = beschreibung.value;
     calloc.free(beschreibung);
-    return _PipeLauscher(pipe, sid, abgewiesen, sa, b, erste);
+    return _PipeLauscher(pipe, sid, abgewiesen, hinweis, sa, b, erste);
   }
 
   @override
@@ -572,6 +825,9 @@ class WindowsKanal extends KanalOrt {
           }
           return await _PipeVerbindung.oeffnen(h, server: false);
         }
+        // Die Fehlernummer dient nur der Meldung (und dem Warten bei „Pipe
+        // beschäftigt“): Liest sie sich falsch, bleibt es bei einer Meldung
+        // `KanalFehler`, nie bei einem Vorgang, dessen Speicher frei würde.
         final fehler = _getLastError();
         if (fehler == _errorPipeBusy) {
           _waitNamedPipe(n, 1000);

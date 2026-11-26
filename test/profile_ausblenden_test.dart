@@ -33,6 +33,8 @@ import 'package:moocp/einstellungen.dart';
 import 'package:moocp/einstellungen_dialog.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/main.dart';
+import 'package:moocp/mcp/bruecke.dart' show werkzeuglisteFuerStart;
+import 'package:moocp/mcp/kanal.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
@@ -49,6 +51,42 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hilfen/nur_maus.dart';
+
+/// Die Werkzeugliste der Brücke wird in den Tests nie aus der echten
+/// Einstellungsdatei gebildet (A2) und nie im echten Kanalordner abgelegt: Ohne
+/// eigene Angabe liest sie nichts und legt den Kanal dieses Systems nicht an.
+File _keineDatei() => File('/nicht/vorhanden/einstellungen.json');
+Directory _keinOrdner() => Directory('/nicht/vorhanden/plugins');
+
+/// Die Orte der Werkzeugliste, wenn ein Test nichts Eigenes verlangt: ein
+/// Kanal in einem Testordner.
+WerkzeuglisteOrt _tempListe() {
+  final d = Directory.systemTemp.createTempSync('moocp_liste_');
+  addTearDown(() => d.deleteSync(recursive: true));
+  return WerkzeuglisteOrt(kanal: _MerkKanal(p.join(d.path, 'k')), einstellungen: _keineDatei, plugins: _keinOrdner);
+}
+
+/// Wartet, bis [bedingung] gilt (höchstens 20 Sekunden): Die Liste entsteht im
+/// Hintergrund, liest Dateien, und ihre Fortsetzungen laufen in der Zone des
+/// Widget-Tests, also nur, wenn dieser weitertaktet.
+Future<void> _listeWarten(WidgetTester tester, bool Function() bedingung) async {
+  for (var i = 0; i < 200 && !bedingung(); i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
+  }
+}
+
+/// Ein Kanal in einem Testordner, der mitschreibt, was er ablegt.
+class _MerkKanal extends UnixKanal {
+  _MerkKanal(String ordner) : super(ketten: () => [[ordner]]);
+  final abgelegt = <String>[];
+
+  @override
+  Future<void> listeAblegen(String name, String json) {
+    abgelegt.add(name);
+    return super.listeAblegen(name, json);
+  }
+}
 
 class _EinstellungenOhneDatei extends Einstellungen {
   _EinstellungenOhneDatei({super.profile, super.plugins});
@@ -233,6 +271,7 @@ void main() {
     EntwicklungsPlugin Function()? entwicklung,
     LaufendePlugins? laufende,
     double breite = 2000,
+    WerkzeuglisteOrt? liste,
   }) async {
     tester.view.physicalSize = Size(breite, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -263,6 +302,7 @@ void main() {
               return Plugins(einstellungen, protokoll, plugins);
             },
       laufendePlugins: laufende,
+      werkzeuglisteOrt: liste ?? _tempListe(),
       entwicklungVorbereiten: entwicklung == null
           ? null
           : () {
@@ -343,6 +383,55 @@ void main() {
       expect(jsonEncode(neu.toJson()), isNot(contains('schluessel')), reason: 'es gibt keinen Zugangsschlüssel mehr');
       expect(a.einstellungen.gespeichert, greaterThan(0));
     });
+  });
+
+  group('Werkzeugliste der Brücke (Linux, Mac)', () {
+    late Directory wurzel;
+    late _MerkKanal kanal;
+    setUp(() {
+      wurzel = Directory.systemTemp.createTempSync('moocp_liste_');
+      kanal = _MerkKanal(p.join(wurzel.path, 'k'));
+    });
+    tearDown(() => wurzel.deleteSync(recursive: true));
+
+    testWidgets('ein Profil, das zur Laufzeit dazukommt, hat seine Liste, wenn die Einrichtung seinen Eintrag setzt', (tester) async {
+      final a = await starten(tester, [standard], liste: WerkzeuglisteOrt(kanal: kanal, einstellungen: _keineDatei, plugins: _keinOrdner));
+      expect(await werkzeuglisteFuerStart(File('moocp'), 'moodle-test', ort: kanal), isNull);
+
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('add-profile')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('profile-name')), 'Moodle Test');
+      await tester.enterText(find.byKey(const Key('profile-address')), 'https://test.schule.example');
+      await tester.tap(find.text('Hinzufügen'));
+      await tester.pumpAndSettle();
+
+      expect(a.einstellungen.profile.last.mcpName, 'moodle-test');
+      await _listeWarten(tester, () => kanal.abgelegt.contains('moodle-test'));
+      final l = await werkzeuglisteFuerStart(File('moocp'), 'moodle-test', ort: kanal);
+      expect(l, isNotNull, reason: 'die Brücke beantwortet initialize für das neue Profil, solange die App läuft');
+      expect(l!.initialize, isNotEmpty);
+      expect(l.tools['tools'], isNotEmpty);
+      expect(kanal.abgelegt, contains('moodle-test'));
+    }, skip: Platform.isWindows);
+
+    testWidgets('ein Plugin ein- oder ausschalten legt die Liste neu ab', (tester) async {
+      await starten(tester, [standard, test],
+          plugins: [_pluginEintrag()],
+          entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung, 'k2'})},
+          liste: WerkzeuglisteOrt(kanal: kanal, einstellungen: _keineDatei, plugins: _keinOrdner));
+      kanal.abgelegt.clear();
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'Moodle Test (moodle-test)'));
+      await tester.pumpAndSettle();
+      await _listeWarten(tester, () => kanal.abgelegt.contains('moodle-test'));
+      expect(kanal.abgelegt, containsAll(['moodle', 'moodle-test']), reason: 'jedes Profil bekommt seine Liste neu');
+    }, skip: Platform.isWindows);
   });
 
   group('Ab zwei Profilen erscheinen Auswahl und Namen', () {

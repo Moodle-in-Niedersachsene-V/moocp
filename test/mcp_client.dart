@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/mcp/kanal.dart';
@@ -25,7 +26,7 @@ class McpTestClient {
     v.eingang.transform(utf8.decoder).transform(const LineSplitter()).listen((zeile) {
       final n = jsonDecode(zeile);
       if (n is Map) _antworten.remove(n['id'])?.complete(n);
-    });
+    }, onDone: _abreissen);
     return _verbindung = v;
   }
 
@@ -34,6 +35,17 @@ class McpTestClient {
     final v = _verbindung;
     _verbindung = null;
     await v?.schliessen();
+    _abreissen();
+  }
+
+  /// Wer noch auf eine Antwort wartet, bekommt nie mehr eine: Die Verbindung ist
+  /// zu (wie bei einem HTTP-Client, dessen Verbindung abgerissen wird).
+  void _abreissen() {
+    final offen = [..._antworten.values];
+    _antworten.clear();
+    for (final c in offen) {
+      c.completeError(const SocketException('Verbindung beendet'));
+    }
   }
 
   Future<Map> call(String method, [Map<String, Object?>? params, int? fehlercode]) async {

@@ -897,9 +897,8 @@ class _HauptseiteState extends State<Hauptseite> {
         sitzungLaeuft: _dienst.laeuft,
         profilname: _profilnameAnzeige,
         mcpName: _mehrere ? _profil.mcpName : null,
-        // Das Standardprofil bleibt: An ihm hängen der globale Schlüssel, den
-        // die Brücke für Bionic liest, und der Eintrag „moodle" in den
-        // KI-Werkzeugen (E6, E21).
+        // Das Standardprofil bleibt: An ihm hängen der Eintrag „moodle" in den
+        // KI-Werkzeugen und `--werkzeugliste` der Brücke (E21).
         profilLoeschenMoeglich: _mehrere && !_profil.istStandard,
         weitereInstanzMoeglich: widget.instanzErstellen != null,
         plugins: _plugins,

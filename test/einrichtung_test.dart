@@ -530,7 +530,7 @@ void main() {
 
     test('ohne Brücke neben der App: nichts eintragen, sondern es sagen', () async {
       final ohne = LmStudio({'USERPROFILE': tmp.path, 'HOME': tmp.path}, bruecke: p.join(tmp.path, 'weg', brueckeExe));
-      expect(await ohne.eintragen(), contains('moocp-bruecke.exe fehlt'));
+      expect(await ohne.eintragen(), contains('$brueckeExe fehlt'));
       expect(File(p.join(tmp.path, pfad)).existsSync(), isFalse);
     });
 
@@ -547,6 +547,42 @@ void main() {
       expect(await lm().austragen(), isNull);
       expect(gelesen().map((e) => (e as Map)['name']), ['blender']);
       expect(lm().verbindung(), Verbindung.fehlt);
+    });
+  });
+
+  group('Brücke im AppImage', () {
+    test('ohne AppImage liegt die Brücke neben der App', () {
+      expect(imAppImage(const {}), isFalse);
+      expect(brueckenOrt(umgebung: const {}), p.join(p.dirname(Platform.resolvedExecutable), brueckeExe));
+    });
+
+    test('im AppImage zeigt der Eintrag auf eine Kopie im Einstellungsordner, nicht in den Einhängepunkt', () {
+      final u = {'APPIMAGE': '/home/erika/moocp.AppImage'};
+      expect(imAppImage(u), Platform.isLinux);
+      if (!Platform.isLinux) return;
+      expect(brueckenOrt(umgebung: u, einstellungen: '/e/moocp'), p.join('/e/moocp', 'bruecke', brueckeExe));
+    });
+
+    test('bereitstellen kopiert die Brücke aus dem Einhängepunkt, ausführbar, und ersetzt eine ältere', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null; // setUp setzt sie für die übrigen Tests
+      final quelle = datei('mount/usr/bin/$brueckeExe', 'neu');
+      final ziel = p.join(tmp.path, 'einstellungen', 'bruecke', brueckeExe);
+      datei('einstellungen/bruecke/$brueckeExe', 'alt');
+      expect(brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': 'x'}, quelle: quelle.path), isNull);
+      expect(File(ziel).readAsStringSync(), 'neu');
+      expect(FileStat.statSync(ziel).mode & 0x1ff, 0x1ed);
+      expect(File('$ziel.neu').existsSync(), isFalse);
+    });
+
+    test('ohne Brücke weder im AppImage noch am Ziel: ein Satz, warum', () {
+      if (!Platform.isLinux) return;
+      festeBruecke = null;
+      final ziel = p.join(tmp.path, 'einstellungen', 'bruecke', brueckeExe);
+      expect(
+        brueckeBereitstellen(ziel, umgebung: {'APPIMAGE': 'x'}, quelle: p.join(tmp.path, 'weg')),
+        contains('$brueckeExe fehlt'),
+      );
     });
   });
 

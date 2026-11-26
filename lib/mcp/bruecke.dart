@@ -1,8 +1,8 @@
-// Die Brücke für KI-Werkzeuge, die MCP nur über stdio sprechen (LM Studio,
-// einrichtung.dart): `moocp-bruecke.exe` (bin/moocp_bruecke.dart) liest
-// JSON-RPC-Nachrichten zeilenweise von stdin, reicht Werkzeugaufrufe an den
-// MCP-Server der laufenden App weiter (http://127.0.0.1:<port>/mcp) und
-// schreibt die Antworten zeilenweise nach stdout.
+// Die Brücke der KI-Werkzeuge (Claude Code, Codex, LM Studio; einrichtung.dart):
+// `moocp-bruecke` (bin/moocp_bruecke.dart) liest JSON-RPC-Nachrichten zeilenweise
+// von stdin, reicht Werkzeugaufrufe über den Kanal des Profils (kanal.dart) an
+// den MCP-Server der laufenden App weiter und schreibt die Antworten
+// zeilenweise nach stdout.
 //
 // Ein eigenes Programm ohne Flutter statt der App mit einem Schalter: Der
 // Client hält die Brücke offen, solange er läuft, und ein laufendes Programm

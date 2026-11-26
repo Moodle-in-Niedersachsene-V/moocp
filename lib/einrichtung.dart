@@ -35,6 +35,8 @@ import 'dart:math';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
+import 'einstellungen_ort.dart';
+import 'plattform/datei_rechte.dart';
 import 'plattform/kindprozess.dart';
 import 'plattform/signatur_mac.dart';
 import 'plattform/signatur_windows.dart';
@@ -147,12 +149,16 @@ const clientZeitlimit = Duration(minutes: 35);
 /// Dialog -- ist für alle gleich.
 abstract class KiWerkzeug {
   KiWerkzeug(this.umgebung, {String? bruecke})
-      : bruecke = bruecke ?? festeBruecke ?? p.join(p.dirname(Platform.resolvedExecutable), brueckeExe);
+      : bruecke = bruecke ?? festeBruecke ?? brueckenOrt();
 
   final Map<String, String> umgebung;
 
   /// Die Brücke, die eingetragen wird: die neben der laufenden App.
   final String bruecke;
+
+  /// Legt die Brücke bereit, ehe ein Eintrag auf sie zeigt: Null, wenn sie da
+  /// ist, sonst ein Satz, warum nicht ([brueckeBereitstellen]).
+  String? brueckeBereit() => brueckeBereitstellen(bruecke);
 
   /// Der Befehl und die Argumente, mit denen jedes KI-Werkzeug die Brücke für
   /// das Profil [name] startet. Mehr steht nicht im Eintrag: kein Port und
@@ -532,7 +538,8 @@ class ClaudeCode extends KiWerkzeug {
   @override
   Future<String?> eintragen({String name = mcpName}) async {
     if (exe == null) return '${_programm('claude')} nicht gefunden';
-    if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp: moocp neu installieren.';
+    final bereit = brueckeBereit();
+    if (bereit != null) return bereit;
     // Fehlt der Eintrag, endet remove mit Fehler; das ist hier der Normalfall.
     await ausfuehren(exe!, ['mcp', 'remove', name, '--scope', 'user']);
     final code = await ausfuehren(exe!, addArgumente(name));
@@ -667,7 +674,8 @@ class CodexCli extends KiWerkzeug {
 
   @override
   Future<String?> eintragen({String name = mcpName}) async {
-    if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp: moocp neu installieren.';
+    final bereit = brueckeBereit();
+    if (bereit != null) return bereit;
     try {
       final alt = konfiguration.existsSync() ? konfiguration.readAsStringSync() : '';
       final neu = tomlBlockSetzen(alt, name, bruecke, brueckenArgumente(name));
@@ -957,7 +965,8 @@ class LmStudio extends KiWerkzeug {
   /// bleibt, damit Bionic, was es daran hängt, nicht verliert.
   @override
   Future<String?> eintragen({String name = mcpName}) async {
-    if (!File(bruecke).existsSync()) return '$brueckeExe fehlt neben moocp.exe: moocp neu installieren.';
+    final bereit = brueckeBereit();
+    if (bereit != null) return bereit;
     try {
       final d = _lesen();
       final server = d['servers'] as List;
@@ -1281,6 +1290,43 @@ const versionSchalter = '--version';
 /// (mcp/bruecke.dart): ein eigenes Programm neben der App, gebaut von
 /// windows/bruecke.cmake, tool/linux_bau.sh und tool/mac_bau.sh.
 final brueckeExe = Platform.isWindows ? 'moocp-bruecke.exe' : 'moocp-bruecke';
+
+/// Ob die App aus einem AppImage läuft (Linux): Das Programm liegt dann in
+/// einem Einhängepunkt, den es nur für die Dauer des Laufs gibt.
+bool imAppImage([Map<String, String>? umgebung]) =>
+    Platform.isLinux && (_v(umgebung ?? Platform.environment, 'APPIMAGE') != null);
+
+/// Wohin die Einträge der KI-Werkzeuge zeigen: auf die Brücke neben der
+/// laufenden App. Läuft die App aus einem AppImage, gäbe es diesen Pfad nach dem
+/// Ende nicht mehr; dann ist es eine Kopie der Brücke im Einstellungsordner
+/// ([brueckeBereitstellen]).
+String brueckenOrt({Map<String, String>? umgebung, String? einstellungen}) =>
+    imAppImage(umgebung)
+        ? p.join(einstellungen ?? einstellungenOrdner, 'bruecke', brueckeExe)
+        : p.join(p.dirname(Platform.resolvedExecutable), brueckeExe);
+
+/// Sorgt dafür, dass die Brücke unter [ziel] liegt, bevor ein Eintrag auf sie
+/// zeigt. Null, wenn sie da ist; sonst ein Satz, warum nicht. Aus einem
+/// AppImage kopiert sie die Brücke von dort an ihren dauerhaften Ort ([ziel]
+/// steht dann im Einstellungsordner) und ersetzt eine ältere Kopie, damit sie
+/// zur laufenden App gehört; sonst liegt sie schon neben der App.
+String? brueckeBereitstellen(String ziel, {Map<String, String>? umgebung, String? quelle}) {
+  if (festeBruecke == null && imAppImage(umgebung)) {
+    final von = File(quelle ?? p.join(p.dirname(Platform.resolvedExecutable), brueckeExe));
+    if (von.existsSync()) {
+      try {
+        Directory(p.dirname(ziel)).createSync(recursive: true);
+        final zwischen = File('$ziel.neu');
+        von.copySync(zwischen.path);
+        const UnixDateiRechte().chmod(zwischen.path, 0x1ed);
+        zwischen.renameSync(ziel);
+      } on FileSystemException {
+        return 'Die Brücke ließ sich nicht an ihren dauerhaften Ort kopieren.';
+      }
+    }
+  }
+  return File(ziel).existsSync() ? null : '$brueckeExe fehlt neben moocp: moocp neu installieren.';
+}
 
 /// Was nach dem Entfernen noch da ist.
 class Entfernt {

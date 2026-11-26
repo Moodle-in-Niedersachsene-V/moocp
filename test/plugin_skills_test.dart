@@ -63,10 +63,15 @@ void main() {
     einstellungen = _EinstellungenOhneDatei();
     final heim = p.join(tmp.path, 'heim');
     umgebung = {'USERPROFILE': heim, 'HOME': heim};
+    final brueckenDatei = File(p.join(tmp.path, 'app', brueckeExe))..createSync(recursive: true);
+    festeBruecke = brueckenDatei.path;
     codex = CodexCli(umgebung);
-    lm = LmStudio(umgebung, bruecke: p.join(tmp.path, 'app', brueckeExe));
+    lm = LmStudio(umgebung, bruecke: brueckenDatei.path);
   });
-  tearDown(() => tmp.deleteSync(recursive: true));
+  tearDown(() {
+    festeBruecke = null;
+    tmp.deleteSync(recursive: true);
+  });
 
   /// Legt das Beispiel-Plugin unter `plugins/beispiel` an, mit seiner
   /// Beschreibungsdatei (verändert durch [manifest]) und seinen Skills.

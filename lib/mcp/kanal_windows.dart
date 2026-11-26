@@ -72,19 +72,44 @@ String sddlNurKonto(String sid) {
   return 'D:P(A;;GA;;;$sid)';
 }
 
-/// Was ein Fehler beim Öffnen der Pipe bedeutet: niemand lauscht (die Pipe
+/// Wandelt den Win32-Namen `\\.\pipe\...` in den NT-Objektpfad
+/// `\Device\NamedPipe\...` für `NtCreateFile` um.
+String ntPipePfad(String win32Pipe) {
+  const praefix = r'\\.\pipe\';
+  if (!win32Pipe.startsWith(praefix) || win32Pipe.length == praefix.length) {
+    throw ArgumentError.value(win32Pipe, 'win32Pipe', 'kein lokaler Pipe-Name');
+  }
+  return r'\Device\NamedPipe\' '${win32Pipe.substring(praefix.length)}';
+}
+
+const _statusNoSuchFile = 0xC000000F;
+const _statusAccessDenied = 0xC0000022;
+const _statusObjectNameNotFound = 0xC0000034;
+const _statusObjectPathNotFound = 0xC000003A;
+const _statusInstanceNotAvailable = 0xC00000AB;
+const _statusPipeNotAvailable = 0xC00000AC;
+const _statusPipeBusy = 0xC00000AE;
+
+/// Ob ein NTSTATUS von `NtCreateFile` bedeutet, dass gerade alle Instanzen der
+/// Pipe belegt sind und ein kurzer neuer Versuch zulässig ist.
+bool ntPipeBelegt(int status) {
+  final s = status & 0xFFFFFFFF;
+  return s == _statusInstanceNotAvailable || s == _statusPipeNotAvailable || s == _statusPipeBusy;
+}
+
+/// Was ein NTSTATUS beim Öffnen der Pipe bedeutet: niemand lauscht (die Pipe
 /// gibt es nicht) oder der Zugriff ist verwehrt (die Pipe gehört nicht dem
-/// Konto), null bei allem anderen. 2 = ERROR_FILE_NOT_FOUND, 3 =
-/// ERROR_PATH_NOT_FOUND, 5 = ERROR_ACCESS_DENIED.
-KanalFehler? verbindungsFehlerFuer(int code) => switch (code) {
-  2 || 3 => KanalNichtDa(),
-  5 => KanalUnsicher('Der Kanal gehört einem anderen Konto.'),
+/// Konto), null bei allem anderen.
+KanalFehler? verbindungsFehlerFuerNtStatus(int status) => switch (status & 0xFFFFFFFF) {
+  _statusObjectNameNotFound || _statusObjectPathNotFound || _statusNoSuchFile => KanalNichtDa(),
+  _statusAccessDenied => KanalUnsicher('Der Kanal gehört einem anderen Konto.'),
   _ => null,
 };
 
-/// Ein Öffnungsversuch an der Win32-Grenze: Fehler unmittelbar beim Öffnen
-/// erfassen, bevor der Rückgabewert in Dart weiterverarbeitet wird.
-typedef PipeOeffnungsVersuch = ({int handle, int fehler}) Function();
+/// Ein Öffnungsversuch über `NtCreateFile`: Der NTSTATUS kommt als direkter
+/// Rückgabewert zurück — ohne `GetLastError()`, den die Dart-VM zwischen zwei
+/// FFI-Aufrufen überschreiben kann.
+typedef PipeOeffnungsVersuch = ({int handle, int status}) Function();
 
 /// Öffnet eine freie Instanz; die Prüfung der Gegenseite folgt im Kanal.
 /// Nur „alle Instanzen belegt“ darf erneut versucht werden. Ein fehlender
@@ -96,17 +121,81 @@ Future<int> pipeOeffnenMitWarten(
 }) async {
   for (var i = 0; i < maxVersuche; i++) {
     final ergebnis = oeffnen();
-    if (ergebnis.handle != _invalidHandle) return ergebnis.handle;
-    if (ergebnis.fehler != _errorPipeBusy) {
-      throw verbindungsFehlerFuer(ergebnis.fehler) ??
-          KanalFehler('moocp nicht erreichbar (Windows-Fehler ${ergebnis.fehler}).');
+    final s = ergebnis.status & 0xFFFFFFFF;
+    if (s < 0x80000000 && ergebnis.handle != 0 && ergebnis.handle != _invalidHandle) {
+      return ergebnis.handle;
+    }
+    if (!ntPipeBelegt(s)) {
+      throw verbindungsFehlerFuerNtStatus(s) ??
+          KanalFehler('moocp nicht erreichbar (Windows-Status 0x${s.toRadixString(16)}).');
     }
     // Auch der Lauscher kann in diesem Isolate laufen. Er muss den bereits
     // angenommenen Client verarbeiten und eine neue Instanz bereitstellen
     // können; ein synchrones WaitNamedPipe hielte ihn dabei selbst auf.
     if (i + 1 < maxVersuche) await Future<void>.delayed(pause);
   }
-  throw KanalFehler('Alle Instanzen des Kanals sind weiterhin belegt (Windows-Fehler 231).');
+  throw KanalFehler('Alle Instanzen des Kanals sind weiterhin belegt.');
+}
+
+/// Öffnet [win32Pipe] direkt über `NtCreateFile` (überlappend, ohne
+/// `GetLastError`). Mit [mitIdentifikation] darf der Server die Gegenstelle
+/// nur identifizieren, nicht nachahmen (`SecurityIdentification`).
+({int handle, int status}) ntPipeOeffnen(String win32Pipe, {bool mitIdentifikation = true}) {
+  final ntPfad = ntPipePfad(win32Pipe);
+  final byteLaenge = ntPfad.codeUnits.length * 2;
+  if (byteLaenge > 0xFFFD) {
+    throw ArgumentError.value(win32Pipe, 'win32Pipe', 'Pipe-Name zu lang für UNICODE_STRING');
+  }
+  final n = ntPfad.toNativeUtf16();
+  // UNICODE_STRING (64-Bit-Windows): Length (0), MaximumLength (2), Buffer (8).
+  final us = calloc<Uint8>(16);
+  // SECURITY_QUALITY_OF_SERVICE: Length (0), ImpersonationLevel (4),
+  // ContextTrackingMode (8 = SECURITY_STATIC_TRACKING), EffectiveOnly (9 = 0).
+  final sqos = mitIdentifikation ? calloc<Uint8>(12) : nullptr;
+  // OBJECT_ATTRIBUTES (64-Bit-Windows, 48 Bytes):
+  // Length (0), RootDirectory (8), ObjectName (16), Attributes (24),
+  // SecurityDescriptor (32), SecurityQualityOfService (40).
+  final oa = calloc<Uint8>(48);
+  final iosb = calloc<Uint8>(_iosbGroesse);
+  final handlePtr = calloc<IntPtr>();
+  try {
+    Pointer<Uint16>.fromAddress(us.address).value = byteLaenge;
+    Pointer<Uint16>.fromAddress(us.address + 2).value = byteLaenge + 2;
+    Pointer<IntPtr>.fromAddress(us.address + 8).value = n.address;
+
+    if (sqos != nullptr) {
+      Pointer<Uint32>.fromAddress(sqos.address).value = 12;
+      Pointer<Uint32>.fromAddress(sqos.address + 4).value = _securityIdentificationLevel;
+    }
+
+    Pointer<Uint32>.fromAddress(oa.address).value = 48;
+    Pointer<IntPtr>.fromAddress(oa.address + 16).value = us.address;
+    Pointer<Uint32>.fromAddress(oa.address + 24).value = _objCaseInsensitive;
+    Pointer<IntPtr>.fromAddress(oa.address + 40).value = sqos.address;
+
+    final status = _ntCreateFile(
+      handlePtr,
+      _genericRead | _genericWrite,
+      oa,
+      iosb,
+      nullptr,
+      0,
+      0,
+      _fileOpen,
+      _fileNonDirectoryFile,
+      nullptr,
+      0,
+    );
+    final s = status & 0xFFFFFFFF;
+    return (handle: s < 0x80000000 ? handlePtr.value : _invalidHandle, status: s);
+  } finally {
+    malloc.free(n);
+    calloc.free(us);
+    if (sqos != nullptr) calloc.free(sqos);
+    calloc.free(oa);
+    calloc.free(iosb);
+    calloc.free(handlePtr);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +205,6 @@ Future<int> pipeOeffnenMitWarten(
 final _kernel32 = DynamicLibrary.open('kernel32.dll');
 final _advapi32 = DynamicLibrary.open('advapi32.dll');
 
-final _getLastError = _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetLastError', isLeaf: true);
 final _closeHandle = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
 final _getCurrentProcess = _kernel32.lookupFunction<IntPtr Function(), int Function()>('GetCurrentProcess');
 final _openProcess = _kernel32.lookupFunction<IntPtr Function(Uint32, Int32, Uint32), int Function(int, int, int)>(
@@ -132,15 +220,23 @@ final _createNamedPipe = _kernel32.lookupFunction<
   int Function(Pointer<Utf16>, int, int, int, int, int, int, Pointer)
 >('CreateNamedPipeW');
 final _disconnectNamedPipe = _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('DisconnectNamedPipe');
-// Lokales CreateFileW(..., OPEN_EXISTING, ...) auf einer Named Pipe kehrt
-// sofort zurück (bei belegten Instanzen mit ERROR_PIPE_BUSY). Mit isLeaf: true
-// liegt kein Dart-Safepoint zwischen CreateFileW und GetLastError, der den
-// Thread-Fehlercode überschreiben könnte.
-final _createFile = _kernel32.lookupFunction<
-  IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Pointer, Uint32, Uint32, IntPtr),
-  int Function(Pointer<Utf16>, int, int, Pointer, int, int, int)
->('CreateFileW', isLeaf: true);
 final _ntdll = DynamicLibrary.open('ntdll.dll');
+final _ntCreateFile = _ntdll.lookupFunction<
+  Int32 Function(
+    Pointer<IntPtr>,
+    Uint32,
+    Pointer,
+    Pointer,
+    Pointer,
+    Uint32,
+    Uint32,
+    Uint32,
+    Uint32,
+    Pointer,
+    Uint32,
+  ),
+  int Function(Pointer<IntPtr>, int, Pointer, Pointer, Pointer, int, int, int, int, Pointer, int)
+>('NtCreateFile');
 final _ntReadFile = _ntdll.lookupFunction<
   Int32 Function(IntPtr, IntPtr, Pointer, Pointer, Pointer, Pointer<Uint8>, Uint32, Pointer, Pointer),
   int Function(int, int, Pointer, Pointer, Pointer, Pointer<Uint8>, int, Pointer, Pointer)
@@ -183,10 +279,11 @@ final _sddlZuBeschreibung = _advapi32.lookupFunction<
 const _invalidHandle = -1;
 const _genericRead = 0x80000000;
 const _genericWrite = 0x40000000;
-const _openExisting = 3;
 const _fileFlagOverlapped = 0x40000000;
-const _securitySqosPresent = 0x00100000; // SECURITY_SQOS_PRESENT; mit 0 = SECURITY_ANONYMOUS
-const _securityIdentification = 0x00010000;
+const _objCaseInsensitive = 0x00000040;
+const _fileOpen = 1;
+const _fileNonDirectoryFile = 0x00000040;
+const _securityIdentificationLevel = 1;
 const _pipeAccessDuplex = 3;
 const _fileFlagFirstPipeInstance = 0x00080000;
 const _pipeRejectRemoteClients = 8;
@@ -194,7 +291,6 @@ const _pipeUnlimitedInstances = 255;
 const _tokenQuery = 8;
 const _tokenUser = 1;
 const _processQueryLimitedInformation = 0x1000;
-const _errorPipeBusy = 231;
 const _pufferGroesse = 64 * 1024;
 
 /// IO_STATUS_BLOCK auf 64-Bit-Windows: Status (NTSTATUS, in einer 8 Byte
@@ -836,47 +932,26 @@ class WindowsKanal extends KanalOrt {
     if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');
     final sid = eigeneSid();
     final pipe = pipeName(sid, name);
-    // Top-Level-Bindungen sind lazy. Insbesondere GetLastError schon VOR
-    // CreateFile auflösen: GetProcAddress danach könnte den Fehler ersetzen.
-    final dateiOeffnen = _createFile;
-    final fehlerLesen = _getLastError;
-    final n = pipe.toNativeUtf16();
+    final h = await pipeOeffnenMitWarten(() => ntPipeOeffnen(pipe));
     try {
-      final h = await pipeOeffnenMitWarten(() {
-        final handle = dateiOeffnen(
-          n,
-          _genericRead | _genericWrite,
-          0,
-          nullptr,
-          _openExisting,
-          _fileFlagOverlapped | _securitySqosPresent | _securityIdentification,
-          0,
-        );
-        final fehler = handle == _invalidHandle ? fehlerLesen() : 0;
-        return (handle: handle, fehler: fehler);
-      });
+      final pid = calloc<Uint32>();
+      final String? serverSid;
       try {
-        final pid = calloc<Uint32>();
-        final String? serverSid;
-        try {
-          serverSid = _getServerPid(h, pid) == 0 ? null : _sidVonPid(pid.value);
-        } finally {
-          calloc.free(pid);
-        }
-        if (serverSid != sid) {
-          // Ein Prozess mit höheren Rechten lässt sein Token eventuell nicht
-          // lesen. Auch dann fließt vor der Prüfung kein Werkzeugbyte.
-          throw KanalUnsicher(serverSid == null
-              ? 'Das Konto, das den Kanal bedient, ließ sich nicht feststellen (läuft moocp mit anderen Rechten?).'
-              : 'Der Kanal wird von einem anderen Konto bedient.');
-        }
-      } catch (_) {
-        _closeHandle(h);
-        rethrow;
+        serverSid = _getServerPid(h, pid) == 0 ? null : _sidVonPid(pid.value);
+      } finally {
+        calloc.free(pid);
       }
-      return await _PipeVerbindung.oeffnen(h, server: false);
-    } finally {
-      malloc.free(n);
+      if (serverSid != sid) {
+        // Ein Prozess mit höheren Rechten lässt sein Token eventuell nicht
+        // lesen. Auch dann fließt vor der Prüfung kein Werkzeugbyte.
+        throw KanalUnsicher(serverSid == null
+            ? 'Das Konto, das den Kanal bedient, ließ sich nicht feststellen (läuft moocp mit anderen Rechten?).'
+            : 'Der Kanal wird von einem anderen Konto bedient.');
+      }
+    } catch (_) {
+      _closeHandle(h);
+      rethrow;
     }
+    return await _PipeVerbindung.oeffnen(h, server: false);
   }
 }

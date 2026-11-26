@@ -8,44 +8,32 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
-import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/mcp/kanal.dart';
 import 'package:moocp/mcp/kanal_windows.dart';
 
 /// Ein roher Client ohne die Prüfungen der Brücke: öffnet die Pipe wie
-/// PowerShell (`Get-Acl`) oder ein beliebiges Programm desselben Kontos.
+/// PowerShell (`Get-Acl`) oder ein beliebiges Programm desselben Kontos —
+/// direkt über `NtCreateFile` (NTSTATUS statt `GetLastError`).
 class _Roh {
   _Roh() {
     final k = DynamicLibrary.open('kernel32.dll');
-    _createFile = k.lookupFunction<
-      IntPtr Function(Pointer<Utf16>, Uint32, Uint32, Pointer, Uint32, Uint32, IntPtr),
-      int Function(Pointer<Utf16>, int, int, Pointer, int, int, int)
-    >('CreateFileW', isLeaf: true);
     _close = k.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
-    _getLastError = k.lookupFunction<Uint32 Function(), int Function()>('GetLastError', isLeaf: true);
   }
-  late final int Function(Pointer<Utf16>, int, int, Pointer, int, int, int) _createFile;
   late final int Function(int) _close;
-  late final int Function() _getLastError;
-  int letzterFehler = 0;
+  int letzterStatus = 0;
 
   /// Öffnet die Pipe; -1 bei einem Fehler (etwa „beschäftigt“, wenn gerade
   /// keine Instanz frei ist: dann kurz warten und noch einmal).
   Future<int> oeffnen(String pipe) async {
-    final n = pipe.toNativeUtf16();
-    try {
-      for (var i = 0; i < 100; i++) {
-        final h = _createFile(n, 0x80000000 | 0x40000000, 0, nullptr, 3, 0, 0);
-        letzterFehler = h == -1 ? _getLastError() : 0;
-        if (h != -1) return h;
-        if (letzterFehler != 231) return -1;
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-      return -1;
-    } finally {
-      malloc.free(n);
+    for (var i = 0; i < 100; i++) {
+      final r = ntPipeOeffnen(pipe, mitIdentifikation: false);
+      letzterStatus = r.status;
+      if (r.handle != -1) return r.handle;
+      if (!ntPipeBelegt(r.status)) return -1;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
+    return -1;
   }
 
   void schliessen(int h) => _close(h);
@@ -106,7 +94,7 @@ void main() {
       final roh = _Roh();
       for (var i = 0; i < 60; i++) {
         final h = await roh.oeffnen(pipe);
-        expect(h, isNot(-1), reason: 'Verbindung $i, Windows-Fehler ${roh.letzterFehler}');
+        expect(h, isNot(-1), reason: 'Verbindung $i, Windows-Status 0x${roh.letzterStatus.toRadixString(16)}');
         roh.schliessen(h);
       }
       // Einer verbindet sich und schweigt.

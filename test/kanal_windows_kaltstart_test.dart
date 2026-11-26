@@ -1,5 +1,5 @@
-// Eigene Testdatei = eigener Testerprozess: Vor dem ersten fehlgeschlagenen
-// Öffnen darf keine andere Kanalprobe GetLastError bereits gebunden haben.
+// Eigene Testdatei = eigener Testerprozess: prüft das allererste Öffnen
+// gegen einen fehlenden Endpunkt ohne vorherige Kanalproben im selben Prozess.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

@@ -64,53 +64,61 @@ Future<List<String>> _zeilen(KanalVerbindung v, int anzahl) async {
 int _zaehler = 0;
 
 void main() {
-  group('Öffnen einer Windows-Pipe über die native Grenze', () {
+  group('Öffnen einer Windows-Pipe über NtCreateFile', () {
+    test('Win32-Pipe-Name wird auf den NT-Objektpfad abgebildet', () {
+      expect(ntPipePfad(r'\\.\pipe\moocp-S-1-5-21-1-moodle'), r'\Device\NamedPipe\moocp-S-1-5-21-1-moodle');
+      expect(() => ntPipePfad(r'\\.\pipe\'), throwsArgumentError);
+      expect(() => ntPipePfad('moocp-moodle'), throwsArgumentError);
+    });
+
     test('belegte Instanz: der Ereignisloop kann die nächste bereitstellen', () async {
       var bereit = false;
       var versuche = 0;
       scheduleMicrotask(() => bereit = true);
       final handle = await pipeOeffnenMitWarten(() {
         versuche++;
-        return bereit ? (handle: 42, fehler: 0) : (handle: -1, fehler: 231);
+        return bereit ? (handle: 42, status: 0) : (handle: -1, status: 0xC00000AC);
       });
       expect(handle, 42);
       expect(versuche, 2);
     });
 
     test('fehlender oder verwehrter Endpunkt wird nicht erneut geöffnet', () async {
-      for (final code in [2, 3, 5]) {
+      for (final status in [0xC0000034, 0xC000003A, 0xC000000F, 0xC0000022]) {
         var versuche = 0;
         await expectLater(pipeOeffnenMitWarten(() {
           versuche++;
-          return (handle: -1, fehler: code);
-        }), throwsA(code == 5 ? isA<KanalUnsicher>() : isA<KanalNichtDa>()));
+          return (handle: -1, status: status);
+        }), throwsA(status == 0xC0000022 ? isA<KanalUnsicher>() : isA<KanalNichtDa>()));
         expect(versuche, 1);
       }
     });
 
-    test('unerwarteter Fehler nennt nur seine Nummer und wird nicht wiederholt', () async {
+    test('unerwarteter NTSTATUS nennt nur seinen Code und wird nicht wiederholt', () async {
       var versuche = 0;
       await expectLater(pipeOeffnenMitWarten(() {
         versuche++;
-        return (handle: -1, fehler: 233);
-      }), throwsA(isA<KanalFehler>().having((e) => e.text, 'Fehlernummer', contains('233'))));
+        return (handle: -1, status: 0xC00000B0);
+      }), throwsA(isA<KanalFehler>().having((e) => e.text, 'Statuscode', contains('c00000b0'))));
       expect(versuche, 1);
     });
 
     test('dauerhaft belegter Endpunkt endet begrenzt und gilt nicht als abwesend', () async {
-      var versuche = 0;
-      await expectLater(
-        pipeOeffnenMitWarten(
-          () {
-            versuche++;
-            return (handle: -1, fehler: 231);
-          },
-          maxVersuche: 3,
-          pause: Duration.zero,
-        ),
-        throwsA(isA<KanalFehler>().having((e) => e is KanalNichtDa, 'abwesend', isFalse)),
-      );
-      expect(versuche, 3);
+      for (final status in [0xC00000AB, 0xC00000AC, 0xC00000AE]) {
+        var versuche = 0;
+        await expectLater(
+          pipeOeffnenMitWarten(
+            () {
+              versuche++;
+              return (handle: -1, status: status);
+            },
+            maxVersuche: 3,
+            pause: Duration.zero,
+          ),
+          throwsA(isA<KanalFehler>().having((e) => e is KanalNichtDa, 'abwesend', isFalse)),
+        );
+        expect(versuche, 3);
+      }
     });
   });
   // Unter Windows gilt kein Unix-Socket, keine Kennung und kein POSIX-Recht.
@@ -530,11 +538,16 @@ void main() {
       expect(ntListenVerbunden(0x103), isFalse, reason: 'läuft noch: noch keine Verbindung');
     });
 
-    test('Fehlernummern beim Öffnen: nicht da heißt „App läuft nicht", Zugriff verwehrt heißt „unsicher"', () {
-      expect(verbindungsFehlerFuer(2), isA<KanalNichtDa>());
-      expect(verbindungsFehlerFuer(3), isA<KanalNichtDa>());
-      expect(verbindungsFehlerFuer(5), isA<KanalUnsicher>());
-      expect(verbindungsFehlerFuer(231), isNull);
+    test('NTSTATUS beim Öffnen: nicht da heißt „App läuft nicht“, Zugriff verwehrt heißt „unsicher“', () {
+      expect(verbindungsFehlerFuerNtStatus(0xC0000034), isA<KanalNichtDa>());
+      expect(verbindungsFehlerFuerNtStatus(0xC000003A), isA<KanalNichtDa>());
+      expect(verbindungsFehlerFuerNtStatus(0xC000000F), isA<KanalNichtDa>());
+      expect(verbindungsFehlerFuerNtStatus(0xC0000022), isA<KanalUnsicher>());
+      expect(verbindungsFehlerFuerNtStatus(0xC00000AC), isNull);
+      expect(ntPipeBelegt(0xC00000AB), isTrue);
+      expect(ntPipeBelegt(0xC00000AC), isTrue);
+      expect(ntPipeBelegt(0xC00000AE), isTrue);
+      expect(ntPipeBelegt(0xC0000034), isFalse);
     });
   });
 }

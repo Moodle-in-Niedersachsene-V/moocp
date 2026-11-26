@@ -46,7 +46,7 @@ class Arbeitsordner {
   ///
   /// Unter Linux teilen sich alle Benutzer /tmp: Der Ordner liegt deshalb in
   /// einem privaten Grundordner des Benutzers ([privatesBasisverzeichnis]),
-  /// wird mit Rechten 700 angelegt und vor jeder Benutzung geprüft. Besteht
+  /// wird mit Rechten 700 angelegt und beim Einrichten und vor dem Leeren geprüft (warum das reicht: [privaterOrdnerPruefen]). Besteht
   /// er die Prüfung nicht, wirft das [PrivaterOrdnerFehler], bevor etwas
   /// geschrieben oder gelöscht wird; sonst läse jeder auf dem Rechner mit,
   /// was die App aus Moodle holt. Ältere Orte unter /tmp rührt die App nicht an.

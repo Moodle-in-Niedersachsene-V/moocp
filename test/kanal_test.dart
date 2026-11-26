@@ -182,6 +182,25 @@ void main() {
     await expectLater(kanal.verbinden('a/b'), throwsA(isA<KanalFehler>()));
   });
 
+  test('überspringt der Kanal einen vorhandenen, aber unsicheren Ordner, meldet er es (ohne Pfad)', () async {
+    final unsicher = Directory(p.join(wurzel.path, 'offen'))..createSync();
+    Process.runSync('chmod', ['755', unsicher.path]);
+    final sicher = p.join(wurzel.path, 'sicher');
+    final meldungen = <String>[];
+    final k = UnixKanal(ketten: () => [[unsicher.path], [sicher]]);
+    final l = await k.lauschen('moodle', hinweis: meldungen.add);
+    addTearDown(l.schliessen);
+    expect(File(p.join(sicher, 'moodle.sock')).existsSync(), isTrue);
+    expect(meldungen, hasLength(1));
+    expect(meldungen.single, isNot(contains(wurzel.path)));
+    // Ein Ort, der nur noch nicht angelegt ist, ist keine Meldung wert.
+    final still = <String>[];
+    final k2 = UnixKanal(ketten: () => [[sicher]]);
+    final l2 = await k2.lauschen('moodle-zwei', hinweis: still.add);
+    addTearDown(l2.schliessen);
+    expect(still, isEmpty);
+  }, skip: posix);
+
   group('die App weist eine Gegenstelle ab, ohne zu lesen', skip: posix, () {
     test('mit fremder Kennung: nichts kommt an, der Grund wird gemeldet', () async {
       final gruende = <String>[];
@@ -442,14 +461,24 @@ void main() {
       }
     });
 
-    test('ein Vorgang läuft nur bei STATUS_PENDING (0x103) in OVERLAPPED.Internal; alles andere ist fertig', () {
-      expect(overlappedAusstehend(0x103), isTrue);
-      expect(overlappedAusstehend(0x00000103 | 0x100000000), isTrue, reason: 'nur die unteren 32 Bit zählen (ULONG_PTR)');
-      expect(overlappedAusstehend(0), isFalse, reason: 'STATUS_SUCCESS: fertig');
-      expect(overlappedAusstehend(0xC000014B), isFalse, reason: 'STATUS_PIPE_BROKEN: gescheitert, nichts läuft');
-      expect(overlappedAusstehend(0xC00000B2), isFalse, reason: 'STATUS_PIPE_CONNECTED: schon verbunden');
-      expect(overlappedAusstehend(0xC0000120), isFalse, reason: 'STATUS_CANCELLED: abgebrochen, nichts läuft mehr');
-      expect(overlappedAusstehend(0x102), isFalse, reason: 'STATUS_TIMEOUT ist kein „läuft“');
+    test('der NTSTATUS von NtReadFile, NtWriteFile und NtFsControlFile entscheidet, ob etwas läuft', () {
+      expect(ntVorgang(0x103), NtVorgang.ausstehend, reason: 'STATUS_PENDING');
+      expect(ntVorgang(0x103 | 0x100000000), NtVorgang.ausstehend, reason: 'nur die unteren 32 Bit zählen');
+      expect(ntVorgang(0), NtVorgang.fertig, reason: 'STATUS_SUCCESS');
+      expect(ntVorgang(0x102), NtVorgang.fertig, reason: 'STATUS_TIMEOUT ist Erfolg, kein „läuft“');
+      expect(ntVorgang(-1073741493), NtVorgang.fehler, reason: 'STATUS_PIPE_BROKEN (0xC000014B als vorzeichenbehafteter Wert)');
+      expect(ntVorgang(0xC000014B), NtVorgang.fehler, reason: 'STATUS_PIPE_BROKEN: gescheitert, nichts läuft');
+      expect(ntVorgang(0xC00000B2), NtVorgang.fehler, reason: 'STATUS_PIPE_CONNECTED ist für Lesen und Schreiben ein Fehler');
+      expect(ntVorgang(0xC0000120), NtVorgang.fehler, reason: 'STATUS_CANCELLED');
+      expect(ntVorgang(0x80000005), NtVorgang.fehler, reason: 'Warnung (STATUS_BUFFER_OVERFLOW) zählt nicht als Erfolg');
+    });
+
+    test('beim Warten auf einen Client zählen Erfolg und „schon verbunden“, sonst nichts', () {
+      expect(ntListenVerbunden(0), isTrue);
+      expect(ntListenVerbunden(0xC00000B2), isTrue, reason: 'STATUS_PIPE_CONNECTED: der Client war schon da');
+      expect(ntListenVerbunden(0xC00000B1), isFalse, reason: 'STATUS_PIPE_CLOSING: schon wieder weg');
+      expect(ntListenVerbunden(0xC0000120), isFalse, reason: 'STATUS_CANCELLED');
+      expect(ntListenVerbunden(0x103), isFalse, reason: 'läuft noch: noch keine Verbindung');
     });
 
     test('Fehlernummern beim Öffnen: nicht da heißt „App läuft nicht", Zugriff verwehrt heißt „unsicher"', () {

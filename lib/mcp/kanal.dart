@@ -83,8 +83,10 @@ abstract interface class KanalLauscher {
 abstract class KanalOrt {
   /// Öffnet den Endpunkt des Profils [name]. [abgewiesen] hört den Grund jeder
   /// Verbindung, die die Prüfung der Gegenstelle nicht bestand (ohne Pfade
-  /// und Namen).
-  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen});
+  /// und Namen). [hinweis] hört, wenn ein vorhandener Ordner der Suche
+  /// übersprungen wurde, weil er die Prüfung nicht bestand, und ein späterer
+  /// Ort gilt (nur Linux und Mac; ohne Pfad).
+  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen, void Function(String text)? hinweis});
 
   /// Verbindet mit dem Endpunkt des Profils [name], nachdem Endpunkt und
   /// Gegenstelle geprüft sind: [KanalNichtDa], wenn dort niemand lauscht,
@@ -126,10 +128,14 @@ KanalOrt standardKanalOrt = Platform.isWindows ? WindowsKanal() : UnixKanal();
 /// zählt nur, wenn er dem Konto allein gehört. Dahinter kommt der Ort ohne
 /// Laufzeitordner, `/tmp/moocp-<uid>/kanal`, unabhängig vom `TMPDIR` des
 /// Aufrufers (der Arbeitsordner liegt unter `<temp>/moocp-<uid>`, E5, und teilt
-/// den Ort nur, wo `TMPDIR` nicht gesetzt ist). Wer die Brücke startet, hat die Variable vielleicht nicht, die App aber
-/// schon (oder umgekehrt): Darum sucht die Brücke an allen Orten.
-/// Mac: `kanal` im Einstellungsordner. Ein anderer Ordner im Temp-Bereich
-/// kommt nie in Frage; die Kennung kommt vom System, nie aus $USER.
+/// den Ort nur, wo `TMPDIR` nicht gesetzt ist). Wer die Brücke startet, hat die
+/// Variable vielleicht nicht, die App aber schon (oder umgekehrt): Darum sucht
+/// die Brücke an allen Orten.
+/// Mac: `kanal` im Einstellungsordner, dahinter `/tmp/moocp-<uid>/kanal`, wenn
+/// der Pfad dort zu lang für einen Unix-Socket ist oder der Ordner die Prüfung
+/// nicht besteht. Ein anderer Ordner im Temp-Bereich kommt nie in Frage, und
+/// jeder Ort gilt nur, wenn er geprüft ist; die Kennung kommt vom System, nie
+/// aus $USER.
 List<List<String>> kanalOrdnerKetten(
   Map<String, String> umgebung, {
   bool? macos,
@@ -230,10 +236,15 @@ class UnixKanal extends KanalOrt {
   static InternetAddress _adresse(String pfad) => InternetAddress(pfad, type: InternetAddressType.unix);
 
   @override
-  Future<KanalLauscher> lauschen(String name, {void Function(String grund)? abgewiesen}) async {
+  Future<KanalLauscher> lauschen(
+    String name, {
+    void Function(String grund)? abgewiesen,
+    void Function(String text)? hinweis,
+  }) async {
     if (!kanalNameGueltig(name)) throw KanalFehler('Der Profilname eignet sich nicht für einen Kanal.');
     String? ordner;
     String? grund;
+    String? uebersprungen;
     for (final kette in _kettenJetzt()) {
       if (_socket(kette.last, name).length > _socketPfadHoechstens) {
         grund ??= 'Der Pfad des Kanals ist zu lang für einen Unix-Socket.';
@@ -247,9 +258,15 @@ class UnixKanal extends KanalOrt {
         break;
       } on PrivaterOrdnerFehler catch (x) {
         grund ??= x.meldung;
+        uebersprungen ??= x.meldung;
       }
     }
     if (ordner == null) throw KanalUnsicher(grund ?? 'Es gibt keinen Ordner für den Kanal.');
+    // Der regelmäßige Ort ist unbrauchbar (falsche Rechte, fremder Besitzer),
+    // und die App läuft am Rückfall: Das soll jemand sehen, der danach sucht.
+    if (uebersprungen != null) {
+      hinweis?.call('Ein Ordner für den Kanal wurde übersprungen, ein anderer geprüfter gilt: $uebersprungen');
+    }
     final pfad = _socket(ordner, name);
     await _alteEntfernen(pfad);
     final server = await ServerSocket.bind(_adresse(pfad), 0);

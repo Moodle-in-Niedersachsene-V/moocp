@@ -1,8 +1,8 @@
 // Die Named Pipe unter Windows (lib/mcp/kanal_windows.dart) gegen Gegenstellen,
 // die sich verbinden und wieder gehen: Eine Pipe mit überlappender Ein- und
 // Ausgabe darf davon weder abstürzen noch hängen, und die nächste echte
-// Verbindung muss danach gehen. Läuft nur unter Windows; die Auswertung von
-// OVERLAPPED.Internal prüft test/kanal_test.dart auf jeder Plattform.
+// Verbindung muss danach gehen. Läuft nur unter Windows; die Auswertung des
+// NTSTATUS prüft test/kanal_test.dart auf jeder Plattform.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
@@ -57,16 +57,26 @@ void main() {
     late String name;
     late KanalLauscher lauscher;
     final angenommen = <KanalVerbindung>[];
+    // Je angenommener Verbindung: wird vollständig, wenn ihr Eingang endet.
+    final enden = <Completer<void>>[];
 
     setUp(() async {
       name = 'zz-pipe-$pid-${zaehler++}';
       angenommen.clear();
+      enden.clear();
       lauscher = await WindowsKanal().lauschen(name);
       // Jede angenommene Verbindung wird wie in der App benutzt: gelesen, und
       // was ankommt, kommt zurück.
       lauscher.verbindungen.listen((v) {
         angenommen.add(v);
-        v.eingang.listen((d) => v.senden(d), onError: (_) {}, cancelOnError: false);
+        final ende = Completer<void>();
+        enden.add(ende);
+        v.eingang.listen(
+          (d) => v.senden(d),
+          onError: (_) {},
+          onDone: () => ende.complete(),
+          cancelOnError: false,
+        );
       });
     });
     tearDown(() async {
@@ -114,15 +124,51 @@ void main() {
       await echoGeht();
     });
 
+    /// Wartet, bis die App [n] Verbindungen angenommen hat.
+    Future<void> bisAngenommen(int n) async {
+      for (var i = 0; i < 200 && angenommen.length < n; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+      expect(angenommen.length, greaterThanOrEqualTo(n), reason: 'die App hat die Verbindung nicht angenommen');
+    }
+
+    test('schließt der Client, endet der Eingang der Verbindung (kein Hängen im Lesen)', () async {
+      final roh = _Roh();
+      final h = await roh.oeffnen(pipeName(eigeneSid(), name));
+      expect(h, isNot(-1));
+      await bisAngenommen(1);
+      roh.schliessen(h);
+      await enden.first.future.timeout(const Duration(seconds: 5));
+      // Und die Pipe nimmt danach die nächste Verbindung an.
+      await echoGeht();
+    });
+
+    test('schreibt die App an einen Client, der schon weg ist, endet die Verbindung (kein Hängen im Schreiben)', () async {
+      final roh = _Roh();
+      final h = await roh.oeffnen(pipeName(eigeneSid(), name));
+      expect(h, isNot(-1));
+      await bisAngenommen(1);
+      roh.schliessen(h);
+      // Zwei Zeilen, damit auch ein erstes Schreiben, das noch durchgeht, die
+      // Verbindung nicht offen hält.
+      angenommen.first.senden(utf8.encode('x\n'));
+      angenommen.first.senden(utf8.encode('y\n'));
+      await enden.first.future.timeout(const Duration(seconds: 5));
+      await echoGeht();
+    });
+
     test('Schließen des Lauschers mit offener, schweigender Gegenseite hängt nicht', () async {
       final roh = _Roh();
       final h = await roh.oeffnen(pipeName(eigeneSid(), name));
       expect(h, isNot(-1));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await bisAngenommen(1);
+      // Die angenommene Verbindung bleibt offen; der Lauscher schließt trotzdem zügig.
+      final uhr = Stopwatch()..start();
+      await lauscher.schliessen().timeout(const Duration(seconds: 10));
+      expect(uhr.elapsed, lessThan(const Duration(seconds: 3)));
       for (final v in angenommen) {
         await v.schliessen();
       }
-      await lauscher.schliessen().timeout(const Duration(seconds: 10));
       roh.schliessen(h);
       // Danach gibt es die Pipe nicht mehr.
       for (var i = 0; i < 100; i++) {

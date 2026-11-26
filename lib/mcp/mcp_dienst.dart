@@ -250,6 +250,7 @@ class McpDienst implements AufrufKontext {
     final l = await (kanal ?? standardKanalOrt).lauschen(
       name,
       abgewiesen: (grund) => protokoll.eintrag(Art.gesperrt, 'MCP-Verbindung abgewiesen: $grund'),
+      hinweis: (text) => protokoll.eintrag(Art.info, 'MCP-Kanal ($name): $text'),
     );
     _lauscher = l;
     _laufendeNamen[profil.port] = name;

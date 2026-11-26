@@ -74,7 +74,7 @@ void main() {
   });
 
   test('Über MCP gibt es kein Werkzeug, das eine Sperre aufhebt', () async {
-    final dienst = McpDienst(Einstellungen(schluessel: ''), moodle, protokoll, Freigaben(protokoll), ordner.path,
+    final dienst = McpDienst(Einstellungen(), moodle, protokoll, Freigaben(protokoll), ordner.path,
         profil: Profil.migriert(''));
     final namen = await dienst.eingebauteWerkzeugnamen();
     expect(namen.where((n) => n.contains('sperre') || n.contains('aufheb')), isEmpty);

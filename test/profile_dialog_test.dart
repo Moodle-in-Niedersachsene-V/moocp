@@ -37,11 +37,6 @@ void main() {
       expect(ergebnis?.name, 'Moodle Test');
       expect(ergebnis?.adresse, 'https://test.schule.example');
       expect(ergebnis?.mcpName, 'moodle-test');
-      expect(
-        ergebnis?.schluessel,
-        hasLength(64),
-        reason: 'jedes neue Profil bekommt gleich einen eigenen Zugangsschlüssel (E6)',
-      );
     },
   );
 
@@ -54,7 +49,6 @@ void main() {
         adresse: 'https://alt.schule.example',
         port: 47812,
         mcpName: 'moodle-test',
-        schluessel: 'eigener-schluessel',
       );
       Profil? ergebnis;
       await tester.pumpWidget(
@@ -86,7 +80,6 @@ void main() {
       expect(ergebnis?.name, 'Test Moodle');
       expect(ergebnis?.adresse, 'https://neu.schule.example');
       expect(ergebnis?.mcpName, 'moodle-test');
-      expect(ergebnis?.schluessel, 'eigener-schluessel');
     },
   );
 }

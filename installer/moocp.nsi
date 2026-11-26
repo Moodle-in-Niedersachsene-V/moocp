@@ -404,7 +404,7 @@ Section "Uninstall"
     ${EndIf}
   ${Loop}
 
-  ; Die Daten der App. Einstellungen mit Zugangsschlüssel und Protokoll
+  ; Die Daten der App. Einstellungen und Protokoll
   ; (lib/einstellungen.dart), Benutzername und verschlüsseltes Passwort
   ; (lib/anmeldedaten.dart; der Ordner kommt aus CompanyName und ProductName
   ; in windows/runner/Runner.rc), der Arbeitsordner (lib/arbeitsordner.dart).

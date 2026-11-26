@@ -144,7 +144,7 @@ void main() {
     final a = WerkzeugAufruf(
       name: '${kurzname}_download',
       args: const {},
-      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil, schluessel: 't'),
+      profil: Profil(kennung: profil, name: profil, adresse: 'https://moodle.schule.example', port: 1, mcpName: profil),
       token: aufrufToken(),
       abbruch: Completer<void>().future,
       kontext: _Kontext(
@@ -175,8 +175,10 @@ void main() {
 
   group('Der Ordner', () {
     test('liegt außerhalb des Arbeitsordners und wird beim Einrichten (Start) geleert', () {
-      final basis = p.join(wurzel.path, 'start');
-      final alt = File(p.join(basis, PluginDownloads.ordnername, 'beispiel', 'A', '1.csv'))
+      final basis = (Directory(p.join(wurzel.path, 'start'))..createSync()).path;
+      // Unter Linux liegt der Ordner im privaten Grundordner (privater_ordner.dart).
+      final (erster, _) = PluginDownloads.einrichten(basis: basis);
+      final alt = File(p.join(erster.wurzel, 'beispiel', 'A', '1.csv'))
         ..createSync(recursive: true)
         ..writeAsStringSync('vom letzten Lauf');
       final (d, geblieben) = PluginDownloads.einrichten(basis: basis);
@@ -367,7 +369,7 @@ void main() {
       final a = WerkzeugAufruf(
         name: 'beispiel_download',
         args: const {},
-        profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A', schluessel: 't'),
+        profil: Profil(kennung: 'A', name: 'A', adresse: 'https://moodle.schule.example', port: 1, mcpName: 'A'),
         token: aufrufToken(),
         abbruch: Completer<void>().future,
         kontext: _Kontext(zugang, wurzel.path),

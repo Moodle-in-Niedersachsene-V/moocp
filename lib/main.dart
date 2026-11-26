@@ -31,6 +31,8 @@ import 'freigabe.dart';
 import 'installer/installer_start.dart';
 import 'profile_dialog.dart';
 import 'log.dart';
+import 'mcp/bruecke.dart' show profilAusArgumenten;
+import 'mcp/kanal.dart';
 import 'mcp/mcp_dienst.dart';
 import 'moodle/instanzen.dart';
 import 'moodle/lernsituation_pruefung.dart' show schucuVorlagenDateien, schucuVorlagenOrdner;
@@ -42,6 +44,7 @@ import 'nur_maus.dart';
 import 'mcp/werkzeugquelle.dart';
 import 'plattform/kindprozess.dart';
 import 'plattform/plattform.dart' show benutzerordner;
+import 'plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
 import 'plattform/zwischenablage.dart';
 import 'plugin/dialoge.dart';
 import 'plugin/downloads.dart';
@@ -58,6 +61,7 @@ import 'ueber.dart';
 import 'update/update.dart';
 import 'testbetrieb_rahmen.dart';
 import 'testschalter.dart';
+import 'start_fehler.dart';
 import 'update/update_dialoge.dart';
 
 export 'anmeldung.dart'
@@ -99,7 +103,7 @@ Future<void> main(List<String> argumente) async {
   if (argumente.contains(claudeEntfernenSchalter)) {
     exit(await _claudeEntfernen());
   }
-  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste());
+  if (argumente.contains(werkzeuglisteSchalter)) exit(await _werkzeugliste(argumente.contains('--profil') ? (profilAusArgumenten(argumente) ?? '') : null));
   if (argumente.contains(versionSchalter)) exit(await _version());
   lizenzAnmelden();
   // Die fertige Windows-App hat keine Konsole; print ginge dort ins Leere und
@@ -122,6 +126,9 @@ Future<void> main(List<String> argumente) async {
   final protokoll = Protokoll(
     datei: File(p.join(einstellungenOrdner, 'protokoll.log')),
   );
+  // Rechte der Einstellungsdatei, die sich nicht setzen ließen, gehören ins
+  // Protokoll (auch die vom Laden, das vor dem Protokoll geschah).
+  Einstellungen.rechteMelder = (m) => protokoll.eintrag(Art.fehler, m);
   FlutterError.onError = (d) => protokoll.eintrag(
     Art.fehler,
     'Fehler in der Oberfläche: ${fehlerBeschreibung(d.exception, d.stack)}',
@@ -134,15 +141,36 @@ Future<void> main(List<String> argumente) async {
     return true;
   };
   protokoll.eintrag(Art.info, 'App gestartet');
-  final (arbeitsordner, geblieben) = Arbeitsordner.einrichten();
+  // Kein privater Ordner (Linux): Fehlermeldung statt Absturz ohne Fenster,
+  // und nichts wird geschrieben oder geleert (plattform/privater_ordner.dart).
+  final Arbeitsordner arbeitsordner;
+  final int geblieben;
+  final PluginDownloads downloads;
+  final int downloadsGeblieben;
+  try {
+    (arbeitsordner, geblieben) = Arbeitsordner.einrichten();
+    (downloads, downloadsGeblieben) = PluginDownloads.einrichten();
+  } on PrivaterOrdnerFehler catch (e) {
+    protokoll.eintrag(Art.fehler, 'Privater Ordner nicht benutzbar: Meldung im Fenster');
+    runApp(StartFehlerApp(e.meldung));
+    return;
+  }
   protokoll.eintrag(
     Art.info,
     geblieben == 0
         ? 'Arbeitsordner geleert: ${arbeitsordner.pfad}'
         : 'Arbeitsordner: ${arbeitsordner.pfad} -- $geblieben Einträge in Benutzung, nicht gelöscht',
   );
+  // Im AppImage steht der Ort der Datei neben der Kopie der Brücke; er stimmt
+  // nur, solange das AppImage dort liegt.
+  final hinweisFehler = appImageHinweisAktualisieren();
+  if (hinweisFehler != null) protokoll.eintrag(Art.fehler, hinweisFehler);
+  // Die Brücke erreicht die App über den Kanal des Kontos und liest die
+  // Werkzeugliste aus einer Datei darin, solange die App nicht läuft
+  // (mcp/kanal.dart); unter Windows fragt sie die exe.
+  unawaited(werkzeuglisteAblegen(protokoll, einstellungen.profile.isEmpty ? [Profil.migriert('')] : einstellungen.profile));
   // Je Instanzprofil ein Zugang, eine Freigabe und ein MCP-Server mit eigenem
-  // Port und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
+  // Endpunkt und Servernamen (E31). Das erste Profil ist das Hauptprofil, dessen
   // Anmeldung die Oberfläche zeigt.
   final profile = einstellungen.profile.isEmpty
       ? [Profil.migriert('')]
@@ -159,7 +187,6 @@ Future<void> main(List<String> argumente) async {
   // Arbeitsordners (plugin/downloads.dart): beim Start geleert wie dieser,
   // beim Beenden von LaufendePlugins.beenden. Sein Pfad gehört in kein
   // Protokoll.
-  final (downloads, downloadsGeblieben) = PluginDownloads.einrichten();
   protokoll.eintrag(
     Art.info,
     downloadsGeblieben == 0
@@ -336,7 +363,7 @@ Future<Einstellungen?> _gespeicherteEinstellungen() async {
     ) as Map<String, dynamic>;
     return Einstellungen.aus(
       j,
-      Einstellungen(moodleAdresse: '', schluessel: ''),
+      Einstellungen(moodleAdresse: ''),
     );
   } catch (_) {
     return null;
@@ -359,7 +386,7 @@ List<String> _gespeicherteMcpNamen(Einstellungen? gespeichert) =>
 /// läuft. Eine Ausnahme von E11 wie die Brücke selbst: Auf stdout stehen nur
 /// Namen, Beschreibungen und Parameter der Werkzeuge. Meldungen von mcp_dart
 /// gehen an den Logger, und dem hört hier niemand zu.
-Future<int> _werkzeugliste() async {
+Future<int> _werkzeugliste(String? profilName) async {
   try {
     mcpLogsUmleiten();
     stdout.writeln(
@@ -367,6 +394,7 @@ Future<int> _werkzeugliste() async {
         await werkzeuglisteFuerBruecke(
           einstellungen: () => einstellungenDatei,
           plugins: () => Directory(pluginsOrdner),
+          profilName: profilName,
         ),
       ),
     );
@@ -374,6 +402,60 @@ Future<int> _werkzeugliste() async {
     return 0;
   } catch (_) {
     return 1;
+  }
+}
+
+/// Wohin die App die Werkzeugliste für die Brücke ablegt und woraus sie sie
+/// bildet; die Tests setzen eigene Orte ein, damit keiner die Einstellungen
+/// oder den Kanal des Kontos berührt.
+class WerkzeuglisteOrt {
+  const WerkzeuglisteOrt({this.kanal, this.einstellungen, this.plugins});
+
+  /// Ohne Angabe der Kanal dieses Systems.
+  final KanalOrt? kanal;
+  final File Function()? einstellungen;
+  final Directory Function()? plugins;
+}
+
+/// Legt die Werkzeugliste für die Brücke jedes Profils ab (nur Linux und Mac,
+/// siehe KanalOrt.listeLesen): je Profil dasselbe, was `--werkzeugliste
+/// --profil Name` ausgibt. Sie wird aus der gespeicherten Einstellungsdatei
+/// gebildet, gilt also erst, nachdem gespeichert ist. Neu abgelegt wird sie
+/// bei jeder Änderung, die in die Liste eingeht: Start, Start der Plugins,
+/// neues Profil, Plugin ein- oder ausgeschaltet oder angenommen. Ein Fehler
+/// dabei ändert nichts am Start; die Brücke sagt dann, dass sie keine Liste
+/// hat.
+Future<void> werkzeuglisteAblegen(
+  Protokoll protokoll,
+  Iterable<Profil> profile, {
+  WerkzeuglisteOrt ort = const WerkzeuglisteOrt(),
+}) async {
+  if (Platform.isWindows) return;
+  for (final profil in profile) {
+    try {
+      final liste = await werkzeuglisteFuerBruecke(
+        einstellungen: ort.einstellungen ?? () => einstellungenDatei,
+        plugins: ort.plugins ?? () => Directory(pluginsOrdner),
+        profilName: profil.mcpName,
+      );
+      await (ort.kanal ?? standardKanalOrt).listeAblegen(profil.mcpName, jsonEncode(liste));
+    } catch (e) {
+      protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht abgelegt (${e.runtimeType})');
+    }
+  }
+}
+
+/// Löscht die Liste eines gelöschten Profils (siehe [werkzeuglisteAblegen]).
+Future<void> werkzeuglisteEntfernen(
+  Protokoll protokoll,
+  Profil profil, {
+  WerkzeuglisteOrt ort = const WerkzeuglisteOrt(),
+}) async {
+  if (Platform.isWindows) return;
+  try {
+    await (ort.kanal ?? standardKanalOrt).listeEntfernen(profil.mcpName);
+  } catch (e) {
+    protokoll.eintrag(Art.fehler, 'Werkzeugliste für die Brücke nicht gelöscht (${e.runtimeType})');
   }
 }
 
@@ -409,6 +491,7 @@ class MoocpApp extends StatelessWidget {
     this.laufendePlugins,
     this.entwicklungVorbereiten,
     this.fokus,
+    this.werkzeuglisteOrt = const WerkzeuglisteOrt(),
     super.key,
   });
   final Einstellungen einstellungen;
@@ -458,6 +541,9 @@ class MoocpApp extends StatelessWidget {
   /// Wenn eine zweite Anmeldung das Fenster verlangt (einzelstart.dart).
   final Stream<void>? fokus;
 
+  /// Wohin die Werkzeugliste für die Brücke kommt; Tests setzen eigene Orte.
+  final WerkzeuglisteOrt werkzeuglisteOrt;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -490,6 +576,7 @@ class MoocpApp extends StatelessWidget {
         laufendePlugins: laufendePlugins,
         entwicklungVorbereiten: entwicklungVorbereiten,
         fokus: fokus,
+        werkzeuglisteOrt: werkzeuglisteOrt,
       ),
     );
   }
@@ -513,6 +600,7 @@ class Hauptseite extends StatefulWidget {
     this.laufendePlugins,
     this.entwicklungVorbereiten,
     this.fokus,
+    this.werkzeuglisteOrt = const WerkzeuglisteOrt(),
     super.key,
   });
   final Einstellungen einstellungen;
@@ -531,6 +619,9 @@ class Hauptseite extends StatefulWidget {
   final UpdatePaket? updatePaket;
   final Future<Plugins> Function()? pluginsLaden;
   final Stream<void>? fokus;
+
+  /// Wohin die Werkzeugliste für die Brücke kommt; Tests setzen eigene Orte.
+  final WerkzeuglisteOrt werkzeuglisteOrt;
 
   @override
   State<Hauptseite> createState() => _HauptseiteState();
@@ -575,6 +666,12 @@ class _HauptseiteState extends State<Hauptseite> {
 
   /// Haken „Anmeldedaten speichern" (anmeldedaten.dart).
   bool _merken = false;
+
+  /// Die Herkunft, für die das Passwort im Feld aus dem Speicher geladen wurde
+  /// (anmeldedaten.dart); null, wenn die Lehrkraft es selbst getippt hat oder
+  /// das Feld leer ist. Ändert sich die Herkunft der Adresse im Feld, geht das
+  /// geladene Passwort nicht mit: Es gehört zu der alten Instanz.
+  String? _passwortHerkunft;
 
   /// Ob „KI-Werkzeuge einrichten" beim Start durch ist; vorher gibt es keine
   /// Anmeldung und keinen MCP-Server (_starten).
@@ -764,7 +861,11 @@ class _HauptseiteState extends State<Hauptseite> {
     if (laden == null) return false;
     Future<Plugins?> lesen() async {
       try {
-        return await laden();
+        final geladen = await laden();
+        // Ein- und Ausschalten und Zustimmen ändert die Werkzeuge, die die
+        // Brücke anbietet (E35, E21).
+        geladen.geaendert = _listeAblegen;
+        return geladen;
       } catch (e) {
         widget.protokoll.eintrag(
           Art.fehler,
@@ -830,6 +931,20 @@ class _HauptseiteState extends State<Hauptseite> {
     );
   }
 
+  /// Legt die Werkzeugliste der Profile für die Brücke neu ab, nachdem sich
+  /// etwas geändert hat, das in sie eingeht (gespeichert muss schon sein).
+  ///
+  /// Die Aufrufe laufen nacheinander, denn zwei zugleich schrieben dieselbe
+  /// Zwischendatei. Niemand wartet darauf: Die Liste liegt längst da, wenn die
+  /// Lehrkraft in der Einrichtung auf „Installieren“ klickt.
+  Future<void> _listeKette = Future.value();
+  void _listeAblegen() {
+    final profile = _alleProfile.toList();
+    _listeKette = _listeKette.then(
+      (_) => werkzeuglisteAblegen(widget.protokoll, profile, ort: widget.werkzeuglisteOrt),
+    );
+  }
+
   /// Startet die Plugins, denen die Lehrkraft zugestimmt hat
   /// (plugin/laufende_plugins.dart), einmal je App. Was nicht startet, steht
   /// mit dem Grund im Protokoll und im Dialog „Plugins“. Ein angenommenes
@@ -844,6 +959,8 @@ class _HauptseiteState extends State<Hauptseite> {
       await laufende.anhaengen(entwicklung, eingebaut: eingebaut);
     }
     if (plugins != null) await laufende.starten(plugins, eingebaut: eingebaut);
+    // Die Werkzeuge der Plugins stehen jetzt in den Einstellungen.
+    _listeAblegen();
   }
 
   /// Ohne Version keine Update-Prüfung: Was sich mit nichts vergleichen
@@ -874,9 +991,8 @@ class _HauptseiteState extends State<Hauptseite> {
         sitzungLaeuft: _dienst.laeuft,
         profilname: _profilnameAnzeige,
         mcpName: _mehrere ? _profil.mcpName : null,
-        // Das Standardprofil bleibt: An ihm hängen der globale Schlüssel, den
-        // die Brücke für Bionic liest, und der Eintrag „moodle" in den
-        // KI-Werkzeugen (E6, E21).
+        // Das Standardprofil bleibt: An ihm hängen der Eintrag „moodle" in den
+        // KI-Werkzeugen und `--werkzeugliste` der Brücke (E21).
         profilLoeschenMoeglich: _mehrere && !_profil.istStandard,
         weitereInstanzMoeglich: widget.instanzErstellen != null,
         plugins: _plugins,
@@ -982,6 +1098,9 @@ class _HauptseiteState extends State<Hauptseite> {
       return;
     }
     await instanz.dienst.stoppen();
+    _listeKette = _listeKette.then(
+      (_) => werkzeuglisteEntfernen(widget.protokoll, profil, ort: widget.werkzeuglisteOrt),
+    );
     // Die Protokolle abgeschlossener Schreibvorgänge nennen Dateien dieser Instanz.
     Schreibvorgang.abgeschlosseneLoeschen(instanz.moodle, dieserInstanz: true);
     instanz.moodle.abmelden();
@@ -1053,7 +1172,10 @@ class _HauptseiteState extends State<Hauptseite> {
         anwenden: (daten) => setState(() {
           _merken = daten.merken;
           if (daten.benutzer != null) _benutzer.text = daten.benutzer!;
-          if (daten.passwort != null) _passwort.text = daten.passwort!;
+          if (daten.passwort != null) {
+            _passwort.text = daten.passwort!;
+            _passwortHerkunft = Anmeldedaten.herkunftVon(profil.adresse);
+          }
         }),
       );
       if (geladen == null) return;
@@ -1073,13 +1195,16 @@ class _HauptseiteState extends State<Hauptseite> {
       // App still abgemeldet.
       instanz.dienst.protokoll.eintrag(
         Art.anmeldung,
-        d.speicherProblem == null
-            ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
-            : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
+        d.herkunftHinweis != null
+            ? 'Gespeichertes Passwort nicht verwendet: Adresse passt nicht zur gespeicherten Herkunft -- bitte in der App anmelden'
+            : d.speicherProblem == null
+                ? 'Kein gespeichertes Passwort (nicht lesbar oder verworfen) -- bitte in der App anmelden'
+                : 'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
       );
       // Sichtbar, nicht nur im Protokoll: Sonst stünde die Lehrkraft vor einem
       // leeren Passwortfeld und wüsste nicht, warum die App nicht anmeldet.
-      if (d.speicherProblem != null && mounted) setState(() => _meldung = d.speicherProblem);
+      final hinweis = d.herkunftHinweis ?? d.speicherProblem;
+      if (hinweis != null && mounted) setState(() => _meldung = hinweis);
       return;
     }
     instanz.dienst.protokoll.eintrag(
@@ -1148,8 +1273,6 @@ class _HauptseiteState extends State<Hauptseite> {
         pruefen: _einrichtungsstand,
         einstellungen: widget.einstellungen,
         protokoll: widget.protokoll,
-        port: _dienst.profil.port,
-        schluessel: widget.einstellungen.schluesselFuer(_dienst.profil),
         servername: _dienst.profil.mcpName,
         profilname: _profilnameAnzeige,
       ),
@@ -1217,9 +1340,7 @@ class _HauptseiteState extends State<Hauptseite> {
     final wahl = {...appWahlSkills, ...plugins.wahlSkills};
     final stand = await einrichtungPruefen(
       umgebung: Platform.environment,
-      port: _dienst.profil.port,
       name: _dienst.profil.mcpName,
-      schluessel: e.schluesselFuer(_dienst.profil),
       skills: [...app, ...plugins.pakete],
       wahlSkills: wahl,
       abgewaehlt: e.werkzeugeAbgewaehlt,
@@ -1398,6 +1519,7 @@ class _HauptseiteState extends State<Hauptseite> {
       _adresse.text = _profil.adresse;
       _benutzer.clear();
       _passwort.clear();
+      _passwortHerkunft = null;
       _meldung = null;
       _merken = false;
     });
@@ -1422,6 +1544,7 @@ class _HauptseiteState extends State<Hauptseite> {
           _merken = daten.merken;
           _benutzer.text = daten.benutzer ?? '';
           _passwort.text = daten.passwort ?? '';
+          _passwortHerkunft = daten.passwort == null ? null : Anmeldedaten.herkunftVon(profil.adresse);
         }),
       );
       if (geladen == null) return;
@@ -1435,7 +1558,13 @@ class _HauptseiteState extends State<Hauptseite> {
       }
       return;
     }
-    if (d.merken && d.passwort == null && d.speicherProblem != null) {
+    if (d.merken && d.passwort == null && d.herkunftHinweis != null) {
+      instanz.dienst.protokoll.eintrag(
+        Art.anmeldung,
+        'Gespeichertes Passwort nicht verwendet: Adresse passt nicht zur gespeicherten Herkunft -- bitte in der App anmelden',
+      );
+      if (mounted) setState(() => _meldung = d.herkunftHinweis);
+    } else if (d.merken && d.passwort == null && d.speicherProblem != null) {
       instanz.dienst.protokoll.eintrag(
         Art.anmeldung,
         'Gespeichertes Passwort nicht gelesen: ${d.speicherProblem}',
@@ -1527,6 +1656,9 @@ class _HauptseiteState extends State<Hauptseite> {
         'Einstellungen nicht gespeichert (${e.runtimeType})',
       );
     }
+    // Die Brücke eines neuen Profils braucht seine Liste, wenn die Einrichtung
+    // den Eintrag setzt.
+    if (hinzugefuegt) _listeAblegen();
     setState(() {
       _adresse.text = _profil.adresse;
       _meldung = null;
@@ -1567,16 +1699,35 @@ class _HauptseiteState extends State<Hauptseite> {
     super.dispose();
   }
 
+  /// Das aus dem Speicher geladene Passwort gehört zu seiner Herkunft: Zeigt
+  /// die Adresse im Feld auf eine andere Instanz, wird es aus dem Feld
+  /// genommen, damit es nicht von Hand dorthin geht. Gibt zurück, ob es
+  /// entfernt wurde.
+  bool _fremdesPasswortEntfernen() {
+    final herkunft = _passwortHerkunft;
+    if (herkunft == null || Anmeldedaten.herkunftVon(_adresse.text) == herkunft) return false;
+    _passwort.clear();
+    _passwortHerkunft = null;
+    return true;
+  }
+
   /// [gespeichert]: Die Anmeldung kommt vom Start oder von einem Profilwechsel
   /// und nutzt gespeicherte Zugangsdaten, nicht eine Eingabe der Lehrkraft.
   /// Lehnt Moodle sie ab, werden sie verworfen (E7): genau ein Fehlversuch,
   /// nicht einer je Start und je Wechsel, bis Moodle das Konto sperrt.
   Future<void> _anmelden({bool gespeichert = false}) async {
     if (_beschaeftigt) return;
+    if (!gespeichert && _fremdesPasswortEntfernen()) {
+      setState(() => _meldung = 'Die Moodle-Adresse wurde geändert; das gespeicherte Passwort gilt dafür nicht. Bitte das Passwort eingeben.');
+      return;
+    }
     final auftrag = AnmeldeAuftrag(
       instanz: _aktiv,
       profil: _profil,
-      adresse: _adresse.text.trim(),
+      // Eine automatische Anmeldung nimmt die Adresse des Profils, nicht das
+      // Feld: Geprüft wurde die Herkunft dieser Adresse (anmeldedaten.dart),
+      // und das Feld könnte sich seither geändert haben.
+      adresse: gespeichert ? _profil.adresse : _adresse.text.trim(),
       benutzer: _benutzer.text.trim(),
       passwort: _passwort.text,
       merken: _merken,
@@ -1608,7 +1759,11 @@ class _HauptseiteState extends State<Hauptseite> {
       dienst.profil = profil.copyWith(adresse: adresse);
       await moodle.anmelden(adresse, benutzer, passwort);
       _meldung = 'Angemeldet.';
-      if (merken) {
+      // Eine automatische Anmeldung gelang mit der gespeicherten Bindung
+      // (geprüft in Anmeldedaten.laden, Adresse des Profils): Es gibt nichts
+      // neu zu speichern, und ein Fehler des Speichers soll die Bindung nicht
+      // kosten.
+      if (merken && !gespeichert) {
         try {
           // _beenden wartet darauf: Schließt die Lehrkraft das Fenster gleich
           // nach der Anmeldung, endete der Prozess sonst mitten im Schreiben,
@@ -1654,7 +1809,10 @@ class _HauptseiteState extends State<Hauptseite> {
     } finally {
       // Sonst bleibt das Passwort nicht im Eingabefeld stehen; die App hält es
       // nur intern im Arbeitsspeicher, für die automatische Neuanmeldung.
-      if (feldLeeren) _passwort.clear();
+      if (feldLeeren) {
+        _passwort.clear();
+        _passwortHerkunft = null;
+      }
       if (mounted) setState(() => _beschaeftigt = false);
     }
     await _mcpStarten();
@@ -1769,7 +1927,7 @@ class _HauptseiteState extends State<Hauptseite> {
                   size: 18,
                 ),
                 _dienst.laeuft
-                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} auf 127.0.0.1:${_profil.port}'
+                    ? 'MCP${_mehrere ? ' ${_profil.mcpName}' : ''} läuft (nur dieses Konto)'
                     : _mcpVersucht
                     ? 'MCP-Server läuft nicht'
                     : 'MCP startet nach der Anmeldung',
@@ -1857,6 +2015,9 @@ class _HauptseiteState extends State<Hauptseite> {
                 _karte('Moodle-Anmeldung', [
                   TextField(
                     controller: _adresse,
+                    onChanged: (_) {
+                      if (_fremdesPasswortEntfernen()) setState(() {});
+                    },
                     enabled: !_beschaeftigt && !_moodle.angemeldet,
                     decoration: const InputDecoration(
                       labelText: 'Moodle-Adresse',
@@ -1872,6 +2033,8 @@ class _HauptseiteState extends State<Hauptseite> {
                   TextField(
                     controller: _passwort,
                     obscureText: true,
+                    // Was die Lehrkraft selbst tippt, gehört ihr, nicht dem Speicher.
+                    onChanged: (_) => _passwortHerkunft = null,
                     decoration: const InputDecoration(labelText: 'Passwort'),
                     onSubmitted: (_) {
                       if (_eingerichtet &&

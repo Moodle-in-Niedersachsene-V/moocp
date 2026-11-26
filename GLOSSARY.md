@@ -65,12 +65,12 @@ _Englisch_: delivery course
 ## Werkzeuge, Freigabe und Einrichtung
 
 **MCP-Server**
-Der Dienst, den die App selbst anbietet: lokal auf `127.0.0.1`, geschützt durch einen Zugangsschlüssel. KI-Werkzeuge sprechen ihn direkt an.
+Der Dienst, den die App selbst anbietet: je Instanzprofil ein Kanal, den nur das eigene Benutzerkonto auf dem Rechner öffnen kann. KI-Werkzeuge erreichen ihn über die Brücke.
 _Englisch_: MCP server
 _Nicht zu verwechseln mit_: Brücke.
 
 **Brücke**
-Ein kleines Zusatzprogramm, das nur für Bionic gebraucht wird. Bionic startet Server nur als lokalen Befehl, deshalb nimmt die Brücke diese Aufrufe entgegen und reicht sie an den MCP-Server weiter.
+Ein kleines Zusatzprogramm, das jedes KI-Werkzeug als lokalen Befehl startet (`moocp-bruecke --profil <MCP-Name>`). Es nimmt die Aufrufe entgegen, prüft den Kanal und die Gegenseite und reicht die Aufrufe an den MCP-Server weiter.
 _Englisch_: bridge
 _Nicht zu verwechseln mit_: MCP-Server.
 
@@ -94,7 +94,7 @@ _Englisch_: clarification
 _Nicht zu verwechseln mit_: Freigabe.
 
 **Instanzprofil**
-Eine angebundene Moodle-Instanz mit eigenem Anzeigenamen, Port, MCP-Server, Zugangsschlüssel, Anmeldung und Freigabestufe. Das Standardprofil heißt „Moodle"; weitere Profile tragen eigene Namen und sind erst ab dem zweiten in der Oberfläche zu sehen.
+Eine angebundene Moodle-Instanz mit eigenem Anzeigenamen, MCP-Server samt Kanal, Anmeldung und Freigabestufe. Das Standardprofil heißt „Moodle"; weitere Profile tragen eigene Namen und sind erst ab dem zweiten in der Oberfläche zu sehen.
 _Englisch_: instance profile
 
 **Arbeitsordner**

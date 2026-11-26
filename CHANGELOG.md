@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.13.0
+- Mehrere Benutzerkonten auf einem Rechner: Die Verbindung zu den KI-Werkzeugen, der Browser für Bildschirmfotos sowie unter Linux der Arbeitsordner und die Downloads von Plugins sind nur für das eigene Konto erreichbar.
+- KI-Werkzeuge: Claude Code, Codex und LM Studio verbinden sich über die Brücke von moocp, ohne Schlüssel in ihrer Konfiguration.
+- Anmeldung: Gespeicherte Anmeldedaten gelten nur für die Moodle-Adresse, an der sie gespeichert wurden.
 - Einrichtung: Auf dem Mac findet moocp Codex auch, wenn es nur in der ChatGPT-App installiert ist, und nennt es „Codex (ChatGPT-App oder CLI)“.
 - Neu: Testversionen (Nightlies) mit den neuesten Änderungen gibt es auf GitHub, für Windows, Linux und den Mac.
 - Plugins: Bei einem möglichen Namen oder geschützten Pfad in einer Antwort entscheidet jetzt die Lehrkraft, und ein Plugin kann moocp Pfade nennen, die nicht an die KI gehören.

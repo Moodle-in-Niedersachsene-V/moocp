@@ -1,5 +1,6 @@
 // Offline prüfbar: Instanzprofile (E31). Altbestand-Migration der
 // Einstellungen, Port und Servername je Profil, und die Registry der Zugänge.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -12,7 +13,7 @@ import 'package:moocp/plugin/verbindung.dart' show mcpWerkzeugnameHoechstens, we
 import 'package:moocp/profil.dart';
 import 'package:moocp/protokoll.dart';
 
-Einstellungen _standard() => Einstellungen(schluessel: 'x');
+Einstellungen _standard() => Einstellungen();
 
 final _a = Profil(
     kennung: 'a1b2c3d4', name: 'Schule A', adresse: 'https://a.schule.example', port: 47811, mcpName: 'schule-a');
@@ -33,7 +34,6 @@ void main() {
       expect(geladen.port, standardPort);
       expect(geladen.bestaetigungen, Bestaetigungen.vorgabe);
       expect(geladen.updatePruefen, isNull);
-      expect(geladen.schluessel, matches(RegExp(r'^[0-9a-f]{64}$')));
       final erneut = await Einstellungen.laden(datei: datei);
       expect(erneut.zuJson(), geladen.zuJson());
     });
@@ -149,7 +149,7 @@ void main() {
       final e = Einstellungen(profile: [
         Profil(kennung: 'k1', name: 'Eins', adresse: 'https://e.schule.example', port: 47900, mcpName: 'eins'),
         Profil(kennung: 'k2', name: 'Zwei', adresse: 'https://z.schule.example', port: 47900, mcpName: 'zwei'),
-      ], schluessel: 'x');
+      ]);
       expect(e.profile.map((p) => p.port), [47900, 47811]);
     });
 
@@ -171,7 +171,7 @@ void main() {
           mcpName: 'moodle-test',
           bestaetigungen: Bestaetigungen.keine,
         ),
-      ], schluessel: 'x');
+      ]);
 
       final geladen = Einstellungen.aus(e.zuJson(), _standard());
 
@@ -225,76 +225,103 @@ void main() {
     });
   });
 
-  group('Zugangsschlüssel je Profil (E6)', () {
-    test('das Standardprofil behält den globalen Schlüssel und hat keinen eigenen', () {
-      final e = Einstellungen.aus({
-        'schluessel': 'global',
-        'moodleAdresse': 'https://moodle.schule.example',
-      }, _standard());
-      expect(e.profile.single.istStandard, isTrue);
-      expect(e.profile.single.schluessel, isEmpty);
-      expect(e.schluesselFuer(e.profile.single), 'global');
-      expect(((e.zuJson()['profile']! as List).single as Map).containsKey('schluessel'), isFalse,
-          reason: 'der globale Schlüssel steht schon oben in der Datei; kein zweiter Ort');
-    });
+  group('Kein Zugangsschlüssel für den Kanal (E6); Platzhalter für ältere Versionen (E39)', () {
+    final profile = [
+      {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
+      {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'schluessel': 'eigener'},
+    ];
 
-    test('weitere Profile ohne Schlüssel bekommen beim Laden je einen eigenen, verschieden vom globalen', () {
-      final e = Einstellungen.aus({
-        'schluessel': 'global',
-        'profile': [
-          {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'},
-          {'kennung': 'k3', 'name': 'Drei', 'adresse': 'https://c.schule.example'},
-        ],
-      }, _standard());
-      final standard = e.profile[0], zwei = e.profile[1], drei = e.profile[2];
-      expect(e.schluesselFuer(standard), 'global');
-      expect(zwei.schluessel, hasLength(64));
-      expect(drei.schluessel, hasLength(64));
-      expect({zwei.schluessel, drei.schluessel, 'global'}, hasLength(3));
-      expect(e.schluesselFuer(zwei), zwei.schluessel);
-    });
-
-    test('ein vergebener Schlüssel übersteht Speichern und Laden unverändert', () {
-      final e = Einstellungen.aus({
-        'profile': [
-          {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'},
-        ],
-      }, _standard());
+    test('Schlüssel aus früheren Dateien gelten nicht mehr: beim Schreiben stehen andere', () {
+      final e = Einstellungen.aus({'schluessel': 'global', 'profile': profile}, _standard());
       final j = e.zuJson();
-      expect(Einstellungen.schluesselFehlen(j), isFalse, reason: 'die Datei hat ihn jetzt');
-      final zurueck = Einstellungen.aus(j, _standard());
-      expect(zurueck.profile[1].schluessel, e.profile[1].schluessel);
+      expect(j['schluessel'], isNot('global'));
+      expect(((j['profile']! as List)[1] as Map)['schluessel'], isNot('eigener'));
+      final text = jsonEncode(j);
+      expect(text, isNot(contains('"global"')));
+      expect(text, isNot(contains('eigener')));
     });
 
-    test('schluesselFehlen: nur ein Profil außer dem Standardprofil ohne Schlüssel verlangt ein Speichern', () {
-      expect(Einstellungen.schluesselFehlen({}), isFalse);
-      expect(Einstellungen.schluesselFehlen({'moodleAdresse': 'https://a.schule.example'}), isFalse);
-      expect(Einstellungen.schluesselFehlen({
-        'profile': [
-          {'kennung': Profil.standardKennung, 'name': 'Moodle', 'adresse': 'https://a.schule.example'},
-        ],
-      }), isFalse);
-      expect(Einstellungen.schluesselFehlen({
-        'profile': [
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'},
-        ],
-      }), isTrue);
-      expect(Einstellungen.schluesselFehlen({
-        'profile': [
-          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'schluessel': 'abc'},
-        ],
-      }), isFalse);
+    test('ein Platzhalter für ein Profil ohne Schlüssel und für die Datei, je zufällig und verschieden', () {
+      final e = Einstellungen.aus({'profile': profile}, _standard());
+      final j = e.zuJson();
+      final global = j['schluessel'] as String;
+      final zwei = ((j['profile']! as List)[1] as Map)['schluessel'] as String;
+      expect(global, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(zwei, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(zwei, isNot(global));
+      expect(((j['profile']! as List)[0] as Map).containsKey('schluessel'), isFalse, reason: 'das Standardprofil nutzt den globalen');
     });
 
-    test('ändern am Profil (Name, Adresse, Stufe) behält den Schlüssel', () {
-      final p = Profil(
-          kennung: 'k2', name: 'Zwei', adresse: 'https://b.schule.example', port: 47812, mcpName: 'zwei', schluessel: 'meiner');
-      expect(p.copyWith(adresse: 'https://c.schule.example').schluessel, 'meiner');
-      expect(p.mitBestaetigungen(Bestaetigungen.alle).schluessel, 'meiner');
+    test('ein geschriebener Platzhalter bleibt über Speichern und Laden gleich: eine ältere Version erzeugt keinen neuen', () {
+      final e = Einstellungen.aus({'profile': profile}, _standard());
+      final j = e.zuJson();
+      expect(Einstellungen.schluesselErneuern(j), isFalse);
+      final zurueck = Einstellungen.aus(jsonDecode(jsonEncode(j)) as Map<String, dynamic>, _standard());
+      expect(zurueck.zuJson()['schluessel'], j['schluessel']);
+      expect(((zurueck.zuJson()['profile']! as List)[1] as Map)['schluessel'], ((j['profile']! as List)[1] as Map)['schluessel']);
+    });
+
+    test('schluesselErneuern: Schlüssel ohne die Marke, fehlende Platzhalter', () {
+      expect(Einstellungen.schluesselErneuern({}), isTrue);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x'}), isTrue);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x', 'schluesselPlatzhalter': true, 'profile': [profile[0]]}), isFalse);
+      expect(Einstellungen.schluesselErneuern({'schluessel': 'x', 'schluesselPlatzhalter': true, 'profile': [profile[0], {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example'}]}), isTrue,
+          reason: 'das zweite Profil hat noch keinen Platzhalter');
+    });
+
+    test('laden schreibt die Datei mit neuen Platzhaltern, die alten Werte stehen nicht mehr darin', () async {
+      final ordner = await Directory.systemTemp.createTemp('moocp_einstellungen_test_');
+      addTearDown(() => ordner.delete(recursive: true));
+      final datei = File('${ordner.path}/einstellungen.json');
+      await datei.writeAsString(jsonEncode({
+        'schluessel': 'alter-globaler-schluessel',
+        'profile': [
+          {'kennung': 'standard', 'name': 'Moodle', 'adresse': 'https://moodle.schule.example', 'port': 47811, 'mcpName': 'moodle'},
+          {'kennung': 'k2', 'name': 'Zwei', 'adresse': 'https://b.schule.example', 'port': 47812, 'mcpName': 'zwei', 'schluessel': 'alter-profilschluessel'},
+        ],
+        'zukunft': {'bleibt': true},
+      }));
+      await Einstellungen.laden(datei: datei);
+      final text = await datei.readAsString();
+      expect(text, isNot(contains('alter-globaler-schluessel')));
+      expect(text, isNot(contains('alter-profilschluessel')));
+      expect(text, contains('zukunft'), reason: 'Unbekanntes bleibt (E39)');
+      expect(text, contains('"port": 47812'));
+      final erster = jsonDecode(text) as Map;
+      await Einstellungen.laden(datei: datei);
+      expect((jsonDecode(await datei.readAsString()) as Map)['schluessel'], erster['schluessel'], reason: 'beim zweiten Laden unverändert');
+    });
+
+    test('ändern am Profil (Name, Adresse, Stufe) behält Port und Servernamen', () {
+      final p = Profil(kennung: 'k2', name: 'Zwei', adresse: 'https://b.schule.example', port: 47812, mcpName: 'zwei');
+      expect(p.copyWith(adresse: 'https://c.schule.example').mcpName, 'zwei');
+      expect(p.mitBestaetigungen(Bestaetigungen.alle).port, 47812);
     });
   });
+
+  group('Rechte der Einstellungsdatei', () {
+    late Directory ordner;
+    setUp(() => ordner = Directory.systemTemp.createTempSync('moocp_einstellungen_test_'));
+    tearDown(() => ordner.deleteSync(recursive: true));
+    int modus(String pfad) => FileStat.statSync(pfad).mode & 0x1ff;
+
+    test('speichern: Datei 0600, Ordner 0700', () async {
+      final datei = File('${ordner.path}/neu/einstellungen.json');
+      await Einstellungen(moodleAdresse: 'https://a.schule.example').speichernNach(datei);
+      expect(modus(datei.path), 0x180);
+      expect(modus(datei.parent.path), 0x1c0);
+    });
+
+    test('laden zieht eine zu offene Datei und ihren Ordner zusammen', () async {
+      final datei = File('${ordner.path}/einstellungen.json');
+      await datei.writeAsString(jsonEncode({'moodleAdresse': 'https://a.schule.example'}));
+      Process.runSync('chmod', ['644', datei.path]);
+      Process.runSync('chmod', ['755', ordner.path]);
+      await Einstellungen.laden(datei: datei);
+      expect(modus(datei.path), 0x180);
+      expect(modus(ordner.path), 0x1c0);
+    });
+  }, skip: Platform.isWindows ? 'POSIX' : null);
 
   group('Servername', () {
     test('aus dem Anzeigenamen: Kleinbuchstaben, Bindestriche, keine Leerzeichen', () {

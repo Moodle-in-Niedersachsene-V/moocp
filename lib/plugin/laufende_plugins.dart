@@ -89,6 +89,7 @@ import '../mcp/werkzeugquelle.dart';
 import '../moodle/moodle_zugang.dart' show MoodleFehler;
 import '../plattform/kindprozess.dart';
 import '../plattform/plattform.dart';
+import '../plattform/privater_ordner.dart' show PrivaterOrdnerFehler;
 import '../profil.dart';
 import '../protokoll.dart';
 import 'app_adresse.dart';
@@ -853,7 +854,14 @@ class LaufendePlugins implements WerkzeugQuelle {
     // Protokoll.
     final d = downloads;
     if (d != null) {
-      final geblieben = d.leeren();
+      int geblieben;
+      try {
+        geblieben = d.leeren();
+      } on PrivaterOrdnerFehler {
+        // Nicht mehr privat (Linux): nicht leeren, was nicht der App gehört.
+        _protokoll.eintrag(Art.fehler, 'Ordner für Downloads von Plugins: nicht privat, nicht geleert');
+        return;
+      }
       if (geblieben > 0) {
         _protokoll.eintrag(
           Art.info,

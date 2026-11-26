@@ -248,6 +248,7 @@ void main() {
 
     test('Umstellung: nur der eigene Eintrag wird ersetzt, die Konfiguration schreibt allein claude', () async {
       final heim = p.join(tmp.path, 'heim');
+      final umgebung = {'USERPROFILE': heim, 'HOME': heim, 'LOCALAPPDATA': p.join(tmp.path, 'lokal')};
       datei(claudeOrt);
       final fremd = {'type': 'stdio', 'command': 'npx', 'args': ['-y', 'foo']};
       final alt = alterEintrag();
@@ -255,7 +256,7 @@ void main() {
       final f = datei('heim/.claude.json', jsonEncode(alt));
       final vorher = f.readAsStringSync();
       final aufrufe = <List<String>>[];
-      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim})
+      final c = ClaudeCode(umgebung)
         ..ausfuehren = (programm, argumente) async {
           aufrufe.add(argumente);
           return 0;
@@ -273,7 +274,8 @@ void main() {
       final heim = p.join(tmp.path, 'heim');
       datei(claudeOrt);
       final aufrufe = <List<String>>[];
-      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim}, bruecke: p.join(tmp.path, 'weg', brueckeExe))
+      // LOCALAPPDATA: Unter Windows liegt claudeOrt in der Ablage von Claude Desktop.
+      final c = ClaudeCode({'USERPROFILE': heim, 'HOME': heim, 'LOCALAPPDATA': p.join(tmp.path, 'lokal')}, bruecke: p.join(tmp.path, 'weg', brueckeExe))
         ..ausfuehren = (_, a) async {
           aufrufe.add(a);
           return 0;
@@ -940,7 +942,7 @@ void main() {
             'connection': {
               'type': 'stdio',
               'command': exe,
-              'args': [],
+              'args': ['--profil', 'moodle'],
               'timeoutMs': clientZeitlimit.inMilliseconds,
             },
           },

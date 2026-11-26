@@ -1,9 +1,12 @@
 // Der Kanal zwischen Brücke und App (lib/mcp/kanal.dart) mit echten
-// Unix-Sockets in einem privaten Ordner: Verbindung und Neuaufbau, ein
-// Endpunkt je Profil, und die Fälle, in denen nichts fließen darf -- Ordner
-// oder Socket eines anderen Kontos, zu weite Rechte, Verknüpfung, Gegenstelle
-// mit fremder Kennung. Ein zweites Konto gibt es hier nicht; seine Kennung
-// steht als Attrappe an der Stelle, an der das System sie liefert.
+// Unix-Sockets in einem privaten Ordner (unter Windows mit der echten Named
+// Pipe): Verbindung und Neuaufbau, ein Endpunkt je Profil, und die Fälle, in
+// denen nichts fließen darf -- Ordner oder Socket eines anderen Kontos, zu
+// weite Rechte, Verknüpfung, Gegenstelle mit fremder Kennung. Ein zweites
+// Konto gibt es hier nicht; seine Kennung steht als Attrappe an der Stelle, an
+// der das System sie liefert. Was nur für Unix-Sockets gilt, ist unter Windows
+// übersprungen; die Fälle, die beide Kanäle tragen, laufen dort über die Pipe
+// (mit je Aufruf eigenem Namen, damit sie keine laufende App stören).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -55,22 +58,48 @@ Future<List<String>> _zeilen(KanalVerbindung v, int anzahl) async {
   return z;
 }
 
+/// Zählt die Profilnamen unter Windows hoch: Der Name einer Pipe gehört dem
+/// ganzen Rechner, ein Rest eines früheren Tests oder die laufende App dürfen
+/// nicht stören.
+int _zaehler = 0;
+
 void main() {
+  // Unter Windows gilt kein Unix-Socket, keine Kennung und kein POSIX-Recht.
+  final String? posix = Platform.isWindows ? 'POSIX: Unix-Socket, Kennung, Dateirechte' : null;
   late Directory wurzel;
   late String ordner;
-  late UnixKanal kanal;
+  late KanalOrt kanal;
+  late String sfx;
+
+  /// Der Profilname dieses Tests: unter Windows mit Zusatz.
+  String n(String basis) => Platform.isWindows ? '$basis-zz$pid-$sfx' : basis;
+
   setUp(() {
     wurzel = Directory.systemTemp.createTempSync('moocp_kanal_');
     ordner = p.join(wurzel.path, 'k');
-    kanal = UnixKanal(ketten: () => [[ordner]]);
+    sfx = '${_zaehler++}';
+    kanal = Platform.isWindows ? WindowsKanal() : UnixKanal(ketten: () => [[ordner]]);
   });
   tearDown(() => wurzel.deleteSync(recursive: true));
 
+  /// Wartet, bis die Pipe weg ist (die letzte Instanz schließt asynchron).
+  Future<void> bisNichtDa(String name) async {
+    for (var i = 0; i < 100; i++) {
+      try {
+        await (await kanal.verbinden(name)).schliessen();
+      } on KanalNichtDa {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    fail('der Kanal $name ist nach 5 s noch da');
+  }
+
   test('eine Verbindung trägt Zeilen in beide Richtungen', () async {
-    final l = await kanal.lauschen('moodle');
+    final l = await kanal.lauschen(n('moodle'));
     addTearDown(l.schliessen);
     final angenommen = l.verbindungen.first;
-    final c = await kanal.verbinden('moodle');
+    final c = await kanal.verbinden(n('moodle'));
     final s = await angenommen;
     c.senden(utf8.encode('{"hin":1}\n'));
     expect(await _zeilen(s, 1), ['{"hin":1}']);
@@ -84,18 +113,18 @@ void main() {
     addTearDown(l.schliessen);
     expect(FileStat.statSync(ordner).mode & 0x1ff, 0x1c0);
     expect(FileStat.statSync(p.join(ordner, 'moodle.sock')).mode & 0x1ff, 0x180);
-  });
+  }, skip: posix);
 
   test('zwei Profile, zwei Endpunkte: eine Verbindung erreicht nie das andere', () async {
-    final a = await kanal.lauschen('moodle');
-    final b = await kanal.lauschen('moodle-test');
+    final a = await kanal.lauschen(n('moodle'));
+    final b = await kanal.lauschen(n('moodle-test'));
     addTearDown(a.schliessen);
     addTearDown(b.schliessen);
     final beiA = <KanalVerbindung>[];
     final beiB = <KanalVerbindung>[];
     a.verbindungen.listen(beiA.add);
     b.verbindungen.listen(beiB.add);
-    final c = await kanal.verbinden('moodle-test');
+    final c = await kanal.verbinden(n('moodle-test'));
     await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(beiA, isEmpty);
     expect(beiB, hasLength(1));
@@ -103,14 +132,14 @@ void main() {
   });
 
   test('ohne Lauscher: KanalNichtDa; nach dem Neustart der App geht es wieder', () async {
-    await expectLater(kanal.verbinden('moodle'), throwsA(isA<KanalNichtDa>()));
-    final l1 = await kanal.lauschen('moodle');
-    await (await kanal.verbinden('moodle')).schliessen();
+    await expectLater(kanal.verbinden(n('moodle')), throwsA(isA<KanalNichtDa>()));
+    final l1 = await kanal.lauschen(n('moodle'));
+    await (await kanal.verbinden(n('moodle'))).schliessen();
     await l1.schliessen();
-    await expectLater(kanal.verbinden('moodle'), throwsA(isA<KanalNichtDa>()));
-    final l2 = await kanal.lauschen('moodle');
+    await bisNichtDa(n('moodle'));
+    final l2 = await kanal.lauschen(n('moodle'));
     addTearDown(l2.schliessen);
-    await (await kanal.verbinden('moodle')).schliessen();
+    await (await kanal.verbinden(n('moodle'))).schliessen();
   });
 
   test('ein Socket aus einem abgestürzten Lauf wird ersetzt', () async {
@@ -127,11 +156,11 @@ void main() {
   }, skip: Platform.isWindows ? 'POSIX' : null);
 
   test('läuft die App im Konto schon, bricht der zweite Start ab', () async {
-    final l = await kanal.lauschen('moodle');
+    final l = await kanal.lauschen(n('moodle'));
     addTearDown(l.schliessen);
-    await expectLater(kanal.lauschen('moodle'), throwsA(isA<KanalFehler>()));
+    await expectLater(kanal.lauschen(n('moodle')), throwsA(isA<KanalFehler>()));
     // und der erste lauscht weiter
-    await (await kanal.verbinden('moodle')).schliessen();
+    await (await kanal.verbinden(n('moodle'))).schliessen();
   });
 
   test('ein Pfad, der für einen Unix-Socket zu lang ist, weicht auf die nächste Kette aus; die Brücke findet sie', () async {
@@ -153,7 +182,7 @@ void main() {
     await expectLater(kanal.verbinden('a/b'), throwsA(isA<KanalFehler>()));
   });
 
-  group('die App weist eine Gegenstelle ab, ohne zu lesen', () {
+  group('die App weist eine Gegenstelle ab, ohne zu lesen', skip: posix, () {
     test('mit fremder Kennung: nichts kommt an, der Grund wird gemeldet', () async {
       final gruende = <String>[];
       final streng = UnixKanal(ketten: () => [[ordner]], gegenstelle: (s, uid) => 'Die Gegenseite gehört einem anderen Konto.');
@@ -198,7 +227,7 @@ void main() {
     });
   });
 
-  group('die Brücke sendet nichts an einen Endpunkt, der nicht dem Konto gehört', () {
+  group('die Brücke sendet nichts an einen Endpunkt, der nicht dem Konto gehört', skip: posix, () {
     /// Ein Lauscher, der mitzählt, ob je jemand kam.
     Future<(ServerSocket, List<Socket>)> hinter(String pfad) async {
       final s = await ServerSocket.bind(InternetAddress(pfad, type: InternetAddressType.unix), 0);
@@ -281,7 +310,7 @@ void main() {
     });
   });
 
-  test('Socket eines anderen Kontos in einem eigenen Ordner: nichts wird gesendet', () async {
+  test('Socket eines anderen Kontos in einem eigenen Ordner: nichts wird gesendet', skip: posix, () async {
     final l = await kanal.lauschen('moodle');
     addTearDown(l.schliessen);
     var gekommen = 0;
@@ -292,7 +321,7 @@ void main() {
     expect(gekommen, 0);
   });
 
-  group('Werkzeugliste für die Brücke (Linux, Mac)', () {
+  group('Werkzeugliste für die Brücke (Linux, Mac)', skip: posix, () {
     final liste = jsonEncode({
       'versionen': ['2025-06-18'],
       'initialize': {'protocolVersion': '2025-06-18'},
@@ -350,7 +379,7 @@ void main() {
     });
   });
 
-  group('kanalOrdnerKetten', () {
+  group('kanalOrdnerKetten', skip: posix, () {
     test('Laufzeitordner der Sitzung zuerst, nur wenn er dem Konto allein gehört; dann der Ort im Temp-Bereich', () {
       final system = UnixPrivatSystem();
       final laufzeit = p.join(wurzel.path, 'lauf');
@@ -411,6 +440,16 @@ void main() {
         expect(sidGueltig(x), isFalse, reason: x);
         expect(() => sddlNurKonto(x), throwsArgumentError, reason: x);
       }
+    });
+
+    test('ein Vorgang läuft nur bei STATUS_PENDING (0x103) in OVERLAPPED.Internal; alles andere ist fertig', () {
+      expect(overlappedAusstehend(0x103), isTrue);
+      expect(overlappedAusstehend(0x00000103 | 0x100000000), isTrue, reason: 'nur die unteren 32 Bit zählen (ULONG_PTR)');
+      expect(overlappedAusstehend(0), isFalse, reason: 'STATUS_SUCCESS: fertig');
+      expect(overlappedAusstehend(0xC000014B), isFalse, reason: 'STATUS_PIPE_BROKEN: gescheitert, nichts läuft');
+      expect(overlappedAusstehend(0xC00000B2), isFalse, reason: 'STATUS_PIPE_CONNECTED: schon verbunden');
+      expect(overlappedAusstehend(0xC0000120), isFalse, reason: 'STATUS_CANCELLED: abgebrochen, nichts läuft mehr');
+      expect(overlappedAusstehend(0x102), isFalse, reason: 'STATUS_TIMEOUT ist kein „läuft“');
     });
 
     test('Fehlernummern beim Öffnen: nicht da heißt „App läuft nicht", Zugriff verwehrt heißt „unsicher"', () {

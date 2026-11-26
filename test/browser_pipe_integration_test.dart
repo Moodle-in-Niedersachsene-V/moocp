@@ -60,7 +60,10 @@ void main() {
         }
       }
     }
-  }, skip: browser == null ? 'MOOCP_BROWSER_PIPE nicht gesetzt' : false, timeout: const Timeout(Duration(minutes: 2)));
+  }, skip: browser == null
+      ? 'MOOCP_BROWSER_PIPE nicht gesetzt'
+      : (Platform.isWindows ? 'POSIX: UnixBrowserStarter (unter Windows prüft der zweite Test den WindowsBrowserStarter)' : false),
+      timeout: const Timeout(Duration(minutes: 2)));
   test('ganze Aufnahme mit echtem Browser: Seite kommt über die App, Fremdes bleibt draußen', () async {
     final ordner = Directory.systemTemp.createTempSync('moocp_echt2_');
     addTearDown(() => ordner.deleteSync(recursive: true));

@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.13.0
+- Neu: moocp unterstützt Google Antigravity (Desktop-App, IDE und CLI) auf Windows, macOS und Linux.
 - Mehrere Benutzerkonten auf einem Rechner: Die Verbindung zu den KI-Werkzeugen, der Browser für Bildschirmfotos sowie unter Linux der Arbeitsordner und die Downloads von Plugins sind nur für das eigene Konto erreichbar.
 - KI-Werkzeuge: Claude Code, Codex und LM Studio verbinden sich über die Brücke von moocp, ohne Schlüssel in ihrer Konfiguration.
 - Anmeldung: Gespeicherte Anmeldedaten gelten nur für die Moodle-Adresse, an der sie gespeichert wurden.

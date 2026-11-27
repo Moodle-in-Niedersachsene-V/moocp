@@ -159,6 +159,21 @@ void main() {
       Directory(p.join(heim, '.lmstudio', 'apps', 'bionic')).createSync(recursive: true);
       expect(LmStudio({'HOME': heim}, bruecke: p.join(tmp.path, 'x')).gefunden, isFalse);
     });
+
+    test('Antigravity findet agy im PATH und Antigravity.app in Applications', () {
+      final heim = p.join(tmp.path, 'heim');
+      programm(p.join(tmp.path, 'bin', 'agy'));
+      final ag = Antigravity({'HOME': heim, 'PATH': p.join(tmp.path, 'bin')});
+      expect(ag.exe, p.join(tmp.path, 'bin', 'agy'));
+      expect(ag.heim.path, p.join(heim, '.gemini', 'config'));
+
+      festeAppOrdner = [p.join(tmp.path, 'Applications')];
+      addTearDown(() => festeAppOrdner = null);
+      Directory(p.join(tmp.path, 'Applications', 'Antigravity.app')).createSync(recursive: true);
+      final app = Antigravity({'HOME': heim, 'PATH': ''});
+      expect(app.desktopApp, p.join(tmp.path, 'Applications', 'Antigravity.app'));
+      expect(app.gefunden, isTrue);
+    });
   }, skip: Platform.isMacOS ? null : 'Suche nach Programmen unter macOS nur auf dem Mac');
 
   test('ohne Benutzerordner lösen sich die Orte der KI-Werkzeuge nicht relativ auf', () {
@@ -166,6 +181,7 @@ void main() {
     expect(() => CodexCli({}).heim, throwsStateError);
     expect(() => ClaudeCode({}).konfiguration, throwsStateError);
     expect(() => LmStudio({}).heim, throwsStateError);
+    expect(() => Antigravity({}).heim, throwsStateError);
     // Mit verlegtem Ordner braucht es den Benutzerordner nicht.
     expect(CodexCli({'CODEX_HOME': p.join('a', 'codex')}).heim.path, p.join('a', 'codex'));
     expect(ClaudeCode({'CLAUDE_CONFIG_DIR': p.join('a', 'claude')}).konfiguration.path, p.join('a', 'claude', '.claude.json'));

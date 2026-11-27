@@ -9,15 +9,15 @@
 // „KI-Werkzeuge einrichten", wie bei den Freigaben. Beim Deinstallieren
 // entfernt die App beides wieder ([einrichtungEntfernen]).
 //
-// Alle drei Werkzeuge starten dieselbe Brücke (mcp/bruecke.dart) mit dem
+// Alle vier Werkzeuge starten dieselbe Brücke (mcp/bruecke.dart) mit dem
 // Profil als Argument; sie spricht über einen Kanal mit der App, den nur das
 // eigene Konto erreicht (mcp/kanal.dart, E6). Einträge aus früheren Versionen
 // mit Adresse und Schlüssel gelten als veraltet und werden ersetzt.
 //
-// Eingerichtet werden Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio. Alle drei sind
-// MCP-Clients, die auf demselben Rechner laufen, Skills im Format
-// `SKILL.md` laden und eigene Werkzeuge für Dateien haben -- mehr braucht
-// diese App von einem Client nicht. Der Chat der ChatGPT-App gehört nicht
+// Eingerichtet werden Claude Code, Codex (ChatGPT-App oder CLI), LM Studio und
+// Antigravity. Alle vier sind MCP-Clients, die auf demselben Rechner laufen,
+// Skills im Format `SKILL.md` laden und eigene Werkzeuge für Dateien haben --
+// mehr braucht diese App von einem Client nicht. Der Chat der ChatGPT-App gehört nicht
 // dazu (das in ihr mitgelieferte Codex schon, es teilt `~/.codex` mit der
 // CLI): Er erreicht nur öffentliche HTTPS-Server, und der Weg über OpenAIs Tunnel
 // führte unsere Werkzeuge aus dem Netz erreichbar heraus (E6) und brächte
@@ -1023,9 +1023,230 @@ String _neueId() {
   return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
 }
 
+// ---------------------------------------------------------------------------
+// Google Antigravity (Desktop-App, IDE oder CLI)
+// ---------------------------------------------------------------------------
+
+/// Google Antigravity als Desktop-App (2.0), IDE oder CLI (`agy`). Alle drei
+/// teilen sich `~/.gemini/config` für MCP-Server (`mcp_config.json`) und
+/// globale Skills (`skills/`). Weil `agy` keinen nicht-interaktiven Unterbefehl
+/// zum Eintragen von MCP-Servern bietet, schreibt die App `mcp_config.json`
+/// direkt über eine Zwischendatei und atomares Umbenennen (wie [LmStudio]):
+/// Angefasst wird nur `mcpServers.<Profilname>`, fremde Server und übrige
+/// Felder bleiben stehen, und eine unlesbare Datei wird nie überschrieben.
+///
+/// Antigravity bricht Werkzeugaufrufe ohne Angabe nach 180 Sekunden ab --
+/// kürzer als die 30-Minuten-Frist einer Freigabe (E4). Darum trägt die App
+/// `timeoutSeconds` mit [clientZeitlimit] (2100 s) ein.
+class Antigravity extends KiWerkzeug {
+  Antigravity(super.umgebung, {super.bruecke});
+
+  @override
+  String get id => 'antigravity';
+  @override
+  String get name => 'Antigravity (Desktop-App, IDE oder CLI)';
+  @override
+  String get datenziel => 'Inhalte gehen an das eingestellte Modell, in der Regel bei Google';
+  @override
+  String get wirkt => 'Wirkt in Antigravity (Desktop-App, IDE und CLI agy).';
+
+  /// Globaler Konfigurationsordner (`~/.gemini/config`), den Desktop-App, IDE
+  /// und CLI `agy` auf allen drei Betriebssystemen teilen.
+  Directory get heim => Directory(p.join(_heimPflicht(umgebung), '.gemini', 'config'));
+
+  /// Globale MCP-Konfiguration (`~/.gemini/config/mcp_config.json`).
+  File get konfiguration => File(p.join(heim.path, 'mcp_config.json'));
+
+  @override
+  Directory get skillOrdner => Directory(p.join(heim.path, 'skills'));
+
+  /// Die Antigravity-CLI `agy` im Suchpfad oder an bekannten Installationsorten.
+  String? get exe {
+    final h = _heimOrdner(umgebung);
+    if (Platform.isWindows) {
+      final lokal = _v(umgebung, 'LOCALAPPDATA');
+      final roaming = _v(umgebung, 'APPDATA');
+      final dirs = [
+        ..._pfad(umgebung),
+        if (lokal != null) p.join(lokal, 'agy', 'bin'),
+        if (lokal != null) p.join(lokal, 'Programs', 'Antigravity', 'bin'),
+        if (roaming != null) p.join(roaming, 'npm'),
+      ];
+      const namen = ['agy.exe', 'agy.cmd', 'agy.bat'];
+      for (final d in dirs) {
+        for (final n in namen) {
+          final f = p.join(d, n);
+          if (File(f).existsSync()) return f;
+        }
+      }
+      return null;
+    }
+    final dirs = [
+      ..._pfad(umgebung),
+      if (h != null) p.join(h, '.local', 'bin'),
+      ..._unixVerzeichnisse(h),
+    ];
+    for (final d in dirs) {
+      final f = p.join(d, 'agy');
+      if (File(f).existsSync()) return f;
+    }
+    return null;
+  }
+
+  /// Antigravity Desktop-App oder IDE auf macOS, Windows und Linux. Erkannt
+  /// wird nur der Installationsort, das Programm wird nie gestartet.
+  String? get desktopApp {
+    final h = _heimOrdner(umgebung);
+    final appOrte = festeAppOrdner ??
+        (Platform.isMacOS ? ['/Applications', if (h != null) p.join(h, 'Applications')] : const <String>[]);
+    for (final o in appOrte) {
+      final d = p.join(o, 'Antigravity.app');
+      if (Directory(d).existsSync()) return d;
+    }
+    if (Platform.isWindows) {
+      final lokal = _v(umgebung, 'LOCALAPPDATA');
+      final prog = _v(umgebung, 'ProgramFiles') ?? _v(umgebung, 'PROGRAMFILES');
+      final kandidaten = [
+        if (lokal != null) p.join(lokal, 'Programs', 'Antigravity', 'Antigravity.exe'),
+        if (lokal != null) p.join(lokal, 'Antigravity', 'Antigravity.exe'),
+        if (prog != null) p.join(prog, 'Antigravity', 'Antigravity.exe'),
+      ];
+      for (final f in kandidaten) {
+        if (File(f).existsSync()) return f;
+      }
+    }
+    if (Platform.isLinux) {
+      final dirs = [
+        ..._pfad(umgebung),
+        ..._unixVerzeichnisse(h),
+        if (festeProgrammOrdner == null) ...const ['/opt/antigravity', '/usr/share/antigravity'],
+      ];
+      for (final d in dirs) {
+        final f = p.join(d, 'antigravity');
+        if (File(f).existsSync()) return f;
+      }
+    }
+    return null;
+  }
+
+  bool get _datenOrdnerDa {
+    final h = _heimPflicht(umgebung);
+    return heim.existsSync() ||
+        Directory(p.join(h, '.gemini', 'antigravity-cli')).existsSync() ||
+        Directory(p.join(h, '.gemini', 'antigravity')).existsSync();
+  }
+
+  @override
+  bool get gefunden => _datenOrdnerDa || exe != null || desktopApp != null;
+
+  @override
+  String? get hinweis => !heim.existsSync() && (exe != null || desktopApp != null)
+      ? 'Antigravity hat seinen Ordner ${heim.path} noch nicht angelegt. Starten Sie Antigravity '
+          'einmal, bevor Sie installieren; sonst legt moocp den Ordner selbst an.'
+      : null;
+
+  @override
+  bool get bedienbar => true;
+  @override
+  String? get hindernis => null;
+
+  @override
+  String verbindungText(Verbindung v) => switch (v) {
+        Verbindung.aktuell => 'aktuell',
+        Verbindung.fehlt => 'nicht eingetragen',
+        Verbindung.veraltet => 'der Eintrag weicht ab, wird ersetzt',
+        Verbindung.unlesbar => 'MCP-Konfiguration von Antigravity nicht lesbar',
+      };
+
+  /// Liest `mcp_config.json`. Fehlt sie oder ist sie leer, liefert es ein
+  /// leeres Objekt; bei ungültigem JSON oder unerwarteten Typen wirft es,
+  /// damit nichts überschrieben wird.
+  Map<String, dynamic> _lesen() {
+    if (!konfiguration.existsSync()) return {'mcpServers': <String, dynamic>{}};
+    final text = konfiguration.readAsStringSync().trim();
+    if (text.isEmpty) return {'mcpServers': <String, dynamic>{}};
+    final d = jsonDecode(text);
+    if (d is! Map) throw const FormatException('mcp_config.json ist kein JSON-Objekt');
+    if (d.containsKey('mcpServers') && d['mcpServers'] is! Map) {
+      throw const FormatException('mcp_config.json: mcpServers ist kein Objekt');
+    }
+    return Map<String, dynamic>.from(d);
+  }
+
+  /// Schreibt `mcp_config.json` über eine Zwischendatei und atomares
+  /// Umbenennen, damit ein laufendes Antigravity keine halb geschriebene
+  /// Datei liest.
+  void _schreiben(Map<String, dynamic> daten) {
+    konfiguration.parent.createSync(recursive: true);
+    final zwischen = File('${konfiguration.path}.moocp');
+    zwischen.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(daten), flush: true);
+    zwischen.renameSync(konfiguration.path);
+  }
+
+  @override
+  Verbindung verbindung({String name = mcpName}) {
+    if (!konfiguration.existsSync()) return Verbindung.fehlt;
+    try {
+      final d = _lesen();
+      final server = d['mcpServers'];
+      if (server is! Map || !server.containsKey(name)) return Verbindung.fehlt;
+      final e = server[name];
+      if (e is! Map) return Verbindung.veraltet;
+      final passt = _brueckePasst(e['command']) &&
+          _gleichListe(e['args'], brueckenArgumente(name)) &&
+          e['timeoutSeconds'] == clientZeitlimit.inSeconds &&
+          !e.containsKey('url') &&
+          !e.containsKey('serverUrl');
+      return passt ? Verbindung.aktuell : Verbindung.veraltet;
+    } catch (_) {
+      return Verbindung.unlesbar;
+    }
+  }
+
+  @override
+  Future<String?> eintragen({String name = mcpName}) async {
+    final bereit = brueckeBereit();
+    if (bereit != null) return bereit;
+    try {
+      final d = _lesen();
+      final server = Map<String, dynamic>.from(d['mcpServers'] as Map? ?? const {});
+      server[name] = {
+        'command': bruecke,
+        'args': brueckenArgumente(name),
+        'timeoutSeconds': clientZeitlimit.inSeconds,
+      };
+      d['mcpServers'] = server;
+      _schreiben(d);
+      return null;
+    } on FormatException {
+      return 'Die MCP-Konfiguration von Antigravity ist nicht lesbar und wurde nicht angefasst.';
+    } catch (x) {
+      return 'mcp_config.json nicht geschrieben (${x.runtimeType})';
+    }
+  }
+
+  @override
+  Future<String?> austragen({String name = mcpName}) async {
+    if (!konfiguration.existsSync()) return null;
+    try {
+      final d = _lesen();
+      final server = d['mcpServers'];
+      if (server is! Map || !server.containsKey(name)) return null;
+      final neu = Map<String, dynamic>.from(server)..remove(name);
+      d['mcpServers'] = neu;
+      _schreiben(d);
+      return null;
+    } on FormatException {
+      return 'Die MCP-Konfiguration von Antigravity ist nicht lesbar und wurde nicht angefasst.';
+    } catch (x) {
+      return 'mcp_config.json nicht geschrieben (${x.runtimeType})';
+    }
+  }
+}
+
 /// Alle Werkzeuge, in der Reihenfolge, in der sie im Dialog stehen.
 List<KiWerkzeug> alleWerkzeuge(Map<String, String> umgebung) =>
-    [ClaudeCode(umgebung), CodexCli(umgebung), LmStudio(umgebung)];
+    [ClaudeCode(umgebung), CodexCli(umgebung), LmStudio(umgebung), Antigravity(umgebung)];
 
 /// Ob [befehl] die Brücke von moocp ist: eine vorhandene Datei dieses Namens.
 /// Welche, ist gleich -- installierte App und eigener Bau teilen Einstellungen

@@ -1499,6 +1499,11 @@ Future<void> main(List<String> a) async {
       final prozesse = <Process>[];
       final l = LaufendePlugins(
         protokoll,
+        // Der Neustart übersetzt ein Skript samt mcp_dart in einer frischen
+        // Dart-VM; unter Emulation (Windows auf ARM) dauert das 10 bis 25 s und
+        // lag nahe an der Startfrist von 20 s und am Testlimit von 30 s.
+        // Der Test prüft den Erfolgsweg, eine längere Frist verdeckt nichts.
+        startfrist: const Duration(seconds: 90),
         starter: (programm, argumente, {required umgebung, required arbeitsordner}) async {
           final prozess = prozesse.isEmpty
               ? await Process.start(programm, argumente, environment: umgebung, workingDirectory: arbeitsordner)
@@ -1524,7 +1529,7 @@ Future<void> main(List<String> a) async {
       for (final prozess in prozesse) {
         expect(await prozessLaeuft(prozess.pid), prozess == prozesse.last);
       }
-    });
+    }, timeout: const Timeout(Duration(minutes: 3)));
 
     test('das reguläre Beenden ist kein Absturz: kein Neustart, keine Anzeige', () async {
       final profil = beispielProfil('standard', 'moodle', await freierPort());

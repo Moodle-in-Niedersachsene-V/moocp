@@ -43,9 +43,16 @@ for arch in arm64 x86_64; do
 done
 
 # Die Brücke für KI-Werkzeuge liegt in der App (tool/mac_bau.sh) und muss auf
-# jedem Mac laufen, auf dem die App läuft.
-BRUECKE_ARCHS=" $(lipo -archs "$APP/Contents/MacOS/moocp-bruecke") "
+# jedem Mac laufen, auf dem die App läuft. Bei universellem Bau liegen beide
+# Architekturen als `moocp-bruecke-<arch>` neben dem Starter `moocp-bruecke`.
+[[ -x "$APP/Contents/MacOS/moocp-bruecke" ]] || { echo 'Die Brücke moocp-bruecke fehlt in der App' >&2; exit 1; }
 for arch in arm64 x86_64; do
+  BRUECKE_DATEI="$APP/Contents/MacOS/moocp-bruecke-$arch"
+  if [[ -f "$BRUECKE_DATEI" ]]; then
+    BRUECKE_ARCHS=" $(lipo -archs "$BRUECKE_DATEI") "
+  else
+    BRUECKE_ARCHS=" $(lipo -archs "$APP/Contents/MacOS/moocp-bruecke") "
+  fi
   [[ "$BRUECKE_ARCHS" == *" $arch "* ]] || { echo "Die Brücke enthält $arch nicht (gefunden:$BRUECKE_ARCHS); MOOCP_BRUECKE_ANDERE_ARCH nennt die Brücke der anderen Architektur (tool/mac_bau.sh)" >&2; exit 1; }
 done
 

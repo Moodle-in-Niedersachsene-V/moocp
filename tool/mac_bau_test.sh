@@ -33,12 +33,12 @@ ziel=Debug
 mkdir -p "build/macos/Build/Products/$ziel/moocp.app/Contents/MacOS"
 printf 'built\n' > "build/macos/Build/Products/$ziel/moocp.app/result"
 MOCK
-# dart build cli -t bin/moocp_bruecke.dart -o build/bruecke: legt die Brücke an.
+# dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke: legt die Brücke an.
 cat > "$MOCKS/dart" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOOCP_DART_ARGS_FILE"
-mkdir -p build/bruecke/bundle/bin
-printf 'bruecke\n' > build/bruecke/bundle/bin/moocp_bruecke
+mkdir -p build/bruecke
+printf 'bruecke\n' > build/bruecke/moocp-bruecke
 MOCK
 cat > "$MOCKS/codesign" <<'MOCK'
 #!/usr/bin/env bash
@@ -46,8 +46,12 @@ printf '%s\n' "$*" >> "$MOOCP_CODESIGN_ARGS_FILE"
 MOCK
 cat > "$MOCKS/lipo" <<'MOCK'
 #!/usr/bin/env bash
-# lipo -create -output <Ziel> <Datei> <Datei>
-printf 'fat\n' > "$3"
+# lipo -archs <Datei>
+if [[ "$2" == *andere-bruecke ]]; then
+  printf 'x86_64\n'
+else
+  printf 'arm64\n'
+fi
 MOCK
 chmod +x "$MOCKS/rsync" "$MOCKS/mktemp" "$MOCKS/flutter" "$MOCKS/dart" "$MOCKS/codesign" "$MOCKS/lipo"
 
@@ -66,7 +70,7 @@ APP="$FIXTURE/build/macos/Build/Products/Debug/moocp.app"
 [[ -f "$APP/result" ]]
 # Die Brücke liegt in der App, ausführbar, und die App wird danach neu ad hoc signiert.
 [[ -x "$APP/Contents/MacOS/moocp-bruecke" ]]
-grep -Fq -- 'build cli -t bin/moocp_bruecke.dart' "$MOOCP_DART_ARGS_FILE"
+grep -Fq -- 'tool/bruecke_bauen.dart build/bruecke/moocp-bruecke' "$MOOCP_DART_ARGS_FILE"
 grep -Fq -- '--sign -' "$MOOCP_CODESIGN_ARGS_FILE"
 grep -Fq -- 'DebugProfile.entitlements' "$MOOCP_CODESIGN_ARGS_FILE"
 [[ ! -e "$(cat "$MOOCP_TEMP_PATH_FILE")" ]]
@@ -89,10 +93,13 @@ for variable in MOOCP_TESTZUGANG_PROFILE MOOCP_TESTZUGANG MOOCP_TESTZUGANG_ADRES
   grep -q '^BAU-OK$' "$TEST_ROOT/testbetrieb.log"
 done
 
-# Mit der Brücke der anderen Architektur wird sie zugefügt (lipo), nicht allein kopiert.
+# Mit der Brücke der anderen Architektur werden beide Architekturen abgelegt und per Starter aufgerufen.
 printf 'andere\n' > "$TEST_ROOT/andere-bruecke"
 MOOCP_BRUECKE_ANDERE_ARCH="$TEST_ROOT/andere-bruecke" "$FIXTURE/tool/mac_bau.sh" > "$TEST_ROOT/fat.log"
-[[ "$(cat "$APP/Contents/MacOS/moocp-bruecke")" == fat ]]
+[[ -x "$APP/Contents/MacOS/moocp-bruecke" ]]
+[[ "$(cat "$APP/Contents/MacOS/moocp-bruecke-arm64")" == bruecke ]]
+[[ "$(cat "$APP/Contents/MacOS/moocp-bruecke-x86_64")" == andere ]]
+grep -Fq -- 'exec "$HERE/moocp-bruecke-$ARCH" "$@"' "$APP/Contents/MacOS/moocp-bruecke"
 
 # Ein anschließender Bau ohne Variablen nimmt die Marke wieder weg.
 "$FIXTURE/tool/mac_bau.sh" > "$TEST_ROOT/success.log"

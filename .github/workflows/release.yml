@@ -67,6 +67,40 @@ jobs:
           REQUIRE: ${{ steps.plan.outputs.publish == 'true' && '--require' || '' }}
         # Ohne Abschnitt in CHANGELOG.md scheitert ein veröffentlichender Lauf hier, vor den Bauten.
         run: python tool/ci_release.py notes --base-version "$BASE_VERSION" --out notes.md $REQUIRE
+  # Dart übersetzt die Brücke nur für die Architektur des Baurechners (tool/mac_bau.sh, E24).
+  # Für die universelle macOS-DMG baut ein Intel-Runner vorab die x86_64-Brücke; der
+  # Apple-Silicon-Bau fügt sie über MOOCP_BRUECKE_ANDERE_ARCH mit lipo hinzu.
+  macos-bridge-x64:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/flutter-setup
+      - name: macOS x64 bridge
+        run: |
+          dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke
+          archs="$(lipo -archs build/bruecke/moocp-bruecke)"
+          echo "moocp-bruecke archs: $archs"
+          [[ " $archs " == *" x86_64 "* ]]
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/bruecke/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
+      # Der Name darf nicht mit `moocp-` beginnen, damit `verify` und `publish-*`
+      # (`pattern: moocp-*`) nur die fünf Release-Pakete laden.
+      - name: Upload macOS x64 bridge
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-bridge-x64
+          path: build/bruecke/moocp-bruecke
+          if-no-files-found: error
+          retention-days: 1
   build:
     needs: plan
     if: needs.plan.outputs.build == 'true'
@@ -78,8 +112,6 @@ jobs:
             runner: ubuntu-24.04
           - platform: windows
             runner: windows-2022
-          - platform: macos
-            runner: macos-26
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     defaults:
@@ -122,6 +154,12 @@ jobs:
         run: |
           cat build/linux/x64/release/bundle/data/flutter_assets/version.json
           grep -q "\"version\":\"$VERSION\"" build/linux/x64/release/bundle/data/flutter_assets/version.json
+      - name: Smoke test Linux bridge
+        if: matrix.platform == 'linux'
+        run: |
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/linux/x64/release/bundle/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
       - name: create_installer.bat keeps CRLF
         if: matrix.platform == 'windows'
         run: |
@@ -145,19 +183,13 @@ jobs:
           $out = (& build\windows\x64\runner\Release\moocp.exe --version | Out-String).Trim()
           Write-Host "moocp --version: $out"
           if (-not $out.StartsWith($erwartet)) { throw "Unexpected version: $out" }
-      - name: macOS disk image
-        if: matrix.platform == 'macos'
-        run: bash tool/mac_dmg.sh
-      # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
-      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. So zeigt die App eine
-      # Nightly auf jeder Plattform (lib/ueber.dart).
-      - name: Version of the macOS build
-        if: matrix.platform == 'macos'
+      - name: Smoke test Windows bridge
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
-          erwartet="${VERSION/-nightly./.}"
-          out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
-          echo "moocp --version: $out"
-          [[ "$out" == "$erwartet"* ]]
+          $out = ('{"jsonrpc":"2.0","id":1,"method":"ping"}' | & build\windows\x64\runner\Release\moocp-bruecke.exe --profil probe | Out-String).Trim()
+          Write-Host "moocp-bruecke.exe ping: $out"
+          if ($LASTEXITCODE -ne 0 -or -not $out.Contains('"result":{}')) { throw "Unexpected bridge response ($LASTEXITCODE): $out" }
       - name: Check packages
         run: python tool/ci_release.py check-assets --version "$VERSION" --platform ${{ matrix.platform }}
       - name: Packages
@@ -168,11 +200,66 @@ jobs:
           if-no-files-found: error
           # Eine stabile Version wartet im Environment auf die Bestätigung, bis zu 30 Tage.
           retention-days: ${{ needs.plan.outputs.channel == 'stable' && 30 || 7 }}
+  # Eigener Job statt in `build`, damit Linux und Windows nicht auf macos-15-intel warten.
+  build-macos:
+    needs: [plan, macos-bridge-x64]
+    if: needs.plan.outputs.build == 'true'
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/flutter-setup
+      # Die Nightly-Version kommt nur in die Arbeitskopie dieses Runners, in keinen Commit.
+      - name: Nightly version
+        if: needs.plan.outputs.version_suffix != ''
+        env:
+          BUILD_NUMBER: ${{ needs.plan.outputs.build_number }}
+        run: python tool/ci_release.py set-version --version "$VERSION" --build "$BUILD_NUMBER"
+      - name: Download macOS x64 bridge
+        uses: actions/download-artifact@v7
+        with:
+          name: macos-bridge-x64
+          path: build/bruecke-x64
+      - name: macOS disk image
+        env:
+          MOOCP_BRUECKE_ANDERE_ARCH: ${{ github.workspace }}/build/bruecke-x64/moocp-bruecke
+        run: bash tool/mac_dmg.sh
+      # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
+      # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. So zeigt die App eine
+      # Nightly auf jeder Plattform (lib/ueber.dart).
+      - name: Version of the macOS build
+        run: |
+          erwartet="${VERSION/-nightly./.}"
+          out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
+          echo "moocp --version: $out"
+          [[ "$out" == "$erwartet"* ]]
+      - name: Smoke test macOS bridge
+        run: |
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
+      - name: Check packages
+        run: python tool/ci_release.py check-assets --version "$VERSION" --platform macos
+      - name: Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: moocp-macos
+          path: installer/moocp_*
+          if-no-files-found: error
+          # Eine stabile Version wartet im Environment auf die Bestätigung, bis zu 30 Tage.
+          retention-days: ${{ needs.plan.outputs.channel == 'stable' && 30 || 7 }}
   # Die Pakete aller drei Plattformen zusammen, wie ein Release sie bekäme: Erst wenn alle
   # fünf da sind, darf veröffentlicht werden. Läuft auch ohne Veröffentlichen, damit ein
   # Probelauf denselben Weg geht.
   verify:
-    needs: [plan, build]
+    needs: [plan, build, build-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

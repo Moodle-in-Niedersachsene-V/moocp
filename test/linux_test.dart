@@ -132,6 +132,15 @@ void main() {
       Directory(p.join(heim, '.lmstudio', 'apps', 'bionic')).createSync(recursive: true);
       expect(LmStudio({'HOME': heim}, bruecke: p.join(tmp.path, 'x')).gefunden, isFalse);
     });
+
+    test('Antigravity findet agy unter ~/.local/bin und antigravity im PATH', () {
+      programm(p.join(heim, '.local', 'bin', 'agy'));
+      expect(Antigravity({'HOME': heim, 'PATH': ''}).exe, p.join(heim, '.local', 'bin', 'agy'));
+      programm(p.join(tmp.path, 'bin', 'antigravity'));
+      final ag = Antigravity({'HOME': heim, 'PATH': p.join(tmp.path, 'bin')});
+      expect(ag.desktopApp, p.join(tmp.path, 'bin', 'antigravity'));
+      expect(ag.heim.path, p.join(heim, '.gemini', 'config'));
+    });
   }, skip: Platform.isLinux ? null : 'Suche nach Programmen unter Linux nur auf Linux');
 }
 

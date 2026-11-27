@@ -849,6 +849,7 @@ void main() {
       expect(ClaudeCode(const {}).wirkt,
           'Wirkt in Claude Code und im Reiter „Code“ von Claude Desktop, nicht im normalen Chat.');
       expect(LmStudio(const {}, bruecke: 'b').wirkt, 'Wirkt im Agenten Bionic, nicht im klassischen LM Studio.');
+      expect(Antigravity(const {}, bruecke: 'b').wirkt, 'Wirkt in Antigravity (Desktop-App, IDE und CLI agy).');
     });
 
     testWidgets('nur der wählbare Skill hat einen Haken mit seiner Beschreibung, vorgegeben aus', (tester) async {

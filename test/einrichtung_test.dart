@@ -553,6 +553,274 @@ void main() {
     });
   });
 
+  group('Antigravity (Desktop-App, IDE oder CLI)', () {
+    late String exe;
+    late String heim;
+    setUp(() {
+      exe = datei('app/$brueckeExe').path;
+      heim = p.join(tmp.path, 'heim');
+    });
+    const pfad = 'heim/.gemini/config/mcp_config.json';
+    Map<String, String> env([Map<String, String> mehr = const {}]) =>
+        {'USERPROFILE': heim, 'HOME': heim, 'PATH': '', ...mehr};
+    Antigravity ag([Map<String, String> mehr = const {}, String? bruecke]) =>
+        Antigravity(env(mehr), bruecke: bruecke ?? exe);
+    File konfig(Object inhalt) => datei(pfad, inhalt is String ? inhalt : jsonEncode(inhalt));
+    Map<String, dynamic> gelesen() =>
+        jsonDecode(File(p.join(tmp.path, pfad)).readAsStringSync()) as Map<String, dynamic>;
+
+    test('Metadaten und Pfade', () {
+      final a = ag();
+      expect(a.id, 'antigravity');
+      expect(a.name, 'Antigravity (Desktop-App, IDE oder CLI)');
+      expect(a.datenziel, 'Inhalte gehen an das eingestellte Modell, in der Regel bei Google');
+      expect(a.wirkt, 'Wirkt in Antigravity (Desktop-App, IDE und CLI agy).');
+      expect(a.bedienbar, isTrue);
+      expect(a.hindernis, isNull);
+      expect(a.heim.path, p.join(heim, '.gemini', 'config'));
+      expect(a.konfiguration.path, p.join(heim, '.gemini', 'config', 'mcp_config.json'));
+      expect(a.skillOrdner.path, p.join(heim, '.gemini', 'config', 'skills'));
+    });
+
+    test('Erkennung über Konfigurations- und Datenordner', () {
+      expect(ag().gefunden, isFalse);
+      for (final ordner in ['config', 'antigravity-cli', 'antigravity']) {
+        final d = Directory(p.join(heim, '.gemini', ordner))..createSync(recursive: true);
+        expect(ag().gefunden, isTrue, reason: ordner);
+        expect(ag().hinweis, isNull, reason: 'ohne App/CLI-Fund kein Ordner-Hinweis');
+        d.deleteSync(recursive: true);
+      }
+    });
+
+    test('Erkennung über CLI agy (Unix: PATH, ~/.local/bin, festeProgrammOrdner) und Hinweis', () {
+      datei('bin/agy');
+      final ausPath = ag({'PATH': p.join(tmp.path, 'bin')});
+      expect(ausPath.exe, p.join(tmp.path, 'bin', 'agy'));
+      expect(ausPath.gefunden, isTrue);
+      expect(ausPath.hinweis, contains('noch nicht angelegt'));
+
+      // Sobald ~/.gemini/config da ist, verschwindet der Hinweis.
+      Directory(p.join(heim, '.gemini', 'config')).createSync(recursive: true);
+      expect(ausPath.hinweis, isNull);
+      Directory(p.join(heim, '.gemini', 'config')).deleteSync(recursive: true);
+
+      // ~/.local/bin/agy wird auch ohne PATH gefunden.
+      datei('heim/.local/bin/agy');
+      expect(ag().exe, p.join(heim, '.local', 'bin', 'agy'));
+      expect(ag().gefunden, isTrue);
+      File(p.join(heim, '.local', 'bin', 'agy')).deleteSync();
+
+      // festeProgrammOrdner (Homebrew / Systemordner).
+      final prog = p.join(tmp.path, 'prog');
+      datei('prog/agy');
+      festeProgrammOrdner = [prog];
+      expect(ag().exe, p.join(prog, 'agy'));
+      expect(ag().gefunden, isTrue);
+    }, skip: Platform.isWindows ? 'Unix-Annahme: agy ohne Endung' : null);
+
+    test('Erkennung über CLI agy und Desktop-App unter Windows', () {
+      final lokal = p.join(tmp.path, 'lokal');
+      final roaming = p.join(tmp.path, 'roaming');
+      final prog = p.join(tmp.path, 'ProgramFiles');
+      final u = {'LOCALAPPDATA': lokal, 'APPDATA': roaming, 'ProgramFiles': prog};
+
+      datei('lokal/agy/bin/agy.exe');
+      expect(ag(u).exe, p.join(lokal, 'agy', 'bin', 'agy.exe'));
+      expect(ag(u).gefunden, isTrue);
+      expect(ag(u).hinweis, contains('noch nicht angelegt'));
+      File(p.join(lokal, 'agy', 'bin', 'agy.exe')).deleteSync();
+
+      datei('lokal/Programs/Antigravity/bin/agy.cmd');
+      expect(ag(u).exe, p.join(lokal, 'Programs', 'Antigravity', 'bin', 'agy.cmd'));
+      File(p.join(lokal, 'Programs', 'Antigravity', 'bin', 'agy.cmd')).deleteSync();
+
+      datei('roaming/npm/agy.cmd');
+      expect(ag(u).exe, p.join(roaming, 'npm', 'agy.cmd'));
+      File(p.join(roaming, 'npm', 'agy.cmd')).deleteSync();
+
+      for (final rel in [
+        'lokal/Programs/Antigravity/Antigravity.exe',
+        'lokal/Antigravity/Antigravity.exe',
+        'ProgramFiles/Antigravity/Antigravity.exe',
+      ]) {
+        final f = datei(rel);
+        expect(ag(u).desktopApp, f.path);
+        expect(ag(u).gefunden, isTrue);
+        f.deleteSync();
+      }
+    }, skip: Platform.isWindows ? null : 'Windows-Annahme: agy.exe/.cmd und Antigravity.exe');
+
+    test('Erkennung über Desktop-App / IDE: Antigravity.app (macOS via festeAppOrdner)', () {
+      festeAppOrdner = [p.join(tmp.path, 'Applications'), p.join(heim, 'Applications')];
+      Directory(p.join(tmp.path, 'Applications', 'Antigravity.app')).createSync(recursive: true);
+      final a = ag();
+      expect(a.desktopApp, p.join(tmp.path, 'Applications', 'Antigravity.app'));
+      expect(a.gefunden, isTrue);
+      expect(a.hinweis, contains('noch nicht angelegt'));
+      Directory(p.join(tmp.path, 'Applications', 'Antigravity.app')).deleteSync(recursive: true);
+
+      Directory(p.join(heim, 'Applications', 'Antigravity.app')).createSync(recursive: true);
+      expect(ag().gefunden, isTrue);
+    });
+
+    test('Erkennung über Desktop-App unter Linux (PATH und festeProgrammOrdner)', () {
+      datei('bin/antigravity');
+      expect(ag({'PATH': p.join(tmp.path, 'bin')}).desktopApp, p.join(tmp.path, 'bin', 'antigravity'));
+      expect(ag({'PATH': p.join(tmp.path, 'bin')}).gefunden, isTrue);
+
+      datei('opt/antigravity/antigravity');
+      festeProgrammOrdner = [p.join(tmp.path, 'opt', 'antigravity')];
+      expect(ag().desktopApp, p.join(tmp.path, 'opt', 'antigravity', 'antigravity'));
+      expect(ag().gefunden, isTrue);
+    }, skip: Platform.isLinux ? null : 'Linux-Annahme: antigravity Binary');
+
+    test('verbindung: fehlt, aktuell, veraltet, unlesbar', () {
+      expect(ag().verbindung(), Verbindung.fehlt);
+      konfig({'mcpServers': {}});
+      expect(ag().verbindung(), Verbindung.fehlt);
+      konfig({
+        'mcpServers': {
+          'anderer': {'command': 'npx', 'args': ['-y', 'foo']},
+        },
+      });
+      expect(ag().verbindung(), Verbindung.fehlt);
+
+      Map<String, Object?> ok({
+        String name = 'moodle',
+        String? command,
+        List<String>? args,
+        Object? timeoutSeconds = 'wie eingetragen',
+        Map<String, Object?> extra = const {},
+      }) =>
+          {
+            'mcpServers': {
+              name: {
+                'command': command ?? exe,
+                'args': args ?? ['--profil', name],
+                if (timeoutSeconds != null)
+                  'timeoutSeconds': timeoutSeconds == 'wie eingetragen' ? clientZeitlimit.inSeconds : timeoutSeconds,
+                ...extra,
+              },
+            },
+          };
+
+      konfig(ok());
+      expect(ag().verbindung(), Verbindung.aktuell);
+      expect(ag().verbindung(name: 'moodle-test'), Verbindung.fehlt);
+
+      konfig(ok(command: p.join(tmp.path, 'weg', brueckeExe)));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'Brücke fehlt');
+      konfig(ok(command: datei('app/anderes').path));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'falscher Befehl');
+      konfig(ok(args: ['--profil', 'anderes']));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'falsches Profil');
+      konfig(ok(args: const []));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'fehlende Argumente');
+      konfig(ok(timeoutSeconds: null));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'ohne timeoutSeconds (180 s Vorgabe zu kurz)');
+      konfig(ok(timeoutSeconds: 180));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'zu kurzes Zeitlimit');
+      konfig(ok(extra: {'url': 'http://127.0.0.1:47811/mcp'}));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'url vorhanden');
+      konfig(ok(extra: {'serverUrl': 'http://127.0.0.1:47811/mcp'}));
+      expect(ag().verbindung(), Verbindung.veraltet, reason: 'serverUrl vorhanden');
+
+      konfig('{"mcpServers": {');
+      expect(ag().verbindung(), Verbindung.unlesbar);
+      konfig('[]');
+      expect(ag().verbindung(), Verbindung.unlesbar, reason: 'Wurzel kein Objekt');
+      konfig({'mcpServers': []});
+      expect(ag().verbindung(), Verbindung.unlesbar, reason: 'mcpServers kein Objekt');
+    });
+
+    test('eintragen: neue Datei, Format, atomar ohne Zwischendatei, Fremdes bleibt', () async {
+      expect(await ag().eintragen(), isNull);
+      expect(ag().verbindung(), Verbindung.aktuell);
+      expect(gelesen(), {
+        'mcpServers': {
+          'moodle': {
+            'command': exe,
+            'args': ['--profil', 'moodle'],
+            'timeoutSeconds': clientZeitlimit.inSeconds,
+          },
+        },
+      });
+      expect(File(p.join(tmp.path, '$pfad.moocp')).existsSync(), isFalse);
+
+      // Fremde Server und Top-Level-Felder bleiben unberührt.
+      konfig({
+        'theme': 'dark',
+        'mcpServers': {
+          'fremd': {'command': 'uvx', 'args': ['demo']},
+          'moodle': {'serverUrl': 'http://127.0.0.1:1/mcp'},
+        },
+      });
+      expect(ag().verbindung(), Verbindung.veraltet);
+      expect(await ag().eintragen(), isNull);
+      final d = gelesen();
+      expect(d['theme'], 'dark');
+      final servers = d['mcpServers'] as Map;
+      expect(servers['fremd'], {'command': 'uvx', 'args': ['demo']});
+      expect(servers['moodle'], {
+        'command': exe,
+        'args': ['--profil', 'moodle'],
+        'timeoutSeconds': clientZeitlimit.inSeconds,
+      });
+      expect(ag().verbindung(), Verbindung.aktuell);
+    });
+
+    test('mehrere Profile (E31) und austragen', () async {
+      expect(await ag().austragen(), isNull, reason: 'Datei fehlt: nichts zu tun');
+      expect(await ag().eintragen(), isNull);
+      expect(await ag().eintragen(name: 'moodle-test'), isNull);
+      expect(ag().verbindung(), Verbindung.aktuell);
+      expect(ag().verbindung(name: 'moodle-test'), Verbindung.aktuell);
+
+      expect(await ag().austragen(name: 'moodle-test'), isNull);
+      expect(ag().verbindung(name: 'moodle-test'), Verbindung.fehlt);
+      expect(ag().verbindung(), Verbindung.aktuell);
+      expect((gelesen()['mcpServers'] as Map).keys, ['moodle']);
+    });
+
+    test('ohne Brücke: nichts eintragen, sondern es sagen', () async {
+      final ohne = ag(const {}, p.join(tmp.path, 'weg', brueckeExe));
+      expect(await ohne.eintragen(), contains('$brueckeExe fehlt'));
+      expect(File(p.join(tmp.path, pfad)).existsSync(), isFalse);
+    });
+
+    test('unlesbare mcp_config.json wird nie überschrieben', () async {
+      final f = konfig('{"mcpServers": {');
+      expect(await ag().eintragen(), contains('nicht angefasst'));
+      expect(await ag().austragen(), contains('nicht angefasst'));
+      expect(f.readAsStringSync(), '{"mcpServers": {');
+    });
+
+    test('Einrichtungsstand: Skills und Abwählen', () async {
+      final paket = SkillPaket('moodle', {'SKILL.md': utf8.encode('Skill')}, herkunft: SkillHerkunft.app);
+      final a = ag();
+      expect(await a.eintragen(), isNull);
+      skillInstallieren(paket, Directory(p.join(a.skillOrdner.path, 'moodle')));
+
+      var s = await einrichtungPruefen(umgebung: env(), skills: [paket], wahlSkills: appWahlSkills);
+      expect(s.werkzeuge.map((w) => w.werkzeug.id), ['antigravity']);
+      expect(s.bereit, isTrue);
+      expect(s.brauchtEtwas, isFalse);
+
+      // Abgewählt: Eintrag und Skills sollen entfernt werden.
+      s = await einrichtungPruefen(
+          umgebung: env(), skills: [paket], wahlSkills: appWahlSkills, abgewaehlt: {'antigravity'});
+      final ws = s.werkzeuge.single;
+      expect(ws.gewaehlt, isFalse);
+      expect(ws.entfernen, {'moodle'});
+      expect(ws.brauchtEtwas, isTrue);
+      expect(await ws.werkzeug.austragen(), isNull);
+      skillEntfernen(Directory(p.join(a.skillOrdner.path, 'moodle')));
+      s = await einrichtungPruefen(
+          umgebung: env(), skills: [paket], wahlSkills: appWahlSkills, abgewaehlt: {'antigravity'});
+      expect(s.werkzeuge.single.brauchtEtwas, isFalse);
+    });
+  });
+
   group('Brücke im AppImage', () {
     test('ohne AppImage liegt die Brücke neben der App', () {
       expect(imAppImage(const {}), isFalse);
@@ -1100,8 +1368,12 @@ void main() {
 
     setUp(aufrufe.clear);
 
-    List<KiWerkzeug> werkzeuge({Future<int> Function(String, List<String>)? ausfuehren}) =>
-        [ClaudeCode(umgebung)..ausfuehren = ausfuehren ?? claudeAttrappe, CodexCli(umgebung), LmStudio(umgebung)];
+    List<KiWerkzeug> werkzeuge({Future<int> Function(String, List<String>)? ausfuehren}) => [
+          ClaudeCode(umgebung)..ausfuehren = ausfuehren ?? claudeAttrappe,
+          CodexCli(umgebung),
+          LmStudio(umgebung),
+          Antigravity(umgebung),
+        ];
 
     test('Eintrag über claude.exe, Skills der App gelöscht, fremde bleiben', () async {
       final exe = datei(claudeOrt).path;
@@ -1150,7 +1422,7 @@ void main() {
       expect(File(p.join(tmp.path, 'cfg/skills/fremd/SKILL.md')).existsSync(), isTrue);
     });
 
-    test('Codex und LM Studio: Einträge und Skills weg, Fremdes bleibt', () async {
+    test('Codex, LM Studio und Antigravity: Einträge und Skills weg, Fremdes bleibt', () async {
       konfig.writeAsStringSync(jsonEncode({'mcpServers': {}}));
       final toml = datei('heim/.codex/config.toml', 'model = "gpt-5"\n');
       await CodexCli(umgebung).eintragen();
@@ -1170,15 +1442,30 @@ void main() {
       }));
       datei('heim/.lmstudio/skills/moodle/SKILL.md');
       datei('heim/.lmstudio/skills/fremd/SKILL.md');
+      final agKonfig = datei('heim/.gemini/config/mcp_config.json', jsonEncode({
+        'mcpServers': {
+          'fremd': {'command': 'uvx', 'args': ['demo']},
+          'moodle': {
+            'command': datei('app/$brueckeExe').path,
+            'args': ['--profil', 'moodle'],
+            'timeoutSeconds': clientZeitlimit.inSeconds,
+          },
+        },
+      }));
+      datei('heim/.gemini/config/skills/moodle/SKILL.md');
+      datei('heim/.gemini/config/skills/fremd/SKILL.md');
 
       final e = await einrichtungEntfernen(umgebung: umgebung, skills: ['moodle'], werkzeuge: werkzeuge());
       expect(e.code, 0);
       expect(toml.readAsStringSync(), 'model = "gpt-5"\n');
       expect(((jsonDecode(liste.readAsStringSync()) as Map)['servers'] as List).map((s) => (s as Map)['name']),
           ['blender']);
+      expect(((jsonDecode(agKonfig.readAsStringSync()) as Map)['mcpServers'] as Map).keys, ['fremd']);
       expect(Directory(p.join(tmp.path, 'heim/.codex/skills/moodle')).existsSync(), isFalse);
       expect(Directory(p.join(tmp.path, 'heim/.lmstudio/skills/moodle')).existsSync(), isFalse);
       expect(File(p.join(tmp.path, 'heim/.lmstudio/skills/fremd/SKILL.md')).existsSync(), isTrue);
+      expect(Directory(p.join(tmp.path, 'heim/.gemini/config/skills/moodle')).existsSync(), isFalse);
+      expect(File(p.join(tmp.path, 'heim/.gemini/config/skills/fremd/SKILL.md')).existsSync(), isTrue);
     });
   });
 

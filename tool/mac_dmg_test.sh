@@ -18,6 +18,8 @@ cat > "$FIXTURE/tool/mac_bau.sh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$*" "${MOOCP_TESTZUGANG:-}" >> "$MOOCP_BAU_ARGS"
 mkdir -p build/macos/Build/Products/Release/moocp.app/Contents/MacOS
+printf '#!/bin/sh\n' > build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp-bruecke
+chmod +x build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp-bruecke
 MOCK
 cat > "$MOCKS/lipo" <<'MOCK'
 #!/usr/bin/env bash

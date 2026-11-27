@@ -15,11 +15,12 @@
 # Contents/MacOS/moocp-bruecke in die App, wie moocp-bruecke.exe unter Windows
 # neben moocp.exe liegt. Gebaut wird sie über tool/bruecke_bauen.dart mit
 # `dart compile exe` als eigenständige Einzeldatei für die Architektur dieses
-# Macs. Dart übersetzt nicht für die andere Architektur; eine universelle App
-# (Release, DMG) braucht darum zusätzlich die auf der anderen Architektur
-# gebaute Brücke in MOOCP_BRUECKE_ANDERE_ARCH, die hier mit der eigenen
-# zusammengefügt wird (lipo). Danach wird die App neu ad hoc signiert: Eine
-# Datei, die der Bau nicht kannte, bräche sonst das Siegel.
+# Macs. Dart übersetzt nicht für die andere Architektur, und `lipo -create`
+# zerstört den angehängten Dart-AOT-Snapshot; eine universelle App (Release,
+# DMG) legt darum beide Binaries als `moocp-bruecke-<arch>` ab und setzt
+# `moocp-bruecke` als kleinen Starter davor, der per `exec` die passende
+# Architektur ausführt. Danach wird die App neu ad hoc signiert: Eine Datei,
+# die der Bau nicht kannte, bräche sonst das Siegel.
 set -euo pipefail
 MODUS="${1:-debug}"
 case "$MODUS" in
@@ -43,7 +44,21 @@ APP_TMP="$TMP/build/macos/Build/Products/$ZIEL/moocp.app"
 (cd "$TMP" && dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke)
 BRUECKE="$TMP/build/bruecke/moocp-bruecke"
 if [[ -n "${MOOCP_BRUECKE_ANDERE_ARCH:-}" ]]; then
-  lipo -create -output "$APP_TMP/Contents/MacOS/moocp-bruecke" "$BRUECKE" "$MOOCP_BRUECKE_ANDERE_ARCH"
+  ARCH_LOKAL="$(lipo -archs "$BRUECKE")"
+  ARCH_ANDERE="$(lipo -archs "$MOOCP_BRUECKE_ANDERE_ARCH")"
+  [[ -n "$ARCH_LOKAL" && -n "$ARCH_ANDERE" && "$ARCH_LOKAL" != "$ARCH_ANDERE" ]] || {
+    echo "Die beiden Brücken haben keine verschiedenen Architekturen ($ARCH_LOKAL vs. $ARCH_ANDERE)" >&2
+    exit 1
+  }
+  cp "$BRUECKE" "$APP_TMP/Contents/MacOS/moocp-bruecke-$ARCH_LOKAL"
+  cp "$MOOCP_BRUECKE_ANDERE_ARCH" "$APP_TMP/Contents/MacOS/moocp-bruecke-$ARCH_ANDERE"
+  chmod 755 "$APP_TMP/Contents/MacOS/moocp-bruecke-$ARCH_LOKAL" "$APP_TMP/Contents/MacOS/moocp-bruecke-$ARCH_ANDERE"
+  cat > "$APP_TMP/Contents/MacOS/moocp-bruecke" <<'WRAP'
+#!/bin/sh
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ARCH="$(uname -m)"
+exec "$HERE/moocp-bruecke-$ARCH" "$@"
+WRAP
 else
   cp "$BRUECKE" "$APP_TMP/Contents/MacOS/moocp-bruecke"
 fi

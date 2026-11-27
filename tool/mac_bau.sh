@@ -13,8 +13,8 @@
 #
 # Die Brücke für KI-Werkzeuge (bin/moocp_bruecke.dart, E21) kommt als
 # Contents/MacOS/moocp-bruecke in die App, wie moocp-bruecke.exe unter Windows
-# neben moocp.exe liegt. Gebaut wird sie mit `dart build cli` (nicht `dart
-# compile exe`: Das lehnt Pakete mit Build-Hooks ab) für die Architektur dieses
+# neben moocp.exe liegt. Gebaut wird sie über tool/bruecke_bauen.dart mit
+# `dart compile exe` als eigenständige Einzeldatei für die Architektur dieses
 # Macs. Dart übersetzt nicht für die andere Architektur; eine universelle App
 # (Release, DMG) braucht darum zusätzlich die auf der anderen Architektur
 # gebaute Brücke in MOOCP_BRUECKE_ANDERE_ARCH, die hier mit der eigenen
@@ -40,8 +40,8 @@ rsync -a --delete --exclude build --exclude .git --exclude .dart_tool "$REPO"/ "
 # ${DEFINES[@]+...}: Das Mac-bash 3.2 meldet ein leeres Feld unter `set -u` als nicht gesetzt.
 (cd "$TMP" && flutter build macos --"$MODUS" ${DEFINES[@]+"${DEFINES[@]}"})
 APP_TMP="$TMP/build/macos/Build/Products/$ZIEL/moocp.app"
-(cd "$TMP" && dart build cli -t bin/moocp_bruecke.dart -o build/bruecke --verbosity=error)
-BRUECKE="$TMP/build/bruecke/bundle/bin/moocp_bruecke"
+(cd "$TMP" && dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke)
+BRUECKE="$TMP/build/bruecke/moocp-bruecke"
 if [[ -n "${MOOCP_BRUECKE_ANDERE_ARCH:-}" ]]; then
   lipo -create -output "$APP_TMP/Contents/MacOS/moocp-bruecke" "$BRUECKE" "$MOOCP_BRUECKE_ANDERE_ARCH"
 else

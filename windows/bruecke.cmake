@@ -4,10 +4,9 @@
 # Baus, also bei `flutter build windows` wie bei `flutter run`; die Variablen
 # BRUECKE_* setzt CMakeLists.txt.
 #
-# `dart build cli`, nicht `dart compile exe`: compile lehnt ein Projekt ab,
-# sobald eine seiner Abhängigkeiten Build-Hooks hat (über die Flutter-Plugins
-# etwa objective_c). Die Brücke braucht davon nichts; unter Windows enthält
-# das Bündel nur die exe, ohne Bibliotheken.
+# Übersetzt über tool/bruecke_bauen.dart mit `dart compile exe` (eine einzige
+# eigenständige Datei ohne separate libdartaot*.dll, E21; Build-Hook-Pakete aus
+# Flutter-Plugins werden dafür vorab aus der package_config gefiltert).
 #
 # Ein KI-Werkzeug, das die Brücke gestartet hat, hält sie offen, solange es
 # läuft. Überschreiben und Löschen gehen dann nicht, Umbenennen schon, und
@@ -15,13 +14,13 @@
 # alte beiseite, die neue an ihren Platz, und Beiseitegelegtes löschen,
 # sobald es frei ist. Genauso macht es der Installer (installer/moocp.nsi).
 
-set(zwischen "${BRUECKE_PROJEKT}/build/bruecke")
+set(zwischen "${BRUECKE_PROJEKT}/build/bruecke/moocp-bruecke.exe")
 execute_process(
-  COMMAND "${BRUECKE_DART}" build cli -t bin/moocp_bruecke.dart -o "${zwischen}" --verbosity=error
+  COMMAND "${BRUECKE_DART}" tool/bruecke_bauen.dart "${zwischen}"
   WORKING_DIRECTORY "${BRUECKE_PROJEKT}"
   RESULT_VARIABLE fehler)
 if(fehler)
-  message(FATAL_ERROR "moocp-bruecke.exe nicht gebaut: dart build cli endete mit ${fehler}")
+  message(FATAL_ERROR "moocp-bruecke.exe nicht gebaut: tool/bruecke_bauen.dart endete mit ${fehler}")
 endif()
 
 set(ziel "${BRUECKE_ORDNER}/moocp-bruecke.exe")
@@ -32,7 +31,7 @@ if(EXISTS "${ziel}")
     message(FATAL_ERROR "moocp-bruecke.exe nicht ersetzt: ${fehler}")
   endif()
 endif()
-file(COPY_FILE "${zwischen}/bundle/bin/moocp_bruecke.exe" "${ziel}")
+file(COPY_FILE "${zwischen}" "${ziel}")
 message(STATUS "Installing: ${ziel}")
 
 file(GLOB reste "${BRUECKE_ORDNER}/moocp-bruecke.*.alt")

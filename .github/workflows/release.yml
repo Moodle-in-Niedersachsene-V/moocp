@@ -85,17 +85,20 @@ jobs:
       - uses: ./.github/actions/flutter-setup
       - name: macOS x64 bridge
         run: |
-          dart build cli -t bin/moocp_bruecke.dart -o build/bruecke --verbosity=error
-          archs="$(lipo -archs build/bruecke/bundle/bin/moocp_bruecke)"
-          echo "moocp_bruecke archs: $archs"
+          dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke
+          archs="$(lipo -archs build/bruecke/moocp-bruecke)"
+          echo "moocp-bruecke archs: $archs"
           [[ " $archs " == *" x86_64 "* ]]
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/bruecke/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
       # Der Name darf nicht mit `moocp-` beginnen, damit `verify` und `publish-*`
       # (`pattern: moocp-*`) nur die fünf Release-Pakete laden.
       - name: Upload macOS x64 bridge
         uses: actions/upload-artifact@v7
         with:
           name: macos-bridge-x64
-          path: build/bruecke/bundle/bin/moocp_bruecke
+          path: build/bruecke/moocp-bruecke
           if-no-files-found: error
           retention-days: 1
   build:
@@ -151,6 +154,12 @@ jobs:
         run: |
           cat build/linux/x64/release/bundle/data/flutter_assets/version.json
           grep -q "\"version\":\"$VERSION\"" build/linux/x64/release/bundle/data/flutter_assets/version.json
+      - name: Smoke test Linux bridge
+        if: matrix.platform == 'linux'
+        run: |
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/linux/x64/release/bundle/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
       - name: create_installer.bat keeps CRLF
         if: matrix.platform == 'windows'
         run: |
@@ -174,6 +183,13 @@ jobs:
           $out = (& build\windows\x64\runner\Release\moocp.exe --version | Out-String).Trim()
           Write-Host "moocp --version: $out"
           if (-not $out.StartsWith($erwartet)) { throw "Unexpected version: $out" }
+      - name: Smoke test Windows bridge
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $out = ('{"jsonrpc":"2.0","id":1,"method":"ping"}' | & build\windows\x64\runner\Release\moocp-bruecke.exe --profil probe | Out-String).Trim()
+          Write-Host "moocp-bruecke.exe ping: $out"
+          if ($LASTEXITCODE -ne 0 -or -not $out.Contains('"result":{}')) { throw "Unexpected bridge response ($LASTEXITCODE): $out" }
       - name: Check packages
         run: python tool/ci_release.py check-assets --version "$VERSION" --platform ${{ matrix.platform }}
       - name: Packages
@@ -213,7 +229,7 @@ jobs:
           path: build/bruecke-x64
       - name: macOS disk image
         env:
-          MOOCP_BRUECKE_ANDERE_ARCH: ${{ github.workspace }}/build/bruecke-x64/moocp_bruecke
+          MOOCP_BRUECKE_ANDERE_ARCH: ${{ github.workspace }}/build/bruecke-x64/moocp-bruecke
         run: bash tool/mac_dmg.sh
       # macOS erlaubt in der Version der App nur Ziffern und Punkte; Flutter macht aus
       # 0.13.0-nightly.20261124.1 deshalb 0.13.0.20261124.1. So zeigt die App eine
@@ -224,6 +240,11 @@ jobs:
           out="$(build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp --version)"
           echo "moocp --version: $out"
           [[ "$out" == "$erwartet"* ]]
+      - name: Smoke test macOS bridge
+        run: |
+          out="$(printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | build/macos/Build/Products/Release/moocp.app/Contents/MacOS/moocp-bruecke --profil probe)"
+          echo "moocp-bruecke ping: $out"
+          [[ "$out" == *'"result":{}'* ]]
       - name: Check packages
         run: python tool/ci_release.py check-assets --version "$VERSION" --platform macos
       - name: Packages

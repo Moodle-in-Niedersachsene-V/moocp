@@ -33,12 +33,12 @@ ziel=Debug
 mkdir -p "build/macos/Build/Products/$ziel/moocp.app/Contents/MacOS"
 printf 'built\n' > "build/macos/Build/Products/$ziel/moocp.app/result"
 MOCK
-# dart build cli -t bin/moocp_bruecke.dart -o build/bruecke: legt die Brücke an.
+# dart tool/bruecke_bauen.dart build/bruecke/moocp-bruecke: legt die Brücke an.
 cat > "$MOCKS/dart" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOOCP_DART_ARGS_FILE"
-mkdir -p build/bruecke/bundle/bin
-printf 'bruecke\n' > build/bruecke/bundle/bin/moocp_bruecke
+mkdir -p build/bruecke
+printf 'bruecke\n' > build/bruecke/moocp-bruecke
 MOCK
 cat > "$MOCKS/codesign" <<'MOCK'
 #!/usr/bin/env bash
@@ -66,7 +66,7 @@ APP="$FIXTURE/build/macos/Build/Products/Debug/moocp.app"
 [[ -f "$APP/result" ]]
 # Die Brücke liegt in der App, ausführbar, und die App wird danach neu ad hoc signiert.
 [[ -x "$APP/Contents/MacOS/moocp-bruecke" ]]
-grep -Fq -- 'build cli -t bin/moocp_bruecke.dart' "$MOOCP_DART_ARGS_FILE"
+grep -Fq -- 'tool/bruecke_bauen.dart build/bruecke/moocp-bruecke' "$MOOCP_DART_ARGS_FILE"
 grep -Fq -- '--sign -' "$MOOCP_CODESIGN_ARGS_FILE"
 grep -Fq -- 'DebugProfile.entitlements' "$MOOCP_CODESIGN_ARGS_FILE"
 [[ ! -e "$(cat "$MOOCP_TEMP_PATH_FILE")" ]]

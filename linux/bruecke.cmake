@@ -4,26 +4,26 @@
 # Variablen BRUECKE_* setzt CMakeLists.txt. Dasselbe tut windows/bruecke.cmake
 # für moocp-bruecke.exe.
 #
-# `dart build cli`, nicht `dart compile exe`: compile lehnt ein Projekt ab,
-# sobald eine seiner Abhängigkeiten Build-Hooks hat (über die Flutter-Plugins).
-# Die Brücke braucht davon nichts; das Bündel enthält nur die ausführbare Datei.
+# Übersetzt über tool/bruecke_bauen.dart mit `dart compile exe` (eine einzige
+# eigenständige Datei ohne separate libdartaot*.so, E21; Build-Hook-Pakete aus
+# Flutter-Plugins werden dafür vorab aus der package_config gefiltert).
 #
 # Ein laufender Prozess hält seine Datei offen: Überschreiben scheitert mit
 # „Text file busy", Löschen nicht. Also die alte entfernen und die neue an ihren
 # Platz legen; ein KI-Werkzeug, das die Brücke schon gestartet hat, arbeitet mit
 # seiner Fassung weiter.
 
-set(zwischen "${BRUECKE_PROJEKT}/build/bruecke")
+set(zwischen "${BRUECKE_PROJEKT}/build/bruecke/moocp-bruecke")
 execute_process(
-  COMMAND "${BRUECKE_DART}" build cli -t bin/moocp_bruecke.dart -o "${zwischen}" --verbosity=error
+  COMMAND "${BRUECKE_DART}" tool/bruecke_bauen.dart "${zwischen}"
   WORKING_DIRECTORY "${BRUECKE_PROJEKT}"
   RESULT_VARIABLE fehler)
 if(fehler)
-  message(FATAL_ERROR "moocp-bruecke nicht gebaut: dart build cli endete mit ${fehler}")
+  message(FATAL_ERROR "moocp-bruecke nicht gebaut: tool/bruecke_bauen.dart endete mit ${fehler}")
 endif()
 
 set(ziel "${BRUECKE_ORDNER}/moocp-bruecke")
 file(REMOVE "${ziel}")
-file(COPY_FILE "${zwischen}/bundle/bin/moocp_bruecke" "${ziel}")
+file(COPY_FILE "${zwischen}" "${ziel}")
 file(CHMOD "${ziel}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 message(STATUS "Installing: ${ziel}")

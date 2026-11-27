@@ -410,7 +410,7 @@ class _EinrichtungDialogState extends State<EinrichtungDialog> {
             if (s != null) ...[
               for (final ws in s.werkzeuge) ..._werkzeug(ws),
               if (s.werkzeuge.isEmpty)
-                _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex (ChatGPT-App oder CLI) und LM Studio. '
+                _hinweis('Gesucht wurde nach Claude Code (auch in Claude Desktop), Codex (ChatGPT-App oder CLI), LM Studio und Antigravity. '
                     'Eines davon installieren und einmal starten, danach „Nochmal prüfen".'),
               // Das Wählbare für sich, damit es nicht wie ein Pflichtteil aussieht.
               if (s.werkzeuge.isNotEmpty && s.skills.any((x) => s.wahlSkills.containsKey(x.name))) ...[

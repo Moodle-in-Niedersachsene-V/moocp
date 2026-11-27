@@ -351,12 +351,13 @@ class EntfernenErgebnis {
       z.add(
         '• Die Verbindung „moodle“ in einem KI-Werkzeug. Claude Code: im Terminal '
         '„claude mcp remove moodle --scope user“. Codex (ChatGPT-App oder CLI): den Abschnitt [mcp_servers.moodle] '
-        'in ~/.codex/config.toml löschen.',
+        'in ~/.codex/config.toml löschen. Antigravity: den Eintrag „moodle“ unter mcpServers in '
+        '~/.gemini/config/mcp_config.json löschen.',
       );
     }
     if (skillsBlieben) {
       z.add(
-        '• Dateien der Skills: unter ~/.claude/skills und ~/.codex/skills die Ordner '
+        '• Dateien der Skills: unter ~/.claude/skills, ~/.codex/skills und ~/.gemini/config/skills die Ordner '
         'moodle, moodle-fragen und lernsituation löschen.',
       );
     }

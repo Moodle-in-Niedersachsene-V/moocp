@@ -231,7 +231,7 @@ class _EinstellungenDialogState extends State<EinstellungenDialog> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio brauchen die Verbindung zu dieser App und '
+                  'Claude Code, Codex (ChatGPT-App oder CLI), LM Studio und Antigravity brauchen die Verbindung zu dieser App und '
                   'die Skills in der Version, die zu ihr gehört. Dort wählen Sie auch, welche '
                   'davon eingerichtet werden.',
                   style: klein,

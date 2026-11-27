@@ -188,6 +188,8 @@ void main() {
     expect(anmeldedatenGeloescht, isTrue);
     expect(e.eintragBlieb, isTrue);
     expect(e.hinweis, contains('claude mcp remove moodle'));
+    expect(e.hinweis, contains('~/.gemini/config/mcp_config.json'));
+    expect(EntfernenErgebnis(2).hinweis, contains('~/.gemini/config/skills'));
     expect(File(p.join(w.ziel, 'moocp')).existsSync(), isFalse);
     expect(File(p.join(w.ziel, '.moocp-installiert')).existsSync(), isFalse);
     expect(File(p.join(w.ziel, 'fremd.txt')).existsSync(), isTrue);

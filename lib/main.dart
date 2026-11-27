@@ -1048,7 +1048,7 @@ class _HauptseiteState extends State<Hauptseite> {
         content: Text(
           '„${profil.name}“ (${profil.mcpName}) wird aus moocp entfernt. '
           'Die Moodle-Anmeldung und gespeicherte Anmeldedaten dieses Profils werden gelöscht. '
-          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex (ChatGPT-App oder CLI) und LM Studio entfernt, '
+          'Der Eintrag „${profil.mcpName}“ wird auch aus Claude Code, Codex (ChatGPT-App oder CLI), LM Studio und Antigravity entfernt, '
           'soweit er dort steht.',
         ),
         actions: [

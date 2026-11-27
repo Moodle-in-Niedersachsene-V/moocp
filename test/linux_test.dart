@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moocp/anmeldedaten.dart';
 import 'package:moocp/arbeitsordner.dart';
+import 'package:moocp/plattform/privater_ordner.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/einstellungen_ort.dart';
 import 'package:moocp/plattform/linux.dart';
@@ -142,39 +143,45 @@ void arbeitsordnerTests() {
     setUp(() => tmp = Directory.systemTemp.createTempSync('aolinux'));
     tearDown(() => tmp.deleteSync(recursive: true));
 
-    test('der Name trägt den Benutzer, unzulässige Zeichen fallen weg', () {
-      expect(Arbeitsordner.ordnername({'USER': 'e.mustermann'}, linux: true), 'moocp_arbeitsordner_e.mustermann');
-      expect(Arbeitsordner.ordnername({'USER': '../x y'}, linux: true), 'moocp_arbeitsordner_..xy');
-      expect(Arbeitsordner.ordnername({'LOGNAME': 'a'}, linux: true), 'moocp_arbeitsordner_a');
-      expect(Arbeitsordner.ordnername({}, linux: true), 'moocp_arbeitsordner_benutzer');
-      expect(Arbeitsordner.ordnername({'USER': 'x'}, linux: false), 'moocp_arbeitsordner');
-    });
-
-    test('der Ordner gehört nur dem Benutzer (Rechte 700)', () {
+    test('der Ordner liegt im privaten Grundordner und gehört nur dem Benutzer (Rechte 700)', () {
       final (a, _) = Arbeitsordner.einrichten(temp: tmp.path, linux: true, umgebung: {'USER': 'x'});
-      expect(a.pfad, endsWith('moocp_arbeitsordner_x'));
-      expect(FileStat.statSync(a.pfad).mode & 0x1ff, 0x1c0);
+      expect(a.pfad, endsWith(p.join('moocp-${UnixPrivatSystem().uid}', 'moocp_arbeitsordner')));
+      expect(FileStat.statSync(a.pfad).mode & 0xfff, 448);
+      expect(FileStat.statSync(p.dirname(a.pfad)).mode & 0xfff, 448);
     }, skip: Platform.isWindows ? 'Dateirechte nach POSIX' : null);
 
-    test('eine Verknüpfung an der Stelle des Ordners wird nicht benutzt', () {
+    test('der Name hängt nicht an USER: dieselbe Benutzernummer, derselbe Ort', () {
+      final (a, _) = Arbeitsordner.einrichten(temp: tmp.path, linux: true, umgebung: {'USER': 'x'});
+      final (b, _) = Arbeitsordner.einrichten(temp: tmp.path, linux: true, umgebung: {'USER': 'y'});
+      expect(b.pfad, a.pfad);
+    }, skip: Platform.isWindows ? 'Dateirechte nach POSIX' : null);
+
+    test('eine Verknüpfung an der Stelle des Grundordners wird nicht benutzt', () {
       final fremd = Directory(p.join(tmp.path, 'fremd'))..createSync();
-      Link(p.join(tmp.path, 'moocp_arbeitsordner_x')).createSync(fremd.path);
+      Link(p.join(tmp.path, 'moocp-${UnixPrivatSystem().uid}')).createSync(fremd.path);
       expect(
         () => Arbeitsordner.einrichten(temp: tmp.path, linux: true, umgebung: {'USER': 'x'}),
-        throwsStateError,
+        throwsA(isA<PrivaterOrdnerFehler>()),
       );
+      expect(fremd.listSync(), isEmpty);
     }, skip: Platform.isWindows ? 'Verknüpfungen nach POSIX' : null);
   });
 }
 
 // Der Zugriff auf den Schlüsselbund unter Linux: Ohne benutzbaren Bund wird gar
 // nicht erst libsecret gerufen, das die App anhielte (anmeldedaten.dart).
+const _adresse = 'https://moodle.schule.example';
+
 void schluesselbundTests() {
   group('Passwort im Schlüsselbund unter Linux', () {
     final aufrufe = <String>[];
     setUp(() {
       aufrufe.clear();
-      SharedPreferences.setMockInitialValues({'anmeldung.merken': true, 'anmeldung.benutzer': 'e.mustermann'});
+      SharedPreferences.setMockInitialValues({
+        'anmeldung.merken': true,
+        'anmeldung.benutzer': 'e.mustermann',
+        'anmeldung.herkunft': 'https://moodle.schule.example:443',
+      });
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
         (call) async {
@@ -194,8 +201,8 @@ void schluesselbundTests() {
 
     test('bereit: lesen und speichern gehen durch', () async {
       Anmeldedaten.schluesselbundPruefer = () async => Schluesselbund.bereit;
-      expect((await Anmeldedaten.laden()).passwort, 'geheim');
-      await Anmeldedaten.speichern('e.mustermann', 'pw');
+      expect((await Anmeldedaten.laden(adresse: _adresse)).passwort, 'geheim');
+      await Anmeldedaten.speichern('e.mustermann', 'pw', adresse: _adresse);
       expect(aufrufe, containsAll(['read', 'write']));
     });
 
@@ -204,11 +211,11 @@ void schluesselbundTests() {
         Anmeldedaten.schluesselbundPruefer = () async => zustand;
         // Bleibt der Bund nach dem Entsperrversuch gesperrt, ist er nicht benutzbar.
         Anmeldedaten.schluesselbundEntsperrer = () async => zustand;
-        final daten = await Anmeldedaten.laden();
+        final daten = await Anmeldedaten.laden(adresse: _adresse);
         expect(daten.passwort, isNull);
         expect(daten.benutzer, 'e.mustermann');
         expect(daten.speicherProblem, SchluesselbundFehler(zustand).meldung, reason: 'kein stilles Scheitern');
-        await expectLater(Anmeldedaten.speichern('e.mustermann', 'pw'), throwsA(isA<SchluesselbundFehler>()));
+        await expectLater(Anmeldedaten.speichern('e.mustermann', 'pw', adresse: _adresse), throwsA(isA<SchluesselbundFehler>()));
         expect(aufrufe, isEmpty, reason: 'kein Aufruf an den Schlüsselbund');
       });
     }
@@ -220,7 +227,7 @@ void schluesselbundTests() {
         entsperrt = true;
         return Schluesselbund.bereit;
       };
-      final daten = await Anmeldedaten.laden();
+      final daten = await Anmeldedaten.laden(adresse: _adresse);
       expect(daten.passwort, 'geheim');
       expect(daten.speicherProblem, isNull);
     });

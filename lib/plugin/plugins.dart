@@ -199,6 +199,12 @@ class Plugins {
   final Einstellungen _einstellungen;
   final Protokoll _protokoll;
 
+  /// Wird gerufen, nachdem eine Entscheidung oder das Ein- oder Ausschalten in
+  /// einem Profil gespeichert ist: Die Werkzeuge, die die Server der Profile
+  /// anbieten, ändern sich damit (die App legt die Liste für die Brücke neu
+  /// ab). Ein Fehler darin bleibt ohne Folge für die Entscheidung.
+  void Function()? geaendert;
+
   /// Alles, was gefunden wurde, auch was nicht lädt, nach Ordnernamen
   /// geordnet.
   final List<PluginEintrag> eintraege;
@@ -283,6 +289,7 @@ class Plugins {
     };
     _protokoll.eintrag(Art.info, 'Plugin im Ordner „${e.ordner}“: ${zugestimmt ? 'Zustimmung erteilt' : 'abgelehnt'}');
     await _speichern();
+    _gemeldet();
   }
 
   /// Merkt die Werkzeugliste, die das gestartete Plugin [e] genannt hat, bei
@@ -358,6 +365,15 @@ class Plugins {
       'Plugin im Ordner „${e.ordner}“: in Profil $profilKennung ${an ? 'eingeschaltet' : 'ausgeschaltet'}',
     );
     await _speichern();
+    _gemeldet();
+  }
+
+  void _gemeldet() {
+    try {
+      geaendert?.call();
+    } catch (e) {
+      _protokoll.eintrag(Art.fehler, 'Änderung eines Plugins nicht weitergegeben (${e.runtimeType})');
+    }
   }
 
   Future<void> _speichern([String was = 'Plugin-Entscheidung']) async {

@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'browser_start.dart';
+import 'browser_unix.dart';
+import 'browser_windows.dart';
 import 'kindprozess.dart';
 import 'linux.dart';
 import 'macos.dart';
@@ -66,6 +69,9 @@ final PlattformBrowser plattformBrowser = Platform.isMacOS
     : Platform.isLinux
     ? LinuxBrowser()
     : WindowsBrowser();
+
+/// Startet den Browser der Bildschirmfotos mit seiner Pipe (browser_start.dart).
+final BrowserStarter browserStarter = Platform.isWindows ? WindowsBrowserStarter() : UnixBrowserStarter();
 
 /// Ob die Zwischenablage hier HTML neben dem Text trägt (zwischenablage.dart):
 /// unter Windows und macOS ja, sonst liegt nur der Quelltext als Text darin.

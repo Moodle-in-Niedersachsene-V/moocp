@@ -21,7 +21,11 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
+// ignore: depend_on_referenced_packages
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moocp/anmeldedaten.dart';
 import 'package:moocp/arbeitsordner.dart';
 import 'package:moocp/einrichtung.dart';
 import 'package:moocp/einrichtung_dialog.dart';
@@ -29,6 +33,8 @@ import 'package:moocp/einstellungen.dart';
 import 'package:moocp/einstellungen_dialog.dart';
 import 'package:moocp/freigabe.dart';
 import 'package:moocp/main.dart';
+import 'package:moocp/mcp/bruecke.dart' show werkzeuglisteFuerStart;
+import 'package:moocp/mcp/kanal.dart';
 import 'package:moocp/mcp/mcp_dienst.dart';
 import 'package:moocp/moodle/moodle_zugang.dart';
 import 'package:moocp/plugin/adressmuster.dart';
@@ -46,24 +52,79 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hilfen/nur_maus.dart';
 
+/// Die Werkzeugliste der Brücke wird in den Tests nie aus der echten
+/// Einstellungsdatei gebildet (A2) und nie im echten Kanalordner abgelegt: Ohne
+/// eigene Angabe liest sie nichts und legt den Kanal dieses Systems nicht an.
+File _keineDatei() => File('/nicht/vorhanden/einstellungen.json');
+Directory _keinOrdner() => Directory('/nicht/vorhanden/plugins');
+
+/// Die Orte der Werkzeugliste, wenn ein Test nichts Eigenes verlangt: ein
+/// Kanal in einem Testordner.
+WerkzeuglisteOrt _tempListe() {
+  final d = Directory.systemTemp.createTempSync('moocp_liste_');
+  addTearDown(() => d.deleteSync(recursive: true));
+  return WerkzeuglisteOrt(kanal: _MerkKanal(p.join(d.path, 'k')), einstellungen: _keineDatei, plugins: _keinOrdner);
+}
+
+/// Wartet, bis [bedingung] gilt (höchstens 20 Sekunden): Die Liste entsteht im
+/// Hintergrund, liest Dateien, und ihre Fortsetzungen laufen in der Zone des
+/// Widget-Tests, also nur, wenn dieser weitertaktet.
+Future<void> _listeWarten(WidgetTester tester, bool Function() bedingung) async {
+  for (var i = 0; i < 200 && !bedingung(); i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
+  }
+}
+
+/// Ein Kanal in einem Testordner, der mitschreibt, was er ablegt.
+class _MerkKanal extends UnixKanal {
+  _MerkKanal(String ordner) : super(ketten: () => [[ordner]]);
+  final abgelegt = <String>[];
+
+  @override
+  Future<void> listeAblegen(String name, String json) {
+    abgelegt.add(name);
+    return super.listeAblegen(name, json);
+  }
+}
+
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile, super.plugins, required super.schluessel});
+  _EinstellungenOhneDatei({super.profile, super.plugins});
   int gespeichert = 0;
 
   @override
   Future<void> speichern() async => gespeichert++;
 }
 
+/// Ein sicherer Speicher, der lesen lässt, aber jedes Schreiben als Fehler
+/// meldet, etwa ein gesperrter Schlüsselbund.
+class _SpeicherOhneSchreiben extends TestFlutterSecureStoragePlatform {
+  _SpeicherOhneSchreiben(super.data);
+  int schreibversuche = 0;
+
+  @override
+  Future<void> write({required String key, required String value, required Map<String, String> options}) async {
+    schreibversuche++;
+    throw PlatformException(code: 'Speicher nicht erreichbar');
+  }
+}
+
 /// Ein Zugang, der sich nicht ins Netz wagt: zählt die Versuche und lehnt auf
 /// Wunsch ausdrücklich ab, wie Moodle bei einem falschen Passwort.
 class _Zugang extends MoodleZugang {
-  _Zugang(super.protokoll, {this.ablehnen = false});
+  _Zugang(super.protokoll, {this.ablehnen = false, this.unerreichbar = false});
   final bool ablehnen;
+  final bool unerreichbar;
   int versuche = 0;
+
+  /// Was an Moodle ginge: „Adresse|Passwort“ je Versuch.
+  final gesendet = <String>[];
 
   @override
   Future<void> anmelden(String adresse, String benutzer, String passwort) async {
     versuche++;
+    gesendet.add('$adresse|$passwort');
+    if (unerreichbar) throw MoodleNichtErreichbar('Moodle ist nicht erreichbar.');
     if (ablehnen) {
       throw MoodleAnmeldungAbgelehnt('Anmeldung fehlgeschlagen. Benutzername oder Passwort prüfen.');
     }
@@ -78,12 +139,11 @@ Profil _profil(String kennung, String name, String mcp, int port, {Bestaetigunge
       port: port,
       mcpName: mcp,
       bestaetigungen: stufe,
-      schluessel: kennung == Profil.standardKennung ? '' : 'schluessel-$kennung',
     );
 
-Instanz _instanz(Einstellungen e, Protokoll protokoll, Profil profil, {bool ablehnen = false}) {
+Instanz _instanz(Einstellungen e, Protokoll protokoll, Profil profil, {bool ablehnen = false, bool unerreichbar = false}) {
   final ansicht = protokoll.fuer(profil.name);
-  final zugang = _Zugang(ansicht, ablehnen: ablehnen);
+  final zugang = _Zugang(ansicht, ablehnen: ablehnen, unerreichbar: unerreichbar);
   final freigaben = Freigaben(ansicht, stufe: profil.bestaetigungen);
   return Instanz(zugang, freigaben, McpDienst(e, zugang, ansicht, freigaben, 'arbeitsordner', profil: profil));
 }
@@ -180,7 +240,11 @@ PluginEntscheidung _zugestimmt(Set<String> profile, {bool ja = true}) =>
     PluginEntscheidung(version: '1.0', pruefsumme: 'summe-1.0', zugestimmt: ja, profile: profile);
 
 void main() {
+  late Directory brueckenOrdner;
   setUp(() {
+    // Die Brücke, die die Einrichtung einträgt: eine Datei im Testordner.
+    brueckenOrdner = Directory.systemTemp.createTempSync('moocp_bruecke_');
+    festeBruecke = (File(p.join(brueckenOrdner.path, brueckeExe))..writeAsStringSync('x')).path;
     // ignore: invalid_use_of_visible_for_testing_member
     SharedPreferences.setMockInitialValues({});
     // ignore: invalid_use_of_visible_for_testing_member
@@ -189,6 +253,10 @@ void main() {
     PackageInfo.setMockInitialValues(
         appName: 'moocp', packageName: 'moocp', version: '0.9.4', buildNumber: '1', buildSignature: '');
   });
+  tearDown(() {
+    festeBruecke = null;
+    brueckenOrdner.deleteSync(recursive: true);
+  });
 
   /// Startet die App wie `main`: das erste Profil ist das Hauptprofil, die
   /// übrigen kommen als `weitere`, und `instanzErstellen` gibt es immer.
@@ -196,21 +264,23 @@ void main() {
     WidgetTester tester,
     List<Profil> profile, {
     List<bool> ablehnen = const [],
+    bool unerreichbar = false,
     List<PluginEintrag> plugins = const [],
     Map<String, PluginEntscheidung> entscheidungen = const {},
     List<String>? ablauf,
     EntwicklungsPlugin Function()? entwicklung,
     LaufendePlugins? laufende,
     double breite = 2000,
+    WerkzeuglisteOrt? liste,
   }) async {
     tester.view.physicalSize = Size(breite, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen, schluessel: 'global');
+    final einstellungen = _EinstellungenOhneDatei(profile: profile, plugins: entscheidungen);
     final protokoll = Protokoll();
     final instanzen = [
       for (var i = 0; i < einstellungen.profile.length; i++)
-        _instanz(einstellungen, protokoll, einstellungen.profile[i], ablehnen: i < ablehnen.length && ablehnen[i]),
+        _instanz(einstellungen, protokoll, einstellungen.profile[i], ablehnen: i < ablehnen.length && ablehnen[i], unerreichbar: unerreichbar),
     ];
     await tester.pumpWidget(MoocpApp(
       einstellungen,
@@ -232,6 +302,7 @@ void main() {
               return Plugins(einstellungen, protokoll, plugins);
             },
       laufendePlugins: laufende,
+      werkzeuglisteOrt: liste ?? _tempListe(),
       entwicklungVorbereiten: entwicklung == null
           ? null
           : () {
@@ -309,10 +380,58 @@ void main() {
       expect(find.text('moocp — Moodle Test (moodle-test)'), findsOneWidget);
       expect(a.einstellungen.profile, hasLength(2));
       final neu = a.einstellungen.profile.last;
-      expect(neu.schluessel, hasLength(64), reason: 'jedes neue Profil bekommt einen eigenen Schlüssel');
-      expect(neu.schluessel, isNot(a.einstellungen.schluessel));
+      expect(jsonEncode(neu.toJson()), isNot(contains('schluessel')), reason: 'es gibt keinen Zugangsschlüssel mehr');
       expect(a.einstellungen.gespeichert, greaterThan(0));
     });
+  });
+
+  group('Werkzeugliste der Brücke (Linux, Mac)', () {
+    late Directory wurzel;
+    late _MerkKanal kanal;
+    setUp(() {
+      wurzel = Directory.systemTemp.createTempSync('moocp_liste_');
+      kanal = _MerkKanal(p.join(wurzel.path, 'k'));
+    });
+    tearDown(() => wurzel.deleteSync(recursive: true));
+
+    testWidgets('ein Profil, das zur Laufzeit dazukommt, hat seine Liste, wenn die Einrichtung seinen Eintrag setzt', (tester) async {
+      final a = await starten(tester, [standard], liste: WerkzeuglisteOrt(kanal: kanal, einstellungen: _keineDatei, plugins: _keinOrdner));
+      expect(await werkzeuglisteFuerStart(File('moocp'), 'moodle-test', ort: kanal), isNull);
+
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('add-profile')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('profile-name')), 'Moodle Test');
+      await tester.enterText(find.byKey(const Key('profile-address')), 'https://test.schule.example');
+      await tester.tap(find.text('Hinzufügen'));
+      await tester.pumpAndSettle();
+
+      expect(a.einstellungen.profile.last.mcpName, 'moodle-test');
+      await _listeWarten(tester, () => kanal.abgelegt.contains('moodle-test'));
+      final l = await werkzeuglisteFuerStart(File('moocp'), 'moodle-test', ort: kanal);
+      expect(l, isNotNull, reason: 'die Brücke beantwortet initialize für das neue Profil, solange die App läuft');
+      expect(l!.initialize, isNotEmpty);
+      expect(l.tools['tools'], isNotEmpty);
+      expect(kanal.abgelegt, contains('moodle-test'));
+    }, skip: Platform.isWindows);
+
+    testWidgets('ein Plugin ein- oder ausschalten legt die Liste neu ab', (tester) async {
+      await starten(tester, [standard, test],
+          plugins: [_pluginEintrag()],
+          entscheidungen: {'beispiel': _zugestimmt({Profil.standardKennung, 'k2'})},
+          liste: WerkzeuglisteOrt(kanal: kanal, einstellungen: _keineDatei, plugins: _keinOrdner));
+      kanal.abgelegt.clear();
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plugins ansehen und ändern …'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'Moodle Test (moodle-test)'));
+      await tester.pumpAndSettle();
+      await _listeWarten(tester, () => kanal.abgelegt.contains('moodle-test'));
+      expect(kanal.abgelegt, containsAll(['moodle', 'moodle-test']), reason: 'jedes Profil bekommt seine Liste neu');
+    }, skip: Platform.isWindows);
   });
 
   group('Ab zwei Profilen erscheinen Auswahl und Namen', () {
@@ -432,6 +551,9 @@ void main() {
       SharedPreferences.setMockInitialValues({
         'anmeldung.merken$suffix': true,
         'anmeldung.benutzer$suffix': 'e.mustermann',
+        // Die Herkunft, mit der die Anmeldedaten gespeichert wurden (E7).
+        'anmeldung.herkunft$suffix':
+            'https://${kennung == Profil.standardKennung ? 'moodle' : 'moodle-test'}.schule.example:443',
       });
       // ignore: invalid_use_of_visible_for_testing_member
       FlutterSecureStorage.setMockInitialValues({'moodle.passwort$suffix': passwort});
@@ -482,22 +604,153 @@ void main() {
     });
   });
 
-  group('Der Dialog „KI-Werkzeuge einrichten" schreibt den Schlüssel des Profils', () {
+  group('Gespeicherte Anmeldedaten gelten nur für die bestätigte Herkunft (E7)', () {
+    const sicher = FlutterSecureStorage();
+    const alt = 'https://alt.schule.example:443';
+
+    /// Gespeicherte Anmeldedaten des Profils, gebunden an [herkunft]
+    /// (null: Altbestand ohne Herkunft).
+    void speicher(String kennung, String? herkunft, {String passwort = 'geheim'}) {
+      final suffix = kennung == Profil.standardKennung ? '' : '.$kennung';
+      // ignore: invalid_use_of_visible_for_testing_member
+      SharedPreferences.setMockInitialValues({
+        'anmeldung.merken$suffix': true,
+        'anmeldung.benutzer$suffix': 'e.mustermann',
+        'anmeldung.herkunft$suffix': ?herkunft,
+      });
+      // ignore: invalid_use_of_visible_for_testing_member
+      FlutterSecureStorage.setMockInitialValues({'moodle.passwort$suffix': passwort});
+    }
+
+    _Zugang zugang(_Aufbau a, int i) => a.instanzen[i].moodle as _Zugang;
+
+    Future<void> wechseln(WidgetTester tester, String eintrag) async {
+      await tester.tap(find.byType(DropdownButtonFormField<int>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(eintrag).last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Start: Adresse des sichtbaren Profils geändert – kein Versuch, Passwort bleibt gesperrt, Hinweis im Fenster',
+        (tester) async {
+      speicher(Profil.standardKennung, alt);
+      final a = await starten(tester, [standard]);
+
+      expect(zugang(a, 0).versuche, 0, reason: 'das alte Passwort geht an keine andere Instanz');
+      expect(zugang(a, 0).gesendet, isEmpty);
+      expect(find.text(Anmeldedaten.herkunftsHinweis), findsOneWidget);
+      expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Passwort')).controller!.text, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('anmeldung.herkunft'), alt, reason: 'nur eine erfolgreiche Anmeldung verschiebt die Bindung');
+      expect(await sicher.read(key: 'moodle.passwort'), 'geheim');
+    });
+
+    testWidgets('Profilwechsel: Adresse des Zielprofils geändert – kein Versuch, Hinweis im Fenster', (tester) async {
+      speicher('k2', alt);
+      final a = await starten(tester, [standard, test]);
+      // Der Start meldet auch das nicht sichtbare Profil an: hier nicht.
+      expect(zugang(a, 1).versuche, 0);
+      expect(find.text(Anmeldedaten.herkunftsHinweis), findsNothing);
+
+      await wechseln(tester, 'Moodle Test (moodle-test)');
+
+      expect(zugang(a, 1).versuche, 0, reason: 'auch der Wechsel sendet das alte Passwort nicht');
+      expect(find.text(Anmeldedaten.herkunftsHinweis), findsOneWidget);
+      expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Passwort')).controller!.text, isEmpty);
+      expect(await sicher.read(key: 'moodle.passwort.k2'), 'geheim');
+    });
+
+    testWidgets('Altbestand ohne Herkunft: Hinweis, Anmeldung von Hand setzt die Bindung, der nächste Start meldet selbst an',
+        (tester) async {
+      speicher(Profil.standardKennung, null, passwort: 'altes-passwort');
+      var a = await starten(tester, [standard]);
+      expect(zugang(a, 0).versuche, 0);
+      expect(find.text(Anmeldedaten.herkunftsHinweis), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Passwort'), 'neues-passwort');
+      await tester.tap(find.widgetWithText(FilledButton, 'Anmelden'));
+      await tester.pumpAndSettle();
+      expect(zugang(a, 0).gesendet, ['https://moodle.schule.example|neues-passwort']);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('anmeldung.herkunft'), 'https://moodle.schule.example:443');
+      expect(await sicher.read(key: 'moodle.passwort'), 'neues-passwort');
+
+      // Neustart mit demselben Speicher: Das Fenster verschwindet, ein neues entsteht.
+      await tester.pumpWidget(const SizedBox());
+      a = await starten(tester, [standard]);
+      expect(zugang(a, 0).gesendet, ['https://moodle.schule.example|neues-passwort']);
+      expect(find.text(Anmeldedaten.herkunftsHinweis), findsNothing);
+    });
+
+    testWidgets('ein vorbelegtes Passwort geht nicht an eine von Hand geänderte Adresse', (tester) async {
+      speicher(Profil.standardKennung, 'https://moodle.schule.example:443');
+      final a = await starten(tester, [standard], unerreichbar: true);
+      // Moodle war nicht erreichbar: Das Passwort bleibt im Feld.
+      expect(zugang(a, 0).versuche, 1);
+      Future<String> feld() async =>
+          tester.widget<TextField>(find.widgetWithText(TextField, 'Passwort')).controller!.text;
+      expect(await feld(), 'geheim');
+
+      // Gleiche Herkunft in anderer Schreibweise: das Passwort bleibt.
+      await tester.enterText(find.widgetWithText(TextField, 'Moodle-Adresse'), 'HTTPS://moodle.schule.example:443/');
+      await tester.pump();
+      expect(await feld(), 'geheim');
+
+      await tester.enterText(find.widgetWithText(TextField, 'Moodle-Adresse'), 'https://moodle2.schule.example');
+      await tester.pump();
+      expect(await feld(), isEmpty, reason: 'anderer Host: das Passwort ist weg');
+      await tester.tap(find.widgetWithText(FilledButton, 'Anmelden'));
+      await tester.pumpAndSettle();
+      expect(zugang(a, 0).gesendet.where((x) => x.endsWith('|geheim')), ['https://moodle.schule.example|geheim'],
+          reason: 'das gespeicherte Passwort ging nur einmal hinaus, an seine eigene Instanz');
+      expect(zugang(a, 0).gesendet.last, 'https://moodle2.schule.example|', reason: 'an die andere Adresse höchstens ein leeres Feld (Moodle lehnt es vorher ab)');
+    });
+
+    testWidgets('eine selbst getippte Passworteingabe bleibt bei geänderter Adresse stehen', (tester) async {
+      speicher(Profil.standardKennung, 'https://moodle.schule.example:443');
+      final a = await starten(tester, [standard], unerreichbar: true);
+      await tester.enterText(find.widgetWithText(TextField, 'Passwort'), 'getippt');
+      await tester.enterText(find.widgetWithText(TextField, 'Moodle-Adresse'), 'https://moodle2.schule.example');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Anmelden'));
+      await tester.pumpAndSettle();
+      expect(zugang(a, 0).gesendet.last, 'https://moodle2.schule.example|getippt');
+    });
+
+    testWidgets('eine automatische Anmeldung mit unveränderter Herkunft schreibt nichts neu: ein Speicherfehler kostet die Bindung nicht',
+        (tester) async {
+      speicher(Profil.standardKennung, 'https://moodle.schule.example:443');
+      final ohneSchreiben = _SpeicherOhneSchreiben({'moodle.passwort': 'geheim'});
+      FlutterSecureStoragePlatform.instance = ohneSchreiben;
+
+      final a = await starten(tester, [standard]);
+
+      expect(zugang(a, 0).versuche, 1);
+      expect(ohneSchreiben.schreibversuche, 0);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('anmeldung.herkunft'), 'https://moodle.schule.example:443');
+    });
+  });
+
+  group('Der Dialog „KI-Werkzeuge einrichten" stellt den Eintrag des Profils um', () {
     late Directory heim;
     setUp(() => heim = Directory.systemTemp.createTempSync('moocp_einrichtung_'));
     tearDown(() => heim.deleteSync(recursive: true));
 
-    testWidgets('ein Eintrag mit dem Schlüssel eines anderen Profils ist veraltet, „Installieren" erneuert ihn', (tester) async {
+    testWidgets('ein Eintrag mit Adresse und Schlüssel ist veraltet, „Installieren" ersetzt ihn durch die Brücke', (tester) async {
       // USERPROFILE gilt unter Windows, HOME auf dem Mac.
       final env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       final codex = CodexCli(env);
-      // Ein Eintrag aus der Zeit, als alle Profile den globalen Schlüssel teilten.
-      expect(await codex.eintragen(47812, 'global', name: 'moodle-test'), isNull);
+      // Ein Eintrag aus früheren Versionen, daneben ein fremder Server.
+      final konfig = File(p.join(heim.path, '.codex', 'config.toml'))..createSync(recursive: true);
+      const fremd = '[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
+      konfig.writeAsStringSync(
+        '$fremd\n[mcp_servers.moodle-test]\nurl = "http://127.0.0.1:47812/mcp"\n'
+        'http_headers = { Authorization = "Bearer alt" }\ntool_timeout_sec = 2100\n',
+      );
 
       Future<Einrichtungsstand> pruefen() => einrichtungPruefen(
             umgebung: env,
-            port: 47812,
-            schluessel: 'eigener',
             name: 'moodle-test',
             skills: const [],
             wahlSkills: const {},
@@ -510,10 +763,8 @@ void main() {
         home: EinrichtungDialog(
           stand: stand,
           pruefen: pruefen,
-          einstellungen: Einstellungen(schluessel: 'global'),
+          einstellungen: Einstellungen(),
           protokoll: Protokoll(),
-          port: 47812,
-          schluessel: 'eigener',
           servername: 'moodle-test',
           profilname: 'Moodle Test',
         ),
@@ -523,10 +774,12 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await tester.pumpAndSettle();
 
-      final toml = File(p.join(heim.path, '.codex', 'config.toml')).readAsStringSync();
+      final toml = konfig.readAsStringSync();
+      expect(toml, startsWith(fremd), reason: 'der fremde Server bleibt Zeichen für Zeichen');
       expect(toml, contains('[mcp_servers.moodle-test]'));
-      expect(toml, contains('Bearer eigener'));
-      expect(toml, isNot(contains('Bearer global')));
+      expect(toml, contains("args = ['--profil', 'moodle-test']"));
+      expect(toml, isNot(contains('Bearer')));
+      expect(toml, isNot(contains('127.0.0.1')));
       expect((await pruefen()).werkzeuge.single.verbindung, Verbindung.aktuell);
     });
   });
@@ -555,16 +808,14 @@ void main() {
       addTearDown(() => heim.deleteSync(recursive: true));
       env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       codex = CodexCli(env);
-      expect(await codex.eintragen(47811, 'abc'), isNull);
+      expect(await codex.eintragen(), isNull);
       expect(skillInstallieren(moodle, skillOrdner('moodle')), isEmpty);
-      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+      einstellungen = _EinstellungenOhneDatei();
     }
 
     // Wie die App prüft: die gespeicherte Wahl, solange es eine gibt.
     Future<Einrichtungsstand> pruefen() => einrichtungPruefen(
           umgebung: env,
-          port: 47811,
-          schluessel: 'abc',
           skills: [moodle, lernsituation],
           wahlSkills: appWahlSkills,
           gewaehlt: einstellungen.wahlSkills ?? const {},
@@ -578,8 +829,6 @@ void main() {
           pruefen: pruefen,
           einstellungen: einstellungen,
           protokoll: Protokoll(),
-          port: 47811,
-          schluessel: 'abc',
         ),
       ));
     }
@@ -625,7 +874,7 @@ void main() {
       addTearDown(() => heim.deleteSync(recursive: true));
       env = {'USERPROFILE': heim.path, 'HOME': heim.path};
       codex = CodexCli(env);
-      einstellungen = _EinstellungenOhneDatei(schluessel: 'abc');
+      einstellungen = _EinstellungenOhneDatei();
       await zeigen(tester);
 
       expect(find.text('Installieren'), findsOneWidget);
@@ -677,8 +926,6 @@ void main() {
           'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
       Future<Einrichtungsstand> mitPlugin() => einrichtungPruefen(
             umgebung: env,
-            port: 47811,
-            schluessel: 'abc',
             skills: [moodle, lernsituation, pflicht, wahl],
             wahlSkills: {...appWahlSkills, 'beispiel-vorlage': 'Eine Vorlage zum Ausprobieren.'},
             gewaehlt: einstellungen.wahlSkills ?? const {},
@@ -694,8 +941,6 @@ void main() {
           pruefen: mitPlugin,
           einstellungen: einstellungen,
           protokoll: Protokoll(),
-          port: 47811,
-          schluessel: 'abc',
         ),
       ));
 
@@ -722,8 +967,6 @@ void main() {
           'Der Ordner skills/beispiel-fehlt fehlt im Plugin-Ordner.';
       Future<Einrichtungsstand> mitFehler() => einrichtungPruefen(
             umgebung: env,
-            port: 47811,
-            schluessel: 'abc',
             skills: [moodle],
             wahlSkills: const {},
             skillFehler: const [fehler],
@@ -743,9 +986,7 @@ void main() {
                 pruefen: mitFehler,
                 einstellungen: einstellungen,
                 protokoll: Protokoll(),
-                port: 47811,
-                schluessel: 'abc',
-              ),
+                  ),
             ),
             child: const Text('öffnen'),
           ),

@@ -302,7 +302,7 @@ class _EinstellungenDialogState extends State<EinstellungenDialog> {
                     child: Text(
                       'Nur nötig, wenn Sie mit mehr als einer Moodle-Instanz arbeiten, etwa einer '
                       'Test- neben der Produktivinstanz. Jede bekommt eine eigene Anmeldung, '
-                      'Freigabestufe und einen eigenen MCP-Server mit eigenem Schlüssel.',
+                      'Freigabestufe und einen eigenen MCP-Server.',
                       style: klein,
                     ),
                   ),

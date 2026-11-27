@@ -339,6 +339,11 @@ class Freigaben extends ChangeNotifier {
   /// Adresse der App), doch für den Aufruf, zu dem sie gehört.
   static AufrufZaehler? get zaehlerImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.zaehler;
 
+  /// Erfüllt sich, wenn der Client des Werkzeugaufrufs nicht mehr wartet
+  /// ([mitAbbruch]); null außerhalb eines Aufrufs. Wer lange arbeitet (der
+  /// Browser der Bildschirmfotos), hört darauf und räumt auf.
+  static Future<void>? get abbruchImAufruf => (Zone.current[_abbruch] as _AbbruchStand?)?.signal;
+
   /// Das Plugin, das das Werkzeug aufgerufen hat, in dessen Zone das läuft
   /// ([mitAbbruch]); null bei einem KI-Werkzeug und außerhalb eines Aufrufs.
   /// `status` nennt es als Verbindung (mcp_dienst.dart).

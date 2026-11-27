@@ -22,7 +22,7 @@ import 'package:moocp/testschalter.dart';
 import 'package:path/path.dart' as p;
 
 class _EinstellungenOhneDatei extends Einstellungen {
-  _EinstellungenOhneDatei({super.profile, super.plugins}) : super(schluessel: 'schluessel');
+  _EinstellungenOhneDatei({super.profile, super.plugins}) : super();
   int gespeichert = 0;
   bool speichernScheitert = false;
 
@@ -286,7 +286,7 @@ void main() {
       await aufbauen();
       await plugins.entscheiden(beispiel(), zugestimmt: true, profile: {'standard'});
       final json = jsonDecode(jsonEncode(einstellungen.zuJson())) as Map<String, dynamic>;
-      final neu = Einstellungen.aus(json, Einstellungen(schluessel: 'x'));
+      final neu = Einstellungen.aus(json, Einstellungen());
       final nachNeustart = Plugins(neu, Protokoll(), plugins.eintraege);
       expect(nachNeustart.stand(beispiel()).zustand, PluginZustand.zugestimmt);
       expect(nachNeustart.aktivIn('standard').map((s) => s.eintrag.ordner), ['beispiel']);
@@ -445,16 +445,16 @@ void main() {
 
   group('Gespeichert in den Einstellungen', () {
     test('ohne Plugins steht nichts in der Datei', () {
-      expect(Einstellungen(schluessel: 'x').zuJson().containsKey('plugins'), isFalse);
+      expect(Einstellungen().zuJson().containsKey('plugins'), isFalse);
     });
 
     test('Hin und zurück: Version, Prüfsumme, Entscheidung und Profile', () {
-      final e = Einstellungen(schluessel: 'x', plugins: {
+      final e = Einstellungen(plugins: {
         'eins': const PluginEntscheidung(version: '1.0', pruefsumme: 'aa', zugestimmt: true, profile: {'k2', 'standard'}),
         'zwei': const PluginEntscheidung(version: '2', pruefsumme: 'bb', zugestimmt: false),
       });
       final json = jsonDecode(jsonEncode(e.zuJson())) as Map<String, dynamic>;
-      final neu = Einstellungen.aus(json, Einstellungen(schluessel: 'y'));
+      final neu = Einstellungen.aus(json, Einstellungen());
       expect(neu.plugins.keys, ['eins', 'zwei']);
       expect(neu.plugins['eins']!.version, '1.0');
       expect(neu.plugins['eins']!.pruefsumme, 'aa');
@@ -477,10 +477,10 @@ void main() {
           'gut': {'version': '1', 'pruefsumme': 'aa', 'zugestimmt': true, 'profile': ['standard', 5]},
         },
       };
-      final e = Einstellungen.aus(j, Einstellungen(schluessel: 'y'));
+      final e = Einstellungen.aus(j, Einstellungen());
       expect(e.plugins.keys, ['gut']);
       expect(e.plugins['gut']!.profile, {'standard'});
-      expect(Einstellungen.aus({'schluessel': 'x', 'plugins': 'kaputt'}, Einstellungen(schluessel: 'y')).plugins, isEmpty);
+      expect(Einstellungen.aus({'schluessel': 'x', 'plugins': 'kaputt'}, Einstellungen()).plugins, isEmpty);
     });
   });
 
@@ -516,7 +516,7 @@ void main() {
     test('kein MCP-Werkzeug nennt Plugins oder Zustimmung', () async {
       final protokoll = Protokoll();
       final dienst = McpDienst(
-        Einstellungen(schluessel: ''),
+        Einstellungen(),
         MoodleZugang(protokoll),
         protokoll,
         Freigaben(protokoll),

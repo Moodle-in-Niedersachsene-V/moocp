@@ -103,7 +103,6 @@ void main() {
     try {
       final einstellungen = Einstellungen(
         moodleAdresse: 'https://moodle.schule.example',
-        schluessel: 'erfunden',
       );
       // Nur der Pfad; geleert wird er erst beim Beenden, und das kommt hier nicht vor.
       const arbeitsordner = Arbeitsordner(r'C:\Users\Lehrkraft\AppData\Local\Temp\moocp_arbeitsordner');

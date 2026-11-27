@@ -4,7 +4,7 @@ Status: gilt. Die Regeln dazu stehen im Index der [CLAUDE.md](../../CLAUDE.md).
 
 ## Entscheidung
 
-moocp ist eine Flutter-Desktop-App mit einem Code für Windows und macOS. Die App enthält Fenster (Anmeldung, Freigabedialog, Protokoll, Einstellungen), den MCP-Server auf `127.0.0.1` (E6) und die Moodle-Sitzung in einem Prozess. Die Skills sind keine Flutter-Teile, sondern Pakete von `skills/build.py` (E8, E13).
+moocp ist eine Flutter-Desktop-App mit einem Code für Windows und macOS. Die App enthält Fenster (Anmeldung, Freigabedialog, Protokoll, Einstellungen), den MCP-Server mit seinem Kanal nur für das eigene Konto (E6) und die Moodle-Sitzung in einem Prozess. Die Skills sind keine Flutter-Teile, sondern Pakete von `skills/build.py` (E8, E13).
 
 Folgen für den Code:
 

@@ -1506,7 +1506,7 @@ void main() {
       await s.close();
       final protokoll = Protokoll();
       dienst = McpDienst(
-        Einstellungen(schluessel: 'test'),
+        Einstellungen(),
         MoodleZugang(protokoll),
         protokoll,
         Freigaben(protokoll),
@@ -1517,7 +1517,6 @@ void main() {
           adresse: 'https://moodle.schule.example',
           port: port,
           mcpName: 'test',
-          schluessel: 'test',
         ),
         schucuVorlagen: () async => _vorlagen,
       );
@@ -1527,7 +1526,7 @@ void main() {
     });
 
     tearDown(() async {
-      client.http.close(force: true);
+      client.schliessen();
       await dienst.stoppen();
       ao.deleteSync(recursive: true);
     });

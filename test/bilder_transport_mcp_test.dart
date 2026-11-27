@@ -193,7 +193,6 @@ void main() {
       adresse: extern.basis.toString(),
       port: port.port,
       mcpName: 'test',
-      schluessel: 'test',
     );
     await port.close();
     protokoll = Protokoll();
@@ -211,7 +210,7 @@ void main() {
     freigaben.addListener(() {
       if (freigaben.aktuell != null) scheduleMicrotask(() => freigaben.entscheiden(true));
     });
-    dienst = McpDienst(Einstellungen(schluessel: 'test'), moodle, protokoll, freigaben, ordner.path, profil: profil);
+    dienst = McpDienst(Einstellungen(), moodle, protokoll, freigaben, ordner.path, profil: profil);
     await dienst.starten();
     client = McpTestClient(profil.port);
     await client.initialize();
@@ -225,7 +224,7 @@ void main() {
   });
 
   tearDown(() async {
-    client.http.close(force: true);
+    client.schliessen();
     await dienst.stoppen();
     moodle.abmelden();
     await extern.stoppen();
